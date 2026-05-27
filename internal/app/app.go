@@ -199,6 +199,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
+	if !isAdmin && a.userBlocked(ctx, chatID) {
+		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
+		return
+	}
 
 	switch {
 	case strings.HasPrefix(text, "/setup"):

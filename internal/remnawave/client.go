@@ -162,6 +162,44 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
+// Squad — внутренний сквад панели (для выбора при создании пользователей).
+type Squad struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+}
+
+// ListSquads возвращает внутренние сквады панели. Разбор защитный: ответ
+// панели может прийти как {response:{internalSquads:[...]}} или {response:[...]}.
+func (c *Client) ListSquads(ctx context.Context) ([]Squad, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/internal-squads", nil)
+	if err != nil {
+		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyHTTP(resp)
+	}
+	var env struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("разбор ответа панели: %w", err)
+	}
+	// 1) объект с полем internalSquads
+	var obj struct {
+		InternalSquads []Squad `json:"internalSquads"`
+	}
+	if json.Unmarshal(env.Response, &obj) == nil && len(obj.InternalSquads) > 0 {
+		return obj.InternalSquads, nil
+	}
+	// 2) сразу массив
+	var arr []Squad
+	if json.Unmarshal(env.Response, &arr) == nil {
+		return arr, nil
+	}
+	return nil, nil
+}
+
 func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
 	if err != nil {

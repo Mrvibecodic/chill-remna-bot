@@ -64,7 +64,7 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 
 func (a *App) showIface(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "menu.cat_iface"), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "menu.iface_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		homeRow(lang),
 	})
@@ -72,7 +72,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "menu.cat_pay"), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "menu.pay_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p")},
 		homeRow(lang),
 	})
@@ -80,9 +80,9 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 
 func (a *App) showManage(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "menu.cat_manage"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
-		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+	a.sendKB(ctx, chatID, i18n.T(lang, "menu.manage_title"), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.users"), "menu:users"), btn(i18n.T(lang, "btn.status"), "menu:status")},
+		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
 }
@@ -211,6 +211,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "reconf":
 		if isAdmin {
 			a.startReconfigure(ctx, chatID)
+		}
+	case "users":
+		if isAdmin {
+			a.showUsers(ctx, chatID, 0)
 		}
 	}
 }

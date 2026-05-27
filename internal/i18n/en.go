@@ -154,4 +154,52 @@ var en = map[string]string{
 	"emoji.ask_one":          "Send the animated version for %s as a single emoji.",
 	"emoji.set_ok":           "✅ Set for %s.",
 	"emoji.none_in_msg":      "No animated (premium) emoji in the message. Send a premium emoji.",
+
+	"menu.iface_title": "🎨 <b>Interface</b>\n\n" +
+		"Configure how the bot looks to users: the start banner (image and welcome text) " +
+		"and animated premium emoji in messages.\n\n" +
+		"Choose what to set up:",
+	"menu.pay_title": "💳 <b>Payment settings</b>\n\n" +
+		"Ways to accept payment. Currently available: card transfer (P2P) with manual review — " +
+		"card details, rotation between them, prices per period and the squad for new accounts.\n\n" +
+		"Choose a section:",
+	"menu.manage_title": "🛠 <b>Bot management</b>\n\n" +
+		"Utility functions: panel connection status, bot users (block and delete affect the bot " +
+		"only), bot updates and reconfiguring the DB and panel connection.\n\n" +
+		"Choose an action:",
+
+	"btn.users":       "👥 Users",
+	"btn.back":        "⬅️ Back",
+	"btn.block":       "🚫 Block",
+	"btn.unblock":     "✅ Unblock",
+	"btn.delete":      "🗑 Delete from bot",
+	"btn.del_confirm": "🗑 Confirm delete",
+	"btn.prev":        "⬅️",
+	"btn.next":        "➡️",
+
+	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
+		"People registered in the bot. Block and delete affect the bot ONLY and do NOT touch " +
+		"panel accounts.\n\nChoose a user:",
+	"users.empty": "👥 No users yet.",
+	"user.card": "👤 <b>User</b> <code>%d</code>\nRegistered: %s\nP2P access: %s\nStatus: %s\n\n" +
+		"⚠️ The actions below change bot access only; the panel account stays untouched.",
+	"user.active":           "active ✅",
+	"user.blocked":          "blocked 🚫",
+	"user.yes":              "yes ✅",
+	"user.no":               "no",
+	"user.blocked_done":     "🚫 User blocked in the bot.",
+	"user.unblocked_done":   "✅ User unblocked.",
+	"user.deleted":          "🗑 User deleted from the bot (panel account untouched).",
+	"user.you_blocked":      "🚫 Your access to the bot is restricted. Contact the administrator.",
+	"user.card_confirm_del": "🗑 Delete user <code>%s</code> from the bot? The panel account is NOT affected.",
+
+	"squad.title": "🎯 <b>Squad for new users</b>\nCurrent: %s\n\n" +
+		"Pick a squad from the panel — accounts created by the bot will be placed into it:",
+	"squad.none":    "not set",
+	"squad.clear":   "🚫 No squad",
+	"squad.manual":  "✏️ Enter UUID manually",
+	"squad.refresh": "🔄 Refresh list",
+	"squad.empty":   "No squads found in the panel. Enter a UUID manually or create a squad in the panel.",
+	"squad.fail":    "❌ Could not fetch squads from the panel: %s\nYou can enter a UUID manually with the button below.",
+	"squad.set_ok":  "✅ Squad saved.",
 }

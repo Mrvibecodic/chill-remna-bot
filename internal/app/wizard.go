@@ -46,6 +46,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	a.msg.AnswerCallback(ctx, cq.ID)
 	chatID := cq.From.ID
 	isAdmin := chatID == a.cfg.AdminID
+	if !isAdmin && a.userBlocked(ctx, chatID) {
+		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
+		return
+	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 
 	switch key {
@@ -79,6 +83,14 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case "wel":
 		if isAdmin {
 			a.onWelcome(ctx, chatID, val)
+		}
+	case "usr":
+		if isAdmin {
+			a.onUsers(ctx, chatID, val)
+		}
+	case "sq":
+		if isAdmin {
+			a.onSquad(ctx, chatID, val)
 		}
 	}
 }

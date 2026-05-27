@@ -91,6 +91,7 @@ type P2PConfig struct {
 type User struct {
 	TelegramID  int64
 	P2PApproved bool
+	Blocked     bool
 	CreatedAt   string
 }
 

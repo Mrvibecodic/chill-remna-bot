@@ -241,7 +241,7 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
-		{btn(i18n.T(lang, "admin.btn_squad"), "adm:squad")},
+		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
 		homeRow(lang),
 	})
 }

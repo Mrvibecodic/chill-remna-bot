@@ -192,3 +192,54 @@ func TestUsersAndP2P(t *testing.T) {
 		}
 	})
 }
+
+func TestUsersListBlockDelete(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{11, 22, 33} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		users, total, err := st.ListUsers(ctx, 10, 0)
+		if err != nil || total != 3 || len(users) != 3 {
+			t.Fatalf("ListUsers: total=%d len=%d err=%v", total, len(users), err)
+		}
+		// пагинация
+		page, total, err := st.ListUsers(ctx, 2, 0)
+		if err != nil || total != 3 || len(page) != 2 {
+			t.Fatalf("ListUsers page: total=%d len=%d err=%v", total, len(page), err)
+		}
+
+		// блокировка
+		if err := st.SetBlocked(ctx, 22, true); err != nil {
+			t.Fatal(err)
+		}
+		u, _ := st.GetUser(ctx, 22)
+		if u == nil || !u.Blocked {
+			t.Fatalf("после SetBlocked(true) должен быть Blocked: %+v", u)
+		}
+		if err := st.SetBlocked(ctx, 22, false); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ = st.GetUser(ctx, 22); u == nil || u.Blocked {
+			t.Fatalf("после SetBlocked(false) не должен быть Blocked: %+v", u)
+		}
+
+		// SetBlocked для несуществующего создаёт запись
+		if err := st.SetBlocked(ctx, 44, true); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ = st.GetUser(ctx, 44); u == nil || !u.Blocked {
+			t.Fatalf("SetBlocked должен апсертить: %+v", u)
+		}
+
+		// удаление
+		if err := st.DeleteUser(ctx, 11); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ = st.GetUser(ctx, 11); u != nil {
+			t.Fatal("после DeleteUser юзер должен исчезнуть")
+		}
+	})
+}

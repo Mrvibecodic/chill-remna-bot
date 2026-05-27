@@ -99,6 +99,36 @@ func (s *fakeStore) SetP2PApproved(_ context.Context, id int64, ok bool) error {
 	s.users[id].P2PApproved = ok
 	return nil
 }
+
+func (s *fakeStore) ListUsers(_ context.Context, limit, offset int) ([]model.User, int, error) {
+	var all []model.User
+	for _, u := range s.users {
+		all = append(all, *u)
+	}
+	total := len(all)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+func (s *fakeStore) SetBlocked(_ context.Context, id int64, blocked bool) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	s.users[id].Blocked = blocked
+	return nil
+}
+func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
+	delete(s.users, id)
+	return nil
+}
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}
@@ -356,5 +386,90 @@ func TestP2P_FullFlow(t *testing.T) {
 	}
 	if !strings.Contains(fm.joined(), "sub/abc") {
 		t.Fatalf("юзеру не отправлена ссылка:\n%s", fm.joined())
+	}
+}
+
+// Сценарий админки «Пользователи»: блокировка ограничивает доступ, удаление чистит запись.
+func TestUsersAdmin_BlockEnforceDelete(t *testing.T) {
+	fm := &fakeMsg{}
+	fs := &fakeStore{}
+	a := &App{
+		cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msg:   fm,
+		wiz:   map[int64]*wizard{},
+		ui:    map[int64]*uiState{},
+		store: fs,
+	}
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	ctx := context.Background()
+	const user int64 = 555
+
+	// юзер регистрируется
+	_ = fs.UpsertUser(ctx, user)
+
+	// админ блокирует
+	a.handleCallback(ctx, cb(100, "usr:block:555"))
+	if u, _ := fs.GetUser(ctx, user); u == nil || !u.Blocked {
+		t.Fatalf("юзер должен быть заблокирован: %+v", u)
+	}
+
+	// заблокированный юзер пишет /start -> получает отказ, меню не показывается
+	fm.texts = nil
+	a.handleMessage(ctx, msgText(user, "/start"))
+	if !strings.Contains(fm.joined(), "ограничен") {
+		t.Fatalf("заблокированному должен прийти отказ, got:\n%s", fm.joined())
+	}
+
+	// заблокированный юзер жмёт кнопку покупки -> тоже отказ (callback)
+	fm.texts = nil
+	a.handleCallback(ctx, cb(user, "menu:buy"))
+	if !strings.Contains(fm.joined(), "ограничен") {
+		t.Fatalf("callback заблокированного должен быть отклонён, got:\n%s", fm.joined())
+	}
+
+	// админ разблокирует
+	a.handleCallback(ctx, cb(100, "usr:unblock:555"))
+	if u, _ := fs.GetUser(ctx, user); u == nil || u.Blocked {
+		t.Fatalf("юзер должен быть разблокирован: %+v", u)
+	}
+
+	// админ удаляет
+	a.handleCallback(ctx, cb(100, "usr:delc:555"))
+	if u, _ := fs.GetUser(ctx, user); u != nil {
+		t.Fatal("после удаления записи быть не должно")
+	}
+}
+
+// Жёсткий запрет: блокировка/удаление в боте НЕ трогают аккаунт в панели.
+// Здесь проверяем, что DeleteUser не вызывает никаких обращений к панели.
+func TestUsersAdmin_DeleteDoesNotTouchPanel(t *testing.T) {
+	var panelHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panelHits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	fm := &fakeMsg{}
+	fs := &fakeStore{}
+	a := &App{
+		cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msg:   fm,
+		wiz:   map[int64]*wizard{},
+		ui:    map[int64]*uiState{},
+		store: fs,
+	}
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	ctx := context.Background()
+
+	_ = fs.UpsertUser(ctx, 555)
+	a.handleCallback(ctx, cb(100, "usr:block:555"))
+	a.handleCallback(ctx, cb(100, "usr:delc:555"))
+
+	if panelHits != 0 {
+		t.Fatalf("блок/удаление в боте не должны обращаться к панели, hits=%d", panelHits)
 	}
 }

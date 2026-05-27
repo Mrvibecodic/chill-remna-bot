@@ -27,6 +27,10 @@ type Storage interface {
 	UpsertUser(ctx context.Context, telegramID int64) error
 	GetUser(ctx context.Context, telegramID int64) (*model.User, error)
 	SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error
+	// ListUsers возвращает страницу пользователей (по created_at) и общее число.
+	ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
+	SetBlocked(ctx context.Context, telegramID int64, blocked bool) error
+	DeleteUser(ctx context.Context, telegramID int64) error
 
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
@@ -129,18 +133,18 @@ func (b *base) UpsertUser(ctx context.Context, telegramID int64) error {
 }
 
 func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, error) {
-	var approved int
+	var approved, blocked int
 	var created string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT p2p_approved, created_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&approved, &created)
+		"SELECT p2p_approved, blocked, created_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&approved, &blocked, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, P2PApproved: approved != 0, CreatedAt: created}, nil
+	return &model.User{TelegramID: telegramID, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -148,6 +152,46 @@ func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bo
 		"INSERT INTO users (telegram_id, p2p_approved, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET p2p_approved = excluded.p2p_approved",
 		telegramID, boolToInt(approved), nowStr())
+	return err
+}
+
+func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+	var total int
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, p2p_approved, blocked, created_at FROM users "+
+			"ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
+		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var approved, blocked int
+		if err := rows.Scan(&u.TelegramID, &approved, &blocked, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		u.P2PApproved = approved != 0
+		u.Blocked = blocked != 0
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
+func (b *base) SetBlocked(ctx context.Context, telegramID int64, blocked bool) error {
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at) VALUES ("+b.ph(1)+", 0, "+b.ph(2)+", "+b.ph(3)+") "+
+			"ON CONFLICT (telegram_id) DO UPDATE SET blocked = excluded.blocked",
+		telegramID, boolToInt(blocked), nowStr())
+	return err
+}
+
+func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
 
