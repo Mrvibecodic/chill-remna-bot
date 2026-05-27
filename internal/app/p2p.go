@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot/models"
 
@@ -25,6 +26,9 @@ type uiState struct {
 func (a *App) getUI(chatID int64) *uiState {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.ui == nil {
+		a.ui = map[int64]*uiState{}
+	}
 	st := a.ui[chatID]
 	if st == nil {
 		st = &uiState{}
@@ -220,7 +224,7 @@ func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fil
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", req.TelegramID, req.Months, req.Price+curSuffix(a.p2pConfig().Currency), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
-	a.msg.SendPhoto(ctx, a.cfg.AdminID, fileID, caption, [][]models.InlineKeyboardButton{{
+	a.msg.SendPhoto(ctx, a.cfg.AdminID, fileID, a.applyPremium(caption), [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
 		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+id),
 	}})
@@ -451,4 +455,35 @@ func formatPrices(p model.P2PConfig) string {
 		return "—"
 	}
 	return strings.Join(parts, " ")
+}
+
+// collectEmoji строит карту "эмодзи -> custom_emoji_id" из присланного админом
+// сообщения с анимированными (premium) эмодзи. Работает, если у владельца бота
+// есть Telegram Premium. Эмодзи затем подставляются во все сообщения бота.
+func (a *App) collectEmoji(ctx context.Context, chatID int64, m *models.Message) {
+	a.getUI(chatID).adminInput = ""
+	u16 := utf16.Encode([]rune(m.Text))
+	added := 0
+	a.mu.Lock()
+	if a.botCfg != nil {
+		if a.botCfg.PremiumEmoji == nil {
+			a.botCfg.PremiumEmoji = map[string]string{}
+		}
+		for _, e := range m.Entities {
+			if e.Type != models.MessageEntityTypeCustomEmoji || e.CustomEmojiID == "" {
+				continue
+			}
+			if e.Offset < 0 || e.Offset+e.Length > len(u16) {
+				continue
+			}
+			emoji := string(utf16.Decode(u16[e.Offset : e.Offset+e.Length]))
+			a.botCfg.PremiumEmoji[emoji] = e.CustomEmojiID
+			added++
+		}
+	}
+	a.mu.Unlock()
+	if added > 0 {
+		_ = a.saveBotConfig(ctx)
+	}
+	a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.emoji_saved", added))
 }

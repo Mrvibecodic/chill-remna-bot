@@ -37,15 +37,15 @@ var en = map[string]string{
 		"📘 <b>Official (Caddy)</b>\n" +
 		"Sources:\n" +
 		"• Quick start: https://docs.rw/docs/overview/quick-start/\n" +
-		"• Caddy reverse proxy: https://docs.rw/docs/install/reverse-proxies/caddy/\n" +
+		"• Reverse proxies (Caddy, nginx, etc.): https://docs.rw/docs/install/reverse-proxies/\n" +
 		"• Panel protection: https://docs.rw/docs/security/caddy-with-minimal-setup/\n" +
 		"No cookie in our sense; machines use X-API-Key (asked only if enabled).\n\n" +
-		"🛠 <b>eGames script (nginx)</b>\n" +
+		"🛠 <b>eGames script (nginx, cookie auth)</b>\n" +
 		"Sources:\n" +
 		"• Repository: https://github.com/eGamesAPI/remnawave-reverse-proxy\n" +
 		"• Wiki: https://wiki.egam.es/\n" +
 		"Sets up nginx with cookie protection — you'll need to provide it.",
-	"step.install.choose_docs":   "📘 Official (Caddy)",
+	"step.install.choose_docs":   "📘 Official (docs)",
 	"step.install.choose_egames": "🛠 eGames script (nginx)",
 
 	"step.url.ask": "🔗 Enter the panel URL (e.g. <code>https://panel.example.com</code>).",
@@ -80,7 +80,7 @@ var en = map[string]string{
 	"update.not_available":   "Self-update is unavailable: the bot runs without docker.sock access.",
 	"menu.installed":         "Bot is ready 👋\nChoose an action:",
 	"menu.buy":               "💳 Buy subscription",
-	"menu.admin_hint":        "⚙️ Admin: /p2p — configure P2P payments.",
+	"menu.admin_hint":        "⚙️ Admin: /p2p — P2P payments · /emoji — animated emoji.",
 	"buy.choose_plan":        "📦 Choose a subscription period:",
 	"buy.no_plans":           "No plans configured yet, check back later.",
 	"buy.plan_btn":           "%d mo — %s",
@@ -124,4 +124,6 @@ var en = map[string]string{
 	"admin.done":             "✅ Done.",
 	"admin.provision_fail":   "❌ Panel creation error: %s\nRequest not confirmed.",
 	"admin.not_found":        "Request not found or already processed.",
+	"admin.ask_emoji":        "Send the animated (premium) emoji you want in a single message — I will use them in all bot messages.",
+	"admin.emoji_saved":      "✅ Saved animated emoji: %d. They will appear in bot messages.",
 }

@@ -38,15 +38,15 @@ var ru = map[string]string{
 		"📘 <b>Официально (Caddy)</b>\n" +
 		"Источники:\n" +
 		"• Быстрый старт: https://docs.rw/docs/overview/quick-start/\n" +
-		"• Reverse-proxy Caddy: https://docs.rw/docs/install/reverse-proxies/caddy/\n" +
+		"• Reverse-proxy (Caddy, nginx и др.): https://docs.rw/docs/install/reverse-proxies/\n" +
 		"• Защита панели: https://docs.rw/docs/security/caddy-with-minimal-setup/\n" +
 		"Куки в нашем смысле нет; для машины используется X-API-Key (спрошу, только если включён).\n\n" +
-		"🛠 <b>Скрипт eGames (nginx)</b>\n" +
+		"🛠 <b>Скрипт eGames (nginx, защита кукой)</b>\n" +
 		"Источники:\n" +
 		"• Репозиторий: https://github.com/eGamesAPI/remnawave-reverse-proxy\n" +
 		"• Вики: https://wiki.egam.es/\n" +
 		"Ставит nginx с защитой по куке — её нужно будет указать.",
-	"step.install.choose_docs":   "📘 Официально (Caddy)",
+	"step.install.choose_docs":   "📘 Официально (по доке)",
 	"step.install.choose_egames": "🛠 Скрипт eGames (nginx)",
 
 	"step.url.ask": "🔗 Введите URL панели (например, <code>https://panel.example.com</code>).",
@@ -81,7 +81,7 @@ var ru = map[string]string{
 	"update.not_available":   "Самообновление недоступно: бот запущен без доступа к docker.sock.",
 	"menu.installed":         "Бот готов 👋\nВыберите действие:",
 	"menu.buy":               "💳 Купить подписку",
-	"menu.admin_hint":        "⚙️ Админ: /p2p — настройка оплаты переводом.",
+	"menu.admin_hint":        "⚙️ Админ: /p2p — оплата переводом · /emoji — анимированные эмодзи.",
 	"buy.choose_plan":        "📦 Выберите срок подписки:",
 	"buy.no_plans":           "Тарифы пока не настроены, загляните позже.",
 	"buy.plan_btn":           "%d мес — %s",
@@ -125,4 +125,6 @@ var ru = map[string]string{
 	"admin.done":             "✅ Готово.",
 	"admin.provision_fail":   "❌ Ошибка создания в панели: %s\nЗаявка не подтверждена.",
 	"admin.not_found":        "Заявка не найдена или уже обработана.",
+	"admin.ask_emoji":        "Пришлите одним сообщением нужные анимированные (premium) эмодзи — я подставлю их во все сообщения бота.",
+	"admin.emoji_saved":      "✅ Сохранено анимированных эмодзи: %d. Они появятся в сообщениях бота.",
 }

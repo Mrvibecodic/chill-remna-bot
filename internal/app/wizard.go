@@ -130,10 +130,10 @@ func (a *App) gotoDB(ctx context.Context, chatID int64, w *wizard) {
 	w.step = stepDB
 	lang := w.cfg.Language
 	a.send(ctx, chatID, i18n.T(lang, "step.db.title"))
-	a.sendKB(ctx, chatID, i18n.T(lang, "step.db.body"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "step.db.choose_sqlite"), "db:sqlite")},
-		{btn(i18n.T(lang, "step.db.choose_postgres"), "db:postgres")},
-	})
+	a.sendKB(ctx, chatID, i18n.T(lang, "step.db.body"), [][]models.InlineKeyboardButton{{
+		btn(i18n.T(lang, "step.db.choose_sqlite"), "db:sqlite"),
+		btn(i18n.T(lang, "step.db.choose_postgres"), "db:postgres"),
+	}})
 }
 
 func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind string) {
@@ -186,10 +186,10 @@ func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind stri
 func (a *App) gotoLocation(ctx context.Context, chatID int64, w *wizard) {
 	w.step = stepLocation
 	lang := w.cfg.Language
-	a.sendKB(ctx, chatID, i18n.T(lang, "step.location.title"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "step.location.choose_local"), "loc:local")},
-		{btn(i18n.T(lang, "step.location.choose_remote"), "loc:remote")},
-	})
+	a.sendKB(ctx, chatID, i18n.T(lang, "step.location.title"), [][]models.InlineKeyboardButton{{
+		btn(i18n.T(lang, "step.location.choose_local"), "loc:local"),
+		btn(i18n.T(lang, "step.location.choose_remote"), "loc:remote"),
+	}})
 }
 
 func (a *App) onLocationChosen(ctx context.Context, chatID int64, w *wizard, val string) {
@@ -206,10 +206,10 @@ func (a *App) onLocationChosen(ctx context.Context, chatID int64, w *wizard, val
 	}
 	w.step = stepInstall
 	lang := w.cfg.Language
-	a.sendKB(ctx, chatID, i18n.T(lang, "step.install.title"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "step.install.choose_docs"), "inst:docs")},
-		{btn(i18n.T(lang, "step.install.choose_egames"), "inst:egames")},
-	})
+	a.sendKB(ctx, chatID, i18n.T(lang, "step.install.title"), [][]models.InlineKeyboardButton{{
+		btn(i18n.T(lang, "step.install.choose_docs"), "inst:docs"),
+		btn(i18n.T(lang, "step.install.choose_egames"), "inst:egames"),
+	}})
 }
 
 func (a *App) gotoURL(ctx context.Context, chatID int64, w *wizard) {

@@ -163,7 +163,7 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	a.b = b
-	a.msg = botMessenger{b: b, log: a.log, premium: a.cfg.PremiumEmoji}
+	a.msg = botMessenger{b: b, log: a.log}
 	a.log.Info("бот запущен")
 	b.Start(ctx)
 	return nil
@@ -230,9 +230,19 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 			a.showP2PAdmin(ctx, chatID)
 		}
 		return
+	case strings.HasPrefix(text, "/emoji"):
+		if isAdmin {
+			a.getUI(chatID).adminInput = "emoji"
+			a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_emoji"))
+		}
+		return
 	}
 
 	if !isAdmin {
+		return
+	}
+	if a.getUI(chatID).adminInput == "emoji" {
+		a.collectEmoji(ctx, chatID, m)
 		return
 	}
 	a.mu.Lock()
@@ -285,11 +295,11 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 // --- отправка сообщений (через messenger) ---
 
 func (a *App) send(ctx context.Context, chatID int64, text string) {
-	a.msg.Send(ctx, chatID, text)
+	a.msg.Send(ctx, chatID, a.applyPremium(text))
 }
 
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	a.msg.SendKB(ctx, chatID, text, rows)
+	a.msg.SendKB(ctx, chatID, a.applyPremium(text), rows)
 }
 
 func btn(text, data string) models.InlineKeyboardButton {
@@ -306,15 +316,37 @@ func (a *App) lang(chatID int64) string {
 	return i18n.Fallback
 }
 
+// premiumMap — карта "эмодзи -> custom_emoji_id": env PREMIUM_EMOJI + заданная
+// через /emoji (вторая перекрывает первую). nil, если пусто.
+func (a *App) premiumMap() map[string]string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := map[string]string{}
+	for k, v := range a.cfg.PremiumEmoji {
+		out[k] = v
+	}
+	if a.botCfg != nil {
+		for k, v := range a.botCfg.PremiumEmoji {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (a *App) applyPremium(text string) string {
+	return applyPremiumEmoji(text, a.premiumMap())
+}
+
 // botMessenger — реальная отправка через Telegram (ParseMode=HTML).
 type botMessenger struct {
-	b       *bot.Bot
-	log     *slog.Logger
-	premium map[string]string
+	b   *bot.Bot
+	log *slog.Logger
 }
 
 func (m botMessenger) Send(ctx context.Context, chatID int64, text string) {
-	text = applyPremiumEmoji(text, m.premium)
 	if _, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML,
 	}); err != nil {
@@ -323,7 +355,6 @@ func (m botMessenger) Send(ctx context.Context, chatID int64, text string) {
 }
 
 func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	text = applyPremiumEmoji(text, m.premium)
 	if _, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML,
 		ReplyMarkup: models.InlineKeyboardMarkup{InlineKeyboard: rows},
@@ -333,7 +364,6 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 }
 
 func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
-	caption = applyPremiumEmoji(caption, m.premium)
 	p := &bot.SendPhotoParams{
 		ChatID:    chatID,
 		Photo:     &models.InputFileString{Data: fileID},

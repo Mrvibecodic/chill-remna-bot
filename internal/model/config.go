@@ -48,6 +48,9 @@ type BotConfig struct {
 	DBKind    string      `json:"db_kind"`
 	Panel     PanelConfig `json:"panel"`
 	P2P       P2PConfig   `json:"p2p"`
+	// PremiumEmoji: карта "обычный эмодзи" -> custom_emoji_id (анимированные premium),
+	// заполняется через /emoji. Дополняет/перекрывает env PREMIUM_EMOJI.
+	PremiumEmoji map[string]string `json:"premium_emoji"`
 }
 
 // PlanMonths — фиксированные сроки подписки (в месяцах).
