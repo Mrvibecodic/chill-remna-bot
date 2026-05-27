@@ -185,7 +185,6 @@ func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 
 func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
-	a.beginScreen(chatID)
 	ui := a.getUI(chatID)
 	if ui.welcomeAwait == "img" {
 		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
@@ -386,7 +385,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.send(ctx, chatID, i18n.T(lang, "admin.saved"))
+		a.showP2PAdmin(ctx, chatID)
 	case "squad":
 		ui.adminInput = ""
 		v := strings.TrimSpace(text)
@@ -399,7 +398,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.send(ctx, chatID, i18n.T(lang, "admin.saved"))
+		a.showP2PAdmin(ctx, chatID)
 	case "price":
 		mo := ui.priceMonths
 		ui.adminInput = ""
@@ -413,7 +412,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.send(ctx, chatID, i18n.T(lang, "admin.saved"))
+		a.showP2PAdmin(ctx, chatID)
 	}
 }
 

@@ -109,6 +109,24 @@ func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
 	cp := *s.users[id]
 	return &cp, nil
 }
+
+func (s *fakeStore) SetUserInfo(_ context.Context, id int64, username, firstName string) error {
+	if s.users == nil || s.users[id] == nil {
+		return nil // обновляем только существующую запись
+	}
+	s.users[id].Username = username
+	s.users[id].FirstName = firstName
+	return nil
+}
+
+func (s *fakeStore) HasApprovedPurchase(_ context.Context, id int64) (bool, error) {
+	for _, r := range s.reqs {
+		if r.TelegramID == id && r.Status == model.P2PApproved {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (s *fakeStore) SetP2PApproved(_ context.Context, id int64, ok bool) error {
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
@@ -567,5 +585,74 @@ func TestNotificationsArePersistent(t *testing.T) {
 	fm.mu.Unlock()
 	if !foundLive {
 		t.Fatal("уведомление админу не должно удаляться при навигации пользователя")
+	}
+}
+
+func TestUserLabel(t *testing.T) {
+	cases := []struct {
+		u    model.User
+		want string
+	}{
+		{model.User{TelegramID: 6882779276, Username: "vasya"}, "@vasya (6882779276)"},
+		{model.User{TelegramID: 7, FirstName: "Вася"}, "Вася (7)"},
+		{model.User{TelegramID: 42}, "42"},
+	}
+	for _, c := range cases {
+		if got := userLabel(&c.u); got != c.want {
+			t.Fatalf("userLabel(%+v)=%q want %q", c.u, got, c.want)
+		}
+	}
+}
+
+func btnData(rows []models.InlineKeyboardButton) string {
+	var b strings.Builder
+	for _, x := range rows {
+		b.WriteString(x.CallbackData + "|")
+	}
+	return b.String()
+}
+
+func TestNavRow(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	ctx := context.Background()
+	const user int64 = 555
+
+	// админ -> только Главная
+	if row := a.navRow(ctx, 100, true); len(row) != 1 || row[0].CallbackData != "menu:home" {
+		t.Fatalf("админ должен иметь только Главную: %s", btnData(row))
+	}
+	// юзер без подписки -> Главная + Купить
+	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:buy|" {
+		t.Fatalf("юзер без подписки: %s", btnData(row))
+	}
+	// после одобренной покупки -> Главная + Мои подписки
+	_ = fs.CreateP2PRequest(ctx, &model.P2PRequest{TelegramID: user, Status: model.P2PApproved})
+	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:mysubs|" {
+		t.Fatalf("юзер с подпиской: %s", btnData(row))
+	}
+}
+
+// Кнопка «Разрешить P2P» в карточке: выдаёт доступ и уведомляет пользователя.
+func TestUserCard_AllowP2P(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	ctx := context.Background()
+	const user int64 = 555
+	_ = fs.UpsertUser(ctx, user)
+
+	a.handleCallback(ctx, cb(100, "usr:p2pon:555"))
+	if u, _ := fs.GetUser(ctx, user); u == nil || !u.P2PApproved {
+		t.Fatalf("P2P-доступ должен быть выдан: %+v", u)
+	}
+	if !strings.Contains(fm.joined(), "одобрена оплата переводом") {
+		t.Fatalf("пользователь должен получить уведомление:\n%s", fm.joined())
+	}
+	// запрет обратно
+	a.handleCallback(ctx, cb(100, "usr:p2poff:555"))
+	if u, _ := fs.GetUser(ctx, user); u == nil || u.P2PApproved {
+		t.Fatalf("P2P-доступ должен быть снят: %+v", u)
 	}
 }

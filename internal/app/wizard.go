@@ -46,7 +46,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	a.msg.AnswerCallback(ctx, cq.ID)
 	chatID := cq.From.ID
 	isAdmin := chatID == a.cfg.AdminID
-	a.beginScreen(chatID)
+	a.rememberUser(ctx, chatID, cq.From.Username, cq.From.FirstName)
 	if !isAdmin && a.userBlocked(ctx, chatID) {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return
@@ -66,7 +66,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 		a.wizardCallback(ctx, chatID, w, key, val)
 	case "menu":
-		a.onMenu(ctx, chatID, val, isAdmin, displayName(cq.From.FirstName, cq.From.Username))
+		a.onMenu(ctx, chatID, val, isAdmin, cq.From.FirstName, cq.From.Username)
 	case "buy":
 		a.onBuyPlan(ctx, chatID, val)
 	case "method":

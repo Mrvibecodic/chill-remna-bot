@@ -243,3 +243,52 @@ func TestUsersListBlockDelete(t *testing.T) {
 		}
 	})
 }
+
+func TestUserInfoAndPurchase(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		// SetUserInfo для несуществующего — no-op (строку не создаёт)
+		if err := st.SetUserInfo(ctx, 6882779276, "vasya", "Вася"); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, 6882779276); u != nil {
+			t.Fatal("SetUserInfo не должен создавать запись")
+		}
+		// после регистрации — обновляет ник/имя
+		if err := st.UpsertUser(ctx, 6882779276); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetUserInfo(ctx, 6882779276, "vasya", "Вася"); err != nil {
+			t.Fatal(err)
+		}
+		u, _ := st.GetUser(ctx, 6882779276)
+		if u == nil || u.Username != "vasya" || u.FirstName != "Вася" {
+			t.Fatalf("ник/имя не сохранились: %+v", u)
+		}
+		// HasApprovedPurchase
+		if ok, _ := st.HasApprovedPurchase(ctx, 6882779276); ok {
+			t.Fatal("без заявок покупок быть не должно")
+		}
+		r := &model.P2PRequest{TelegramID: 6882779276, Months: 1, Price: "100", Status: model.P2PApproved}
+		if err := st.CreateP2PRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := st.HasApprovedPurchase(ctx, 6882779276); !ok {
+			t.Fatal("после approved-заявки покупка должна определяться")
+		}
+		// ник попадает в список
+		users, _, err := st.ListUsers(ctx, 10, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, x := range users {
+			if x.TelegramID == 6882779276 && x.Username == "vasya" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ник не попал в ListUsers: %+v", users)
+		}
+	})
+}

@@ -90,6 +90,8 @@ type P2PConfig struct {
 // User — запись пользователя бота (гейт доступа к P2P и т.п.).
 type User struct {
 	TelegramID  int64
+	Username    string // @username из Telegram (без @), может быть пустым
+	FirstName   string // имя из Telegram, может быть пустым
 	P2PApproved bool
 	Blocked     bool
 	CreatedAt   string

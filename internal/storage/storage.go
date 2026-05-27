@@ -25,8 +25,12 @@ type Storage interface {
 	SaveConfig(ctx context.Context, cfg *model.BotConfig) error
 
 	UpsertUser(ctx context.Context, telegramID int64) error
+	// SetUserInfo обновляет ник/имя существующей записи (строку не создаёт).
+	SetUserInfo(ctx context.Context, telegramID int64, username, firstName string) error
 	GetUser(ctx context.Context, telegramID int64) (*model.User, error)
 	SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error
+	// HasApprovedPurchase сообщает, есть ли у пользователя одобренная покупка.
+	HasApprovedPurchase(ctx context.Context, telegramID int64) (bool, error)
 	// ListUsers возвращает страницу пользователей (по created_at) и общее число.
 	ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
 	SetBlocked(ctx context.Context, telegramID int64, blocked bool) error
@@ -132,19 +136,34 @@ func (b *base) UpsertUser(ctx context.Context, telegramID int64) error {
 	return err
 }
 
+func (b *base) SetUserInfo(ctx context.Context, telegramID int64, username, firstName string) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET username = "+b.ph(1)+", first_name = "+b.ph(2)+" WHERE telegram_id = "+b.ph(3),
+		username, firstName, telegramID)
+	return err
+}
+
+func (b *base) HasApprovedPurchase(ctx context.Context, telegramID int64) (bool, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2),
+		telegramID, model.P2PApproved).Scan(&n)
+	return n > 0, err
+}
+
 func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, error) {
 	var approved, blocked int
-	var created string
+	var created, username, firstName string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT p2p_approved, blocked, created_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&approved, &blocked, &created)
+		"SELECT username, first_name, p2p_approved, blocked, created_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -161,7 +180,7 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 		return nil, 0, err
 	}
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, p2p_approved, blocked, created_at FROM users "+
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
 			"ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
 	if err != nil {
@@ -172,7 +191,7 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 	for rows.Next() {
 		var u model.User
 		var approved, blocked int
-		if err := rows.Scan(&u.TelegramID, &approved, &blocked, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		u.P2PApproved = approved != 0

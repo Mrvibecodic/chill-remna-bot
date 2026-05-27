@@ -54,16 +54,15 @@ type App struct {
 	wiz    map[int64]*wizard
 	ui     map[int64]*uiState
 
-	// single-message UI: храним id «экранных» сообщений бота по chatID и
-	// удаляем их при следующем взаимодействии (остаётся только текущий экран).
-	scrMu        sync.Mutex
-	screen       map[int64][]int
-	pendingClear map[int64]bool
+	// single-message UI: на бота держим РОВНО одно «экранное» сообщение на chatID;
+	// каждое новое экранное сообщение удаляет предыдущее (чистота чата).
+	scrMu  sync.Mutex
+	screen map[int64][]int
 }
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
 	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{},
-		screen: map[int64][]int{}, pendingClear: map[int64]bool{}}
+		screen: map[int64][]int{}}
 }
 
 // Bootstrap при старте подхватывает ранее выбранную БД и конфиг.
@@ -208,7 +207,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
-	a.beginScreen(chatID)
+	a.rememberUser(ctx, chatID, username, firstName)
 	if !isAdmin && a.userBlocked(ctx, chatID) {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return
@@ -351,31 +350,16 @@ func (a *App) notifyUpdated(ctx context.Context) {
 
 // --- single-message UI: «экран» = последние сообщения бота для chatID ---
 
-// beginScreen помечает, что следующее «экранное» сообщение должно сначала
-// удалить предыдущий экран этого чата. Вызывается в начале обработки апдейта.
-func (a *App) beginScreen(chatID int64) {
-	a.scrMu.Lock()
-	if a.pendingClear == nil {
-		a.pendingClear = map[int64]bool{}
-	}
-	a.pendingClear[chatID] = true
-	a.scrMu.Unlock()
-}
-
-// emit отправляет «экранное» сообщение: при необходимости удаляет предыдущий
-// экран чата, отправляет новое и запоминает его id. Несколько emit подряд в
-// рамках одного апдейта копятся в один экран (clear срабатывает только на первом).
+// emit отправляет «экранное» сообщение и УДАЛЯЕТ предыдущее экранное сообщение
+// этого чата — на боте всегда остаётся ровно одно сообщение (строгая чистота).
+// Постоянные уведомления (notify*) сюда не попадают и не трекаются.
 func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 	a.scrMu.Lock()
 	if a.screen == nil {
 		a.screen = map[int64][]int{}
 	}
-	var toDelete []int
-	if a.pendingClear[chatID] {
-		a.pendingClear[chatID] = false
-		toDelete = a.screen[chatID]
-		a.screen[chatID] = nil
-	}
+	toDelete := a.screen[chatID]
+	a.screen[chatID] = nil
 	a.scrMu.Unlock()
 
 	for _, id := range toDelete {
@@ -384,7 +368,7 @@ func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 	id := send()
 	if id != 0 {
 		a.scrMu.Lock()
-		a.screen[chatID] = append(a.screen[chatID], id)
+		a.screen[chatID] = []int{id}
 		a.scrMu.Unlock()
 	}
 }

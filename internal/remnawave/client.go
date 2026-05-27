@@ -200,6 +200,15 @@ func (c *Client) ListSquads(ctx context.Context) ([]Squad, error) {
 	return nil, nil
 }
 
+// Subscription возвращает ссылку на подписку пользователя (по telegramId), если он есть в панели.
+func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, bool) {
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil || u == nil || u.SubscriptionURL == "" {
+		return "", false
+	}
+	return u.SubscriptionURL, true
+}
+
 func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
 	if err != nil {

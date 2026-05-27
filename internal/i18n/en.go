@@ -192,6 +192,11 @@ var en = map[string]string{
 	"user.deleted":          "🗑 User deleted from the bot (panel account untouched).",
 	"user.you_blocked":      "🚫 Your access to the bot is restricted. Contact the administrator.",
 	"user.card_confirm_del": "🗑 Delete user <code>%s</code> from the bot? The panel account is NOT affected.",
+	"btn.p2p_allow":         "✅ Allow P2P",
+	"btn.p2p_deny":          "🚫 Revoke P2P",
+	"btn.mysubs":            "📲 My subscriptions",
+	"subs.none":             "📲 You don't have an active subscription yet.\nPress «Buy» to get access.",
+	"subs.show":             "📲 <b>Your subscription</b>\n\nConnection link:\n<code>%s</code>",
 
 	"squad.title": "🎯 <b>Squad for new users</b>\nCurrent: %s\n\n" +
 		"Pick a squad from the panel — accounts created by the bot will be placed into it:",

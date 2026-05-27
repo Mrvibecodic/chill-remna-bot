@@ -12,6 +12,14 @@ import (
 
 const usersPageSize = 8
 
+// rememberUser обновляет ник/имя из Telegram у уже существующей записи (новую не создаёт).
+func (a *App) rememberUser(ctx context.Context, chatID int64, username, firstName string) {
+	if a.store == nil || (username == "" && firstName == "") {
+		return
+	}
+	_ = a.store.SetUserInfo(ctx, chatID, username, firstName)
+}
+
 // userBlocked сообщает, ограничен ли доступ к боту для этого chatID (только не-админ).
 func (a *App) userBlocked(ctx context.Context, chatID int64) bool {
 	if chatID == a.cfg.AdminID || a.store == nil {
@@ -45,7 +53,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 
 	var rows [][]models.InlineKeyboardButton
 	for _, u := range users {
-		label := "👤 " + strconv.FormatInt(u.TelegramID, 10)
+		label := "👤 " + userLabel(&u)
 		if u.Blocked {
 			label += " 🚫"
 		}
@@ -104,7 +112,14 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	} else {
 		toggle = btn(i18n.T(lang, "btn.block"), "usr:block:"+id)
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "user.card", uid, created, p2p, status), [][]models.InlineKeyboardButton{
+	var p2pBtn models.InlineKeyboardButton
+	if u.P2PApproved {
+		p2pBtn = btn(i18n.T(lang, "btn.p2p_deny"), "usr:p2poff:"+id)
+	} else {
+		p2pBtn = btn(i18n.T(lang, "btn.p2p_allow"), "usr:p2pon:"+id)
+	}
+	a.sendKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status), [][]models.InlineKeyboardButton{
+		{p2pBtn},
 		{toggle, btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		{btn(i18n.T(lang, "btn.back"), "usr:list"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
@@ -126,11 +141,16 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string) {
 		if a.store != nil {
 			_ = a.store.SetBlocked(ctx, uid, action == "block")
 		}
-		key := "user.unblocked_done"
-		if action == "block" {
-			key = "user.blocked_done"
+		a.showUser(ctx, chatID, uid)
+	case "p2pon", "p2poff":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		allow := action == "p2pon"
+		if a.store != nil {
+			_ = a.store.SetP2PApproved(ctx, uid, allow)
 		}
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), key))
+		if allow {
+			a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
+		}
 		a.showUser(ctx, chatID, uid)
 	case "del":
 		lang := a.lang(chatID)
@@ -143,9 +163,30 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string) {
 		if a.store != nil {
 			_ = a.store.DeleteUser(ctx, uid)
 		}
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.deleted"))
 		a.showUsers(ctx, chatID, 0)
 	}
+}
+
+// --- пользователь: мои подписки ---
+
+func (a *App) showMySubs(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.mu.Lock()
+	panel := a.panel
+	a.mu.Unlock()
+	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
+	var url string
+	ok := false
+	if panel != nil {
+		url, ok = panel.Subscription(ctx, chatID)
+	}
+	if !ok {
+		a.sendKB(ctx, chatID, i18n.T(lang, "subs.none"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.buy"), "menu:buy")}, home,
+		})
+		return
+	}
+	a.sendKB(ctx, chatID, i18n.T(lang, "subs.show", url), [][]models.InlineKeyboardButton{home})
 }
 
 // --- админ: выбор сквада из панели ---
@@ -224,7 +265,6 @@ func (a *App) onSquad(ctx context.Context, chatID int64, val string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.send(ctx, chatID, i18n.T(lang, "squad.set_ok"))
 		a.showP2PAdmin(ctx, chatID)
 	}
 }

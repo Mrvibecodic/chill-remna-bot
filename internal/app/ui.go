@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
@@ -44,14 +45,49 @@ func displayName(first, username string) string {
 	return "друг"
 }
 
-func homeRow(lang string) []models.InlineKeyboardButton {
-	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
+// userLabel — «Ник (id)» для списка/карточки. Ник: @username, иначе имя, иначе только id.
+func userLabel(u *model.User) string {
+	id := strconv.FormatInt(u.TelegramID, 10)
+	nick := ""
+	switch {
+	case u.Username != "":
+		nick = "@" + u.Username
+	case u.FirstName != "":
+		nick = u.FirstName
+	}
+	if nick == "" {
+		return id
+	}
+	return nick + " (" + id + ")"
 }
 
-func (a *App) userMenuRows(lang string) [][]models.InlineKeyboardButton {
-	return [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
+// userHasSub — есть ли у пользователя одобренная покупка (для выбора кнопки нав-ряда).
+func (a *App) userHasSub(ctx context.Context, chatID int64) bool {
+	if a.store == nil {
+		return false
 	}
+	ok, _ := a.store.HasApprovedPurchase(ctx, chatID)
+	return ok
+}
+
+// navRow — нижний ряд инлайн-навигации: админу только «Главная»; пользователю
+// «Главная» + «Купить», а после покупки — «Главная» + «Мои подписки».
+func (a *App) navRow(ctx context.Context, chatID int64, isAdmin bool) []models.InlineKeyboardButton {
+	lang := a.lang(chatID)
+	row := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
+	if isAdmin {
+		return row
+	}
+	if a.userHasSub(ctx, chatID) {
+		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
+	} else {
+		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
+	}
+	return row
+}
+
+func homeRow(lang string) []models.InlineKeyboardButton {
+	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }
 
 func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
@@ -145,7 +181,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		ents = nil
 		rows = a.adminMenuRows(lang)
 	} else {
-		rows = a.userMenuRows(lang)
+		rows = [][]models.InlineKeyboardButton{a.navRow(ctx, chatID, false)}
 	}
 	if len(ents) == 0 {
 		caption = a.applyPremium(caption)
@@ -161,21 +197,25 @@ func (a *App) showRegister(ctx context.Context, chatID int64, name string) {
 	})
 }
 
-func (a *App) registerUser(ctx context.Context, chatID int64, name string) {
+func (a *App) registerUser(ctx context.Context, chatID int64, firstName, username string) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
+		_ = a.store.SetUserInfo(ctx, chatID, username, firstName)
 	}
-	a.showMenu(ctx, chatID, false, name)
+	a.showMenu(ctx, chatID, false, displayName(firstName, username))
 }
 
-func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, name string) {
+func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, firstName, username string) {
+	name := displayName(firstName, username)
 	switch val {
 	case "buy":
 		a.showPlans(ctx, chatID)
+	case "mysubs":
+		a.showMySubs(ctx, chatID)
 	case "home":
 		a.showMenu(ctx, chatID, isAdmin, name)
 	case "register":
-		a.registerUser(ctx, chatID, name)
+		a.registerUser(ctx, chatID, firstName, username)
 	case "status":
 		if isAdmin {
 			a.handleStatus(ctx, chatID)
@@ -255,7 +295,7 @@ func (a *App) setWelcomeImageURL(ctx context.Context, chatID int64, url string) 
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.send(ctx, chatID, i18n.T(a.lang(chatID), "welcome.saved"))
+	a.showWelcomeAdmin(ctx, chatID)
 }
 
 func (a *App) setWelcomeImageFile(ctx context.Context, chatID int64, fileID string) {
@@ -267,7 +307,7 @@ func (a *App) setWelcomeImageFile(ctx context.Context, chatID int64, fileID stri
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.send(ctx, chatID, i18n.T(a.lang(chatID), "welcome.saved"))
+	a.showWelcomeAdmin(ctx, chatID)
 }
 
 func (a *App) setWelcomeText(ctx context.Context, chatID int64, m *models.Message) {
@@ -280,7 +320,7 @@ func (a *App) setWelcomeText(ctx context.Context, chatID int64, m *models.Messag
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.send(ctx, chatID, i18n.T(a.lang(chatID), "welcome.saved"))
+	a.showWelcomeAdmin(ctx, chatID)
 }
 
 // --- админ: эмодзи (грид) ---
@@ -339,7 +379,6 @@ func (a *App) setEmojiFor(ctx context.Context, chatID int64, m *models.Message) 
 		}
 	}
 	if id == "" {
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "emoji.none_in_msg"))
 		a.showEmojiGrid(ctx, chatID)
 		return
 	}
@@ -352,6 +391,5 @@ func (a *App) setEmojiFor(ctx context.Context, chatID int64, m *models.Message) 
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.send(ctx, chatID, i18n.T(a.lang(chatID), "emoji.set_ok", target))
 	a.showEmojiGrid(ctx, chatID)
 }
