@@ -17,6 +17,7 @@ import (
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 	"remnabot/internal/storage"
+	"remnabot/internal/yookassa"
 )
 
 // fakeMsg перехватывает исходящие сообщения вместо реального Telegram.
@@ -165,6 +166,17 @@ func (s *fakeStore) ListPayments(_ context.Context, limit, offset int) ([]model.
 func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 	for _, p := range s.pays {
 		if p.TelegramID == id && p.Status == model.PaymentPaid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (s *fakeStore) PaymentByExtID(_ context.Context, extID string) (bool, error) {
+	if extID == "" {
+		return false, nil
+	}
+	for _, p := range s.pays {
+		if p.ExtID == extID {
 			return true, nil
 		}
 	}
@@ -780,5 +792,89 @@ func TestModerationNotificationDeleted(t *testing.T) {
 	}
 	if u, _ := fs.GetUser(ctx, 555); u == nil || !u.P2PApproved {
 		t.Fatal("доступ должен быть выдан")
+	}
+}
+
+func TestPricingResolver(t *testing.T) {
+	pr := model.Pricing{
+		Currency: "руб",
+		Base:     map[int]string{1: "150", 3: "400"},
+		P2P:      map[int]string{1: "140"}, // переопределение P2P для 1 мес
+		YooKassa: map[int]string{},         // нет переопределения — берётся база
+		Stars:    map[int]int{1: 100},
+	}
+	if got := pr.Fiat(model.PayMethodP2P, 1); got != "140" {
+		t.Fatalf("P2P override 1мес = %q, want 140", got)
+	}
+	if got := pr.Fiat(model.PayMethodP2P, 3); got != "400" {
+		t.Fatalf("P2P fallback to base 3мес = %q, want 400", got)
+	}
+	if got := pr.Fiat(model.PayMethodYooKassa, 1); got != "150" {
+		t.Fatalf("YK fallback to base 1мес = %q, want 150", got)
+	}
+	if got := pr.StarPrice(1); got != 100 {
+		t.Fatalf("stars 1мес = %d, want 100", got)
+	}
+}
+
+// Флоу ЮKassa: выбор метода -> кнопка оплаты -> проверка статуса -> провижн + лог.
+func TestYooKassaFlow(t *testing.T) {
+	// стуб панели Remnawave
+	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"response":{"uuid":"u1","subscriptionUrl":"https://sub/yk"}}`))
+	}))
+	defer panel.Close()
+
+	// стуб API ЮKassa
+	yk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"id":"pay_42","status":"pending","confirmation":{"confirmation_url":"https://yoo/p/42"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"pay_42","status":"succeeded","amount":{"value":"150.00","currency":"RUB"},"metadata":{"months":"1","telegram_id":"555"}}`))
+	}))
+	defer yk.Close()
+	oldBase := yookassa.BaseURL
+	yookassa.BaseURL = yk.URL
+	defer func() { yookassa.BaseURL = oldBase }()
+
+	fm := &fakeMsg{}
+	fs := &fakeStore{}
+	a := &App{
+		cfg: &config.Config{AdminID: 100, DataDir: t.TempDir()},
+		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msg: fm, wiz: map[int64]*wizard{}, ui: map[int64]*uiState{}, store: fs,
+	}
+	a.botCfg = &model.BotConfig{
+		Installed: true, Language: "ru",
+		YooKassa: model.YooKassaConfig{Enabled: true, ShopID: "shop", SecretKey: "sec", ReturnURL: "https://t.me"},
+		Pricing:  model.Pricing{Currency: "руб", Base: map[int]string{1: "150"}},
+	}
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panel.URL, APIToken: "t"})
+	ctx := context.Background()
+	const user int64 = 555
+
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	a.handleCallback(ctx, cb(user, "method:yk"))
+	if !strings.Contains(fm.joined(), "Оплат") {
+		t.Fatalf("не показан запрос на оплату:\n%s", fm.joined())
+	}
+	// проверка оплаты -> succeeded -> провижн
+	a.handleCallback(ctx, cb(user, "ykc:pay_42"))
+	if !strings.Contains(fm.joined(), "sub/yk") {
+		t.Fatalf("после успешной оплаты нет ссылки:\n%s", fm.joined())
+	}
+	if ok, _ := fs.HasPaidPayment(ctx, user); !ok {
+		t.Fatal("оплата ЮKassa не записана в лог")
+	}
+	// идемпотентность: повторная проверка не создаёт второй платёж
+	before := len(fs.pays)
+	a.handleCallback(ctx, cb(user, "ykc:pay_42"))
+	if len(fs.pays) != before {
+		t.Fatalf("повторная проверка не должна создавать новый платёж: было %d стало %d", before, len(fs.pays))
 	}
 }

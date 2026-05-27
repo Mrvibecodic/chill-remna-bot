@@ -45,13 +45,15 @@ type PanelConfig struct {
 
 // BotConfig — вся конфигурация бота, хранится одной зашифрованной строкой в БД.
 type BotConfig struct {
-	Installed bool          `json:"installed"`
-	Language  string        `json:"language"`
-	DBKind    string        `json:"db_kind"`
-	Panel     PanelConfig   `json:"panel"`
-	P2P       P2PConfig     `json:"p2p"`
-	Stars     StarsConfig   `json:"stars"`
-	Welcome   WelcomeConfig `json:"welcome"`
+	Installed bool           `json:"installed"`
+	Language  string         `json:"language"`
+	DBKind    string         `json:"db_kind"`
+	Panel     PanelConfig    `json:"panel"`
+	P2P       P2PConfig      `json:"p2p"`
+	Stars     StarsConfig    `json:"stars"`
+	YooKassa  YooKassaConfig `json:"yookassa"`
+	Pricing   Pricing        `json:"pricing"`
+	Welcome   WelcomeConfig  `json:"welcome"`
 	// PremiumEmoji: карта "обычный эмодзи" -> custom_emoji_id (анимированные premium),
 	// заполняется через /emoji. Дополняет/перекрывает env PREMIUM_EMOJI.
 	PremiumEmoji map[string]string `json:"premium_emoji"`
@@ -79,8 +81,9 @@ const (
 
 // Способы оплаты (для лога и единого финализатора).
 const (
-	PayMethodP2P   = "p2p"
-	PayMethodStars = "stars"
+	PayMethodP2P      = "p2p"
+	PayMethodStars    = "stars"
+	PayMethodYooKassa = "yookassa"
 )
 
 // Статусы записи в логе оплат.
@@ -95,15 +98,27 @@ type StarsConfig struct {
 	Prices  map[int]int `json:"prices"` // месяцы(1/3/6/12) -> цена в звёздах
 }
 
+// YooKassaConfig — оплата картами РФ через ЮKassa (api.yookassa.ru).
+// Подтверждение оплаты — опросом статуса по кнопке (без входящих вебхуков).
+type YooKassaConfig struct {
+	Enabled   bool           `json:"enabled"`
+	ShopID    string         `json:"shop_id"`
+	SecretKey string         `json:"secret_key"`
+	ReturnURL string         `json:"return_url"` // куда вернуть после оплаты, напр. https://t.me/<bot>
+	Currency  string         `json:"currency"`   // обычно RUB
+	Prices    map[int]string `json:"prices"`     // месяцы -> сумма, напр. "150.00"
+}
+
 // Payment — запись в логе оплат/действий (видна админу).
 type Payment struct {
 	ID         int64
 	TelegramID int64
-	Method     string // p2p | stars
+	Method     string // p2p | stars | yookassa
 	Months     int
 	Amount     string // человекочитаемая сумма, напр. "150 руб" или "100 ⭐"
 	Status     string // paid | rejected
 	Comment    string // напр. причина отказа
+	ExtID      string // id платежа у внешнего провайдера (для идемпотентности)
 	CreatedAt  string
 }
 

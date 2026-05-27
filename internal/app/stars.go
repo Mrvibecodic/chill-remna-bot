@@ -28,9 +28,8 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}
-	stars := a.starsConfig()
-	amount := stars.Prices[months]
-	if !stars.Enabled || amount <= 0 {
+	amount := a.pricing().StarPrice(months)
+	if !a.starsConfig().Enabled || amount <= 0 {
 		a.send(ctx, chatID, i18n.T(lang, "stars.no_price"))
 		return
 	}
@@ -59,7 +58,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		months = model.PlanMonths[0]
 	}
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
-	link, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount)
+	link, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID)
 	if err != nil {
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", err.Error()))
 		return
@@ -71,12 +70,11 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 
 func (a *App) showStarsAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	stars := a.starsConfig()
 	status := i18n.T(lang, "admin.off")
-	if stars.Enabled {
+	if a.starsConfig().Enabled {
 		status = i18n.T(lang, "admin.on")
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "admin.stars_title", status, formatStarPrices(stars)), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "admin.stars_title", status, a.formatStarPrices()), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "star:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "star:prices")},
 		homeRow(lang),
 	})
@@ -108,10 +106,11 @@ func (a *App) onStars(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-func formatStarPrices(s model.StarsConfig) string {
+func (a *App) formatStarPrices() string {
+	pr := a.pricing()
 	var parts []string
 	for _, mo := range model.PlanMonths {
-		if v, ok := s.Prices[mo]; ok && v > 0 {
+		if v := pr.StarPrice(mo); v > 0 {
 			parts = append(parts, strconv.Itoa(mo)+"м="+strconv.Itoa(v)+"⭐")
 		}
 	}

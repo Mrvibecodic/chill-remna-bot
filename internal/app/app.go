@@ -105,6 +105,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		return err
 	}
 	if ok && cfg.Installed {
+		cfg.NormalizePricing()
 		a.botCfg = cfg
 		a.panel = remnawave.New(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
@@ -283,6 +284,9 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	if !isAdmin {
 		return
 	}
+	// Введённый админом текст (цена, реквизиты, токен и т.п.) — это часть «экрана»:
+	// удаляем сообщение пользователя, чтобы в чате оставалось одно сообщение бота.
+	a.msg.Delete(ctx, chatID, m.ID)
 	ui := a.getUI(chatID)
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
@@ -415,6 +419,17 @@ func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption str
 
 func btn(text, data string) models.InlineKeyboardButton {
 	return models.InlineKeyboardButton{Text: text, CallbackData: data}
+}
+
+// pricing возвращает единый прайс (карты инициализированы).
+func (a *App) pricing() model.Pricing {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return model.Pricing{}
+	}
+	a.botCfg.NormalizePricing() // идемпотентно: инициализирует карты и переносит legacy-цены
+	return a.botCfg.Pricing
 }
 
 func (a *App) lang(chatID int64) string {

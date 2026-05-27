@@ -62,14 +62,14 @@ func (a *App) p2pConfig() model.P2PConfig {
 
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	p2p := a.p2pConfig()
+	pr := a.pricing()
 	var rows [][]models.InlineKeyboardButton
 	for _, mo := range model.PlanMonths {
-		price, ok := p2p.Prices[mo]
-		if !ok || price == "" {
+		price := pr.Base[mo]
+		if price == "" {
 			continue
 		}
-		label := i18n.T(lang, "buy.plan_btn", mo, price+curSuffix(p2p.Currency))
+		label := i18n.T(lang, "buy.plan_btn", mo, price+curSuffix(pr.Currency))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "buy:"+strconv.Itoa(mo))})
 	}
 	if len(rows) == 0 {
@@ -95,9 +95,13 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 	a.mu.Lock()
 	var p2p model.P2PConfig
 	var stars model.StarsConfig
+	var yk model.YooKassaConfig
+	var pr model.Pricing
 	if a.botCfg != nil {
 		p2p = a.botCfg.P2P
 		stars = a.botCfg.Stars
+		yk = a.botCfg.YooKassa
+		pr = a.botCfg.Pricing
 	}
 	a.mu.Unlock()
 
@@ -105,8 +109,12 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 	if p2p.Enabled {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
-	if stars.Enabled && stars.Prices[months] > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", stars.Prices[months]), "method:stars")})
+	if yk.Enabled && pr.Fiat(model.PayMethodYooKassa, months) != "" {
+		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(pr.Currency))
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
+	}
+	if stars.Enabled && pr.StarPrice(months) > 0 {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", pr.StarPrice(months)), "method:stars")})
 	}
 	if len(rows) == 0 {
 		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), [][]models.InlineKeyboardButton{homeRow(lang)})
@@ -122,6 +130,8 @@ func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
 		a.startP2P(ctx, chatID)
 	case "stars":
 		a.startStars(ctx, chatID)
+	case "yk":
+		a.startYooKassa(ctx, chatID)
 	}
 }
 
@@ -164,7 +174,9 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	}
 
 	a.mu.Lock()
+	a.botCfg.NormalizePricing()
 	p2p := a.botCfg.P2P
+	pr := a.botCfg.Pricing
 	if len(p2p.Cards) == 0 {
 		a.mu.Unlock()
 		a.send(ctx, chatID, i18n.T(lang, "p2p.no_cards"))
@@ -176,8 +188,8 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 		a.botCfg.P2P.RotateIdx = idx + 1
 	}
 	card := p2p.Cards[idx]
-	price := p2p.Prices[months]
-	cur := p2p.Currency
+	price := pr.Fiat(model.PayMethodP2P, months)
+	cur := pr.Currency
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 
@@ -231,7 +243,7 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 
 func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fileID string) {
 	lang := a.lang(a.cfg.AdminID)
-	caption := i18n.T(lang, "admin.payment_caption", req.TelegramID, req.Months, req.Price+curSuffix(a.p2pConfig().Currency), req.ID)
+	caption := i18n.T(lang, "admin.payment_caption", req.TelegramID, req.Months, req.Price+curSuffix(a.pricing().Currency), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
 	a.notifyPhoto(ctx, a.cfg.AdminID, fileID, caption, [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
@@ -256,7 +268,7 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if squad == "" {
 		squad = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, formatPrices(p2p), squad)
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, a.formatFiatPrices(model.PayMethodP2P), squad)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
@@ -355,8 +367,8 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		a.send(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
-	amount := req.Price + curSuffix(a.p2pConfig().Currency)
-	link, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount)
+	amount := req.Price + curSuffix(a.pricing().Currency)
+	link, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, "")
 	if err != nil {
 		a.send(ctx, adminChat, i18n.T(alang, "admin.provision_fail", err.Error()))
 		return
@@ -371,7 +383,7 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 // finalizePurchase — единый финализатор: создаёт/продлевает аккаунт в панели,
 // пишет запись в лог оплат и возвращает ссылку на подписку. Используется и для
 // P2P (после ручного подтверждения), и для Telegram Stars (после оплаты).
-func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount string) (string, error) {
+func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string) (string, error) {
 	a.mu.Lock()
 	panel := a.panel
 	squad := ""
@@ -388,7 +400,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	}
 	if a.store != nil {
 		_ = a.store.AddPayment(ctx, &model.Payment{
-			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid,
+			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
 		})
 	}
 	return link, nil
@@ -414,7 +426,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		_ = a.store.UpdateP2PRequest(ctx, req)
 		_ = a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: req.TelegramID, Method: model.PayMethodP2P, Months: req.Months,
-			Amount: req.Price + curSuffix(a.p2pConfig().Currency), Status: model.PaymentRejected, Comment: text,
+			Amount: req.Price + curSuffix(a.pricing().Currency), Status: model.PaymentRejected, Comment: text,
 		})
 		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
 		a.send(ctx, chatID, i18n.T(lang, "admin.done"))
@@ -449,14 +461,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		mo := ui.priceMonths
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		a.mu.Lock()
-		if a.botCfg != nil {
-			if a.botCfg.P2P.Prices == nil {
-				a.botCfg.P2P.Prices = map[int]string{}
-			}
-			a.botCfg.P2P.Prices[mo] = strings.TrimSpace(text)
-		}
-		a.mu.Unlock()
+		a.setFiatPrice(model.PayMethodP2P, mo, strings.TrimSpace(text))
 		_ = a.saveBotConfig(ctx)
 		a.showP2PAdmin(ctx, chatID)
 	case "starprice":
@@ -464,16 +469,55 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.adminInput = ""
 		ui.priceMonths = 0
 		v, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setStarPrice(mo, v)
+		_ = a.saveBotConfig(ctx)
+		a.showStarsAdmin(ctx, chatID)
+	case "baseprice":
+		mo := ui.priceMonths
+		ui.adminInput = ""
+		ui.priceMonths = 0
+		a.setBasePrice(mo, strings.TrimSpace(text))
+		_ = a.saveBotConfig(ctx)
+		a.showPricing(ctx, chatID)
+	case "currency":
+		ui.adminInput = ""
+		a.setCurrency(strings.TrimSpace(text))
+		_ = a.saveBotConfig(ctx)
+		a.showPricing(ctx, chatID)
+	case "ykprice":
+		mo := ui.priceMonths
+		ui.adminInput = ""
+		ui.priceMonths = 0
+		a.setFiatPrice(model.PayMethodYooKassa, mo, strings.TrimSpace(text))
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "yk_shop":
+		ui.adminInput = ""
 		a.mu.Lock()
 		if a.botCfg != nil {
-			if a.botCfg.Stars.Prices == nil {
-				a.botCfg.Stars.Prices = map[int]int{}
-			}
-			a.botCfg.Stars.Prices[mo] = v
+			a.botCfg.YooKassa.ShopID = strings.TrimSpace(text)
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.showStarsAdmin(ctx, chatID)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "yk_secret":
+		ui.adminInput = ""
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.SecretKey = strings.TrimSpace(text)
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "yk_return":
+		ui.adminInput = ""
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.ReturnURL = strings.TrimSpace(text)
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
 	}
 }
 
@@ -496,10 +540,12 @@ func splitTrim(s, sep string) []string {
 	return out
 }
 
-func formatPrices(p model.P2PConfig) string {
+// formatFiatPrices — строка цен метода (с учётом переопределения и базы).
+func (a *App) formatFiatPrices(method string) string {
+	pr := a.pricing()
 	var parts []string
 	for _, mo := range model.PlanMonths {
-		if v, ok := p.Prices[mo]; ok && v != "" {
+		if v := pr.Fiat(method, mo); v != "" {
 			parts = append(parts, strconv.Itoa(mo)+"м="+v)
 		}
 	}
@@ -507,6 +553,53 @@ func formatPrices(p model.P2PConfig) string {
 		return "—"
 	}
 	return strings.Join(parts, " ")
+}
+
+// setFiatPrice пишет переопределение цены метода в едином прайсе.
+func (a *App) setFiatPrice(method string, months int, val string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	switch method {
+	case model.PayMethodP2P:
+		a.botCfg.Pricing.P2P[months] = val
+	case model.PayMethodYooKassa:
+		a.botCfg.Pricing.YooKassa[months] = val
+	}
+}
+
+// setBasePrice / setCurrency / setStarPrice — редактирование единого прайса.
+func (a *App) setBasePrice(months int, val string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	a.botCfg.Pricing.Base[months] = val
+}
+
+func (a *App) setCurrency(val string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	a.botCfg.Pricing.Currency = val
+}
+
+func (a *App) setStarPrice(months, val int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	a.botCfg.Pricing.Stars[months] = val
 }
 
 // collectEmoji строит карту "эмодзи -> custom_emoji_id" из присланного админом

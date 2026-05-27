@@ -43,6 +43,7 @@ type Storage interface {
 	AddPayment(ctx context.Context, p *model.Payment) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
+	PaymentByExtID(ctx context.Context, extID string) (bool, error)
 
 	Kind() string
 	Close() error
@@ -263,9 +264,9 @@ func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
 		p.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, created_at) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+")",
-		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.CreatedAt)
+		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
+		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt)
 	return err
 }
 
@@ -275,7 +276,7 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 		return nil, 0, err
 	}
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT id, telegram_id, method, months, amount, status, comment, created_at FROM payments "+
+		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments "+
 			"ORDER BY created_at DESC, id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
 	if err != nil {
@@ -285,7 +286,7 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 	var out []model.Payment
 	for rows.Next() {
 		var p model.Payment
-		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, p)
@@ -298,5 +299,15 @@ func (b *base) HasPaidPayment(ctx context.Context, telegramID int64) (bool, erro
 	err := b.db.QueryRowContext(ctx,
 		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2),
 		telegramID, model.PaymentPaid).Scan(&n)
+	return n > 0, err
+}
+
+func (b *base) PaymentByExtID(ctx context.Context, extID string) (bool, error) {
+	if extID == "" {
+		return false, nil
+	}
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM payments WHERE ext_id = "+b.ph(1), extID).Scan(&n)
 	return n > 0, err
 }

@@ -81,6 +81,16 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onStars(ctx, chatID, val)
 		}
+	case "yk":
+		if isAdmin {
+			a.onYKAdmin(ctx, chatID, val)
+		}
+	case "ykc":
+		a.onYKCheck(ctx, chatID, val)
+	case "prc":
+		if isAdmin {
+			a.onPricing(ctx, chatID, val)
+		}
 	case "pay":
 		if isAdmin {
 			a.onPayments(ctx, chatID, val)
@@ -295,6 +305,7 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	}
 
 	w.cfg.Installed = true
+	w.cfg.NormalizePricing()
 	if a.store == nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", "БД не инициализирована"))
 		return

@@ -98,6 +98,7 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
 		{btn(i18n.T(lang, "menu.cat_iface"), "menu:iface"), btn(i18n.T(lang, "menu.cat_pay"), "menu:pay")},
 		{btn(i18n.T(lang, "menu.cat_manage"), "menu:manage")},
+		homeRow(lang),
 	}
 }
 
@@ -113,6 +114,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, i18n.T(lang, "menu.pay_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
+		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.pricing"), "menu:pricing")},
 		homeRow(lang),
 	})
 }
@@ -263,6 +265,14 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "stars":
 		if isAdmin {
 			a.showStarsAdmin(ctx, chatID)
+		}
+	case "yookassa":
+		if isAdmin {
+			a.showYooKassaAdmin(ctx, chatID)
+		}
+	case "pricing":
+		if isAdmin {
+			a.showPricing(ctx, chatID)
 		}
 	case "payments":
 		if isAdmin {
