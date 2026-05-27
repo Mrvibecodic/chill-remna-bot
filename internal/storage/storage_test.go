@@ -125,3 +125,70 @@ func TestPostgresContract(t *testing.T) {
 		t.Fatalf("PG roundtrip провален: ok=%v err=%v", ok, err)
 	}
 }
+
+// eachStore прогоняет fn против SQLite (всегда) и PostgreSQL (если задан TEST_POSTGRES_DSN).
+func eachStore(t *testing.T, fn func(t *testing.T, st Storage)) {
+	t.Run("sqlite", func(t *testing.T) { fn(t, openSQLiteTest(t)) })
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		t.Run("postgres", func(t *testing.T) {
+			st, err := Open(model.DBPostgres, dsn, testCrypter(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			if err := st.Migrate(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			fn(t, st)
+		})
+	}
+}
+
+func TestUsersAndP2P(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+
+		if err := st.UpsertUser(ctx, 777); err != nil {
+			t.Fatal(err)
+		}
+		u, err := st.GetUser(ctx, 777)
+		if err != nil || u == nil {
+			t.Fatalf("GetUser: %v %v", u, err)
+		}
+		if u.P2PApproved {
+			t.Fatal("новый юзер не должен быть approved")
+		}
+		if err := st.SetP2PApproved(ctx, 777, true); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ = st.GetUser(ctx, 777); u == nil || !u.P2PApproved {
+			t.Fatal("после SetP2PApproved должен быть approved")
+		}
+		if u2, _ := st.GetUser(ctx, 999999); u2 != nil {
+			t.Fatal("несуществующий юзер -> nil")
+		}
+
+		r := &model.P2PRequest{TelegramID: 777, Months: 3, Price: "150", Status: model.P2PAwaiting}
+		if err := st.CreateP2PRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		if r.ID == 0 {
+			t.Fatal("id заявки не присвоен")
+		}
+		got, err := st.GetP2PRequest(ctx, r.ID)
+		if err != nil || got == nil {
+			t.Fatalf("GetP2PRequest: %v %v", got, err)
+		}
+		if got.Months != 3 || got.Status != model.P2PAwaiting {
+			t.Fatalf("заявка не совпала: %+v", got)
+		}
+		got.Status = model.P2PApproved
+		got.Screenshot = "fid"
+		if err := st.UpdateP2PRequest(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		if g2, _ := st.GetP2PRequest(ctx, r.ID); g2 == nil || g2.Status != model.P2PApproved || g2.Screenshot != "fid" {
+			t.Fatalf("UpdateP2PRequest не применился: %+v", g2)
+		}
+	})
+}

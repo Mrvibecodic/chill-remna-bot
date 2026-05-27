@@ -1,15 +1,14 @@
-// Package remnawave — минимальный клиент REST API панели Remnawave.
-//
-// На этапе установки нужны только проверка связи и базовая статистика;
-// методы для юзеров/подписок/платежей добавляются на следующих фазах.
+// Package remnawave — клиент REST API панели Remnawave.
 package remnawave
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,37 +42,42 @@ func New(cfg model.PanelConfig) *Client {
 	}
 }
 
-func (c *Client) newRequest(ctx context.Context, method, path string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, nil)
-	if err != nil {
-		return nil, err
-	}
+func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
-
 	if c.local {
-		// ProxyCheckGuard панели в проде рвёт сокет без этих заголовков,
-		// когда обращаемся к :3000 напрямую, минуя reverse-proxy.
+		// ProxyCheckGuard панели рвёт сокет без этих заголовков при прямом :3000.
 		req.Header.Set("X-Forwarded-For", "127.0.0.1")
 		req.Header.Set("X-Forwarded-Proto", "https")
 	}
 	if c.cookie != "" {
-		// eGames(nginx): без этой куки nginx отдаёт 444 ещё до панели.
-		req.Header.Set("Cookie", c.cookie)
+		req.Header.Set("Cookie", c.cookie) // eGames(nginx): иначе 444
 	}
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
-	return req, nil
 }
 
-// Health проверяет доступность панели: GET /api/system/health.
-func (c *Client) Health(ctx context.Context) error {
-	req, err := c.newRequest(ctx, http.MethodGet, "/api/system/health")
-	if err != nil {
-		return err
+func (c *Client) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
+	var r io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		r = bytes.NewReader(buf)
 	}
-	resp, err := c.http.Do(req)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, r)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	return c.http.Do(req)
+}
+
+// Health проверяет доступность панели.
+func (c *Client) Health(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodGet, "/api/system/health", nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
@@ -84,13 +88,9 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
-// SystemStats возвращает счётчик пользователей панели (GET /api/system/stats).
+// SystemStats возвращает число пользователей панели.
 func (c *Client) SystemStats(ctx context.Context) (int, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, "/api/system/stats")
-	if err != nil {
-		return 0, err
-	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(ctx, http.MethodGet, "/api/system/stats", nil)
 	if err != nil {
 		return 0, fmt.Errorf("нет связи с панелью: %w", err)
 	}
@@ -111,15 +111,106 @@ func (c *Client) SystemStats(ctx context.Context) (int, error) {
 	return out.Response.Users.TotalUsers, nil
 }
 
-// classifyHTTP превращает не-200 ответ в понятную пользователю ошибку,
-// подсказывая вероятную причину (токен/кука/защита /api).
+type panelUser struct {
+	Uuid            string `json:"uuid"`
+	ExpireAt        string `json:"expireAt"`
+	SubscriptionURL string `json:"subscriptionUrl"`
+}
+
+// CreateOrUpdateUser создаёт юзера в панели или продлевает существующего
+// (поиск по telegramId) на months месяцев и возвращает ссылку на подписку.
+//
+// ВНИМАНИЕ: точные формы запросов/ответов панели нужно проверить на живой
+// инсталляции; при расхождении — поправить разбор.
+func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months int, squadUUID string) (string, error) {
+	existing, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return "", err
+	}
+	expire := nextExpire(existing, months)
+
+	if existing != nil && existing.Uuid != "" {
+		return c.upsertCall(ctx, http.MethodPatch, "/api/users", map[string]any{
+			"uuid":     existing.Uuid,
+			"expireAt": expire,
+		})
+	}
+
+	body := map[string]any{
+		"username":   fmt.Sprintf("tg_%d", telegramID),
+		"telegramId": telegramID,
+		"expireAt":   expire,
+	}
+	if squadUUID != "" {
+		body["activeInternalSquads"] = []string{squadUUID}
+	}
+	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+}
+
+func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
+	if err != nil {
+		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyHTTP(resp)
+	}
+	var env struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, err
+	}
+	var arr []panelUser
+	if json.Unmarshal(env.Response, &arr) == nil && len(arr) > 0 {
+		return &arr[0], nil
+	}
+	var one panelUser
+	if json.Unmarshal(env.Response, &one) == nil && one.Uuid != "" {
+		return &one, nil
+	}
+	return nil, nil
+}
+
+func (c *Client) upsertCall(ctx context.Context, method, path string, body any) (string, error) {
+	resp, err := c.do(ctx, method, path, body)
+	if err != nil {
+		return "", fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", classifyHTTP(resp)
+	}
+	var env struct {
+		Response panelUser `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return "", err
+	}
+	return env.Response.SubscriptionURL, nil
+}
+
+// nextExpire — новая дата окончания: продлеваем от max(now, текущая) на months.
+func nextExpire(existing *panelUser, months int) string {
+	base := time.Now().UTC()
+	if existing != nil && existing.ExpireAt != "" {
+		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
+			base = t
+		}
+	}
+	return base.AddDate(0, months, 0).Format(time.RFC3339)
+}
+
 func classifyHTTP(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	snippet := strings.TrimSpace(string(body))
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("панель отклонила доступ (HTTP %d): проверьте API-token. %s",
-			resp.StatusCode, snippet)
+		return fmt.Errorf("панель отклонила доступ (HTTP %d): проверьте API-token. %s", resp.StatusCode, snippet)
 	case http.StatusNotFound:
 		return fmt.Errorf("эндпоинт не найден (HTTP 404): проверьте URL панели")
 	default:

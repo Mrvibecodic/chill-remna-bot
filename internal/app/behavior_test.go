@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"remnabot/internal/config"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 	"remnabot/internal/storage"
 )
 
@@ -28,7 +30,10 @@ func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, _ [][]models.I
 	f.add(text)
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
-func (f *fakeMsg) add(s string)                               { f.mu.Lock(); f.texts = append(f.texts, s); f.mu.Unlock() }
+func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, _ [][]models.InlineKeyboardButton) {
+	f.add(caption)
+}
+func (f *fakeMsg) add(s string) { f.mu.Lock(); f.texts = append(f.texts, s); f.mu.Unlock() }
 func (f *fakeMsg) last() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -44,7 +49,12 @@ func (f *fakeMsg) joined() string {
 }
 
 // fakeStore — хранилище в памяти (реализует storage.Storage без БД).
-type fakeStore struct{ cfg *model.BotConfig }
+type fakeStore struct {
+	cfg   *model.BotConfig
+	users map[int64]*model.User
+	reqs  map[int64]*model.P2PRequest
+	seq   int64
+}
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }
 func (s *fakeStore) LoadConfig(context.Context) (*model.BotConfig, bool, error) {
@@ -57,6 +67,59 @@ func (s *fakeStore) LoadConfig(context.Context) (*model.BotConfig, bool, error) 
 func (s *fakeStore) SaveConfig(_ context.Context, c *model.BotConfig) error {
 	cp := *c
 	s.cfg = &cp
+	return nil
+}
+func (s *fakeStore) UpsertUser(_ context.Context, id int64) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	return nil
+}
+func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
+	if s.users == nil || s.users[id] == nil {
+		return nil, nil
+	}
+	cp := *s.users[id]
+	return &cp, nil
+}
+func (s *fakeStore) SetP2PApproved(_ context.Context, id int64, ok bool) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	s.users[id].P2PApproved = ok
+	return nil
+}
+func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
+	if s.reqs == nil {
+		s.reqs = map[int64]*model.P2PRequest{}
+	}
+	if r.ID == 0 {
+		s.seq++
+		r.ID = s.seq
+	}
+	cp := *r
+	s.reqs[r.ID] = &cp
+	return nil
+}
+func (s *fakeStore) GetP2PRequest(_ context.Context, id int64) (*model.P2PRequest, error) {
+	if s.reqs == nil || s.reqs[id] == nil {
+		return nil, nil
+	}
+	cp := *s.reqs[id]
+	return &cp, nil
+}
+func (s *fakeStore) UpdateP2PRequest(_ context.Context, r *model.P2PRequest) error {
+	if s.reqs == nil {
+		s.reqs = map[int64]*model.P2PRequest{}
+	}
+	cp := *r
+	s.reqs[r.ID] = &cp
 	return nil
 }
 func (s *fakeStore) Kind() string { return "fake" }
@@ -211,5 +274,83 @@ func TestNonAdminIgnored(t *testing.T) {
 	}
 	if !strings.Contains(fm.last(), "админ") && !strings.Contains(strings.ToLower(fm.last()), "admin") {
 		t.Fatalf("ожидался отказ не-админу: %q", fm.last())
+	}
+}
+
+func photoMsg(uid int64, fileID string) *models.Message {
+	return &models.Message{From: &models.User{ID: uid}, Chat: models.Chat{ID: uid}, Photo: []models.PhotoSize{{FileID: fileID}}}
+}
+
+func TestP2P_FullFlow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"response":{"uuid":"u1","subscriptionUrl":"https://sub/abc"}}`))
+	}))
+	defer srv.Close()
+
+	fm := &fakeMsg{}
+	fs := &fakeStore{}
+	a := &App{
+		cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msg:   fm,
+		wiz:   map[int64]*wizard{},
+		ui:    map[int64]*uiState{},
+		store: fs,
+	}
+	a.botCfg = &model.BotConfig{
+		Installed: true, Language: "ru",
+		P2P: model.P2PConfig{Enabled: true, Cards: []string{"CARD-1"}, Prices: map[int]string{1: "100"}, SquadUUID: "sq1"},
+	}
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	ctx := context.Background()
+	const user int64 = 555
+
+	// 1) выбор плана и метода -> гейт доступа (юзер ещё не одобрен)
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	a.handleCallback(ctx, cb(user, "method:p2p"))
+	if u, _ := fs.GetUser(ctx, user); u != nil && u.P2PApproved {
+		t.Fatal("на этом шаге юзер не должен быть одобрен")
+	}
+
+	// 2) админ одобряет доступ
+	a.handleCallback(ctx, cb(100, "adm:uok:555"))
+	if u, _ := fs.GetUser(ctx, user); u == nil || !u.P2PApproved {
+		t.Fatal("админ должен был одобрить доступ")
+	}
+
+	// 3) повторный выбор -> выдаётся карта + создаётся заявка
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	a.handleCallback(ctx, cb(user, "method:p2p"))
+	if !strings.Contains(fm.joined(), "CARD-1") {
+		t.Fatalf("карта не выдана:\n%s", fm.joined())
+	}
+	var reqID int64
+	for id := range fs.reqs {
+		if id > reqID {
+			reqID = id
+		}
+	}
+	if reqID == 0 {
+		t.Fatal("заявка не создана")
+	}
+
+	// 4) «я оплатил» + скриншот
+	a.handleCallback(ctx, cb(user, "p2p:paid:"+strconv.FormatInt(reqID, 10)))
+	a.handlePhoto(ctx, photoMsg(user, "file_123"))
+	if r, _ := fs.GetP2PRequest(ctx, reqID); r == nil || r.Status != model.P2PSubmitted || r.Screenshot != "file_123" {
+		t.Fatalf("скриншот не сохранён: %+v", r)
+	}
+
+	// 5) админ подтверждает -> провижн в панель + ссылка юзеру
+	a.handleCallback(ctx, cb(100, "adm:pok:"+strconv.FormatInt(reqID, 10)))
+	if r, _ := fs.GetP2PRequest(ctx, reqID); r == nil || r.Status != model.P2PApproved {
+		t.Fatalf("оплата не подтверждена: %+v", r)
+	}
+	if !strings.Contains(fm.joined(), "sub/abc") {
+		t.Fatalf("юзеру не отправлена ссылка:\n%s", fm.joined())
 	}
 }

@@ -44,19 +44,38 @@ func (a *App) startWizard(ctx context.Context, chatID int64) {
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	a.msg.AnswerCallback(ctx, cq.ID)
-
 	chatID := cq.From.ID
-	if chatID != a.cfg.AdminID {
-		return
-	}
-	a.mu.Lock()
-	w := a.wiz[chatID]
-	a.mu.Unlock()
-	if w == nil {
-		return
-	}
-
+	isAdmin := chatID == a.cfg.AdminID
 	key, val, _ := strings.Cut(cq.Data, ":")
+
+	switch key {
+	case "lang", "db", "loc", "inst", "apiprot":
+		if !isAdmin {
+			return
+		}
+		a.mu.Lock()
+		w := a.wiz[chatID]
+		a.mu.Unlock()
+		if w == nil {
+			return
+		}
+		a.wizardCallback(ctx, chatID, w, key, val)
+	case "menu":
+		a.onMenu(ctx, chatID, val)
+	case "buy":
+		a.onBuyPlan(ctx, chatID, val)
+	case "method":
+		a.onMethod(ctx, chatID, val)
+	case "p2p":
+		a.onP2PUser(ctx, chatID, val)
+	case "adm":
+		if isAdmin {
+			a.onAdmin(ctx, chatID, val)
+		}
+	}
+}
+
+func (a *App) wizardCallback(ctx context.Context, chatID int64, w *wizard, key, val string) {
 	switch key {
 	case "lang":
 		w.cfg.Language = val

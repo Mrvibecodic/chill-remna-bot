@@ -26,6 +26,7 @@ import (
 type messenger interface {
 	Send(ctx context.Context, chatID int64, text string)
 	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton)
+	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton)
 	AnswerCallback(ctx context.Context, id string)
 }
 
@@ -46,10 +47,11 @@ type App struct {
 	botCfg *model.BotConfig
 	panel  *remnawave.Client
 	wiz    map[int64]*wizard
+	ui     map[int64]*uiState
 }
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
-	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}}
+	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{}}
 }
 
 // Bootstrap при старте подхватывает ранее выбранную БД и конфиг.
@@ -177,6 +179,8 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 		a.handleCallback(ctx, update.CallbackQuery)
 	case update.Message != nil && update.Message.Text != "":
 		a.handleMessage(ctx, update.Message)
+	case update.Message != nil && len(update.Message.Photo) > 0:
+		a.handlePhoto(ctx, update.Message)
 	}
 }
 
@@ -187,32 +191,58 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		userID = m.From.ID
 	}
 	text := strings.TrimSpace(m.Text)
+	isAdmin := userID == a.cfg.AdminID
 
 	switch {
-	case strings.HasPrefix(text, "/start"), strings.HasPrefix(text, "/setup"):
-		if userID != a.cfg.AdminID {
+	case strings.HasPrefix(text, "/setup"):
+		if !isAdmin {
 			a.send(ctx, chatID, i18n.T(i18n.Fallback, "setup.not_admin"))
 			return
 		}
-		if a.installed() && strings.HasPrefix(text, "/start") {
-			a.send(ctx, chatID, i18n.T(a.botCfg.Language, "installed.hint"))
+		a.startWizard(ctx, chatID)
+		return
+	case strings.HasPrefix(text, "/start"):
+		if !a.installed() {
+			if !isAdmin {
+				a.send(ctx, chatID, i18n.T(i18n.Fallback, "setup.not_admin"))
+				return
+			}
+			a.startWizard(ctx, chatID)
 			return
 		}
-		a.startWizard(ctx, chatID)
+		a.showMenu(ctx, chatID, isAdmin)
 		return
 	case strings.HasPrefix(text, "/status"):
 		a.handleStatus(ctx, chatID)
 		return
 	case strings.HasPrefix(text, "/update"):
-		if userID == a.cfg.AdminID {
+		if isAdmin {
 			a.handleUpdate(ctx, chatID)
+		}
+		return
+	case strings.HasPrefix(text, "/buy"):
+		if a.installed() {
+			a.showPlans(ctx, chatID)
+		}
+		return
+	case strings.HasPrefix(text, "/p2p"):
+		if isAdmin {
+			a.showP2PAdmin(ctx, chatID)
 		}
 		return
 	}
 
-	if userID == a.cfg.AdminID {
-		a.handleWizardText(ctx, chatID, text)
+	if !isAdmin {
+		return
 	}
+	a.mu.Lock()
+	wizActive := a.wiz[chatID] != nil
+	a.mu.Unlock()
+	if wizActive {
+		a.handleWizardText(ctx, chatID, text)
+		return
+	}
+	a.handleAdminText(ctx, chatID, text)
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
@@ -299,6 +329,22 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 		ReplyMarkup: models.InlineKeyboardMarkup{InlineKeyboard: rows},
 	}); err != nil {
 		m.log.Error("send keyboard", "err", err)
+	}
+}
+
+func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
+	caption = applyPremiumEmoji(caption, m.premium)
+	p := &bot.SendPhotoParams{
+		ChatID:    chatID,
+		Photo:     &models.InputFileString{Data: fileID},
+		Caption:   caption,
+		ParseMode: models.ParseModeHTML,
+	}
+	if len(rows) > 0 {
+		p.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	}
+	if _, err := m.b.SendPhoto(ctx, p); err != nil {
+		m.log.Error("send photo", "err", err)
 	}
 }
 

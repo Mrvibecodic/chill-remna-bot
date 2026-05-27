@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"remnabot/internal/crypto"
 	"remnabot/internal/model"
@@ -22,6 +23,15 @@ type Storage interface {
 	// LoadConfig возвращает конфигурацию и флаг существования (false на чистой БД).
 	LoadConfig(ctx context.Context) (*model.BotConfig, bool, error)
 	SaveConfig(ctx context.Context, cfg *model.BotConfig) error
+
+	UpsertUser(ctx context.Context, telegramID int64) error
+	GetUser(ctx context.Context, telegramID int64) (*model.User, error)
+	SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error
+
+	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
+	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
+	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
+
 	Kind() string
 	Close() error
 }
@@ -100,4 +110,80 @@ func Transfer(ctx context.Context, src, dst Storage) error {
 		}
 	}
 	return nil
+}
+
+func nowStr() string { return time.Now().UTC().Format(time.RFC3339) }
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (b *base) UpsertUser(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO users (telegram_id, p2p_approved, created_at) VALUES ("+b.ph(1)+", 0, "+b.ph(2)+") "+
+			"ON CONFLICT (telegram_id) DO NOTHING",
+		telegramID, nowStr())
+	return err
+}
+
+func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, error) {
+	var approved int
+	var created string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT p2p_approved, created_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&approved, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &model.User{TelegramID: telegramID, P2PApproved: approved != 0, CreatedAt: created}, nil
+}
+
+func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO users (telegram_id, p2p_approved, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+") "+
+			"ON CONFLICT (telegram_id) DO UPDATE SET p2p_approved = excluded.p2p_approved",
+		telegramID, boolToInt(approved), nowStr())
+	return err
+}
+
+func (b *base) CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error {
+	if r.ID == 0 {
+		r.ID = time.Now().UnixNano()
+	}
+	if r.CreatedAt == "" {
+		r.CreatedAt = nowStr()
+	}
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
+		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt)
+	return err
+}
+
+func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error) {
+	r := &model.P2PRequest{}
+	err := b.db.QueryRowContext(ctx,
+		"SELECT id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at "+
+			"FROM p2p_requests WHERE id = "+b.ph(1), id).
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (b *base) UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE p2p_requests SET status = "+b.ph(1)+", screenshot = "+b.ph(2)+", comment = "+b.ph(3)+", decided_at = "+b.ph(4)+
+			" WHERE id = "+b.ph(5),
+		r.Status, r.Screenshot, r.Comment, r.DecidedAt, r.ID)
+	return err
 }
