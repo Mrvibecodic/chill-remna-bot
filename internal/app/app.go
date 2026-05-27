@@ -1,9 +1,5 @@
 // Package app связывает воедино конфиг, хранилище, клиент панели и
 // Telegram-бота, и реализует мастер первичной установки (FSM).
-//
-// На текущем этапе реализована ТОЛЬКО установка бота (выбор БД, подключение
-// панели с ветвлением по способу установки) + команда /status. Магазин,
-// платежи и админ-функции добавляются на следующих фазах.
 package app
 
 import (
@@ -18,6 +14,7 @@ import (
 
 	"remnabot/internal/config"
 	"remnabot/internal/crypto"
+	"remnabot/internal/hostctl"
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
@@ -30,30 +27,29 @@ type App struct {
 	log     *slog.Logger
 	b       *bot.Bot
 
+	ctl *hostctl.Controller
+
 	mu     sync.Mutex
-	store  storage.Storage   // nil, пока БД не выбрана в мастере
-	botCfg *model.BotConfig  // nil, пока бот не установлен
-	panel  *remnawave.Client // nil, пока бот не установлен
-	wiz    map[int64]*wizard // состояние мастера по chatID
+	store  storage.Storage
+	botCfg *model.BotConfig
+	panel  *remnawave.Client
+	wiz    map[int64]*wizard
 }
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
-	return &App{cfg: cfg, crypter: crypter, log: log, wiz: map[int64]*wizard{}}
+	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}}
 }
 
-// Bootstrap при старте подхватывает ранее выбранную БД и конфиг (если бот
-// уже был установлен), чтобы продолжить работу без повторной установки.
+// Bootstrap при старте подхватывает ранее выбранную БД и конфиг.
+// До первого выбора в мастере БД не открывается (store остаётся nil).
 func (a *App) Bootstrap(ctx context.Context) error {
 	bs, err := storage.LoadBootstrap(a.cfg.DataDir)
 	if err != nil {
 		return err
 	}
 	if bs == nil {
-		// Первый запуск: БД ещё не выбрана. Если движок задан в env — можно
-		// открыть заранее, иначе ждём выбора в мастере.
 		if a.cfg.DBKind != "" {
-			dsn := a.dsnForEnv(a.cfg.DBKind)
-			if err := a.openStore(a.cfg.DBKind, dsn); err != nil {
+			if err := a.openStore(a.cfg.DBKind, a.dsnForEnv(a.cfg.DBKind)); err != nil {
 				return err
 			}
 		}
@@ -105,6 +101,35 @@ func (a *App) openStore(kind, dsn string) error {
 	return storage.SaveBootstrap(a.cfg.DataDir, &storage.Bootstrap{DBKind: kind, DSN: dsn})
 }
 
+// switchStore открывает новое хранилище и при наличии старого переносит данные,
+// затем переключает активное хранилище (старое закрывается после переноса).
+func (a *App) switchStore(ctx context.Context, kind, dsn string) error {
+	newSt, err := storage.Open(kind, dsn, a.crypter)
+	if err != nil {
+		return err
+	}
+	if err := newSt.Migrate(ctx); err != nil {
+		_ = newSt.Close()
+		return err
+	}
+	a.mu.Lock()
+	old := a.store
+	a.mu.Unlock()
+	if old != nil {
+		if err := storage.Transfer(ctx, old, newSt); err != nil {
+			_ = newSt.Close()
+			return err
+		}
+	}
+	a.mu.Lock()
+	a.store = newSt
+	a.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	return storage.SaveBootstrap(a.cfg.DataDir, &storage.Bootstrap{DBKind: kind, DSN: dsn})
+}
+
 // Run создаёт бота и запускает long polling до отмены контекста.
 func (a *App) Run(ctx context.Context) error {
 	b, err := bot.New(a.cfg.BotToken, bot.WithDefaultHandler(a.handle))
@@ -121,7 +146,6 @@ func (a *App) installed() bool {
 	return a.botCfg != nil && a.botCfg.Installed
 }
 
-// handle — единая точка входа для всех апдейтов Telegram.
 func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	switch {
 	case update.CallbackQuery != nil:
@@ -139,7 +163,6 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	text := strings.TrimSpace(m.Text)
 
-	// Команды.
 	switch {
 	case strings.HasPrefix(text, "/start"), strings.HasPrefix(text, "/setup"):
 		if userID != a.cfg.AdminID {
@@ -155,9 +178,13 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	case strings.HasPrefix(text, "/status"):
 		a.handleStatus(ctx, chatID)
 		return
+	case strings.HasPrefix(text, "/update"):
+		if userID == a.cfg.AdminID {
+			a.handleUpdate(ctx, chatID)
+		}
+		return
 	}
 
-	// Текстовый ввод в рамках мастера.
 	if userID == a.cfg.AdminID {
 		a.handleWizardText(ctx, chatID, text)
 	}
@@ -187,7 +214,18 @@ func (a *App) handleStatus(ctx context.Context, chatID int64) {
 	a.send(ctx, chatID, i18n.T(lang, "status.line", count, dbKind, mode))
 }
 
-// --- утилиты отправки ---
+// handleUpdate запускает самообновление образа через одноразовый контейнер.
+func (a *App) handleUpdate(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	if a.ctl == nil || !a.ctl.Available() {
+		a.send(ctx, chatID, i18n.T(lang, "update.not_available"))
+		return
+	}
+	a.send(ctx, chatID, i18n.T(lang, "update.starting"))
+	if err := a.ctl.SelfUpdate(ctx); err != nil {
+		a.send(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
+	}
+}
 
 func (a *App) send(ctx context.Context, chatID int64, text string) {
 	_, err := a.b.SendMessage(ctx, &bot.SendMessageParams{
@@ -216,7 +254,6 @@ func btn(text, data string) models.InlineKeyboardButton {
 	return models.InlineKeyboardButton{Text: text, CallbackData: data}
 }
 
-// lang возвращает язык для chatID: из активного мастера, иначе из конфига, иначе fallback.
 func (a *App) lang(chatID int64) string {
 	if w, ok := a.wiz[chatID]; ok && w.cfg.Language != "" {
 		return w.cfg.Language

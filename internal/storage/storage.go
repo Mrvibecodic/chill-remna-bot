@@ -89,3 +89,18 @@ func (b *base) saveConfig(ctx context.Context, cfg *model.BotConfig, upsertSQL s
 	_, err = b.db.ExecContext(ctx, upsertSQL, enc)
 	return err
 }
+
+// Transfer переносит данные из src в dst (при смене движка БД, напр. SQLite → PostgreSQL).
+// Сейчас это таблица настроек; по мере роста схемы сюда добавляются остальные таблицы.
+func Transfer(ctx context.Context, src, dst Storage) error {
+	cfg, ok, err := src.LoadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if err := dst.SaveConfig(ctx, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}

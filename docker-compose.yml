@@ -1,51 +1,45 @@
-# chill-remna-bot — запуск бота Remnawave.
-# Репозиторий: https://github.com/Mrvibecodic/chill-remna-bot
+# chill-remna-bot — основной файл деплоя (готовый образ из GHCR).
+# Сценарий (см. УСТАНОВКА.md):
+#   mkdir -p /opt/remnachillbot && cd /opt/remnachillbot
+#   git clone https://github.com/Mrvibecodic/chill-remna-bot.git .
+#   nano docker-compose.yml      # заменить 2 строки с токенами ниже
+#   docker network create remnawave-network 2>/dev/null || true
+#   docker compose up -d
+#   # затем в Telegram боту: /start
 #
-# Движок БД выбирается профилем compose:
+# Стартует ТОЛЬКО бот, без базы. БД появляется по выбору в мастере:
+#   • SQLite  — бот создаёт файл в томе bot-data;
+#   • Postgres — бот сам допишет сюда сервис db и поднимет его (через docker.sock).
+# Поэтому проброшены docker.sock и каталог проекта (самоменеджмент + /update).
 #
-#   SQLite (по умолчанию, ничего лишнего):
-#       docker compose --profile sqlite up -d --build
-#
-#   PostgreSQL 17 (для нагруженных проектов):
-#       docker compose --profile postgres up -d --build
-#
-# Перед первым запуском один раз создайте общую сеть (идемпотентно):
-#       docker network create remnawave-network 2>/dev/null || true
-#
-# Сеть remnawave-network (external) нужна для локального режима, чтобы бот
-# достучался до панели по адресу http://remnawave:3000. На сервере панели она
-# обычно уже существует; на отдельном сервере команда выше создаст пустую.
+# Если разворачиваете НЕ в /opt/remnachillbot — поправьте путь в volumes
+# ("/opt/remnachillbot:/compose") и в COMPOSE_HOST_DIR.
+
+name: remnachillbot
 
 services:
-  bot-sqlite:
-    profiles: ["sqlite"]
-    build: .
-    image: chill-remna-bot:latest
+  bot:
+    image: ghcr.io/mrvibecodic/chill-remna-bot:latest
+    pull_policy: always
     container_name: remnabot
     restart: unless-stopped
-    env_file: .env
     environment:
-      DB_KIND: sqlite
+      BOT_TOKEN: "ВПИШИТЕ_ТОКЕН_БОТА"
+      ADMIN_TELEGRAM_ID: "ВПИШИТЕ_ВАШ_TELEGRAM_ID"
       DATA_DIR: /data
+      COMPOSE_PROJECT: remnachillbot
+      COMPOSE_FILE_PATH: /compose/docker-compose.yml
+      COMPOSE_HOST_DIR: /opt/remnachillbot
     volumes:
       - bot-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/remnachillbot:/compose
     networks:
       - remnawave-network
 
-  bot-postgres:
-    profiles: ["postgres"]
-    build: .
-    image: chill-remna-bot:latest
-    container_name: remnabot
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DB_KIND: postgres
-      DATABASE_URL: postgres://remnabot:remnabot@db:5432/remnabot?sslmode=disable
-      DATA_DIR: /data
-    volumes:
-      - bot-data:/data
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
+volumes:
+  bot-data:
+
+networks:
+  remnawave-network:
+    external: true

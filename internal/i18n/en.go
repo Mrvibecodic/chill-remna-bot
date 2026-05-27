@@ -7,7 +7,7 @@ var en = map[string]string{
 	"setup.not_admin": "The bot is not configured yet. Only the administrator can run the setup wizard.",
 
 	"step.db.title": "🗄 <b>Step 2. Database</b>\n\n" +
-		"Where should the bot store its data? You can switch later from the admin panel — migration is built in.",
+		"Where should the bot store its data? You can switch later — migration is built in.",
 	"step.db.body": "📄 <b>SQLite (file)</b> — recommended for starting out and small projects.\n" +
 		"• Nothing to install separately, the whole DB is one file.\n" +
 		"• Backup = copy the file. RAM usage — a few MB.\n" +
@@ -21,6 +21,9 @@ var en = map[string]string{
 	"step.db.choose_postgres": "🐘 PostgreSQL 17",
 	"step.pgdsn.ask": "Enter the PostgreSQL connection string (DATABASE_URL), e.g.:\n" +
 		"<code>postgres://user:pass@host:5432/dbname?sslmode=disable</code>",
+	"step.db.pg_starting": "⏳ Bringing up PostgreSQL and switching to it (no bot restart)…",
+	"step.db.pg_ok":       "✅ PostgreSQL is up, the bot switched to it.",
+	"step.db.pg_failed":   "⚠️ Could not bring up PostgreSQL: %s\nStaying on SQLite — it works fine; you can switch to Postgres later.",
 
 	"step.location.title": "📍 <b>Step 3. Where does the bot run relative to the panel?</b>\n\n" +
 		"🏠 <b>Local</b> (same docker network as the panel) — recommended: safer and simpler, " +
@@ -64,11 +67,15 @@ var en = map[string]string{
 	"step.apikey.ask":           "🔐 Enter the caddy-security X-API-Key (apikeys section in the portal).",
 
 	"step.verify.checking": "⏳ Checking the panel connection…",
-	"step.verify.ok":       "✅ Panel is reachable! Users in panel: %d.\n\nSetup complete. Basic commands: /status",
+	"step.verify.ok":       "✅ Panel is reachable! Users in panel: %d.\n\nSetup complete. Commands: /status, /update",
 	"step.verify.fail":     "❌ Could not connect: %s\n\nFix the details and try again: /setup",
 
-	"installed.hint": "The bot is already set up. Available: /status. Reinstall: /setup.",
+	"installed.hint": "The bot is already set up. Available: /status, /update. Reinstall: /setup.",
 	"status.line":    "📊 <b>Status</b>\nPanel: reachable ✅\nUsers: %d\nDB: %s · Mode: %s",
 	"status.fail":    "📊 Panel unavailable: %s",
 	"setup.restart":  "Restarting the setup wizard.",
+
+	"update.starting":      "⏳ Starting update (pull + restart). The bot will restart for a couple of seconds…",
+	"update.fail":          "❌ Could not start the update: %s",
+	"update.not_available": "Self-update is unavailable: the bot runs without docker.sock access.",
 }
