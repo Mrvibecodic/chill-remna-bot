@@ -60,12 +60,6 @@ func (a *App) p2pConfig() model.P2PConfig {
 
 // --- меню / покупка ---
 
-func (a *App) onMenu(ctx context.Context, chatID int64, val string) {
-	if val == "buy" {
-		a.showPlans(ctx, chatID)
-	}
-}
-
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	p2p := a.p2pConfig()
@@ -79,9 +73,10 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "buy:"+strconv.Itoa(mo))})
 	}
 	if len(rows) == 0 {
-		a.send(ctx, chatID, i18n.T(lang, "buy.no_plans"))
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
+	rows = append(rows, homeRow(lang))
 	a.sendKB(ctx, chatID, i18n.T(lang, "buy.choose_plan"), rows)
 }
 
@@ -247,6 +242,7 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "admin.btn_toggle"), "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
 		{btn(i18n.T(lang, "admin.btn_squad"), "adm:squad")},
+		homeRow(lang),
 	})
 }
 

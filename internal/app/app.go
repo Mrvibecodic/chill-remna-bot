@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -165,6 +166,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
+	a.notifyUpdated(ctx)
 	a.log.Info("бот запущен")
 	b.Start(ctx)
 	return nil
@@ -188,8 +190,11 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
 	userID := int64(0)
+	firstName, username := "", ""
 	if m.From != nil {
 		userID = m.From.ID
+		firstName = m.From.FirstName
+		username = m.From.Username
 	}
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
@@ -211,7 +216,18 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 			a.startWizard(ctx, chatID)
 			return
 		}
-		a.showMenu(ctx, chatID, isAdmin)
+		name := displayName(firstName, username)
+		if isAdmin {
+			a.showMenu(ctx, chatID, true, name)
+			return
+		}
+		if a.store != nil {
+			if u, _ := a.store.GetUser(ctx, chatID); u == nil {
+				a.showRegister(ctx, chatID, name)
+				return
+			}
+		}
+		a.showMenu(ctx, chatID, false, name)
 		return
 	case strings.HasPrefix(text, "/status"):
 		a.handleStatus(ctx, chatID)
@@ -243,10 +259,6 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		return
 	}
 
-	// быстрые кнопки (постоянная клавиатура)
-	if a.handleReplyButton(ctx, chatID, text, isAdmin) {
-		return
-	}
 	if !isAdmin {
 		return
 	}
@@ -305,8 +317,20 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 		return
 	}
 	a.send(ctx, chatID, i18n.T(lang, "update.starting"))
+	marker := filepath.Join(a.cfg.DataDir, "update.pending")
+	_ = os.WriteFile(marker, []byte("1"), 0o600)
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
+		_ = os.Remove(marker)
 		a.send(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
+	}
+}
+
+// notifyUpdated при старте сообщает админу, что бот обновлён (если был /update).
+func (a *App) notifyUpdated(ctx context.Context) {
+	marker := filepath.Join(a.cfg.DataDir, "update.pending")
+	if _, err := os.Stat(marker); err == nil {
+		_ = os.Remove(marker)
+		a.send(ctx, a.cfg.AdminID, i18n.T(a.botLang(), "update.done"))
 	}
 }
 

@@ -61,7 +61,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 		a.wizardCallback(ctx, chatID, w, key, val)
 	case "menu":
-		a.onMenu(ctx, chatID, val)
+		a.onMenu(ctx, chatID, val, isAdmin, displayName(cq.From.FirstName, cq.From.Username))
 	case "buy":
 		a.onBuyPlan(ctx, chatID, val)
 	case "method":
