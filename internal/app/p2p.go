@@ -130,7 +130,7 @@ func (a *App) startP2P(ctx context.Context, chatID int64) {
 func (a *App) notifyAdminUserRequest(ctx context.Context, userID int64) {
 	lang := a.lang(a.cfg.AdminID)
 	id := strconv.FormatInt(userID, 10)
-	a.sendKB(ctx, a.cfg.AdminID, i18n.T(lang, "admin.user_request", userID), [][]models.InlineKeyboardButton{{
+	a.notifyKB(ctx, a.cfg.AdminID, i18n.T(lang, "admin.user_request", userID), [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_user_ok"), "adm:uok:"+id),
 		btn(i18n.T(lang, "admin.btn_user_no"), "adm:uno:"+id),
 	}})
@@ -185,6 +185,7 @@ func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 
 func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
+	a.beginScreen(chatID)
 	ui := a.getUI(chatID)
 	if ui.welcomeAwait == "img" {
 		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
@@ -214,7 +215,7 @@ func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fil
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", req.TelegramID, req.Months, req.Price+curSuffix(a.p2pConfig().Currency), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
-	a.msg.SendPhoto(ctx, a.cfg.AdminID, fileID, a.applyPremium(caption), [][]models.InlineKeyboardButton{{
+	a.notifyPhoto(ctx, a.cfg.AdminID, fileID, caption, [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
 		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+id),
 	}})
@@ -314,7 +315,7 @@ func (a *App) adminApproveUser(ctx context.Context, adminChat int64, arg string,
 		a.send(ctx, adminChat, "❌ "+err.Error())
 		return
 	}
-	a.send(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
+	a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
 	a.send(ctx, adminChat, i18n.T(alang, "admin.user_ok_done"))
 }
 
@@ -348,7 +349,7 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 	req.Status = model.P2PApproved
 	req.DecidedAt = time.Now().UTC().Format(time.RFC3339)
 	_ = a.store.UpdateP2PRequest(ctx, req)
-	a.send(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_ok", link))
+	a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_ok", link))
 	a.send(ctx, adminChat, i18n.T(alang, "admin.done"))
 }
 
@@ -370,7 +371,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		req.Comment = text
 		req.DecidedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = a.store.UpdateP2PRequest(ctx, req)
-		a.send(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
+		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
 		a.send(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
 	}

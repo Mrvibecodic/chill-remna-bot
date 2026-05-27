@@ -46,6 +46,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	a.msg.AnswerCallback(ctx, cq.ID)
 	chatID := cq.From.ID
 	isAdmin := chatID == a.cfg.AdminID
+	a.beginScreen(chatID)
 	if !isAdmin && a.userBlocked(ctx, chatID) {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return

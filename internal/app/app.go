@@ -25,10 +25,12 @@ import (
 // messenger абстрагирует отправку сообщений в Telegram — это «шов» для тестов
 // (в проде botMessenger поверх *bot.Bot, в тестах — фейк-перехватчик).
 type messenger interface {
-	Send(ctx context.Context, chatID int64, text string)
-	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton)
-	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton)
-	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup)
+	// Send* возвращают id отправленного сообщения (0 при ошибке) для трекинга «экрана».
+	Send(ctx context.Context, chatID int64, text string) int
+	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int
+	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
+	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int
+	Delete(ctx context.Context, chatID int64, msgID int)
 	RemoveKeyboard(ctx context.Context, chatID int64)
 	AnswerCallback(ctx context.Context, id string)
 }
@@ -51,10 +53,17 @@ type App struct {
 	panel  *remnawave.Client
 	wiz    map[int64]*wizard
 	ui     map[int64]*uiState
+
+	// single-message UI: храним id «экранных» сообщений бота по chatID и
+	// удаляем их при следующем взаимодействии (остаётся только текущий экран).
+	scrMu        sync.Mutex
+	screen       map[int64][]int
+	pendingClear map[int64]bool
 }
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
-	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{}}
+	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{},
+		screen: map[int64][]int{}, pendingClear: map[int64]bool{}}
 }
 
 // Bootstrap при старте подхватывает ранее выбранную БД и конфиг.
@@ -199,6 +208,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
+	a.beginScreen(chatID)
 	if !isAdmin && a.userBlocked(ctx, chatID) {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return
@@ -335,18 +345,81 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	if _, err := os.Stat(marker); err == nil {
 		_ = os.Remove(marker)
-		a.send(ctx, a.cfg.AdminID, i18n.T(a.botLang(), "update.done"))
+		a.notify(ctx, a.cfg.AdminID, i18n.T(a.botLang(), "update.done"))
 	}
 }
 
-// --- отправка сообщений (через messenger) ---
+// --- single-message UI: «экран» = последние сообщения бота для chatID ---
+
+// beginScreen помечает, что следующее «экранное» сообщение должно сначала
+// удалить предыдущий экран этого чата. Вызывается в начале обработки апдейта.
+func (a *App) beginScreen(chatID int64) {
+	a.scrMu.Lock()
+	if a.pendingClear == nil {
+		a.pendingClear = map[int64]bool{}
+	}
+	a.pendingClear[chatID] = true
+	a.scrMu.Unlock()
+}
+
+// emit отправляет «экранное» сообщение: при необходимости удаляет предыдущий
+// экран чата, отправляет новое и запоминает его id. Несколько emit подряд в
+// рамках одного апдейта копятся в один экран (clear срабатывает только на первом).
+func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
+	a.scrMu.Lock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
+	var toDelete []int
+	if a.pendingClear[chatID] {
+		a.pendingClear[chatID] = false
+		toDelete = a.screen[chatID]
+		a.screen[chatID] = nil
+	}
+	a.scrMu.Unlock()
+
+	for _, id := range toDelete {
+		a.msg.Delete(ctx, chatID, id)
+	}
+	id := send()
+	if id != 0 {
+		a.scrMu.Lock()
+		a.screen[chatID] = append(a.screen[chatID], id)
+		a.scrMu.Unlock()
+	}
+}
+
+// --- отправка сообщений ---
+//
+// send/sendKB/sendBanner — «экранные»: участвуют в single-message UI.
+// notify*/SendPhoto к чужому чату — постоянные (модерация, уведомления, ссылки
+// пользователю): не трекаются и не удаляют чужой экран.
 
 func (a *App) send(ctx context.Context, chatID int64, text string) {
-	a.msg.Send(ctx, chatID, a.applyPremium(text))
+	t := a.applyPremium(text)
+	a.emit(ctx, chatID, func() int { return a.msg.Send(ctx, chatID, t) })
 }
 
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	t := a.applyPremium(text)
+	a.emit(ctx, chatID, func() int { return a.msg.SendKB(ctx, chatID, t, rows) })
+}
+
+func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
+	a.emit(ctx, chatID, func() int { return a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm) })
+}
+
+// notify — постоянное сообщение (не трекается, не удаляет экран).
+func (a *App) notify(ctx context.Context, chatID int64, text string) {
+	a.msg.Send(ctx, chatID, a.applyPremium(text))
+}
+
+func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), rows)
+}
+
+func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
+	a.msg.SendPhoto(ctx, chatID, fileID, a.applyPremium(caption), rows)
 }
 
 func btn(text, data string) models.InlineKeyboardButton {
@@ -393,24 +466,30 @@ type botMessenger struct {
 	log *slog.Logger
 }
 
-func (m botMessenger) Send(ctx context.Context, chatID int64, text string) {
-	if _, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
+func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
+	msg, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML,
-	}); err != nil {
+	})
+	if err != nil {
 		m.log.Error("send message", "err", err)
+		return 0
 	}
+	return msg.ID
 }
 
-func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	if _, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
+func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
+	msg, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML,
 		ReplyMarkup: models.InlineKeyboardMarkup{InlineKeyboard: rows},
-	}); err != nil {
+	})
+	if err != nil {
 		m.log.Error("send keyboard", "err", err)
+		return 0
 	}
+	return msg.ID
 }
 
-func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
+func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int {
 	p := &bot.SendPhotoParams{
 		ChatID:    chatID,
 		Photo:     &models.InputFileString{Data: fileID},
@@ -420,21 +499,34 @@ func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, capti
 	if len(rows) > 0 {
 		p.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
-	if _, err := m.b.SendPhoto(ctx, p); err != nil {
+	msg, err := m.b.SendPhoto(ctx, p)
+	if err != nil {
 		m.log.Error("send photo", "err", err)
+		return 0
 	}
+	return msg.ID
 }
 
-func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) {
+func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int {
 	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: rm}
 	if len(entities) > 0 {
 		p.CaptionEntities = entities
 	} else {
 		p.ParseMode = models.ParseModeHTML
 	}
-	if _, err := m.b.SendPhoto(ctx, p); err != nil {
+	msg, err := m.b.SendPhoto(ctx, p)
+	if err != nil {
 		m.log.Error("send banner", "err", err)
+		return 0
 	}
+	return msg.ID
+}
+
+func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {
+	if msgID == 0 {
+		return
+	}
+	_, _ = m.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
 }
 
 func (m botMessenger) RemoveKeyboard(ctx context.Context, chatID int64) {

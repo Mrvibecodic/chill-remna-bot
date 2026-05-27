@@ -150,7 +150,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 	if len(ents) == 0 {
 		caption = a.applyPremium(caption)
 	}
-	a.msg.SendBanner(ctx, chatID, photo, caption, ents, models.InlineKeyboardMarkup{InlineKeyboard: rows})
+	a.sendBanner(ctx, chatID, photo, caption, ents, models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
 func (a *App) showRegister(ctx context.Context, chatID int64, name string) {

@@ -21,23 +21,43 @@ import (
 
 // fakeMsg перехватывает исходящие сообщения вместо реального Telegram.
 type fakeMsg struct {
-	mu    sync.Mutex
-	texts []string
+	mu      sync.Mutex
+	texts   []string
+	seq     int
+	live    map[int]string // id -> текст активных (неудалённых) сообщений
+	deleted []int
 }
 
-func (f *fakeMsg) Send(_ context.Context, _ int64, text string) { f.add(text) }
-func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, _ [][]models.InlineKeyboardButton) {
-	f.add(text)
+func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
+func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, _ [][]models.InlineKeyboardButton) int {
+	return f.add(text)
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
-func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, _ [][]models.InlineKeyboardButton) {
-	f.add(caption)
+func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, _ [][]models.InlineKeyboardButton) int {
+	return f.add(caption)
 }
-func (f *fakeMsg) SendBanner(_ context.Context, _ int64, _ models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) {
-	f.add(caption)
+func (f *fakeMsg) SendBanner(_ context.Context, _ int64, _ models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) int {
+	return f.add(caption)
+}
+func (f *fakeMsg) Delete(_ context.Context, _ int64, id int) {
+	f.mu.Lock()
+	delete(f.live, id)
+	f.deleted = append(f.deleted, id)
+	f.mu.Unlock()
 }
 func (f *fakeMsg) RemoveKeyboard(_ context.Context, _ int64) {}
-func (f *fakeMsg) add(s string)                              { f.mu.Lock(); f.texts = append(f.texts, s); f.mu.Unlock() }
+func (f *fakeMsg) add(s string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.texts = append(f.texts, s)
+	f.seq++
+	if f.live == nil {
+		f.live = map[int]string{}
+	}
+	f.live[f.seq] = s
+	return f.seq
+}
+func (f *fakeMsg) liveCount() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.live) }
 func (f *fakeMsg) last() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -471,5 +491,81 @@ func TestUsersAdmin_DeleteDoesNotTouchPanel(t *testing.T) {
 
 	if panelHits != 0 {
 		t.Fatalf("блок/удаление в боте не должны обращаться к панели, hits=%d", panelHits)
+	}
+}
+
+// Single-message UI: при навигации бот удаляет предыдущий экран,
+// а кросс-чат уведомления (модерация) НЕ удаляются.
+func TestSingleMessageUI(t *testing.T) {
+	srv := panelStub(5)
+	defer srv.Close()
+	a, fm, _ := newTestApp(t)
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	ctx := context.Background()
+
+	// админ открывает меню -> экран #1
+	a.handleMessage(ctx, msgText(100, "/start"))
+	afterStart := fm.liveCount()
+	if afterStart == 0 {
+		t.Fatalf("после /start должно быть видимое сообщение, live=%d", afterStart)
+	}
+	// переход в «Управление» -> прошлый экран удалён, остаётся текущий
+	a.handleCallback(ctx, cb(100, "menu:manage"))
+	// ещё переход
+	a.handleCallback(ctx, cb(100, "menu:home"))
+	if got := fm.liveCount(); got != afterStart {
+		t.Fatalf("на экране должно оставаться только текущее (%d), а живых=%d; deleted=%v", afterStart, got, fm.deleted)
+	}
+	if len(fm.deleted) == 0 {
+		t.Fatal("предыдущие экраны должны были удаляться")
+	}
+}
+
+// Уведомление админу о заявке не должно удаляться при навигации пользователя.
+func TestNotificationsArePersistent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	fm := &fakeMsg{}
+	fs := &fakeStore{}
+	a := &App{
+		cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msg:   fm,
+		wiz:   map[int64]*wizard{},
+		ui:    map[int64]*uiState{},
+		store: fs,
+	}
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru", P2P: model.P2PConfig{Enabled: true, Prices: map[int]string{1: "100"}}}
+	ctx := context.Background()
+	const user int64 = 555
+
+	// пользователь просит доступ -> админу уходит постоянное уведомление
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	a.handleCallback(ctx, cb(user, "method:p2p"))
+	if !strings.Contains(fm.joined(), "просит доступ") {
+		t.Fatalf("админу не пришло уведомление о запросе:\n%s", fm.joined())
+	}
+	notifDeleted := len(fm.deleted)
+
+	// пользователь продолжает навигацию — это не должно удалять уведомление админу
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	a.handleCallback(ctx, cb(user, "buy:1"))
+	if len(fm.deleted) > notifDeleted {
+		// допускается удаление экранов ПОЛЬЗОВАТЕЛЯ, но уведомление админу должно жить
+	}
+	// уведомление админу (его текст) всё ещё среди живых
+	foundLive := false
+	fm.mu.Lock()
+	for _, txt := range fm.live {
+		if strings.Contains(txt, "просит доступ") {
+			foundLive = true
+		}
+	}
+	fm.mu.Unlock()
+	if !foundLive {
+		t.Fatal("уведомление админу не должно удаляться при навигации пользователя")
 	}
 }
