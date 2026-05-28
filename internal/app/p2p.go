@@ -108,7 +108,7 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
 	if yk.Enabled && pr.Fiat(model.PayMethodYooKassa, months) != "" {
-		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(pr.Currency))
+		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
 	if stars.Enabled && pr.StarPrice(months) > 0 {
@@ -194,6 +194,9 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	card := p2p.Cards[idx]
 	price := pr.Fiat(model.PayMethodP2P, months)
 	cur := pr.Currency
+	if a.botCfg.P2P.Currency != "" {
+		cur = a.botCfg.P2P.Currency
+	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 
@@ -259,7 +262,7 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 
 func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fileID string) {
 	lang := a.lang(a.cfg.AdminID)
-	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.pricing().Currency), req.ID)
+	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
 	a.notifyPhoto(ctx, a.cfg.AdminID, fileID, caption, [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
@@ -284,11 +287,18 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if squad == "" {
 		squad = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, a.formatFiatPrices(model.PayMethodP2P), squad)
+	cur := p2p.Currency
+	if cur == "" {
+		cur = a.pricing().Currency
+	}
+	if cur == "" {
+		cur = i18n.T(lang, "admin.none")
+	}
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, cur, a.formatFiatPrices(model.PayMethodP2P), squad)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
-		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
+		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick"), btn(i18n.T(lang, "pricing.btn_cur"), "adm:cur")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -325,6 +335,9 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "squad":
 		a.getUI(chatID).adminInput = "squad"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_squad"), "menu:p2p")
+	case "cur":
+		a.getUI(chatID).adminInput = "p2p_cur"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_currency"), "menu:p2p")
 	case "prices":
 		a.adminAskPriceMonth(ctx, chatID)
 	case "price":
@@ -384,7 +397,7 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		a.send(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
-	amount := req.Price + curSuffix(a.pricing().Currency)
+	amount := req.Price + curSuffix(a.curFor(model.PayMethodP2P))
 	link, expireAt, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, "")
 	if err != nil {
 		a.send(ctx, adminChat, i18n.T(alang, "admin.provision_fail", err.Error()))
@@ -457,7 +470,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		_ = a.store.UpdateP2PRequest(ctx, req)
 		_ = a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: req.TelegramID, Method: model.PayMethodP2P, Months: req.Months,
-			Amount: req.Price + curSuffix(a.pricing().Currency), Status: model.PaymentRejected, Comment: text,
+			Amount: req.Price + curSuffix(a.curFor(model.PayMethodP2P)), Status: model.PaymentRejected, Comment: text,
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
 		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
@@ -516,6 +529,32 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setCurrency(strings.TrimSpace(text))
 		_ = a.saveBotConfig(ctx)
 		a.showPricing(ctx, chatID)
+	case "p2p_cur":
+		ui.adminInput = ""
+		v := strings.TrimSpace(text)
+		if v == "-" {
+			v = ""
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.P2P.Currency = v
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showP2PAdmin(ctx, chatID)
+	case "yk_cur":
+		ui.adminInput = ""
+		v := strings.TrimSpace(text)
+		if v == "-" {
+			v = ""
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.Currency = v
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
 	case "ykprice":
 		mo := ui.priceMonths
 		ui.adminInput = ""
@@ -733,6 +772,27 @@ func curSuffix(cur string) string {
 		return ""
 	}
 	return " " + cur
+}
+
+// curFor — валюта отображения для метода оплаты. У P2P и ЮKassa может быть своя
+// (botCfg.P2P.Currency / YooKassa.Currency); если не задана — общая Pricing.Currency.
+func (a *App) curFor(method string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return ""
+	}
+	switch method {
+	case model.PayMethodP2P:
+		if a.botCfg.P2P.Currency != "" {
+			return a.botCfg.P2P.Currency
+		}
+	case model.PayMethodYooKassa:
+		if a.botCfg.YooKassa.Currency != "" {
+			return a.botCfg.YooKassa.Currency
+		}
+	}
+	return a.botCfg.Pricing.Currency
 }
 
 func splitTrim(s, sep string) []string {

@@ -138,11 +138,18 @@ func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {
 	if ret == "" {
 		ret = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, a.formatFiatPrices(model.PayMethodYooKassa))
+	cur := cfg.Currency
+	if cur == "" {
+		cur = a.pricing().Currency
+	}
+	if cur == "" {
+		cur = i18n.T(lang, "admin.none")
+	}
+	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, cur, a.formatFiatPrices(model.PayMethodYooKassa))
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "yk:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "yk:prices")},
 		{btn(i18n.T(lang, "admin.yk_btn_shop"), "yk:shop"), btn(i18n.T(lang, "admin.yk_btn_secret"), "yk:secret")},
-		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return")},
+		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return"), btn(i18n.T(lang, "pricing.btn_cur"), "yk:cur")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -168,6 +175,9 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 	case "return":
 		a.getUI(chatID).adminInput = "yk_return"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_return"), "menu:yookassa")
+	case "cur":
+		a.getUI(chatID).adminInput = "yk_cur"
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_currency"), "menu:yookassa")
 	case "prices":
 		a.askPriceMonth(ctx, chatID, "yk")
 	case "price":
