@@ -234,17 +234,12 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	p2pOn, starsOn, ykOn, cbOn := false, false, false, false
-	internalN, externalSet := 0, ""
-	hwid := 0
 	strat := "MONTH"
 	if a.botCfg != nil {
 		p2pOn = a.botCfg.P2P.Enabled
 		starsOn = a.botCfg.Stars.Enabled
 		ykOn = a.botCfg.YooKassa.Enabled
 		cbOn = a.botCfg.CryptoBot.Enabled
-		internalN = len(a.botCfg.Plan.ActiveInternalSquads)
-		externalSet = a.botCfg.Plan.ExternalSquadUUID
-		hwid = a.botCfg.Pricing.DeviceLimit
 		strat = a.botCfg.Pricing.ResetStrategy()
 	}
 	a.mu.Unlock()
@@ -254,18 +249,11 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		}
 		return "❌"
 	}
-	hwidStr := i18n.T(lang, "pricing.hwid_default")
-	if hwid > 0 {
-		hwidStr = strconv.Itoa(hwid)
-	}
-	extStr := i18n.T(lang, "admin.none")
-	if externalSet != "" {
-		extStr = i18n.T(lang, "subsetup.ext_set")
-	}
+	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
 		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn),
-		a.formatTrafficLimits(), hwidStr, strat,
-		internalN, extStr,
+		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
+		internalCSV, externalName,
 	)
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick")},
@@ -287,6 +275,59 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
+}
+
+// squadDisplay возвращает (internalCSV, externalName): имена выбранных сквадов
+// через запятую (internal, может быть несколько) и имя выбранного external
+// (всегда один). Имена резолвятся из панели по UUID; если панель недоступна или
+// сквад не найден — показываем сам UUID, чтобы не терять информацию.
+func (a *App) squadDisplay(ctx context.Context) (string, string) {
+	a.mu.Lock()
+	var activeInt []string
+	extUUID := ""
+	panel := a.panel
+	lang := i18n.Fallback
+	if a.botCfg != nil {
+		activeInt = append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
+		extUUID = a.botCfg.Plan.ExternalSquadUUID
+		if a.botCfg.Language != "" {
+			lang = a.botCfg.Language
+		}
+	}
+	a.mu.Unlock()
+
+	names := map[string]string{}
+	if panel != nil {
+		if ints, err := panel.ListSquads(ctx); err == nil {
+			for _, s := range ints {
+				names[s.UUID] = s.Name
+			}
+		}
+		if exts, err := panel.ListExternalSquads(ctx); err == nil {
+			for _, s := range exts {
+				names[s.UUID] = s.Name
+			}
+		}
+	}
+	disp := func(uuid string) string {
+		if n, ok := names[uuid]; ok && n != "" {
+			return n
+		}
+		return uuid
+	}
+	var ints []string
+	for _, u := range activeInt {
+		ints = append(ints, disp(u))
+	}
+	internalCSV := strings.Join(ints, ", ")
+	if internalCSV == "" {
+		internalCSV = i18n.T(lang, "admin.none")
+	}
+	externalName := i18n.T(lang, "admin.none")
+	if extUUID != "" {
+		externalName = disp(extUUID)
+	}
+	return internalCSV, externalName
 }
 
 // startReconfigure перезапускает мастер с шага БД, СОХРАНЯЯ текущий конфиг

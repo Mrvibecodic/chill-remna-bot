@@ -310,7 +310,7 @@ var en = map[string]string{
 	"pricing.dev_custom":         "✏️ Custom",
 	"pricing.dev_default":        "♻️ Reset (panel default)",
 	"pricing.ask_devices_custom": "✏️ Enter device limit (integer).\n\n• <b>0</b> = reset to panel default (HWID_FALLBACK_DEVICE_LIMIT).\n• Any >0 — hard per-user override in Remnawave.\n\nUse «❌ Cancel» below to go back without changes.",
-	"subsetup.title":             "💳 <b>Subscription & payments</b>\n\n💳 Payment methods:\n• 🤝 P2P: %s · ⭐ Stars: %s\n• 💳 YooKassa: %s · 💎 CryptoBot: %s\n\n🏷 Plans (current limits):\n📊 Traffic: %s · 🖥 Devices: %s · ♻️ Reset: %s\n📡 Squads: internal %d · external %s\n\nBelow — 🪄 quick plan setup or ✏️ fine manual.",
+	"subsetup.title":             "💳 <b>Subscription & payments</b>\n\n💳 Payment methods:\n• 🤝 P2P: %s · ⭐ Stars: %s\n• 💳 YooKassa: %s · 💎 CryptoBot: %s\n\n🏷 Plans (current limits):\n📊 Traffic: %s\n🖥 Devices (HWID): %s\n♻️ Traffic reset: %s\n\n📡 Squads:\n🏠 Internal: %s\n📡 External: %s\n\nBelow — 🪄 quick plan setup or ✏️ fine manual.",
 	"subsetup.ext_set":           "set ✅",
 	"reconcile.paid_ok":          "✅ Payment confirmed! Subscription is active.\n\n%s",
 	"subsetup.btn_quick":         "🪄 Quick plan setup",

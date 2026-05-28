@@ -56,6 +56,25 @@ func (a *App) formatTrafficLimits() string {
 	return strings.Join(parts, " ")
 }
 
+// formatDeviceLimits — сводка лимита устройств (HWID): per-tariff значения, если
+// заданы; иначе общий DeviceLimit; иначе «дефолт панели».
+func (a *App) formatDeviceLimits(lang string) string {
+	pr := a.pricing()
+	var parts []string
+	for _, mo := range model.PlanMonths {
+		if d := pr.Devices[mo]; d > 0 {
+			parts = append(parts, strconv.Itoa(mo)+"м="+strconv.Itoa(d))
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " ")
+	}
+	if pr.DeviceLimit > 0 {
+		return strconv.Itoa(pr.DeviceLimit)
+	}
+	return i18n.T(lang, "pricing.hwid_default")
+}
+
 // showPricing — базовый прайс, валюта и сводка по тарифам (per-month
 // цена + трафик), плюс кнопка «🪄 Быстрая настройка тарифа» — пошаговый
 // помощник, проставляющий цену и трафик за один проход.
