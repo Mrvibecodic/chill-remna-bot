@@ -687,6 +687,13 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 			a.botCfg.Pricing.Traffic[mo] = n
 		}
 		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		ui.adminInput = "plan_q_hwid"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "pricing.q_hwid", mo), "menu:pricing")
+	case "plan_q_hwid":
+		mo := ui.priceMonths
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setDevicesPer(mo, n)
 		ui.adminInput = ""
 		ui.priceMonths = 0
 		_ = a.saveBotConfig(ctx)
