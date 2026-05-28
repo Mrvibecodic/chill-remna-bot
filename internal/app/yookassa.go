@@ -66,6 +66,11 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 		a.send(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
+	if a.store != nil {
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
+			Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months,
+		})
+	}
 	a.sendKB(ctx, chatID, i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency)), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "yk.btn_pay"), URL: pay.Confirmation.ConfirmationURL}},
 		{btn(i18n.T(lang, "yk.btn_check"), "ykc:"+pay.ID)},

@@ -65,6 +65,12 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 		a.send(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
 		return
 	}
+	if a.store != nil {
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
+			Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10),
+			TelegramID: chatID, Months: months,
+		})
+	}
 	payURL := inv.MiniAppInvoiceURL
 	if payURL == "" {
 		payURL = inv.BotInvoiceURL

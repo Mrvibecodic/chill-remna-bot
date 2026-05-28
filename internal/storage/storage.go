@@ -79,6 +79,13 @@ type Storage interface {
 	Export(ctx context.Context) (*Snapshot, error)
 	Import(ctx context.Context, s *Snapshot) error
 
+	// pending_invoices — рабочий список реконсилятора (см. RunReconciler).
+	AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error
+	// ListUnresolvedPending — неподтверждённые инвойсы, созданные не позже
+	// createdBefore (RFC3339 UTC), не более limit штук.
+	ListUnresolvedPending(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error)
+	ResolvePending(ctx context.Context, id int64) error
+
 	Kind() string
 	Close() error
 }
@@ -628,4 +635,49 @@ func (b *base) importUser(ctx context.Context, u *model.User) error {
 		}
 	}
 	return nil
+}
+
+// --- pending_invoices (рабочий список реконсилятора) ---
+
+func (b *base) AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error {
+	if p.ID == 0 {
+		p.ID = time.Now().UnixNano()
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = nowStr()
+	}
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", 0)",
+		p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt)
+	return err
+}
+
+// ListUnresolvedPending — created_at хранится в RFC3339 UTC (фиксированная
+// ширина), поэтому лексикографическое сравнение строк корректно работает как
+// сравнение времени для обоих движков без диалект-специфичных функций дат.
+func (b *base) ListUnresolvedPending(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT id, method, ext_id, telegram_id, months, created_at FROM pending_invoices "+
+			"WHERE resolved = 0 AND created_at <= "+b.ph(1)+" ORDER BY created_at ASC LIMIT "+b.ph(2),
+		createdBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.PendingInvoice
+	for rows.Next() {
+		var p model.PendingInvoice
+		if err := rows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) ResolvePending(ctx context.Context, id int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE pending_invoices SET resolved = 1 WHERE id = "+b.ph(1), id)
+	return err
 }

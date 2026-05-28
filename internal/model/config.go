@@ -177,6 +177,20 @@ type Payment struct {
 	CreatedAt  string
 }
 
+// PendingInvoice — выставленный, но ещё не подтверждённый инвойс (YooKassa /
+// CryptoBot). Рабочий список реконсилятора: если вебхук провайдера не дошёл,
+// фоновый проход перепроверит статус и добьёт выдачу. P2P/Stars сюда не пишем
+// (P2P подтверждает админ вручную, Stars приходит апдейтом бота).
+type PendingInvoice struct {
+	ID         int64
+	Method     string
+	ExtID      string
+	TelegramID int64
+	Months     int
+	CreatedAt  string
+	Resolved   bool
+}
+
 // P2PConfig — настройки P2P-оплаты (перевод на карту с ручной проверкой).
 type P2PConfig struct {
 	Enabled   bool           `json:"enabled"`

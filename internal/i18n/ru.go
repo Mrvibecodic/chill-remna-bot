@@ -310,6 +310,7 @@ var ru = map[string]string{
 	"pricing.ask_devices_custom": "✏️ Введите свой лимит устройств (целое число).\n\n• <b>0</b> = вернуть дефолт панели (HWID_FALLBACK_DEVICE_LIMIT).\n• Любое >0 — жёсткий override per-user в Remnawave.\n\nКнопкой «❌ Отмена» ниже можно вернуться без изменений.",
 	"subsetup.title":             "💳 <b>Подписка и оплата</b>\n\n💳 Способы оплаты:\n• 🤝 P2P: %s · ⭐ Stars: %s\n• 💳 ЮKassa: %s · 💎 CryptoBot: %s\n\n🏷 Тарифы (текущие лимиты):\n📊 Трафик: %s · 🖥 Устройств: %s · ♻️ Сброс: %s\n📡 Сквады: internal %d · external %s\n\nНиже — 🪄 быстрая настройка тарифов или ✏️ тонкая ручная.",
 	"subsetup.ext_set":           "выбран ✅",
+	"reconcile.paid_ok":          "✅ Оплата подтверждена! Подписка активна.\n\n%s",
 	"subsetup.btn_quick":         "🪄 Быстрая настройка тарифов",
 	"subsetup.btn_manual":        "✏️ Тонкая настройка тарифа",
 	"subsetup.btn_traffic":       "📊 Трафик по тарифам",

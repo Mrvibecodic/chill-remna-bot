@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -86,12 +87,13 @@ func (f *fakeMsg) joined() string {
 
 // fakeStore — хранилище в памяти (реализует storage.Storage без БД).
 type fakeStore struct {
-	cfg   *model.BotConfig
-	users map[int64]*model.User
-	reqs  map[int64]*model.P2PRequest
-	pays  map[int64]*model.Payment
-	media map[string]string
-	seq   int64
+	cfg     *model.BotConfig
+	users   map[int64]*model.User
+	reqs    map[int64]*model.P2PRequest
+	pays    map[int64]*model.Payment
+	media   map[string]string
+	pending map[int64]*model.PendingInvoice
+	seq     int64
 }
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }
@@ -325,6 +327,40 @@ func (s *fakeStore) SaveMediaFileID(_ context.Context, section, fileID string) e
 func (s *fakeStore) DeleteMediaFileID(_ context.Context, section string) error {
 	if s.media != nil {
 		delete(s.media, section)
+	}
+	return nil
+}
+
+func (s *fakeStore) AddPendingInvoice(_ context.Context, p *model.PendingInvoice) error {
+	if s.pending == nil {
+		s.pending = map[int64]*model.PendingInvoice{}
+	}
+	if p.ID == 0 {
+		s.seq++
+		p.ID = s.seq
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	cp := *p
+	s.pending[p.ID] = &cp
+	return nil
+}
+func (s *fakeStore) ListUnresolvedPending(_ context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error) {
+	var out []model.PendingInvoice
+	for _, p := range s.pending {
+		if !p.Resolved && p.CreatedAt <= createdBefore {
+			out = append(out, *p)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (s *fakeStore) ResolvePending(_ context.Context, id int64) error {
+	if p, ok := s.pending[id]; ok {
+		p.Resolved = true
 	}
 	return nil
 }
@@ -1040,5 +1076,55 @@ func TestHomeReplyButton(t *testing.T) {
 	// входящее сообщение пользователя удаляется (чистота чата)
 	if len(fm.deleted) == 0 {
 		t.Fatal("сообщение-нажатие «Главная» должно удаляться")
+	}
+}
+
+// --- реконсилятор ---
+
+func TestReconciler_ResolvesAlreadyPaid(t *testing.T) {
+	ctx := context.Background()
+	fs := &fakeStore{}
+	// Платёж уже зачтён (вебхук успел), но pending ещё висит.
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: 777, Method: model.PayMethodYooKassa, ExtID: "yk_x", Status: model.PaymentPaid})
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		Method: model.PayMethodYooKassa, ExtID: "yk_x", TelegramID: 777, Months: 1,
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339),
+	})
+	a := &App{store: fs, log: slog.Default()}
+	a.reconcileOnce(ctx)
+	left, _ := fs.ListUnresolvedPending(ctx, time.Now().UTC().Format(time.RFC3339), 50)
+	if len(left) != 0 {
+		t.Fatalf("ожидалось, что pending закроется как уже-оплаченный, осталось: %d", len(left))
+	}
+}
+
+func TestReconciler_GivesUpStale(t *testing.T) {
+	ctx := context.Background()
+	fs := &fakeStore{}
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		Method: model.PayMethodYooKassa, ExtID: "yk_old", TelegramID: 777, Months: 1,
+		CreatedAt: time.Now().UTC().Add(-25 * time.Hour).Format(time.RFC3339),
+	})
+	a := &App{store: fs, log: slog.Default()}
+	a.reconcileOnce(ctx)
+	left, _ := fs.ListUnresolvedPending(ctx, time.Now().UTC().Format(time.RFC3339), 50)
+	if len(left) != 0 {
+		t.Fatalf("протухший инвойс должен сняться с учёта, осталось: %d", len(left))
+	}
+}
+
+func TestReconciler_SkipsFresh(t *testing.T) {
+	ctx := context.Background()
+	fs := &fakeStore{}
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		Method: model.PayMethodYooKassa, ExtID: "yk_fresh", TelegramID: 777, Months: 1,
+		// создан только что → попадает в grace-окно, реконсилятор его не трогает.
+	})
+	a := &App{store: fs, log: slog.Default()}
+	a.reconcileOnce(ctx)
+	// Запрос без grace-фильтра должен всё ещё видеть его нерешённым.
+	left, _ := fs.ListUnresolvedPending(ctx, time.Now().UTC().Format(time.RFC3339), 50)
+	if len(left) != 1 {
+		t.Fatalf("свежий инвойс не должен трогаться реконсилятором, осталось: %d", len(left))
 	}
 }

@@ -58,7 +58,7 @@ func main() {
 	webSrv := web.New(addr, a, log)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	var botErr, webErr error
 
 	go func() {
@@ -69,6 +69,11 @@ func main() {
 	go func() {
 		defer wg.Done()
 		webErr = webSrv.Run(ctx)
+	}()
+	// Фоновый реконсилятор: добивает «оплачено-но-не-выдано» (пропущенные вебхуки).
+	go func() {
+		defer wg.Done()
+		a.RunReconciler(ctx)
 	}()
 	wg.Wait()
 
