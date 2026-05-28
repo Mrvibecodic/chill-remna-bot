@@ -114,6 +114,7 @@ func TestAdminButtonWalk(t *testing.T) {
 		"menu:subdomain", "subd:edit", "subd:cancel",
 		"menu:apilog", "alog:refresh",
 		"menu:webhooks", "wh:toggle", "wh:addr", "wh:base", "wh:secret",
+		"menu:notify", "ntf:trial", "ntf:sub", "ntf:w:7", "ntf:w:3", "ntf:trialdays",
 		"menu:update",
 		"menu:reconf",
 	}

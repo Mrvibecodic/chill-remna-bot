@@ -290,6 +290,33 @@ func (s *fakeStore) SetTrialUsed(_ context.Context, telegramID int64, ts string)
 	}
 	return nil
 }
+func (s *fakeStore) SetSubExpiry(_ context.Context, telegramID int64, expireAt, kind string) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[telegramID] == nil {
+		s.users[telegramID] = &model.User{TelegramID: telegramID}
+	}
+	s.users[telegramID].SubExpireAt = expireAt
+	s.users[telegramID].NotifyKind = kind
+	s.users[telegramID].NotifySent = ""
+	return nil
+}
+func (s *fakeStore) MarkNotified(_ context.Context, telegramID int64, sentCSV string) error {
+	if u, ok := s.users[telegramID]; ok {
+		u.NotifySent = sentCSV
+	}
+	return nil
+}
+func (s *fakeStore) UsersForNotify(_ context.Context) ([]model.User, error) {
+	var out []model.User
+	for _, u := range s.users {
+		if u.SubExpireAt != "" {
+			out = append(out, *u)
+		}
+	}
+	return out, nil
+}
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}

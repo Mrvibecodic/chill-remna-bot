@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN sub_expire_at TEXT NOT NULL DEFAULT ''

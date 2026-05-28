@@ -97,6 +97,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onWebhooksAdmin(ctx, chatID, val)
 		}
+	case "ntf":
+		if isAdmin {
+			a.onNotifyAdmin(ctx, chatID, val)
+		}
 	case "prc":
 		if isAdmin {
 			a.onPricing(ctx, chatID, val)
@@ -359,6 +363,7 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 
 	w.cfg.Installed = true
 	w.cfg.NormalizePricing()
+	w.cfg.NormalizeReminders()
 	if a.store == nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", "БД не инициализирована"))
 		return

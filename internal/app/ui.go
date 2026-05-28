@@ -271,7 +271,7 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.users"), "menu:users"), btn(i18n.T(lang, "btn.payments"), "menu:payments")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
 		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
-		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks")},
+		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.notify"), "menu:notify")},
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
@@ -475,6 +475,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "webhooks":
 		if isAdmin {
 			a.showWebhooksAdmin(ctx, chatID)
+		}
+	case "notify":
+		if isAdmin {
+			a.showNotifyAdmin(ctx, chatID)
 		}
 	case "cryptobot":
 		if isAdmin {

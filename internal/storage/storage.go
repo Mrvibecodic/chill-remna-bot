@@ -52,6 +52,13 @@ type Storage interface {
 	SetTermsAccepted(ctx context.Context, telegramID int64, ts string) error
 	// SetTrialUsed — отметить, что юзер активировал триал (ISO-время).
 	SetTrialUsed(ctx context.Context, telegramID int64, ts string) error
+	// SetSubExpiry сохраняет срок текущей подписки/триала и сбрасывает счётчик
+	// отправленных напоминаний (kind: "paid"|"trial").
+	SetSubExpiry(ctx context.Context, telegramID int64, expireAt, kind string) error
+	// MarkNotified записывает CSV уже отправленных окон напоминаний.
+	MarkNotified(ctx context.Context, telegramID int64, sentCSV string) error
+	// UsersForNotify возвращает пользователей с непустым sub_expire_at (кандидаты на напоминание).
+	UsersForNotify(ctx context.Context) ([]model.User, error)
 
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
@@ -205,16 +212,17 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	// terms_accepted_at: в PG это TIMESTAMPTZ NULL, в SQLite — TEXT с дефолтом
 	// "". Через sql.NullString корректно ловим оба случая (NULL и пусто).
 	var terms, trial sql.NullString
+	var subExp, notifyKind, notifySent string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -296,6 +304,38 @@ func (b *base) SetTrialUsed(ctx context.Context, telegramID int64, ts string) er
 		"UPDATE users SET trial_used_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		ts, telegramID)
 	return err
+}
+
+func (b *base) SetSubExpiry(ctx context.Context, telegramID int64, expireAt, kind string) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET sub_expire_at = "+b.ph(1)+", notify_kind = "+b.ph(2)+", notify_sent = '' WHERE telegram_id = "+b.ph(3),
+		expireAt, kind, telegramID)
+	return err
+}
+
+func (b *base) MarkNotified(ctx context.Context, telegramID int64, sentCSV string) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET notify_sent = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
+		sentCSV, telegramID)
+	return err
+}
+
+func (b *base) UsersForNotify(ctx context.Context) ([]model.User, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, username, first_name, sub_expire_at, notify_kind, notify_sent FROM users WHERE sub_expire_at <> ''")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 func (b *base) CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error {

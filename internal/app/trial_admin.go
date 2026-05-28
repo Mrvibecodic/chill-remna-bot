@@ -268,7 +268,7 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 		a.send(ctx, chatID, i18n.T(lang, "trial.fail", "panel offline"))
 		return
 	}
-	link, _, err := panel.CreateOrUpdateUserDays(ctx, chatID, tr.Days, remnawave.UserLimits{
+	link, expireAt, err := panel.CreateOrUpdateUserDays(ctx, chatID, tr.Days, remnawave.UserLimits{
 		TrafficBytes:   int64(tr.TrafficGB) * 1024 * 1024 * 1024,
 		DeviceLimit:    tr.DeviceLimit,
 		InternalSquads: tr.InternalSquads,
@@ -286,6 +286,7 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 			TelegramID: chatID, Method: "trial", Months: 0, Amount: "—",
 			Status: model.PaymentPaid,
 		})
+		_ = a.store.SetSubExpiry(ctx, chatID, expireAt, "trial")
 	}
 	a.invalidateSubCache(chatID)
 	a.notify(ctx, chatID, i18n.T(lang, "trial.activated", tr.Days, link))

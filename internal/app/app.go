@@ -133,6 +133,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 	}
 	if ok && cfg.Installed {
 		cfg.NormalizePricing()
+		cfg.NormalizeReminders()
 		a.botCfg = cfg
 		a.panel = remnawave.New(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {

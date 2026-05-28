@@ -58,7 +58,7 @@ func main() {
 	webSrv := web.New(addr, a, log)
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	var botErr, webErr error
 
 	go func() {
@@ -74,6 +74,11 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunReconciler(ctx)
+	}()
+	// Фоновые напоминания: до конца триала и до конца подписки (за N дней).
+	go func() {
+		defer wg.Done()
+		a.RunReminders(ctx)
 	}()
 	wg.Wait()
 

@@ -212,6 +212,14 @@ type User struct {
 	CreatedAt       string
 	TermsAcceptedAt string // ISO-время принятия пользовательского соглашения; пусто = не принимал
 	TrialUsedAt     string // ISO-время активации триала; пусто = ещё не использовал
+	// SubExpireAt — локально сохранённый срок текущей подписки/триала (RFC3339),
+	// обновляется при каждой выдаче. Используется планировщиком напоминаний.
+	SubExpireAt string
+	// NotifyKind — тип текущего активного периода: "paid" | "trial" (для выбора текста).
+	NotifyKind string
+	// NotifySent — CSV уже отправленных окон напоминаний для текущего SubExpireAt
+	// (сбрасывается при новой выдаче). Напр. "7,3".
+	NotifySent string
 }
 
 // P2PRequest — заявка на оплату через P2P (ручная модерация).
@@ -252,11 +260,42 @@ type CryptoBotConfig struct {
 	Prices   map[int]string `json:"prices"`   // месяцы -> цена в Currency, напр. "1.99"
 }
 
-// RemindersConfig — авто-напоминания об истечении подписки. Тикер бота
-// раз в час проверяет панель и пушит юзеру кнопку «Продлить» за N дней до
-// expireAt. Дни хранятся как отсортированный список (3,1,0 — значит за
-// 3 дня, за 1 день, в день истечения).
+// RemindersConfig — авто-напоминания. Фоновый тикер бота раз в N минут смотрит
+// локально сохранённый срок подписки (users.sub_expire_at) и пушит юзеру кнопку
+// «Продлить» за DaysList дней до конца, а для триала — отдельное напоминание
+// «перейти на платный» за TrialDaysBefore дней до конца триала.
 type RemindersConfig struct {
-	Enabled  bool  `json:"enabled"`
-	DaysList []int `json:"days_list"` // напр. [3,1,0]
+	Enabled         bool  `json:"enabled"`           // напоминания об окончании ПЛАТНОЙ подписки
+	DaysList        []int `json:"days_list"`         // окна в днях, напр. [7,3,1]
+	TrialEnabled    bool  `json:"trial_enabled"`     // напоминание до конца триала
+	TrialDaysBefore int   `json:"trial_days_before"` // за сколько дней до конца триала
+	Init            bool  `json:"init"`              // дефолты применены (см. NormalizeReminders)
+}
+
+// NormalizeReminders однократно проставляет дефолты: для триала и для окончания
+// подписки за 3 и 1 день — включено; окно «за 7 дней» доступно, но по умолчанию
+// выключено (нет в списке).
+func (c *BotConfig) NormalizeReminders() {
+	r := &c.Reminders
+	if r.Init {
+		return
+	}
+	r.Enabled = true
+	r.DaysList = []int{3, 1}
+	r.TrialEnabled = true
+	r.TrialDaysBefore = 1
+	r.Init = true
+}
+
+// ReminderWindows — все поддерживаемые окна напоминаний об окончании подписки.
+var ReminderWindows = []int{7, 3, 1}
+
+// HasReminderDay сообщает, включено ли окно d в DaysList.
+func (r RemindersConfig) HasReminderDay(d int) bool {
+	for _, x := range r.DaysList {
+		if x == d {
+			return true
+		}
+	}
+	return false
 }

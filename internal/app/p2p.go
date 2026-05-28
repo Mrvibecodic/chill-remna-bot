@@ -432,6 +432,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		_ = a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
 		})
+		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
 	}
 	return link, expireAt, nil
 }
@@ -643,6 +644,19 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setDevicesPer(mo, n)
 		_ = a.saveBotConfig(ctx)
 		a.showPricing(ctx, chatID)
+	case "ntf_trial_days":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		if n < 0 {
+			n = 0
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Reminders.TrialDaysBefore = n
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showNotifyAdmin(ctx, chatID)
 	case "trial_days":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
