@@ -354,6 +354,15 @@ func (a *App) startReconfigure(ctx context.Context, chatID int64) {
 
 // --- стартовый баннер / меню ---
 
+// bannerInputFor отдаёт встроенную картинку раздела как InputFile (для загрузки),
+// с откатом на общий defaultBanner, если ассета нет.
+func bannerInputFor(section string) models.InputFile {
+	if b := assets.Bytes(section); len(b) > 0 {
+		return &models.InputFileUpload{Filename: section + ".jpg", Data: bytes.NewReader(b)}
+	}
+	return &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
+}
+
 func (a *App) welcomeContent(name string) (models.InputFile, string, []models.MessageEntity) {
 	a.mu.Lock()
 	var w model.WelcomeConfig
@@ -373,7 +382,9 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 	case w.ImageURL != "":
 		photo = &models.InputFileString{Data: w.ImageURL}
 	default:
-		photo = &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
+		// Дефолт приветствия — тематический «щит/firewall» из встроенных ассетов
+		// (более подходит под VPN, чем общий banner_default.jpg).
+		photo = bannerInputFor(assets.SectionMainMenu)
 	}
 
 	caption := w.Text
@@ -395,6 +406,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		caption = i18n.T(lang, "menu.admin_title")
 		ents = nil
 		rows = a.adminMenuRows(lang)
+		photo = bannerInputFor(assets.SectionAdminStats) // тематическая картинка админки
 	} else {
 		rows = a.contactRows()
 		rows = append(rows, a.navRow(ctx, chatID, false))
