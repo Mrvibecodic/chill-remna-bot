@@ -44,12 +44,9 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	if hwid > 0 {
 		hwidStr = strconv.Itoa(hwid)
 	}
-	extStr := i18n.T(lang, "admin.none")
-	if extSq != "" {
-		extStr = i18n.T(lang, "subsetup.ext_set")
-	}
+	internalCSV, externalName := a.squadNames(ctx, intSq, extSq)
 	body := i18n.T(lang, "trial.title",
-		i18n.T(lang, statusKey), days, gbStr, hwidStr, len(intSq), extStr)
+		i18n.T(lang, statusKey), days, gbStr, hwidStr, internalCSV, externalName)
 
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},

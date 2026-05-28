@@ -320,7 +320,7 @@ var en = map[string]string{
 	"subsetup.btn_strategy":      "♻️ Traffic reset strategy",
 	"btn.trial_admin":            "🎁 Trial",
 	"btn.trial_user":             "🎁 Trial",
-	"trial.title":                "🎁 <b>Trial</b>\n\nFree one-time subscription activation for a new user.\n\nStatus: %s\nDuration: %d days\nTraffic: %s\nDevices (HWID): %s\nInternal squads: %d · external: %s",
+	"trial.title":                "🎁 <b>Trial</b>\n\nFree one-time subscription activation for a new user.\n\n⚡ Status: %s\n🗓 Duration: %d days\n📊 Traffic: %s\n🖥 Devices (HWID): %s\n\n📡 Squads:\n🏠 Internal: %s\n📡 External: %s",
 	"trial.unlimited":            "unlimited",
 	"trial.btn_quick":            "🪄 Quick setup",
 	"trial.btn_days":             "🗓 Duration (days)",

@@ -321,7 +321,7 @@ var ru = map[string]string{
 	"subsetup.btn_strategy":      "♻️ Стратегия сброса трафика",
 	"btn.trial_admin":            "🎁 Триал",
 	"btn.trial_user":             "🎁 Триал",
-	"trial.title":                "🎁 <b>Триал</b>\n\nБесплатная разовая активация подписки для нового пользователя.\n\nСтатус: %s\nСрок: %d дн.\nТрафик: %s\nУстройств (HWID): %s\nСквадов internal: %d · external: %s",
+	"trial.title":                "🎁 <b>Триал</b>\n\nБесплатная разовая активация подписки для нового пользователя.\n\n⚡ Статус: %s\n🗓 Срок: %d дн.\n📊 Трафик: %s\n🖥 Устройства (HWID): %s\n\n📡 Сквады:\n🏠 Internal: %s\n📡 External: %s",
 	"trial.unlimited":            "безлимит",
 	"trial.btn_quick":            "🪄 Быстрая настройка",
 	"trial.btn_days":             "🗓 Срок (дни)",

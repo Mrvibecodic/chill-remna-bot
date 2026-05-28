@@ -285,14 +285,22 @@ func (a *App) squadDisplay(ctx context.Context) (string, string) {
 	a.mu.Lock()
 	var activeInt []string
 	extUUID := ""
-	panel := a.panel
-	lang := i18n.Fallback
 	if a.botCfg != nil {
 		activeInt = append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
 		extUUID = a.botCfg.Plan.ExternalSquadUUID
-		if a.botCfg.Language != "" {
-			lang = a.botCfg.Language
-		}
+	}
+	a.mu.Unlock()
+	return a.squadNames(ctx, activeInt, extUUID)
+}
+
+// squadNames резолвит имена выбранных сквадов по UUID через панель и возвращает
+// (internalCSV, externalName). Переиспользуется для тарифов (Plan) и триала.
+func (a *App) squadNames(ctx context.Context, activeInt []string, extUUID string) (string, string) {
+	a.mu.Lock()
+	panel := a.panel
+	lang := i18n.Fallback
+	if a.botCfg != nil && a.botCfg.Language != "" {
+		lang = a.botCfg.Language
 	}
 	a.mu.Unlock()
 
