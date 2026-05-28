@@ -87,6 +87,7 @@ type fakeStore struct {
 	users map[int64]*model.User
 	reqs  map[int64]*model.P2PRequest
 	pays  map[int64]*model.Payment
+	media map[string]string
 	seq   int64
 }
 
@@ -250,6 +251,22 @@ func (s *fakeStore) UpdateP2PRequest(_ context.Context, r *model.P2PRequest) err
 	s.reqs[r.ID] = &cp
 	return nil
 }
+func (s *fakeStore) LoadMediaFileID(_ context.Context, section string) (string, bool, error) {
+	if s.media == nil {
+		return "", false, nil
+	}
+	id, ok := s.media[section]
+	return id, ok, nil
+}
+
+func (s *fakeStore) SaveMediaFileID(_ context.Context, section, fileID string) error {
+	if s.media == nil {
+		s.media = map[string]string{}
+	}
+	s.media[section] = fileID
+	return nil
+}
+
 func (s *fakeStore) Kind() string { return "fake" }
 func (s *fakeStore) Close() error { return nil }
 

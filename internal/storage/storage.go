@@ -45,6 +45,12 @@ type Storage interface {
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
 	PaymentByExtID(ctx context.Context, extID string) (bool, error)
 
+	// LoadMediaFileID возвращает кэшированный Telegram file_id для раздела
+	// (если уже отправляли картинку этого раздела по URL и получили id обратно).
+	// ok=false означает «надо отправить по URL и закэшировать новый id».
+	LoadMediaFileID(ctx context.Context, section string) (id string, ok bool, err error)
+	SaveMediaFileID(ctx context.Context, section, fileID string) error
+
 	Kind() string
 	Close() error
 }
@@ -310,4 +316,31 @@ func (b *base) PaymentByExtID(ctx context.Context, extID string) (bool, error) {
 	err := b.db.QueryRowContext(ctx,
 		"SELECT COUNT(1) FROM payments WHERE ext_id = "+b.ph(1), extID).Scan(&n)
 	return n > 0, err
+}
+
+// LoadMediaFileID — реализация на *base, диалект-нейтральная через b.ph(n).
+// Используется и pgStore, и sqliteStore через embedding.
+func (b *base) LoadMediaFileID(ctx context.Context, section string) (string, bool, error) {
+	var id string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT file_id FROM media_cache WHERE section = "+b.ph(1), section).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return id, true, nil
+}
+
+// SaveMediaFileID — upsert по section. Синтаксис ON CONFLICT ... DO UPDATE
+// поддерживают и PG, и SQLite; время пишем через nowStr() как в соседних
+// методах (UpsertUser, и т.п.), чтобы избежать диалект-различий now()/datetime('now').
+func (b *base) SaveMediaFileID(ctx context.Context, section, fileID string) error {
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO media_cache (section, file_id, updated_at) VALUES ("+
+			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+") "+
+			"ON CONFLICT (section) DO UPDATE SET file_id = excluded.file_id, updated_at = excluded.updated_at",
+		section, fileID, nowStr())
+	return err
 }
