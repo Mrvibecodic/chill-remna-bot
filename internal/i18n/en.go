@@ -227,6 +227,7 @@ var en = map[string]string{
 	"subs.show":             "📦 <b>Your subscription is active</b>\n\nConnection link:\n%s\n\nAdd it to your VPN client (Hiddify / V2RayTun / any compatible) — the config will be pulled in automatically.",
 	"sub.active":            "%s, your subscription is active until <b>%s</b>.\n\n📋 Link to add to your app (tap to copy):\n<code>%s</code>\n\n🌐 Or open %s in a browser (preferably on the same device where you will install the client) — there you can pick an app, install it and read the guides.\n\n❓ Questions? Use the support button below.",
 	"sub.no_expire":         "no expiry",
+	"sub.tz_msk":            "MSK (Moscow time)",
 	"btn.stars":             "⭐ Telegram Stars",
 	"btn.payments":          "📒 Payments log",
 	"method.stars_btn":      "⭐ Pay with Stars (%d ⭐)",

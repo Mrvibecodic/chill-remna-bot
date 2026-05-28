@@ -52,7 +52,9 @@ func formatExpire(raw, lang string) string {
 		return i18n.T(lang, "sub.no_expire")
 	}
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
-		return t.UTC().Format("02.01.2006 15:04") + " UTC"
+		// Москва — UTC+3 круглый год (без перехода на летнее время).
+		msk := t.UTC().Add(3 * time.Hour)
+		return msk.Format("02.01.2006 15:04") + " " + i18n.T(lang, "sub.tz_msk")
 	}
 	return raw
 }
