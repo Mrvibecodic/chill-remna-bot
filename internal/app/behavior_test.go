@@ -227,6 +227,24 @@ func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
 	delete(s.users, id)
 	return nil
 }
+
+func (s *fakeStore) DeletePaymentsByUser(_ context.Context, id int64) error {
+	for k, p := range s.pays {
+		if p.TelegramID == id {
+			delete(s.pays, k)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) DeleteP2PRequestsByUser(_ context.Context, id int64) error {
+	for k, r := range s.reqs {
+		if r.TelegramID == id {
+			delete(s.reqs, k)
+		}
+	}
+	return nil
+}
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}
@@ -562,13 +580,29 @@ func TestUsersAdmin_BlockEnforceDelete(t *testing.T) {
 	}
 }
 
-// Жёсткий запрет: блокировка/удаление в боте НЕ трогают аккаунт в панели.
-// Здесь проверяем, что DeleteUser не вызывает никаких обращений к панели.
-func TestUsersAdmin_DeleteDoesNotTouchPanel(t *testing.T) {
-	var panelHits int
+// При удалении бот-юзера бот ДОЛЖЕН отключить его подписку в панели
+// (POST /api/users/<uuid>/actions/disable) — иначе после повторной регистрации
+// доступ к старой подписке сохранится. При этом:
+//   - блокировка пользователя в боте панель НЕ трогает;
+//   - чужие аккаунты (созданные не ботом) панель отключать запрещено —
+//     проверка по Tag/username делается клиентом.
+//
+// Здесь проверяем оба поведения на стабе панели.
+func TestUsersAdmin_DeleteDisablesInPanel(t *testing.T) {
+	var blockHits, disableHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panelHits++
-		w.WriteHeader(http.StatusOK)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/users/by-telegram-id/"):
+			// Возвращаем «свой» аккаунт (Tag=CHILLBOT).
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"response":[{"uuid":"u-555","tag":"CHILLBOT","username":"tg_555","subscriptionUrl":"https://x/sub/y"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/actions/disable"):
+			disableHits++
+			w.WriteHeader(http.StatusOK)
+		default:
+			blockHits++
+			w.WriteHeader(http.StatusOK)
+		}
 	}))
 	defer srv.Close()
 
@@ -587,11 +621,19 @@ func TestUsersAdmin_DeleteDoesNotTouchPanel(t *testing.T) {
 	ctx := context.Background()
 
 	_ = fs.UpsertUser(ctx, 555)
+	// Блокировка не должна ходить в панель.
 	a.handleCallback(ctx, cb(100, "usr:block:555"))
+	if blockHits != 0 {
+		t.Fatalf("блокировка не должна обращаться к панели, hits=%d", blockHits)
+	}
+	// Удаление — должно отключить подписку «своего» аккаунта в панели.
 	a.handleCallback(ctx, cb(100, "usr:delc:555"))
-
-	if panelHits != 0 {
-		t.Fatalf("блок/удаление в боте не должны обращаться к панели, hits=%d", panelHits)
+	if disableHits != 1 {
+		t.Fatalf("удаление должно дёрнуть actions/disable ровно 1 раз, hits=%d", disableHits)
+	}
+	// Локальные user/payments/p2p должны быть очищены (fakeStore так и делает).
+	if u, _ := fs.GetUser(ctx, 555); u != nil {
+		t.Fatal("после удаления users не должно остаться")
 	}
 }
 

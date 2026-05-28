@@ -35,6 +35,11 @@ type Storage interface {
 	ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
 	SetBlocked(ctx context.Context, telegramID int64, blocked bool) error
 	DeleteUser(ctx context.Context, telegramID int64) error
+	// DeletePaymentsByUser/DeleteP2PRequestsByUser — каскадная зачистка локальной
+	// истории пользователя при его удалении (чтобы после повторной регистрации
+	// бот не выводил «Мои подписки» по старым записям).
+	DeletePaymentsByUser(ctx context.Context, telegramID int64) error
+	DeleteP2PRequestsByUser(ctx context.Context, telegramID int64) error
 
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
@@ -225,6 +230,16 @@ func (b *base) SetBlocked(ctx context.Context, telegramID int64, blocked bool) e
 
 func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
+	return err
+}
+
+func (b *base) DeletePaymentsByUser(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx, "DELETE FROM payments WHERE telegram_id = "+b.ph(1), telegramID)
+	return err
+}
+
+func (b *base) DeleteP2PRequestsByUser(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx, "DELETE FROM p2p_requests WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
 

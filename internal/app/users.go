@@ -162,11 +162,35 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string) {
 		})
 	case "delc":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
-		if a.store != nil {
-			_ = a.store.DeleteUser(ctx, uid)
-		}
+		a.adminDeleteUser(ctx, chatID, uid)
 		a.showUsers(ctx, chatID, 0)
 	}
+}
+
+// adminDeleteUser — каскадное удаление пользователя:
+//  1. DISABLE его подписки в Remnawave (best-effort: если панель недоступна,
+//     не блокируем удаление; чужие аккаунты — не трогаем по правилу безопасности).
+//  2. Локально вычищаем payments и p2p_requests этого telegram_id, чтобы после
+//     повторной регистрации /start показывал «Купить» (а не «Мои подписки» по
+//     старому логу).
+//  3. Удаляем саму запись users.
+//
+// Об ошибке disable админу пишем подсказкой, но удаление НЕ откатываем.
+func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64) {
+	if a.store == nil {
+		return
+	}
+	a.mu.Lock()
+	panel := a.panel
+	a.mu.Unlock()
+	if panel != nil {
+		if _, err := panel.DisableByTelegramID(ctx, uid); err != nil {
+			a.notify(ctx, adminChat, "⚠️ "+err.Error())
+		}
+	}
+	_ = a.store.DeletePaymentsByUser(ctx, uid)
+	_ = a.store.DeleteP2PRequestsByUser(ctx, uid)
+	_ = a.store.DeleteUser(ctx, uid)
 }
 
 // --- админ: лог оплат ---

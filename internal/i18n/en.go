@@ -261,4 +261,10 @@ var en = map[string]string{
 	"subdomain.btn_clear":     "↩️ Clear (use panel host)",
 	"subdomain.ask":           "✏️ Send the subscription domain (e.g. <code>vpn.mybrand.io</code>), or «-» to disable rewriting.",
 	"btn.close":               "❌ Close",
+	"btn.apilog":              "📡 API log",
+	"apilog.title":            "📡 <b>Outgoing API calls log (panel)</b>\nTotal: %d · page %d/%d",
+	"apilog.empty":            "📡 API log is empty — bot has not made any panel calls yet (or buffer was cleared).",
+	"apilog.no_panel":         "📡 Panel not connected — nothing to log.",
+	"apilog.btn_refresh":      "🔄 Refresh",
+	"apilog.btn_clear":        "🧹 Clear",
 }

@@ -119,6 +119,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onSubdomain(ctx, chatID, val)
 		}
+	case "alog":
+		if isAdmin {
+			a.onAPILog(ctx, chatID, val)
+		}
 	case "x":
 		// Кнопки управления самим сообщением: «Закрыть» удаляет это уведомление.
 		if val == "close" {

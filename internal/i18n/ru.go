@@ -262,4 +262,10 @@ var ru = map[string]string{
 	"subdomain.btn_clear":     "↩️ Сбросить (использовать домен панели)",
 	"subdomain.ask":           "✏️ Пришлите домен для подписок (например, <code>vpn.mybrand.io</code>), либо «-» чтобы выключить замену.",
 	"btn.close":               "❌ Закрыть",
+	"btn.apilog":              "📡 Лог API",
+	"apilog.title":            "📡 <b>Лог API-запросов к панели</b>\nВсего: %d · страница %d/%d",
+	"apilog.empty":            "📡 Лог API пуст — бот ещё не делал запросов к панели (или буфер был очищен).",
+	"apilog.no_panel":         "📡 Панель не подключена — логировать нечего.",
+	"apilog.btn_refresh":      "🔄 Обновить",
+	"apilog.btn_clear":        "🧹 Очистить",
 }

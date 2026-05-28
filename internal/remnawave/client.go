@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"remnabot/internal/model"
@@ -18,6 +19,20 @@ import (
 // LocalBaseURL — адрес панели внутри общей docker-сети (минуя reverse-proxy).
 const LocalBaseURL = "http://remnawave:3000"
 
+// APIEvent — одна запись лога исходящих запросов к панели (для админ-просмотра).
+type APIEvent struct {
+	Time       time.Time
+	Method     string
+	Path       string
+	Status     int // 0, если ошибка транспорта (Err непустой)
+	DurationMs int64
+	Err        string // сообщение об ошибке (короткое)
+}
+
+// apiLogCap — кольцевой буфер: чем больше, тем дольше «помним» прошлые запросы.
+// 200 — компромисс между видимостью истории и потреблением памяти.
+const apiLogCap = 200
+
 type Client struct {
 	base   string
 	token  string
@@ -25,6 +40,9 @@ type Client struct {
 	apiKey string // X-API-Key для защищённого Caddy, иначе ""
 	local  bool
 	http   *http.Client
+
+	logMu sync.Mutex
+	logs  []APIEvent // ring buffer длиной apiLogCap
 }
 
 func New(cfg model.PanelConfig) *Client {
@@ -72,7 +90,44 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 		return nil, err
 	}
 	c.setHeaders(req)
-	return c.http.Do(req)
+
+	start := time.Now()
+	resp, err := c.http.Do(req)
+	ev := APIEvent{Time: start, Method: method, Path: path, DurationMs: time.Since(start).Milliseconds()}
+	if err != nil {
+		ev.Err = err.Error()
+	} else {
+		ev.Status = resp.StatusCode
+	}
+	c.appendLog(ev)
+	return resp, err
+}
+
+// appendLog добавляет запись в ring buffer (под мьютексом). Старые записи
+// вытесняются, чтобы не разрастаться по памяти.
+func (c *Client) appendLog(ev APIEvent) {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	c.logs = append(c.logs, ev)
+	if len(c.logs) > apiLogCap {
+		c.logs = c.logs[len(c.logs)-apiLogCap:]
+	}
+}
+
+// Logs возвращает копию текущего лога (новые записи в конце).
+func (c *Client) Logs() []APIEvent {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	out := make([]APIEvent, len(c.logs))
+	copy(out, c.logs)
+	return out
+}
+
+// ClearLogs очищает кольцевой буфер (используется кнопкой «🧹 Очистить»).
+func (c *Client) ClearLogs() {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	c.logs = nil
 }
 
 // Health проверяет доступность панели.
@@ -198,6 +253,34 @@ func (c *Client) ListSquads(ctx context.Context) ([]Squad, error) {
 		return arr, nil
 	}
 	return nil, nil
+}
+
+// DisableByTelegramID отключает аккаунт пользователя в панели (POST /api/users/{uuid}/actions/disable).
+// Жёсткое правило безопасности: трогаем ТОЛЬКО аккаунты, созданные этим ботом
+// (Tag == BotTag или username == tg_<id>); чужие аккаунты не трогаем.
+//
+// Возвращает (true, nil), если аккаунт нашёлся и был отключён или уже отключён.
+// Возвращает (false, nil), если в панели юзера нет — это не ошибка.
+func (c *Client) DisableByTelegramID(ctx context.Context, telegramID int64) (bool, error) {
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return false, err
+	}
+	if u == nil || u.Uuid == "" {
+		return false, nil
+	}
+	if !ownedByBot(u, telegramID) {
+		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — отключать его запрещено", telegramID)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+u.Uuid+"/actions/disable", nil)
+	if err != nil {
+		return false, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		return false, classifyHTTP(resp)
+	}
+	return true, nil
 }
 
 // Subscription возвращает ссылку на подписку пользователя (по telegramId), если он есть в панели.

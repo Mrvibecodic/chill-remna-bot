@@ -126,7 +126,7 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.manage_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.users"), "menu:users"), btn(i18n.T(lang, "btn.payments"), "menu:payments")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
-		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
+		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
@@ -248,6 +248,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "subdomain":
 		if isAdmin {
 			a.showSubdomain(ctx, chatID)
+		}
+	case "apilog":
+		if isAdmin {
+			a.showAPILog(ctx, chatID, 0)
 		}
 	case "update":
 		if isAdmin {
