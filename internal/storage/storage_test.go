@@ -416,5 +416,10 @@ func TestPaymentsLog(t *testing.T) {
 		if err != nil || total != 2 || len(items) != 2 {
 			t.Fatalf("ListPayments: total=%d len=%d err=%v", total, len(items), err)
 		}
+		// PaidPayments — только оплаченные (rejected не считается).
+		paid, err := st.PaidPayments(ctx)
+		if err != nil || len(paid) != 1 || paid[0].Status != model.PaymentPaid {
+			t.Fatalf("PaidPayments: len=%d err=%v", len(paid), err)
+		}
 	})
 }

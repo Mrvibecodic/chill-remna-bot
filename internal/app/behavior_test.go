@@ -178,6 +178,15 @@ func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 	}
 	return false, nil
 }
+func (s *fakeStore) PaidPayments(_ context.Context) ([]model.Payment, error) {
+	var out []model.Payment
+	for _, p := range s.pays {
+		if p.Status == model.PaymentPaid {
+			out = append(out, *p)
+		}
+	}
+	return out, nil
+}
 
 func (s *fakeStore) MostPopularPlan(_ context.Context) (int, int, error) {
 	counts := map[int]int{}

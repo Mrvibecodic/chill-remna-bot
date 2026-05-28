@@ -207,6 +207,41 @@ func payMethodLabel(method string) string {
 	return method
 }
 
+// paymentTotals считает по списку оплаченных платежей: число платящих юзеров
+// (уникальные telegram_id) и сумму по валютам (₽/⭐/USDT и т.п.) — суммировать
+// разные валюты в одно число нельзя, поэтому группируем по единице измерения.
+func paymentTotals(ps []model.Payment) (users int, sums string) {
+	seen := map[int64]struct{}{}
+	byUnit := map[string]float64{}
+	var order []string
+	for _, p := range ps {
+		seen[p.TelegramID] = struct{}{}
+		fields := strings.Fields(p.Amount)
+		if len(fields) == 0 {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.Replace(fields[0], ",", ".", 1), 64)
+		if err != nil {
+			continue // напр. "—" у триала
+		}
+		unit := strings.TrimSpace(strings.Join(fields[1:], " "))
+		if _, ok := byUnit[unit]; !ok {
+			order = append(order, unit)
+		}
+		byUnit[unit] += v
+	}
+	users = len(seen)
+	var parts []string
+	for _, u := range order {
+		num := strconv.FormatFloat(byUnit[u], 'f', -1, 64)
+		if u != "" {
+			num += " " + u
+		}
+		parts = append(parts, num)
+	}
+	return users, strings.Join(parts, " · ")
+}
+
 func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	lang := a.lang(chatID)
 	if a.store == nil {
@@ -260,6 +295,13 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "payments.title", total, page+1, pages))
+	if paid, err := a.store.PaidPayments(ctx); err == nil {
+		users, sums := paymentTotals(paid)
+		if sums == "" {
+			sums = "—"
+		}
+		sb.WriteString("\n" + i18n.T(lang, "payments.totals", users, sums))
+	}
 	sb.WriteString("\n<pre>")
 	header := padRight("Date", 10) + "  " + padRight("Method", wMethod) + "  " +
 		padRight("User", wUser) + "  " + padRight("Term", 4) + "  " +
@@ -295,7 +337,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		kbRows = append(kbRows, nav)
 	}
 	kbRows = append(kbRows, back)
-	a.sendKBSection(ctx, chatID, assets.SectionPromoCode, sb.String(), kbRows)
+	a.sendKB(ctx, chatID, sb.String(), kbRows)
 }
 
 // padRight дополняет строку пробелами справа до ширины w (на основе видимой

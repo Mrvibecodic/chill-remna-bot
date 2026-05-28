@@ -216,6 +216,7 @@ var en = map[string]string{
 	"admin.stars_title":     "⭐ <b>Telegram Stars</b>\n\nWhat it is: Telegram internal currency (XTR), paid right inside Telegram, no KYC and no external merchant. Great for a global audience and fast payments; Telegram pays out to the bot owner. Price is set in stars per plan (1⭐ ≈ ~$0.013).\n\nStatus: %s\nPrices: %s",
 	"admin.stars_ask_price": "Enter the Stars price for %d mo (integer):",
 	"payments.title":        "📒 <b>Payments log</b>\nTotal: %d · page %d/%d\n\ndate · method · user · period · amount · status:",
+	"payments.totals":       "👥 Paying users: %d · 💰 Collected: %s",
 	"payments.empty":        "📒 No payments yet.",
 	"payments.line":         "%s · %s · <code>%d</code> · %dmo · %s · %s",
 	"payments.st_paid":      "paid ✅",

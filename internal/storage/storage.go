@@ -60,6 +60,8 @@ type Storage interface {
 	AddPayment(ctx context.Context, p *model.Payment) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
+	// PaidPayments — все оплаченные платежи (для итогов: платящие юзеры + сумма).
+	PaidPayments(ctx context.Context) ([]model.Payment, error)
 	PaymentByExtID(ctx context.Context, extID string) (bool, error)
 	// MostPopularPlan возвращает (months, totalPaidAcrossAllPlans).
 	// months = 0, если оплаченных платежей нет вообще.
@@ -420,6 +422,26 @@ func (b *base) HasPaidPayment(ctx context.Context, telegramID int64) (bool, erro
 		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2),
 		telegramID, model.PaymentPaid).Scan(&n)
 	return n > 0, err
+}
+
+func (b *base) PaidPayments(ctx context.Context) ([]model.Payment, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments "+
+			"WHERE status = "+b.ph(1)+" ORDER BY created_at DESC",
+		model.PaymentPaid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Payment
+	for rows.Next() {
+		var p model.Payment
+		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 func (b *base) PaymentByExtID(ctx context.Context, extID string) (bool, error) {

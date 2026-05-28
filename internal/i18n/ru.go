@@ -217,6 +217,7 @@ var ru = map[string]string{
 	"admin.stars_title":     "⭐ <b>Telegram Stars</b>\n\nЧто это: внутренняя валюта Telegram (XTR), оплата прямо в Telegram, без KYC и внешних мерчантов. Подходит для глобальной аудитории и быстрых платежей; деньги Telegram переводит автору бота. Цена задаётся в звёздах за каждый тариф (1⭐ ≈ ~$0.013).\n\nСтатус: %s\nЦены: %s",
 	"admin.stars_ask_price": "Введите цену в звёздах для %d мес (целое число):",
 	"payments.title":        "📒 <b>Лог оплат</b>\nВсего: %d · страница %d/%d\n\nдата · способ · юзер · срок · сумма · статус:",
+	"payments.totals":       "👥 Платящих: %d · 💰 Оплачено: %s",
 	"payments.empty":        "📒 Оплат пока нет.",
 	"payments.line":         "%s · %s · <code>%d</code> · %dм · %s · %s",
 	"payments.st_paid":      "оплачено ✅",
