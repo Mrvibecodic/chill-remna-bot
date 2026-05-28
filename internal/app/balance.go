@@ -74,6 +74,7 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 			caption += "\n" + i18n.T(lang, "balance.max_months", best)
 		}
 	}
+	caption += "\n\n" + i18n.T(lang, "balance.autopay_note")
 	a.sendKB(ctx, chatID, caption, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup"), btn(i18n.T(lang, "btn.buy"), "menu:buy")},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},

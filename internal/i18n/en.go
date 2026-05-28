@@ -95,6 +95,7 @@ var en = map[string]string{
 	"balance.col_lasts":      "Lasts",
 	"balance.mo":             "mo",
 	"balance.max_months":     "✅ Up to ~%d mo (the longest plan that fits the balance).",
+	"balance.autopay_note":   "💳 If you have funds on the balance, subscription payment is taken from it automatically (the «Pay from balance» button appears on the payment screen).",
 	"balance.not_enough":     "💼 Not enough balance: need %s ₽, have %s ₽.",
 	"balance.pay_fail":       "❌ Could not issue subscription: %s. Funds returned to balance.",
 	"topup.title":            "💼 <b>Top up balance</b>\n\nCurrent balance: <b>%s ₽</b>\n\nChoose an amount:",
