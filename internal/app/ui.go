@@ -157,6 +157,9 @@ func (a *App) navRow(ctx context.Context, chatID int64, isAdmin bool) []models.I
 	}
 	if a.userHasSub(ctx, chatID) {
 		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
+		if a.renewEligible(ctx, chatID) {
+			row = append(row, btn(i18n.T(lang, "btn.renew"), "menu:renew"))
+		}
 	} else {
 		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
 		if a.trialAvailable(ctx, chatID) {
@@ -164,6 +167,30 @@ func (a *App) navRow(ctx context.Context, chatID int64, isAdmin bool) []models.I
 		}
 	}
 	return row
+}
+
+// renewEligible — показывать ли кнопку «Продлить»: на триале (всегда, само
+// продление на платный гейтится днём окончания) или до конца платной подписки
+// осталось <= 7 дней.
+func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
+	if a.store == nil {
+		return false
+	}
+	u, _ := a.store.GetUser(ctx, chatID)
+	if u == nil {
+		return false
+	}
+	if u.NotifyKind == "trial" {
+		return true
+	}
+	if u.SubExpireAt == "" {
+		return false
+	}
+	exp, err := time.Parse(time.RFC3339, u.SubExpireAt)
+	if err != nil {
+		return false
+	}
+	return daysUntil(exp, time.Now().UTC()) <= 7
 }
 
 // contactRows возвращает дополнительный ряд для пользователя со ссылками
@@ -437,6 +464,8 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	name := displayName(firstName, username)
 	switch val {
 	case "buy":
+		a.showPlans(ctx, chatID)
+	case "renew":
 		a.showPlans(ctx, chatID)
 	case "mysubs":
 		a.showMySubs(ctx, chatID)

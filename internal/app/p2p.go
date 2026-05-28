@@ -39,6 +39,17 @@ func (a *App) p2pConfig() model.P2PConfig {
 
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
+	// Триал → платный можно оформить только в день окончания триала, иначе
+	// наращивание срока подарило бы юзеру остаток триала поверх платных дней.
+	if a.store != nil {
+		if u, _ := a.store.GetUser(ctx, chatID); u != nil && u.NotifyKind == "trial" && u.SubExpireAt != "" {
+			if exp, err := time.Parse(time.RFC3339, u.SubExpireAt); err == nil && daysUntil(exp, time.Now().UTC()) > 1 {
+				a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(u.SubExpireAt, lang)),
+					[][]models.InlineKeyboardButton{homeRow(lang)})
+				return
+			}
+		}
+	}
 	// Перед первой покупкой — пользовательское соглашение (если настроено).
 	if text, need := a.termsRequired(ctx, chatID); need {
 		a.askTerms(ctx, chatID, text)
@@ -51,7 +62,7 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		if price == "" {
 			continue
 		}
-		label := i18n.T(lang, "buy.plan_btn", mo, price+curSuffix(pr.Currency))
+		label := i18n.T(lang, "buy.plan_btn", mo, price+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "buy:"+strconv.Itoa(mo))})
 	}
 	if len(rows) == 0 {
@@ -193,10 +204,7 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	}
 	card := p2p.Cards[idx]
 	price := pr.Fiat(model.PayMethodP2P, months)
-	cur := pr.Currency
-	if a.botCfg.P2P.Currency != "" {
-		cur = a.botCfg.P2P.Currency
-	}
+	cur := curRUB
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 
@@ -287,18 +295,11 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if squad == "" {
 		squad = i18n.T(lang, "admin.none")
 	}
-	cur := p2p.Currency
-	if cur == "" {
-		cur = a.pricing().Currency
-	}
-	if cur == "" {
-		cur = i18n.T(lang, "admin.none")
-	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, cur, a.formatFiatPrices(model.PayMethodP2P), squad)
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
-		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick"), btn(i18n.T(lang, "pricing.btn_cur"), "adm:cur")},
+		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -774,26 +775,13 @@ func curSuffix(cur string) string {
 	return " " + cur
 }
 
-// curFor — валюта отображения для метода оплаты. У P2P и ЮKassa может быть своя
-// (botCfg.P2P.Currency / YooKassa.Currency); если не задана — общая Pricing.Currency.
-func (a *App) curFor(method string) string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return ""
-	}
-	switch method {
-	case model.PayMethodP2P:
-		if a.botCfg.P2P.Currency != "" {
-			return a.botCfg.P2P.Currency
-		}
-	case model.PayMethodYooKassa:
-		if a.botCfg.YooKassa.Currency != "" {
-			return a.botCfg.YooKassa.Currency
-		}
-	}
-	return a.botCfg.Pricing.Currency
-}
+// curRUB — фиксированная валюта фиатных методов (P2P, ЮKassa) и базовых цен.
+// По требованию не настраивается: P2P/ЮKassa всегда в рублях. Stars (⭐) и
+// CryptoBot (монета Asset) показывают свою валюту отдельно.
+const curRUB = "₽"
+
+// curFor — валюта отображения метода оплаты (фиат — всегда ₽).
+func (a *App) curFor(string) string { return curRUB }
 
 func splitTrim(s, sep string) []string {
 	var out []string

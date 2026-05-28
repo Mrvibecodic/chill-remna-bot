@@ -138,18 +138,11 @@ func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {
 	if ret == "" {
 		ret = i18n.T(lang, "admin.none")
 	}
-	cur := cfg.Currency
-	if cur == "" {
-		cur = a.pricing().Currency
-	}
-	if cur == "" {
-		cur = i18n.T(lang, "admin.none")
-	}
-	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, cur, a.formatFiatPrices(model.PayMethodYooKassa))
+	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, curRUB, a.formatFiatPrices(model.PayMethodYooKassa))
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "admin.btn_toggle"), "yk:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "yk:prices")},
 		{btn(i18n.T(lang, "admin.yk_btn_shop"), "yk:shop"), btn(i18n.T(lang, "admin.yk_btn_secret"), "yk:secret")},
-		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return"), btn(i18n.T(lang, "pricing.btn_cur"), "yk:cur")},
+		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
