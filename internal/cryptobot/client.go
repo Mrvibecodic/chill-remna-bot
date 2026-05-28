@@ -86,13 +86,20 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 // CreateInvoice — выставить инвойс на сумму amount в asset (USDT/TON/BTC/...).
 // payload — наш payload, в который кладём telegram_id|months для восстановления
 // контекста при доставке вебхука / при ручной проверке статуса.
-func (c *Client) CreateInvoice(ctx context.Context, asset, amount string, telegramID int64, months int) (*Invoice, error) {
+func (c *Client) CreateInvoice(ctx context.Context, amountRUB, acceptedAssets string, telegramID int64, months int) (*Invoice, error) {
+	if acceptedAssets == "" {
+		acceptedAssets = "USDT"
+	}
+	// Фиатный инвойс (как RW Shop): цена фиксирована в рублях, пользователь
+	// платит криптой (accepted_assets) по живому курсу CryptoPay.
 	body := map[string]any{
-		"asset":       asset,
-		"amount":      amount,
-		"description": fmt.Sprintf("VPN subscription %d mo", months),
-		"payload":     fmt.Sprintf("%d:%d", telegramID, months),
-		"expires_in":  60 * 30, // 30 минут
+		"currency_type":   "fiat",
+		"fiat":            "RUB",
+		"amount":          amountRUB,
+		"accepted_assets": acceptedAssets,
+		"description":     fmt.Sprintf("VPN subscription %d mo", months),
+		"payload":         fmt.Sprintf("%d:%d", telegramID, months),
+		"expires_in":      60 * 30, // 30 минут
 	}
 	var r response[Invoice]
 	if err := c.do(ctx, http.MethodPost, "/createInvoice", body, &r); err != nil {

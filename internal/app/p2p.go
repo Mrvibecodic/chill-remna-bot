@@ -125,8 +125,8 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 	if stars.Enabled && pr.StarPrice(months) > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", pr.StarPrice(months)), "method:stars")})
 	}
-	if cb.Enabled && cb.Prices[months] != "" {
-		label := i18n.T(lang, "method.cb_btn", cb.Prices[months]+" "+cb.Asset)
+	if cb.Enabled && pr.Base[months] != "" {
+		label := i18n.T(lang, "method.cb_btn", pr.Base[months]+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
 	if len(rows) == 0 {

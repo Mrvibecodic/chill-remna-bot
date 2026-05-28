@@ -26,6 +26,15 @@ func (a *App) cbConfig() model.CryptoBotConfig {
 	return a.botCfg.CryptoBot
 }
 
+// cryptoAmount — сумма для лога/итогов: базовая цена в ₽ (крипто-оплата
+// якорится в рублях, как у RW Shop); фолбэк — фактически уплаченная крипта.
+func (a *App) cryptoAmount(months int, fallback string) string {
+	if p := a.pricing().Base[months]; p != "" {
+		return p + curSuffix(curRUB)
+	}
+	return fallback
+}
+
 func (a *App) cbClient() *cryptobot.Client {
 	cfg := a.cbConfig()
 	if !cfg.Enabled || cfg.Token == "" {
@@ -43,7 +52,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 		months = model.PlanMonths[0]
 	}
 	cfg := a.cbConfig()
-	price := cfg.Prices[months]
+	price := a.pricing().Base[months]
 	if !cfg.Enabled || price == "" {
 		a.send(ctx, chatID, i18n.T(lang, "cb.no_price"))
 		return
@@ -53,14 +62,10 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 		a.send(ctx, chatID, i18n.T(lang, "cb.not_configured"))
 		return
 	}
-	asset := cfg.Asset
-	if asset == "" {
-		asset = "USDT"
-	}
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	inv, err := client.CreateInvoice(ctx, asset, price, chatID, months)
+	inv, err := client.CreateInvoice(ctx, price, cfg.Asset, chatID, months)
 	if err != nil {
 		a.send(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
 		return
@@ -75,7 +80,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	if payURL == "" {
 		payURL = inv.BotInvoiceURL
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+" "+asset), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curRUB)), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "cb.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+strconv.FormatInt(inv.InvoiceID, 10)+":"+strconv.Itoa(months))},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -115,7 +120,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		})
 		return
 	}
-	amount := inv.Amount + " " + inv.Asset
+	amount := a.cryptoAmount(months, inv.Amount+" "+inv.Asset)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID)
 	if err != nil {
 		if err == storage.ErrDuplicateExtID {
@@ -145,8 +150,8 @@ func (a *App) showCryptoBotAdmin(ctx context.Context, chatID int64) {
 	if asset == "" {
 		asset = i18n.T(lang, "admin.none")
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "admin.cb_title", status, tok, asset, a.formatCBPrices()), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "admin.btn_toggle"), "cb:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "cb:prices")},
+	a.sendKB(ctx, chatID, i18n.T(lang, "admin.cb_title", status, tok, asset), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "admin.btn_toggle"), "cb:toggle")},
 		{btn(i18n.T(lang, "admin.cb_btn_token"), "cb:token"), btn(i18n.T(lang, "admin.cb_btn_asset"), "cb:asset")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})

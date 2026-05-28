@@ -100,7 +100,7 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 		return true, nil // 200 OK — ретраить нет смысла
 	}
 
-	amount := up.Payload.Amount + " " + up.Payload.Asset
+	amount := a.cryptoAmount(months, up.Payload.Amount+" "+up.Payload.Asset)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
