@@ -659,7 +659,7 @@ func TestUsersAdmin_BlockEnforceDelete(t *testing.T) {
 	}
 
 	// админ удаляет
-	a.handleCallback(ctx, cb(100, "usr:delc:555"))
+	a.handleCallback(ctx, cb(100, "usr:delbot:555"))
 	if u, _ := fs.GetUser(ctx, user); u != nil {
 		t.Fatal("после удаления записи быть не должно")
 	}
@@ -674,15 +674,15 @@ func TestUsersAdmin_BlockEnforceDelete(t *testing.T) {
 //
 // Здесь проверяем оба поведения на стабе панели.
 func TestUsersAdmin_DeleteDisablesInPanel(t *testing.T) {
-	var blockHits, disableHits int
+	var blockHits, deleteHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/users/by-telegram-id/"):
 			// Возвращаем «свой» аккаунт (Tag=CHILLBOT).
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"response":[{"uuid":"u-555","tag":"CHILLBOT","username":"tg_555","subscriptionUrl":"https://x/sub/y"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/actions/disable"):
-			disableHits++
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/users/"):
+			deleteHits++
 			w.WriteHeader(http.StatusOK)
 		default:
 			blockHits++
@@ -711,10 +711,10 @@ func TestUsersAdmin_DeleteDisablesInPanel(t *testing.T) {
 	if blockHits != 0 {
 		t.Fatalf("блокировка не должна обращаться к панели, hits=%d", blockHits)
 	}
-	// Удаление — должно отключить подписку «своего» аккаунта в панели.
-	a.handleCallback(ctx, cb(100, "usr:delc:555"))
-	if disableHits != 1 {
-		t.Fatalf("удаление должно дёрнуть actions/disable ровно 1 раз, hits=%d", disableHits)
+	// Удаление «из бота + панели» — должно УДАЛИТЬ свой аккаунт в панели (DELETE).
+	a.handleCallback(ctx, cb(100, "usr:delfull:555"))
+	if deleteHits != 1 {
+		t.Fatalf("delfull должен дёрнуть DELETE /api/users ровно 1 раз, hits=%d", deleteHits)
 	}
 	// Локальные user/payments/p2p должны быть очищены (fakeStore так и делает).
 	if u, _ := fs.GetUser(ctx, 555); u != nil {

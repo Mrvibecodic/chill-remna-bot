@@ -378,6 +378,33 @@ func (c *Client) DisableByTelegramID(ctx context.Context, telegramID int64) (boo
 	return true, nil
 }
 
+// DeleteByTelegramID УДАЛЯЕТ аккаунт пользователя в панели (DELETE /api/users/{uuid}).
+// СТРОГАЯ безопасность: находим аккаунт по telegramId и удаляем ТОЛЬКО его, и
+// ТОЛЬКО если он создан этим ботом (Tag==BotTag или username==tg_<id>). Чужие
+// аккаунты не трогаем. (true,nil) — удалён; (false,nil) — в панели нет; error —
+// при попытке тронуть чужой аккаунт или ошибке панели.
+func (c *Client) DeleteByTelegramID(ctx context.Context, telegramID int64) (bool, error) {
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return false, err
+	}
+	if u == nil || u.Uuid == "" {
+		return false, nil
+	}
+	if !ownedByBot(u, telegramID) {
+		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — удалять его запрещено", telegramID)
+	}
+	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+u.Uuid, nil)
+	if err != nil {
+		return false, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+		return false, classifyHTTP(resp)
+	}
+	return true, nil
+}
+
 // Subscription возвращает ссылку на подписку пользователя (по telegramId), если он есть в панели.
 func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, string, bool) {
 	u, err := c.findByTelegram(ctx, telegramID)

@@ -156,35 +156,36 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string) {
 		a.showUser(ctx, chatID, uid)
 	case "del":
 		lang := a.lang(chatID)
-		a.sendKB(ctx, chatID, i18n.T(lang, "user.card_confirm_del", arg), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "btn.del_confirm"), "usr:delc:"+arg)},
+		a.sendKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.del_with_sub"), "usr:delfull:"+arg)},
+			{btn(i18n.T(lang, "btn.del_bot_only"), "usr:delbot:"+arg)},
 			{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)},
 		})
-	case "delc":
+	case "delfull":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
-		a.adminDeleteUser(ctx, chatID, uid)
+		a.adminDeleteUser(ctx, chatID, uid, true)
+		a.showUsers(ctx, chatID, 0)
+	case "delbot":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.adminDeleteUser(ctx, chatID, uid, false)
 		a.showUsers(ctx, chatID, 0)
 	}
 }
 
-// adminDeleteUser — каскадное удаление пользователя:
-//  1. DISABLE его подписки в Remnawave (best-effort: если панель недоступна,
-//     не блокируем удаление; чужие аккаунты — не трогаем по правилу безопасности).
-//  2. Локально вычищаем payments и p2p_requests этого telegram_id, чтобы после
-//     повторной регистрации /start показывал «Купить» (а не «Мои подписки» по
-//     старому логу).
-//  3. Удаляем саму запись users.
-//
-// Об ошибке disable админу пишем подсказкой, но удаление НЕ откатываем.
-func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64) {
+// adminDeleteUser удаляет пользователя из бота. Если deleteSub=true — дополнительно
+// УДАЛЯЕТ его (и только его) подписку в панели Remnawave (DELETE по uuid, с проверкой
+// «создан ботом»). При deleteSub=false панель не трогаем вообще.
+// Локально всегда чистим payments/p2p_requests/users этого telegram_id.
+// Ошибку удаления в панели показываем подсказкой, но удаление из бота НЕ откатываем.
+func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteSub bool) {
 	if a.store == nil {
 		return
 	}
 	a.mu.Lock()
 	panel := a.panel
 	a.mu.Unlock()
-	if panel != nil {
-		if _, err := panel.DisableByTelegramID(ctx, uid); err != nil {
+	if deleteSub && panel != nil {
+		if _, err := panel.DeleteByTelegramID(ctx, uid); err != nil {
 			a.notify(ctx, adminChat, "⚠️ "+err.Error())
 		}
 	}

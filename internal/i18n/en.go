@@ -171,14 +171,17 @@ var en = map[string]string{
 		"• 📡 API log — last 200 bot→panel requests (what/where/code/ms).\n" +
 		"• ⏳ Update — pull new image and restart.\n" +
 		"• 🔧 Reconfigure — restart DB and panel wizard.",
-	"btn.users":       "👥 Users",
-	"btn.back":        "⬅️ Back",
-	"btn.block":       "🚫 Block",
-	"btn.unblock":     "✅ Unblock",
-	"btn.delete":      "🗑 Delete from bot",
-	"btn.del_confirm": "🗑 Confirm delete",
-	"btn.prev":        "⬅️",
-	"btn.next":        "➡️",
+	"btn.users":        "👥 Users",
+	"btn.back":         "⬅️ Back",
+	"btn.block":        "🚫 Block",
+	"btn.unblock":      "✅ Unblock",
+	"btn.delete":       "🗑 Delete from bot",
+	"btn.del_confirm":  "🗑 Confirm delete",
+	"btn.del_with_sub": "🗑 Bot + panel subscription",
+	"btn.del_bot_only": "🤖 Bot only",
+	"user.del_ask":     "🗑 <b>Delete user</b>\n\nUser <code>%s</code> will be removed from the bot.\n\nAlso delete THEIR subscription in the Remnawave panel? Only their account is deleted — nothing else is affected.",
+	"btn.prev":         "⬅️",
+	"btn.next":         "➡️",
 
 	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
 		"People registered in the bot. Block and delete affect the bot ONLY and do NOT touch " +
