@@ -272,6 +272,13 @@ func (s *fakeStore) SetTermsAccepted(_ context.Context, telegramID int64, ts str
 	}
 	return nil
 }
+
+func (s *fakeStore) SetTrialUsed(_ context.Context, telegramID int64, ts string) error {
+	if u, ok := s.users[telegramID]; ok {
+		u.TrialUsedAt = ts
+	}
+	return nil
+}
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}

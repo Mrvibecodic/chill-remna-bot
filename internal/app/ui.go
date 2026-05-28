@@ -140,6 +140,9 @@ func (a *App) navRow(ctx context.Context, chatID int64, isAdmin bool) []models.I
 		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
 	} else {
 		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
+		if a.trialAvailable(ctx, chatID) {
+			row = append(row, btn(i18n.T(lang, "btn.trial_user"), "menu:trial"))
+		}
 	}
 	return row
 }
@@ -238,6 +241,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.pricing"), "menu:pricing")},
 		{btn(i18n.T(lang, "subsetup.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "subsetup.btn_devices"), "prc:devices")},
 		{btn(i18n.T(lang, "subsetup.btn_strategy"), "prc:strategy"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
+		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars"), btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa")},
 		homeRow(lang),
 	})
@@ -379,6 +383,12 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "squads":
 		if isAdmin {
 			a.showSquads(ctx, chatID)
+		}
+	case "trial":
+		if isAdmin {
+			a.showTrialAdmin(ctx, chatID)
+		} else {
+			a.activateTrial(ctx, chatID)
 		}
 	case "contacts":
 		if isAdmin {

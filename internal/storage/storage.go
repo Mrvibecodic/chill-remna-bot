@@ -43,6 +43,8 @@ type Storage interface {
 	// SetTermsAccepted сохраняет факт принятия пользовательского соглашения
 	// (ts — ISO-время; пустая строка очищает флаг, если нужно перепринять).
 	SetTermsAccepted(ctx context.Context, telegramID int64, ts string) error
+	// SetTrialUsed — отметить, что юзер активировал триал (ISO-время).
+	SetTrialUsed(ctx context.Context, telegramID int64, ts string) error
 
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
@@ -183,17 +185,17 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	var created, username, firstName string
 	// terms_accepted_at: в PG это TIMESTAMPTZ NULL, в SQLite — TEXT с дефолтом
 	// "". Через sql.NullString корректно ловим оба случая (NULL и пусто).
-	var terms sql.NullString
+	var terms, trial sql.NullString
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -263,6 +265,16 @@ func (b *base) SetTermsAccepted(ctx context.Context, telegramID int64, ts string
 	}
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE users SET terms_accepted_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
+		ts, telegramID)
+	return err
+}
+
+func (b *base) SetTrialUsed(ctx context.Context, telegramID int64, ts string) error {
+	if ts == "" {
+		return nil
+	}
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET trial_used_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		ts, telegramID)
 	return err
 }

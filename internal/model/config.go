@@ -67,6 +67,25 @@ type BotConfig struct {
 	// Plan — общие параметры подписки, применяются ко всем создаваемым ботом
 	// юзерам Remnawave (internal squads — мульти, external — одиночный).
 	Plan SubscriptionPlan `json:"plan"`
+	// Trial — настройки бесплатного триала (отдельно от платных тарифов).
+	// Если Enabled, новый пользователь видит на главной кнопку «🎁 Триал» —
+	// доступную один раз (users.trial_used_at).
+	Trial TrialConfig `json:"trial"`
+}
+
+// TrialConfig — параметры триала, выдаваемого без оплаты.
+//   - Days: срок в днях (1..30). 0/нет = «не задан», кнопка не показывается.
+//   - TrafficGB: лимит трафика на триал (0 = безлимит).
+//   - DeviceLimit: HWID-override для триала (0 = дефолт панели).
+//   - InternalSquads / ExternalSquadUUID: куда положить триальную подписку
+//     (может отличаться от платных — например, отдельные ноды).
+type TrialConfig struct {
+	Enabled           bool     `json:"enabled"`
+	Days              int      `json:"days"`
+	TrafficGB         int      `json:"traffic_gb"`
+	DeviceLimit       int      `json:"device_limit"`
+	InternalSquads    []string `json:"internal_squads"`
+	ExternalSquadUUID string   `json:"external_squad_uuid"`
 }
 
 // SubscriptionPlan — то, что бот передаёт в панель при создании/продлении.
@@ -174,6 +193,7 @@ type User struct {
 	Blocked         bool
 	CreatedAt       string
 	TermsAcceptedAt string // ISO-время принятия пользовательского соглашения; пусто = не принимал
+	TrialUsedAt     string // ISO-время активации триала; пусто = ещё не использовал
 }
 
 // P2PRequest — заявка на оплату через P2P (ручная модерация).

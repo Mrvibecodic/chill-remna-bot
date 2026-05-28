@@ -48,18 +48,46 @@ func (a *App) formatTrafficLimits() string {
 	return strings.Join(parts, " ")
 }
 
-// showPricing — ТОЛЬКО базовый прайс и валюта (трафик/устройства/стратегия
-// вынесены в «Настройки подписки», доступ к ним идёт оттуда).
+// showPricing — базовый прайс, валюта и сводка по тарифам (per-month
+// цена + трафик), плюс кнопка «🪄 Быстрая настройка тарифа» — пошаговый
+// помощник, проставляющий цену и трафик за один проход.
 func (a *App) showPricing(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	cur := a.pricing().Currency
+	pr := a.pricing()
+	cur := pr.Currency
 	if cur == "" {
 		cur = i18n.T(lang, "admin.none")
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.title", a.formatBasePrices(), cur), [][]models.InlineKeyboardButton{
+	table := a.formatPlansTable(lang)
+	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.title", cur, table), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "pricing.btn_quick"), "prc:quick")},
 		{btn(i18n.T(lang, "pricing.btn_base"), "prc:base"), btn(i18n.T(lang, "pricing.btn_cur"), "prc:cur")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
+}
+
+// formatPlansTable — фикс-ширина <pre>-таблицы: «Months | Price | Traffic».
+func (a *App) formatPlansTable(lang string) string {
+	pr := a.pricing()
+	var sb strings.Builder
+	sb.WriteString("<pre>")
+	sb.WriteString(padRight("Plan", 6) + "  " + padRight("Price", 12) + "  Traffic\n")
+	sb.WriteString(strings.Repeat("─", 32) + "\n")
+	for _, mo := range model.PlanMonths {
+		price := pr.Base[mo]
+		if price == "" {
+			price = "—"
+		} else {
+			price += curSuffix(pr.Currency)
+		}
+		traffic := i18n.T(lang, "trial.unlimited")
+		if gb := pr.Traffic[mo]; gb > 0 {
+			traffic = strconv.Itoa(gb) + " GB"
+		}
+		sb.WriteString(padRight(strconv.Itoa(mo)+"m", 6) + "  " + padRight(price, 12) + "  " + traffic + "\n")
+	}
+	sb.WriteString("</pre>")
+	return sb.String()
 }
 
 func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
@@ -77,6 +105,14 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 	case "cur":
 		a.getUI(chatID).adminInput = "currency"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_currency"), "menu:pricing")
+	case "quick":
+		a.startPlanQuick(ctx, chatID)
+	case "qmo":
+		mo, _ := strconv.Atoi(arg)
+		ui := a.getUI(chatID)
+		ui.adminInput = "plan_q_price"
+		ui.priceMonths = mo
+		a.askInput(ctx, chatID, i18n.T(lang, "pricing.q_price", mo), "menu:pricing")
 	case "traffic":
 		// «prc:traffic» → выбор месяца → «prc:trafmo:<mo>».
 		var row []models.InlineKeyboardButton
@@ -156,4 +192,18 @@ func (a *App) setDeviceLimitGlobal(n int) {
 		n = 0
 	}
 	a.botCfg.Pricing.DeviceLimit = n
+}
+
+// startPlanQuick — быстрая настройка одного тарифа (последовательно
+// спрашиваем месяц → цену → трафик; результат сразу применяется).
+func (a *App) startPlanQuick(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	var row []models.InlineKeyboardButton
+	for _, mo := range model.PlanMonths {
+		row = append(row, btn(strconv.Itoa(mo)+"м", "prc:qmo:"+strconv.Itoa(mo)))
+	}
+	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.q_month"), [][]models.InlineKeyboardButton{
+		row,
+		{btn(i18n.T(lang, "btn.back"), "menu:pricing"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+	})
 }

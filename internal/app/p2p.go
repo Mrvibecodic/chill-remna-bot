@@ -563,6 +563,65 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setDeviceLimitGlobal(n)
 		_ = a.saveBotConfig(ctx)
 		a.showPricing(ctx, chatID)
+	case "trial_days":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialDays(n)
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "trial_gb":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialGB(n)
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "trial_hwid":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialHWID(n)
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "trial_q_days":
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialDays(n)
+		ui.adminInput = "trial_q_gb"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "trial.q_gb"), "menu:trial")
+	case "trial_q_gb":
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialGB(n)
+		ui.adminInput = "trial_q_hwid"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "trial.q_hwid"), "menu:trial")
+	case "plan_q_price":
+		mo := ui.priceMonths
+		a.setBasePrice(mo, strings.TrimSpace(text))
+		ui.adminInput = "plan_q_traffic"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "pricing.q_traffic", mo), "menu:pricing")
+	case "plan_q_traffic":
+		mo := ui.priceMonths
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.mu.Lock()
+		if a.botCfg != nil {
+			if a.botCfg.Pricing.Traffic == nil {
+				a.botCfg.Pricing.Traffic = map[int]int{}
+			}
+			a.botCfg.Pricing.Traffic[mo] = n
+		}
+		a.mu.Unlock()
+		ui.adminInput = ""
+		ui.priceMonths = 0
+		_ = a.saveBotConfig(ctx)
+		a.showPricing(ctx, chatID)
+	case "trial_q_hwid":
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialHWID(n)
+		ui.adminInput = ""
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Trial.Enabled = true
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
 	}
 }
 

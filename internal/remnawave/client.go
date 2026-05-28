@@ -231,6 +231,39 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
+// CreateOrUpdateUserDays — то же что CreateOrUpdateUser, но срок задаётся
+// в днях, а не месяцах (для триала с произвольной длительностью).
+func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, days int, limits UserLimits) (string, error) {
+	existing, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return "", err
+	}
+	base := time.Now().UTC()
+	if existing != nil && existing.ExpireAt != "" {
+		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
+			base = t
+		}
+	}
+	expire := base.AddDate(0, 0, days).Format(time.RFC3339)
+
+	if existing != nil && existing.Uuid != "" {
+		if !ownedByBot(existing, telegramID) {
+			return "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
+		}
+		patch := map[string]any{"uuid": existing.Uuid, "expireAt": expire}
+		applyLimits(patch, limits)
+		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
+	}
+	body := map[string]any{
+		"username":   fmt.Sprintf("tg_%d", telegramID),
+		"telegramId": telegramID,
+		"expireAt":   expire,
+		"tag":        BotTag,
+	}
+	applyLimits(body, limits)
+	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+}
+
 // applyLimits добавляет поля лимитов в body запроса (нули/пусто — пропускаем,
 // чтобы не перезаписать дефолты панели нулями).
 func applyLimits(body map[string]any, l UserLimits) {

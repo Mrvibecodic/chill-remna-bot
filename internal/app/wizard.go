@@ -127,6 +127,11 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onContacts(ctx, chatID, val)
 		}
+	case "trial":
+		// admin sub-actions go to admin handler; user just clicks "menu:trial"
+		if isAdmin {
+			a.onTrialAdmin(ctx, chatID, val)
+		}
 	case "sqd":
 		if isAdmin {
 			a.onSquads(ctx, chatID, val)

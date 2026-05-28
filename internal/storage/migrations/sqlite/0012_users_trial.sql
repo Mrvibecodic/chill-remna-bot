@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN trial_used_at TEXT NOT NULL DEFAULT ''
