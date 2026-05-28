@@ -23,6 +23,9 @@ type uiState struct {
 	welcomeAwait       string // для главного баннера: "img"|"txt"
 	awaitSectionBanner string // ждём фото для раздела (ключ assets.Section*)
 	awaitEmojiFor      string // ожидаем premium-эмодзи для этой стандартной
+	// inputBack — callback родителя (например, "menu:pay" или "prc:base"),
+	// чтобы кнопка «◀️ Отмена» на ask-форме могла вернуть админа точно туда.
+	inputBack string
 
 	// --- id сообщений для cleanup ---
 	// «Скриншот получен…» и сам скриншот — удаляются у юзера после решения

@@ -313,10 +313,10 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.showP2PAdmin(ctx, chatID)
 	case "cards":
 		a.getUI(chatID).adminInput = "cards"
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_cards"))
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_cards"), "menu:p2p")
 	case "squad":
 		a.getUI(chatID).adminInput = "squad"
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_squad"))
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_squad"), "menu:p2p")
 	case "prices":
 		a.adminAskPriceMonth(ctx, chatID)
 	case "price":
@@ -324,7 +324,7 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		ui := a.getUI(chatID)
 		ui.adminInput = "price"
 		ui.priceMonths = mo
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_price", mo))
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_price", mo), "menu:p2p")
 	case "uok":
 		a.adminApproveUser(ctx, chatID, arg, true)
 	case "uno":

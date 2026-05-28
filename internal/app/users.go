@@ -415,7 +415,7 @@ func (a *App) onSquad(ctx context.Context, chatID int64, val string) {
 		a.showSquadPicker(ctx, chatID)
 	case "manual":
 		a.getUI(chatID).adminInput = "squad"
-		a.send(ctx, chatID, i18n.T(lang, "admin.ask_squad"))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_squad"), "menu:users")
 	case "set":
 		v := arg
 		if v == "-" {

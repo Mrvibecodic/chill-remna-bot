@@ -158,13 +158,13 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 		a.showYooKassaAdmin(ctx, chatID)
 	case "shop":
 		a.getUI(chatID).adminInput = "yk_shop"
-		a.send(ctx, chatID, i18n.T(lang, "admin.yk_ask_shop"))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_shop"), "menu:yookassa")
 	case "secret":
 		a.getUI(chatID).adminInput = "yk_secret"
-		a.send(ctx, chatID, i18n.T(lang, "admin.yk_ask_secret"))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_secret"), "menu:yookassa")
 	case "return":
 		a.getUI(chatID).adminInput = "yk_return"
-		a.send(ctx, chatID, i18n.T(lang, "admin.yk_ask_return"))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_return"), "menu:yookassa")
 	case "prices":
 		a.askPriceMonth(ctx, chatID, "yk")
 	case "price":
@@ -172,6 +172,6 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "ykprice"
 		ui.priceMonths = mo
-		a.send(ctx, chatID, i18n.T(lang, "admin.yk_ask_price", mo))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_price", mo), "menu:yookassa")
 	}
 }

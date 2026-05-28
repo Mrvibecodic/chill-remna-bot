@@ -134,6 +134,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case "terms":
 		// «Принимаю/Отказаться» соглашения — может нажать обычный пользователь.
 		a.onTerms(ctx, chatID, val, cq.From.FirstName, cq.From.Username)
+	case "inp":
+		if isAdmin && val == "cancel" {
+			a.cancelInput(ctx, chatID, isAdmin, cq.From.FirstName, cq.From.Username)
+		}
 	case "x":
 		// Управление notify-сообщением: «На главную» удаляет уведомление и
 		// открывает главный экран (привычная навигация). «close» — legacy,

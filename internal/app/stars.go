@@ -102,7 +102,7 @@ func (a *App) onStars(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "starprice"
 		ui.priceMonths = mo
-		a.send(ctx, chatID, i18n.T(a.lang(chatID), "admin.stars_ask_price", mo))
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.stars_ask_price", mo), "menu:stars")
 	}
 }
 

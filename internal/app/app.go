@@ -557,6 +557,50 @@ func btn(text, data string) models.InlineKeyboardButton {
 	return models.InlineKeyboardButton{Text: text, CallbackData: data}
 }
 
+// askInput — отправляет вопрос админу и добавляет кнопку «◀️ Отмена»
+// (callback inp:cancel). back — куда вернуться при отмене (например,
+// "menu:pay" / "prc:base"). Пусто = вернуться на главную.
+func (a *App) askInput(ctx context.Context, chatID int64, text, back string) {
+	a.getUI(chatID).inputBack = back
+	lang := a.lang(chatID)
+	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.cancel"), "inp:cancel")},
+	})
+}
+
+// cancelInput — обработчик «◀️ Отмена» на ask-форме. Сбрасывает все ожидания
+// ввода и эмулирует переход на запомненный родительский callback.
+func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname, uname string) {
+	ui := a.getUI(chatID)
+	back := ui.inputBack
+	ui.adminInput = ""
+	ui.priceMonths = 0
+	ui.inputBack = ""
+	if back == "" {
+		a.enterHome(ctx, chatID, isAdmin, fname, uname)
+		return
+	}
+	key, val, _ := strings.Cut(back, ":")
+	switch key {
+	case "menu":
+		a.onMenu(ctx, chatID, val, isAdmin, fname, uname)
+	case "prc":
+		a.onPricing(ctx, chatID, val)
+	case "yk":
+		a.onYKAdmin(ctx, chatID, val)
+	case "star":
+		a.onStars(ctx, chatID, val)
+	case "adm":
+		a.onAdmin(ctx, chatID, val, 0)
+	case "ctc":
+		a.onContacts(ctx, chatID, val)
+	case "subd":
+		a.onSubdomain(ctx, chatID, val)
+	default:
+		a.enterHome(ctx, chatID, isAdmin, fname, uname)
+	}
+}
+
 // enterHome показывает домашний экран: админу — меню, новому юзеру — регистрацию.
 func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstName, username string) {
 	name := displayName(firstName, username)

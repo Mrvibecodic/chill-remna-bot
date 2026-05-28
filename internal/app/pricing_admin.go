@@ -48,26 +48,17 @@ func (a *App) formatTrafficLimits() string {
 	return strings.Join(parts, " ")
 }
 
-// showPricing — единый прайс + per-tariff трафик + общий HWID-override + стратегия.
+// showPricing — ТОЛЬКО базовый прайс и валюта (трафик/устройства/стратегия
+// вынесены в «Настройки подписки», доступ к ним идёт оттуда).
 func (a *App) showPricing(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	pr := a.pricing()
-	cur := pr.Currency
+	cur := a.pricing().Currency
 	if cur == "" {
 		cur = i18n.T(lang, "admin.none")
 	}
-	hwid := strconv.Itoa(pr.DeviceLimit)
-	if pr.DeviceLimit == 0 {
-		hwid = i18n.T(lang, "pricing.hwid_default")
-	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.title",
-		a.formatBasePrices(), cur,
-		a.formatTrafficLimits(), hwid, pr.ResetStrategy(),
-	), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.title", a.formatBasePrices(), cur), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "pricing.btn_base"), "prc:base"), btn(i18n.T(lang, "pricing.btn_cur"), "prc:cur")},
-		{btn(i18n.T(lang, "pricing.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "pricing.btn_devices"), "prc:devices")},
-		{btn(i18n.T(lang, "pricing.btn_strategy"), "prc:strategy")},
-		homeRow(lang),
+		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 
@@ -82,10 +73,10 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "baseprice"
 		ui.priceMonths = mo
-		a.send(ctx, chatID, i18n.T(lang, "admin.ask_base_price", mo))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_base_price", mo), "menu:pricing")
 	case "cur":
 		a.getUI(chatID).adminInput = "currency"
-		a.send(ctx, chatID, i18n.T(lang, "admin.ask_currency"))
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_currency"), "menu:pricing")
 	case "traffic":
 		// «prc:traffic» → выбор месяца → «prc:trafmo:<mo>».
 		var row []models.InlineKeyboardButton
@@ -98,7 +89,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "traffic_gb"
 		ui.priceMonths = mo
-		a.send(ctx, chatID, i18n.T(lang, "pricing.ask_traffic_gb", mo))
+		a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_traffic_gb", mo), "menu:pricing")
 	case "devices":
 		// 3 кнопки: 1 / 3 устройства / свой лимит. Применяется override per-user
 		// в Remnawave (hwidDeviceLimit) для всех создаваемых ботом подписок.
@@ -113,7 +104,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 			ui := a.getUI(chatID)
 			ui.adminInput = "device_limit"
 			ui.priceMonths = 0
-			a.send(ctx, chatID, i18n.T(lang, "pricing.ask_devices_custom"))
+			a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_devices_custom"), "menu:pricing")
 			return
 		}
 		n, _ := strconv.Atoi(arg)

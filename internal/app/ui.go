@@ -194,11 +194,51 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 	})
 }
 
+// showPay — теперь это «Настройки подписки»: статусы платёжек живые
+// (✅/❌ по фактическим Enabled), все настройки подписки в одном экране
+// (цены, трафик, устройства, стратегия сброса, сквады). Имя функции
+// оставлено для совместимости с onMenu (menu:pay).
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "menu.pay_title"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
-		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.pricing"), "menu:pricing")},
+	a.mu.Lock()
+	p2pOn, starsOn, ykOn := false, false, false
+	internalN, externalSet := 0, ""
+	hwid := 0
+	strat := "MONTH"
+	if a.botCfg != nil {
+		p2pOn = a.botCfg.P2P.Enabled
+		starsOn = a.botCfg.Stars.Enabled
+		ykOn = a.botCfg.YooKassa.Enabled
+		internalN = len(a.botCfg.Plan.ActiveInternalSquads)
+		externalSet = a.botCfg.Plan.ExternalSquadUUID
+		hwid = a.botCfg.Pricing.DeviceLimit
+		strat = a.botCfg.Pricing.ResetStrategy()
+	}
+	a.mu.Unlock()
+	mark := func(on bool) string {
+		if on {
+			return "✅"
+		}
+		return "❌"
+	}
+	hwidStr := i18n.T(lang, "pricing.hwid_default")
+	if hwid > 0 {
+		hwidStr = strconv.Itoa(hwid)
+	}
+	extStr := i18n.T(lang, "admin.none")
+	if externalSet != "" {
+		extStr = i18n.T(lang, "subsetup.ext_set")
+	}
+	title := i18n.T(lang, "subsetup.title",
+		mark(p2pOn), mark(starsOn), mark(ykOn),
+		a.formatTrafficLimits(), hwidStr, strat,
+		internalN, extStr,
+	)
+	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.pricing"), "menu:pricing")},
+		{btn(i18n.T(lang, "subsetup.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "subsetup.btn_devices"), "prc:devices")},
+		{btn(i18n.T(lang, "subsetup.btn_strategy"), "prc:strategy"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
+		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars"), btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa")},
 		homeRow(lang),
 	})
 }
@@ -209,7 +249,6 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.users"), "menu:users"), btn(i18n.T(lang, "btn.payments"), "menu:payments")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
 		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
-		{btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
