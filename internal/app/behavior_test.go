@@ -808,6 +808,7 @@ func TestNavRow(t *testing.T) {
 	}
 	// после «покупки» (в панели появилась подписка) -> Главная + Мои подписки
 	hasSub = true
+	a.invalidateSubCache(user)
 	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:mysubs|" {
 		t.Fatalf("юзер с подпиской: %s", btnData(row))
 	}

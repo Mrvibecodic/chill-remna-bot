@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -85,15 +86,46 @@ func userLabel(u *model.User) string {
 //
 // Если панель недоступна (a.panel == nil), для надёжности возвращаем false
 // — пусть пользователь увидит «Купить», а не «Мои подписки», ведущие в никуда.
+const subCacheTTL = 30 // секунд
+
 func (a *App) userHasSub(ctx context.Context, chatID int64) bool {
+	// 1) Быстрый путь — кэш живой.
+	a.subMu.Lock()
+	if a.subCache != nil {
+		if e, ok := a.subCache[chatID]; ok && time.Now().Before(e.expireAt) {
+			a.subMu.Unlock()
+			return e.has
+		}
+	}
+	a.subMu.Unlock()
+
+	// 2) Запрос в панель (источник правды).
 	a.mu.Lock()
 	panel := a.panel
 	a.mu.Unlock()
 	if panel == nil {
 		return false
 	}
-	_, ok := panel.Subscription(ctx, chatID)
-	return ok
+	_, has := panel.Subscription(ctx, chatID)
+
+	// 3) Кладём в кэш на 30 секунд.
+	a.subMu.Lock()
+	if a.subCache == nil {
+		a.subCache = map[int64]subCacheEntry{}
+	}
+	a.subCache[chatID] = subCacheEntry{has: has, expireAt: time.Now().Add(subCacheTTL * time.Second)}
+	a.subMu.Unlock()
+	return has
+}
+
+// invalidateSubCache — сброс кэша подписки для chatID (после покупки/удаления),
+// чтобы следующий рендер сразу увидел актуальное состояние, не дожидаясь TTL.
+func (a *App) invalidateSubCache(chatID int64) {
+	a.subMu.Lock()
+	defer a.subMu.Unlock()
+	if a.subCache != nil {
+		delete(a.subCache, chatID)
+	}
 }
 
 // navRow — нижний ряд инлайн-навигации: админу только «Главная»; пользователю

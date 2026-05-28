@@ -9,6 +9,37 @@ type Pricing struct {
 	P2P      map[int]string `json:"p2p"`      // переопределение для P2P
 	YooKassa map[int]string `json:"yookassa"` // переопределение для ЮKassa
 	Stars    map[int]int    `json:"stars"`    // цены в звёздах
+
+	// Per-tariff лимиты, передаются в Remnawave при создании/продлении юзера.
+	// 0 = безлимит / использовать дефолт панели. RW Shop этого не делает —
+	// у нас каждый тариф может иметь свой объём трафика и свой лимит устройств.
+	Traffic map[int]int `json:"traffic"` // месяцы -> GB трафика (0 = безлимит)
+	Devices map[int]int `json:"devices"` // месяцы -> макс. число HWID-устройств (0 = дефолт панели)
+
+	// TrafficStrategy — стратегия сброса трафика, общая для всех тарифов.
+	// Допустимые значения: "NO_RESET" | "DAY" | "WEEK" | "MONTH". Пусто = MONTH.
+	TrafficStrategy string `json:"traffic_strategy"`
+}
+
+// TrafficBytes возвращает лимит трафика в байтах для тарифа (0 = безлимит).
+func (p Pricing) TrafficBytes(months int) int64 {
+	gb := int64(p.Traffic[months])
+	if gb <= 0 {
+		return 0
+	}
+	return gb * 1024 * 1024 * 1024
+}
+
+// DeviceLimit возвращает лимит устройств для тарифа (0 = не выставлять, дефолт панели).
+func (p Pricing) DeviceLimit(months int) int { return p.Devices[months] }
+
+// ResetStrategy возвращает безопасное значение для API (MONTH по умолчанию).
+func (p Pricing) ResetStrategy() string {
+	switch p.TrafficStrategy {
+	case "NO_RESET", "DAY", "WEEK", "MONTH":
+		return p.TrafficStrategy
+	}
+	return "MONTH"
 }
 
 // Fiat возвращает денежную цену тарифа для метода: сначала переопределение
@@ -63,5 +94,14 @@ func (c *BotConfig) NormalizePricing() {
 	}
 	if p.P2P == nil {
 		p.P2P = map[int]string{}
+	}
+	if p.Traffic == nil {
+		p.Traffic = map[int]int{}
+	}
+	if p.Devices == nil {
+		p.Devices = map[int]int{}
+	}
+	if p.TrafficStrategy == "" {
+		p.TrafficStrategy = "MONTH"
 	}
 }

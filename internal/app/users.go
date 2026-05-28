@@ -188,6 +188,7 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64) {
 			a.notify(ctx, adminChat, "⚠️ "+err.Error())
 		}
 	}
+	a.invalidateSubCache(uid)
 	_ = a.store.DeletePaymentsByUser(ctx, uid)
 	_ = a.store.DeleteP2PRequestsByUser(ctx, uid)
 	_ = a.store.DeleteUser(ctx, uid)

@@ -131,8 +131,14 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		// «Принимаю/Отказаться» соглашения — может нажать обычный пользователь.
 		a.onTerms(ctx, chatID, val, cq.From.FirstName, cq.From.Username)
 	case "x":
-		// Кнопки управления самим сообщением: «Закрыть» удаляет это уведомление.
-		if val == "close" {
+		// Управление notify-сообщением: «На главную» удаляет уведомление и
+		// открывает главный экран (привычная навигация). «close» — legacy,
+		// просто удаляет (используется редко, если где-то ещё прицеплен).
+		switch val {
+		case "home":
+			a.msg.Delete(ctx, chatID, cqMsgID(cq))
+			a.enterHome(ctx, chatID, isAdmin, cq.From.FirstName, cq.From.Username)
+		case "close":
 			a.msg.Delete(ctx, chatID, cqMsgID(cq))
 		}
 	}

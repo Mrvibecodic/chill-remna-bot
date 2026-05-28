@@ -13,6 +13,7 @@ import (
 	"remnabot/internal/assets"
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func (a *App) saveBotConfig(ctx context.Context) error {
@@ -244,7 +245,7 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	lang := a.lang(chatID)
 	ui.p2pSubmitMsgID = a.msg.SendKB(ctx, chatID,
 		a.applyPremium(i18n.T(lang, "p2p.submitted")),
-		[][]models.InlineKeyboardButton{closeRow(lang)})
+		[][]models.InlineKeyboardButton{backHomeRow(lang)})
 	a.notifyAdminPayment(ctx, req, fileID)
 }
 
@@ -394,19 +395,23 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string) (string, error) {
 	a.mu.Lock()
 	panel := a.panel
-	squad := ""
+	limits := remnawave.UserLimits{}
 	if a.botCfg != nil {
-		squad = a.botCfg.P2P.SquadUUID
+		limits.Squad = a.botCfg.P2P.SquadUUID
+		limits.TrafficBytes = a.botCfg.Pricing.TrafficBytes(months)
+		limits.DeviceLimit = a.botCfg.Pricing.DeviceLimit(months)
+		limits.Strategy = a.botCfg.Pricing.ResetStrategy()
 	}
 	a.mu.Unlock()
 	if panel == nil {
 		return "", fmt.Errorf("панель не подключена")
 	}
-	link, err := panel.CreateOrUpdateUser(ctx, telegramID, months, squad)
+	link, err := panel.CreateOrUpdateUser(ctx, telegramID, months, limits)
 	if err != nil {
 		return "", err
 	}
 	link = a.rewriteSub(link)
+	a.invalidateSubCache(telegramID)
 	if a.store != nil {
 		_ = a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
@@ -536,6 +541,22 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setContact(ctx, chatID, "support", text)
 	case "ctc_terms":
 		a.setContact(ctx, chatID, "terms", text)
+	case "traffic_gb":
+		mo := ui.priceMonths
+		ui.adminInput = ""
+		ui.priceMonths = 0
+		gb, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrafficGB(mo, gb)
+		_ = a.saveBotConfig(ctx)
+		a.showPricing(ctx, chatID)
+	case "device_limit":
+		mo := ui.priceMonths
+		ui.adminInput = ""
+		ui.priceMonths = 0
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setDeviceLimit(mo, n)
+		_ = a.saveBotConfig(ctx)
+		a.showPricing(ctx, chatID)
 	}
 }
 

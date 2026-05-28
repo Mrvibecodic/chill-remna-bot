@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -74,6 +75,19 @@ type App struct {
 	scrMu  sync.Mutex
 	screen map[int64][]int
 	kbSet  map[int64]bool // у кого уже выставлена постоянная reply-клавиатура
+
+	// subCache — мини-кэш ответа panel.Subscription для navRow (см. userHasSub).
+	// userHasSub вызывается на каждый рендер главной/меню — без кэша это
+	// делало бы GET /api/users/by-telegram-id/<id> на каждый клик.
+	subMu    sync.Mutex
+	subCache map[int64]subCacheEntry
+}
+
+// subCacheEntry — ответ панели + срок жизни. TTL короткий (30s), чтобы
+// сразу после реальной покупки/удаления юзер увидел корректную кнопку.
+type subCacheEntry struct {
+	has      bool
+	expireAt time.Time
 }
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
@@ -395,7 +409,7 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	}
 	startMsgID := a.msg.SendKB(ctx, chatID,
 		a.applyPremium(i18n.T(lang, "update.starting")),
-		[][]models.InlineKeyboardButton{closeRow(lang)})
+		[][]models.InlineKeyboardButton{backHomeRow(lang)})
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)), 0o600)
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
@@ -515,26 +529,28 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 // в чате, бот всегда добавляет в конец кнопку «✕ Закрыть» (callback x:close),
 // которая удаляет это сообщение.
 func (a *App) notify(ctx context.Context, chatID int64, text string) {
-	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{closeRow(a.lang(chatID))})
+	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
 }
 
 // notifyKB как notify, но с пользовательскими кнопками выше «✕ Закрыть».
 // Кнопка закрытия добавляется автоматически последним рядом — нажатие удаляет
 // всё уведомление (и саму себя), чтобы ничего не «осиротело» в чате.
 func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), closeRow(a.lang(chatID)))
+	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), withClose)
 }
 
 func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
-	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), closeRow(a.lang(chatID)))
+	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
 	a.msg.SendPhoto(ctx, chatID, fileID, a.applyPremium(caption), withClose)
 }
 
-// closeRow — ряд с одной кнопкой «✕ Закрыть» (callback x:close). Используется
-// notify*-методами, чтобы у уведомлений всегда был способ убрать их из чата.
-func closeRow(lang string) []models.InlineKeyboardButton {
-	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.close"), "x:close")}
+// backHomeRow — ряд с одной кнопкой «◀️ На главную» (callback x:home).
+// Используется notify*-методами: клик удаляет это уведомление И возвращает
+// пользователя в главное меню (привычная навигация, а не просто «×»).
+// Если хочется только закрыть без перехода — есть x:close (наследие).
+func backHomeRow(lang string) []models.InlineKeyboardButton {
+	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back_home"), "x:home")}
 }
 
 func btn(text, data string) models.InlineKeyboardButton {

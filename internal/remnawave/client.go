@@ -183,12 +183,24 @@ func ownedByBot(u *panelUser, telegramID int64) bool {
 	return u.Tag == BotTag || u.Username == fmt.Sprintf("tg_%d", telegramID)
 }
 
+// UserLimits — параметры тарифа, передаваемые в Remnawave вместе с
+// expireAt при создании/продлении. Все поля опциональны:
+//   - TrafficBytes == 0 → лимит трафика не выставляем (или сбрасываем).
+//   - DeviceLimit == 0 → дефолт панели.
+//   - Squad == "" → не привязываем к новому скваду.
+//   - Strategy ∈ {"NO_RESET","DAY","WEEK","MONTH"}; "" не передаём.
+type UserLimits struct {
+	TrafficBytes int64
+	DeviceLimit  int
+	Squad        string
+	Strategy     string
+}
+
 // CreateOrUpdateUser создаёт юзера в панели или продлевает существующего
 // (поиск по telegramId) на months месяцев и возвращает ссылку на подписку.
-//
-// ВНИМАНИЕ: точные формы запросов/ответов панели нужно проверить на живой
-// инсталляции; при расхождении — поправить разбор.
-func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months int, squadUUID string) (string, error) {
+// При продлении лимиты ТОЖЕ применяются (например, апгрейд тарифа на 12 мес
+// с большим объёмом должен сразу поднять лимит трафика).
+func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months int, limits UserLimits) (string, error) {
 	existing, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
 		return "", err
@@ -199,10 +211,12 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 		if !ownedByBot(existing, telegramID) {
 			return "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		return c.upsertCall(ctx, http.MethodPatch, "/api/users", map[string]any{
+		patch := map[string]any{
 			"uuid":     existing.Uuid,
 			"expireAt": expire,
-		})
+		}
+		applyLimits(patch, limits)
+		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
 
 	body := map[string]any{
@@ -211,10 +225,25 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 		"expireAt":   expire,
 		"tag":        BotTag,
 	}
-	if squadUUID != "" {
-		body["activeInternalSquads"] = []string{squadUUID}
-	}
+	applyLimits(body, limits)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+}
+
+// applyLimits добавляет поля лимитов в body запроса (нули/пусто — пропускаем,
+// чтобы не перезаписать дефолты панели нулями).
+func applyLimits(body map[string]any, l UserLimits) {
+	if l.TrafficBytes > 0 {
+		body["trafficLimitBytes"] = l.TrafficBytes
+	}
+	if l.Strategy != "" {
+		body["trafficLimitStrategy"] = l.Strategy
+	}
+	if l.DeviceLimit > 0 {
+		body["hwidDeviceLimit"] = l.DeviceLimit
+	}
+	if l.Squad != "" {
+		body["activeInternalSquads"] = []string{l.Squad}
+	}
 }
 
 // Squad — внутренний сквад панели (для выбора при создании пользователей).
