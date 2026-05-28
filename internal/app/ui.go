@@ -433,7 +433,7 @@ func (a *App) showWelcomeAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, i18n.T(lang, "welcome.title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "welcome.btn_image"), "wel:img"), btn(i18n.T(lang, "welcome.btn_text"), "wel:txt")},
-		homeRow(lang),
+		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 
@@ -517,7 +517,7 @@ func (a *App) showEmojiGrid(ctx context.Context, chatID int64) {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, homeRow(lang))
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")})
 	a.sendKB(ctx, chatID, sb.String(), rows)
 }
 
