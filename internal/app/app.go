@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -30,11 +31,13 @@ type messenger interface {
 	Send(ctx context.Context, chatID int64, text string) int
 	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int
 	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
-	// SendPhotoCacheable пробует отправить картинку по cachedFileID; при
-	// ошибке (или если cachedFileID пуст) — по urlFallback. Возвращает
-	// (msgID, newFileID) — newFileID непустой, если Telegram вернул новое
-	// фото (нужно перекэшировать); пустой, если переиспользован cachedFileID.
-	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
+	// SendPhotoCacheable отправляет картинку с цепочкой источников:
+	//   1) cachedFileID (если есть) — мгновенно, без скачивания;
+	//   2) embedBytes (если есть) — встроенный в бинарь JPG (locally-shipped);
+	//   3) urlFallback — последний резерв (например, Unsplash).
+	// Возвращает (msgID, newFileID); newFileID непустой когда фото пришло
+	// НЕ из cachedFileID — его надо перекэшировать в media_cache.
+	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
 	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int
 	Delete(ctx context.Context, chatID int64, msgID int)
 	RemoveKeyboard(ctx context.Context, chatID int64)
@@ -464,8 +467,9 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		}
 	}
 	var newFileID string
+	embed := assets.Bytes(section)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, url, t, rows)
+		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, url, t, rows)
 		newFileID = nf
 		return id
 	})
@@ -657,40 +661,71 @@ func (m botMessenger) SendInvoice(ctx context.Context, chatID int64, title, desc
 	}
 }
 
-// SendPhotoCacheable — отправляет фото (по file_id, либо по URL), возвращает
-// msgID и (если фото пришло из URL) свежий file_id для кэширования.
-// Telegram отдаёт несколько вариантов размера в msg.Photo — берём самый большой.
-func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
-	data := cachedFileID
-	if data == "" {
-		data = urlFallback
-	}
-	send := func(d string) (*models.Message, error) {
+// SendPhotoCacheable — три источника по приоритету:
+//  1. cachedFileID (если есть)
+//  2. встроенный в бинарь JPG (embedBytes)
+//  3. URL (urlFallback)
+//
+// Возвращает (msgID, newFileID). newFileID непустой, если Telegram скачал
+// фото из embed/URL и вернул нам свежий file_id для кэша.
+func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+	// build пробует отправить через конкретный источник.
+	// source: "id" / "embed" / "url" — для решения, кэшировать ли file_id из ответа.
+	build := func(source string) (*models.Message, string, error) {
+		var photo models.InputFile
+		switch source {
+		case "id":
+			photo = &models.InputFileString{Data: cachedFileID}
+		case "embed":
+			photo = &models.InputFileUpload{Filename: "banner.jpg", Data: bytes.NewReader(embedBytes)}
+		case "url":
+			photo = &models.InputFileString{Data: urlFallback}
+		}
 		p := &bot.SendPhotoParams{
 			ChatID:    chatID,
-			Photo:     &models.InputFileString{Data: d},
+			Photo:     photo,
 			Caption:   caption,
 			ParseMode: models.ParseModeHTML,
 		}
 		if len(rows) > 0 {
 			p.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 		}
-		return m.b.SendPhoto(ctx, p)
+		msg, err := m.b.SendPhoto(ctx, p)
+		return msg, source, err
 	}
-	msg, err := send(data)
-	if err != nil && data != urlFallback && urlFallback != "" {
-		// Кэшированный file_id перестал работать (например, бот был восстановлен
-		// из бэкапа в другом инстансе) — пробуем URL.
-		msg, err = send(urlFallback)
-		data = urlFallback
+
+	// Порядок источников.
+	var tries []string
+	if cachedFileID != "" {
+		tries = append(tries, "id")
+	}
+	if len(embedBytes) > 0 {
+		tries = append(tries, "embed")
+	}
+	if urlFallback != "" {
+		tries = append(tries, "url")
+	}
+	if len(tries) == 0 {
+		return 0, ""
+	}
+	var (
+		msg    *models.Message
+		source string
+		err    error
+	)
+	for _, src := range tries {
+		msg, source, err = build(src)
+		if err == nil {
+			break
+		}
 	}
 	if err != nil {
 		m.log.Error("send photo cacheable", "err", err)
 		return 0, ""
 	}
-	// Если ушло по URL — Telegram вернул свежий file_id, его надо закэшировать.
+	// Если отправили НЕ по cached file_id, Telegram вернул новый file_id — кэшируем.
 	var newFileID string
-	if data == urlFallback && len(msg.Photo) > 0 {
+	if source != "id" && len(msg.Photo) > 0 {
 		newFileID = msg.Photo[len(msg.Photo)-1].FileID
 	}
 	return msg.ID, newFileID

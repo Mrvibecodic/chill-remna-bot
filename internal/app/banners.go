@@ -98,8 +98,9 @@ func (a *App) showSectionBanner(ctx context.Context, chatID int64, section strin
 		}
 	}
 	var newFileID string
+	embed := assets.Bytes(section)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, url, caption, rows)
+		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, url, caption, rows)
 		newFileID = nf
 		return id
 	})

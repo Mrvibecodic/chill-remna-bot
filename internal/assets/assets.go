@@ -15,6 +15,21 @@
 // короткое описание — чтобы было понятно, что заменять при ребрендинге.
 package assets
 
+import (
+	"embed"
+	"io/fs"
+	"strings"
+)
+
+// Локальная папка дефолтных картинок 1280×640 — единственный «источник правды»
+// для дефолтов. Хочешь поменять дефолт раздела — кладёшь свой .jpg в assets/sections/
+// с тем же именем (см. ключи ниже), пересобираешь образ. SectionImages-URL'ы
+// остаются как «второй уровень» fallback'а, если бинарь собран без embed-папки
+// (например, custom-сборка из обрезанного контекста).
+//
+//go:embed sections/*.jpg
+var sectionsFS embed.FS
+
 // Ключи разделов. Используются и как ключи мапы, и как PK в таблице media_cache.
 const (
 	// --- Шаги мастера установки ---
@@ -109,4 +124,18 @@ func LabelByKey(key, lang string) string {
 // баннер или текстовое сообщение без картинки).
 func URL(section string) string {
 	return SectionImages[section]
+}
+
+// Bytes возвращает байты дефолтной картинки раздела из embed-папки assets/sections/.
+// Если файла нет (например, ключ не зарегистрирован или картинка не добавлена) —
+// возвращает nil. Используется как ПЕРВЫЙ источник дефолта: если есть локальный
+// файл — отправляем его, при отсутствии — фолбэк на URL.
+func Bytes(section string) []byte {
+	// Ключи у нас в snake_case, файл — sections/<key>.jpg.
+	name := "sections/" + strings.TrimSpace(section) + ".jpg"
+	data, err := fs.ReadFile(sectionsFS, name)
+	if err != nil {
+		return nil
+	}
+	return data
 }

@@ -38,7 +38,7 @@ func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
 func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, _ [][]models.InlineKeyboardButton) int {
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _, _, caption string, _ [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, _, caption string, _ [][]models.InlineKeyboardButton) (int, string) {
 	return f.add(caption), ""
 }
 func (f *fakeMsg) SendBanner(_ context.Context, _ int64, _ models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) int {
