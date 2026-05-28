@@ -28,12 +28,6 @@ func (a *App) HandleCryptoBotWebhook(_ context.Context, sig string, body []byte)
 	return false, nil
 }
 
-// HandleRemnawaveWebhook — обработчик POST /webhook/remnawave (Phase 3).
-func (a *App) HandleRemnawaveWebhook(_ context.Context, sig string, body []byte) (bool, error) {
-	a.log.Info("remnawave webhook received (phase 1 stub)", "sig_len", len(sig), "body_len", len(body))
-	return false, nil
-}
-
 // webhookConfig возвращает копию конфига вебхука или пустую структуру.
 func (a *App) WebhookConfig() (addr string, enabled bool, publicURL string) {
 	a.mu.Lock()

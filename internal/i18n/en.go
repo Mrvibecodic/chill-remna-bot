@@ -344,4 +344,7 @@ var en = map[string]string{
 	"admin.wh_ask_addr":          "Enter host:port to listen on (e.g. `:8080` or `0.0.0.0:8080`):",
 	"admin.wh_ask_base":          "Enter PUBLIC base URL without trailing `/` (e.g. `https://bot.example.com`):",
 	"admin.wh_ask_secret":        "Enter WEBHOOK_SECRET_HEADER from Remnawave panel settings (used for webhook signature validation):",
+	"rw.warn_expiring":           "⏰ <b>Subscription expiring soon</b>\n\nEvent: <code>%s</code>.\nRenew in advance to avoid downtime.",
+	"rw.expired":                 "❌ <b>Subscription expired</b>\n\nAccess to the network is paused. Buy a new period to continue.",
+	"rw.limited":                 "📊 <b>Subscription limit reached</b>\n\nTraffic or device count exhausted. Top up to continue.",
 }
