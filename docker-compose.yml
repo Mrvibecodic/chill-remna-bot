@@ -7,7 +7,6 @@
 #
 # Образ собирает CI и публикует в ghcr.io/mrvibecodic/chill-remna-bot:latest.
 # Обновление: docker compose pull && docker compose up -d  (или команда /update в боте).
-# Пока образ приватный — один раз: docker login ghcr.io (PAT с read:packages).
 #
 # Стартует ТОЛЬКО бот, без базы. БД появляется по выбору в мастере:
 #   • SQLite  — бот создаёт файл в томе bot-data;
