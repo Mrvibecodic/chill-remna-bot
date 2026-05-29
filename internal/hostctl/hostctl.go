@@ -19,6 +19,7 @@ type Controller struct {
 	project        string
 	hostDir        string
 	panelContainer string
+	panelNetwork   string
 	selfContainer  string
 }
 
@@ -28,6 +29,7 @@ func New() *Controller {
 		project:        env("COMPOSE_PROJECT", "remnachillbot"),
 		hostDir:        env("COMPOSE_HOST_DIR", "/opt/remnachillbot"),
 		panelContainer: env("PANEL_CONTAINER", "remnawave"),
+		panelNetwork:   env("PANEL_NETWORK", "remnawave-network"),
 		selfContainer:  env("SELF_CONTAINER", "remnabot"),
 	}
 }
@@ -55,26 +57,60 @@ func (c *Controller) Available() bool {
 }
 
 func (c *Controller) ConnectPanelNetwork(ctx context.Context) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+		nets := c.panelNetworks(ctx)
+		if len(nets) == 0 && c.panelNetwork != "" {
+			nets = []string{c.panelNetwork}
+		}
+		connected := false
+		for _, netName := range nets {
+			if c.connectNetwork(ctx, netName) {
+				connected = true
+			}
+		}
+		if connected {
+			return nil
+		}
+		lastErr = fmt.Errorf("сеть панели не найдена (пробовал: %s)", strings.Join(nets, ", "))
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("сеть панели не найдена")
+	}
+	return lastErr
+}
+
+func (c *Controller) panelNetworks(ctx context.Context) []string {
 	out, err := exec.CommandContext(ctx, "docker", "inspect", "-f",
 		`{{range $k,$_ := .NetworkSettings.Networks}}{{$k}} {{end}}`, c.panelContainer).Output()
 	if err != nil {
-		return fmt.Errorf("inspect %s: %w", c.panelContainer, err)
+		return nil
 	}
-	connected := false
+	var nets []string
 	for _, netName := range strings.Fields(string(out)) {
 		switch netName {
 		case "bridge", "host", "none":
 			continue
 		}
-		o, e := exec.CommandContext(ctx, "docker", "network", "connect", netName, c.selfContainer).CombinedOutput()
-		if e == nil || strings.Contains(string(o), "already exists") {
-			connected = true
-		}
+		nets = append(nets, netName)
 	}
-	if !connected {
-		return fmt.Errorf("у контейнера %q не найдено пользовательских сетей", c.panelContainer)
+	return nets
+}
+
+func (c *Controller) connectNetwork(ctx context.Context, netName string) bool {
+	o, e := exec.CommandContext(ctx, "docker", "network", "connect", netName, c.selfContainer).CombinedOutput()
+	if e == nil {
+		return true
 	}
-	return nil
+	s := string(o)
+	return strings.Contains(s, "already exists") || strings.Contains(s, "already connected") || strings.Contains(s, "endpoint with name")
 }
 
 func (c *Controller) EnablePostgres(ctx context.Context) (string, error) {
