@@ -504,4 +504,7 @@ var en = map[string]string{
 	"trb.btn_url":                "🔗 Payment link",
 	"trb.ask_key":                "Send the Tribute API key (to verify webhook signature):",
 	"trb.ask_url":                "Send the Tribute payment link (shown to the user):",
+	"btn.analytics":              "📊 Analytics",
+	"stats.title":                "📊 <b>Analytics</b>\n\n💰 <b>Revenue</b>\n• today: %.0f ₽\n• 7 days: %.0f ₽\n• 30 days: %.0f ₽\n• total: %.0f ₽\n\n🧾 Payments: <b>%d</b> · payers: <b>%d</b> of %d (conversion %.1f%%)\n⭐ Top plan: <b>%d mo.</b> (%d purchases)\n\n💳 <b>By method</b>\n%s",
+	"stats.btn_reload":           "🔄 Reload",
 }

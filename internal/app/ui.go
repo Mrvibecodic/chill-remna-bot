@@ -257,6 +257,7 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.manage_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.users"), "menu:users"), btn(i18n.T(lang, "btn.payments"), "menu:payments")},
+		{btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
 		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.notify"), "menu:notify")},
@@ -452,6 +453,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "tribute":
 		if isAdmin {
 			a.showTributeAdmin(ctx, chatID)
+		}
+	case "analytics":
+		if isAdmin {
+			a.showAnalytics(ctx, chatID)
 		}
 	case "mysubs":
 		a.showMySubs(ctx, chatID)
