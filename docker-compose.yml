@@ -1,5 +1,5 @@
 # chill-remna-bot — деплой готовым образом из GHCR (без сборки на сервере).
-# Сценарий (см. README.md / УСТАНОВКА.md):
+# Сценарий (см. README.md):
 #   mkdir -p /opt/remnachillbot && cd /opt/remnachillbot
 #   # скачать этот файл (см. доку), вписать 2 значения ниже, затем:
 #   docker compose pull && docker compose up -d
