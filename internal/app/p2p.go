@@ -444,6 +444,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		})
 		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
 	}
+	a.grantReferralBonus(ctx, telegramID)
 	return link, expireAt, nil
 }
 
@@ -670,6 +671,20 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setDeviceLimitGlobal(n)
 		_ = a.saveBotConfig(ctx)
 		a.showPricing(ctx, chatID)
+	case "ref_value":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		if n < 0 {
+			n = 0
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.NormalizeReferral()
+			a.botCfg.Referral.BonusValue = n
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showReferralAdmin(ctx, chatID)
 	case "device_per":
 		mo := ui.priceMonths
 		ui.adminInput = ""

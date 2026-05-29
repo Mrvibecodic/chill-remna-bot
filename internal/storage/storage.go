@@ -50,6 +50,10 @@ type Storage interface {
 
 	DeductBalance(ctx context.Context, telegramID int64, kopecks int64) (bool, error)
 
+	SetReferredBy(ctx context.Context, telegramID, referrerID int64) error
+	SetRefBonusPaid(ctx context.Context, telegramID int64) error
+	CountReferrals(ctx context.Context, referrerID int64) (int, error)
+
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
@@ -188,17 +192,18 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 
 	var terms, trial sql.NullString
 	var subExp, notifyKind, notifySent string
-	var balance int64
+	var balance, referredBy int64
+	var refBonusPaid int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -542,20 +547,21 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 
 	urows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at FROM users")
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid FROM users")
 	if err != nil {
 		return nil, err
 	}
 	for urows.Next() {
 		var u model.User
-		var approved, blocked int
+		var approved, blocked, refBonusPaid int
 		var terms, trial sql.NullString
-		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial); err != nil {
+		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid); err != nil {
 			urows.Close()
 			return nil, err
 		}
 		u.P2PApproved = approved != 0
 		u.Blocked = blocked != 0
+		u.RefBonusPaid = refBonusPaid != 0
 		u.TermsAcceptedAt = terms.String
 		u.TrialUsedAt = trial.String
 		snap.Users = append(snap.Users, u)
@@ -654,12 +660,15 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 
 func (b *base) importUser(ctx context.Context, u *model.User) error {
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+") "+
+		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET "+
 			"p2p_approved = excluded.p2p_approved, blocked = excluded.blocked, "+
-			"created_at = excluded.created_at, username = excluded.username, first_name = excluded.first_name",
-		u.TelegramID, boolToInt(u.P2PApproved), boolToInt(u.Blocked), u.CreatedAt, u.Username, u.FirstName)
+			"created_at = excluded.created_at, username = excluded.username, first_name = excluded.first_name, "+
+			"sub_expire_at = excluded.sub_expire_at, notify_kind = excluded.notify_kind, notify_sent = excluded.notify_sent, "+
+			"balance = excluded.balance, referred_by = excluded.referred_by, ref_bonus_paid = excluded.ref_bonus_paid",
+		u.TelegramID, boolToInt(u.P2PApproved), boolToInt(u.Blocked), u.CreatedAt, u.Username, u.FirstName,
+		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid))
 	if err != nil {
 		return err
 	}
@@ -731,4 +740,24 @@ func (b *base) PendingByExtID(ctx context.Context, extID string) (*model.Pending
 		return nil, err
 	}
 	return p, nil
+}
+
+func (b *base) SetReferredBy(ctx context.Context, telegramID, referrerID int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET referred_by = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2)+" AND referred_by = 0",
+		referrerID, telegramID)
+	return err
+}
+
+func (b *base) SetRefBonusPaid(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET ref_bonus_paid = 1 WHERE telegram_id = "+b.ph(1), telegramID)
+	return err
+}
+
+func (b *base) CountReferrals(ctx context.Context, referrerID int64) (int, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM users WHERE referred_by = "+b.ph(1), referrerID).Scan(&n)
+	return n, err
 }

@@ -65,6 +65,9 @@ type App struct {
 
 	subMu    sync.Mutex
 	subCache map[int64]subCacheEntry
+
+	botUserMu sync.Mutex
+	botUser   string
 }
 
 type subCacheEntry struct {
@@ -114,6 +117,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 	if ok && cfg.Installed {
 		cfg.NormalizePricing()
 		cfg.NormalizeReminders()
+		cfg.NormalizeReferral()
 		a.botCfg = cfg
 		a.panel = remnawave.New(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
@@ -251,6 +255,9 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 			}
 			a.startWizard(ctx, chatID)
 			return
+		}
+		if _, payload, ok := strings.Cut(text, " "); ok {
+			a.bindReferrer(ctx, chatID, strings.TrimSpace(payload))
 		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
 		return

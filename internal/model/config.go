@@ -42,6 +42,7 @@ type BotConfig struct {
 	CryptoBot CryptoBotConfig `json:"cryptobot"`
 	Webhook   WebhookConfig   `json:"webhook"`
 	Reminders RemindersConfig `json:"reminders"`
+	Referral  ReferralConfig  `json:"referral"`
 	Pricing   Pricing         `json:"pricing"`
 	Welcome   WelcomeConfig   `json:"welcome"`
 
@@ -171,6 +172,9 @@ type User struct {
 	NotifySent string
 
 	Balance int64
+
+	ReferredBy   int64
+	RefBonusPaid bool
 }
 
 type P2PRequest struct {
@@ -230,3 +234,33 @@ func (r RemindersConfig) HasReminderDay(d int) bool {
 	}
 	return false
 }
+
+type ReferralConfig struct {
+	Enabled    bool   `json:"enabled"`
+	BonusKind  string `json:"bonus_kind"`
+	BonusValue int    `json:"bonus_value"`
+	OnFirstPay bool   `json:"on_first_pay"`
+	Init       bool   `json:"init"`
+}
+
+func (c *BotConfig) NormalizeReferral() {
+	r := &c.Referral
+	if !r.Init {
+		r.Enabled = false
+		r.BonusKind = ReferralBonusBalance
+		r.BonusValue = 50
+		r.OnFirstPay = true
+		r.Init = true
+	}
+	if r.BonusKind != ReferralBonusBalance && r.BonusKind != ReferralBonusDays {
+		r.BonusKind = ReferralBonusBalance
+	}
+	if r.BonusValue < 0 {
+		r.BonusValue = 0
+	}
+}
+
+const (
+	ReferralBonusBalance = "balance"
+	ReferralBonusDays    = "days"
+)

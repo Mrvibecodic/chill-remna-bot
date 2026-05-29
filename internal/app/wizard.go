@@ -95,6 +95,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onCBAdmin(ctx, chatID, val)
 		}
+	case "ref":
+		if isAdmin {
+			a.onReferralAdmin(ctx, chatID, val)
+		}
 	case "wh":
 		if isAdmin {
 			a.onWebhooksAdmin(ctx, chatID, val)

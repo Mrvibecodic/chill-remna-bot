@@ -341,6 +341,33 @@ func (s *fakeStore) DeductBalance(_ context.Context, id int64, kopecks int64) (b
 	u.Balance -= kopecks
 	return true, nil
 }
+func (s *fakeStore) SetReferredBy(_ context.Context, id, ref int64) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	if s.users[id].ReferredBy == 0 {
+		s.users[id].ReferredBy = ref
+	}
+	return nil
+}
+func (s *fakeStore) SetRefBonusPaid(_ context.Context, id int64) error {
+	if s.users != nil && s.users[id] != nil {
+		s.users[id].RefBonusPaid = true
+	}
+	return nil
+}
+func (s *fakeStore) CountReferrals(_ context.Context, ref int64) (int, error) {
+	n := 0
+	for _, u := range s.users {
+		if u.ReferredBy == ref {
+			n++
+		}
+	}
+	return n, nil
+}
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}

@@ -258,7 +258,7 @@ func (a *App) showManage(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
 		{btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.notify"), "menu:notify")},
-		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+		{btn(i18n.T(lang, "btn.referral_admin"), "menu:refadmin"), btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
 		homeRow(lang),
 	})
 }
@@ -383,6 +383,9 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 	} else {
 		rows = a.contactRows()
 		rows = append(rows, a.navRow(ctx, chatID))
+		if a.referralCfg().Enabled {
+			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.referral"), "menu:ref")})
+		}
 		rows = append(rows, homeRow(lang))
 	}
 	if len(ents) == 0 {
@@ -418,6 +421,12 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		a.showTopUp(ctx, chatID)
 	case "balance":
 		a.showBalance(ctx, chatID)
+	case "ref":
+		a.showReferral(ctx, chatID)
+	case "refadmin":
+		if isAdmin {
+			a.showReferralAdmin(ctx, chatID)
+		}
 	case "mysubs":
 		a.showMySubs(ctx, chatID)
 	case "home":
