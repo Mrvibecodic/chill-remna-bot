@@ -1,10 +1,13 @@
-# chill-remna-bot — деплой сборкой из исходников (registry не нужен).
-# Сценарий (см. УСТАНОВКА.md):
+# chill-remna-bot — деплой готовым образом из GHCR (без сборки на сервере).
+# Сценарий (см. README.md / УСТАНОВКА.md):
 #   mkdir -p /opt/remnachillbot && cd /opt/remnachillbot
-#   git clone <repo-url> .
-#   nano docker-compose.yml      # заменить 2 строки с токенами ниже
-#   docker compose up -d --build
-#   # затем в Telegram боту: /start
+#   # скачать этот файл (см. доку), вписать 2 значения ниже, затем:
+#   docker compose pull && docker compose up -d
+#   # в Telegram боту: /start
+#
+# Образ собирает CI и публикует в ghcr.io/mrvibecodic/chill-remna-bot:latest.
+# Обновление: docker compose pull && docker compose up -d  (или команда /update в боте).
+# Пока образ приватный — один раз: docker login ghcr.io (PAT с read:packages).
 #
 # Стартует ТОЛЬКО бот, без базы. БД появляется по выбору в мастере:
 #   • SQLite  — бот создаёт файл в томе bot-data;
@@ -19,8 +22,8 @@ name: remnachillbot
 
 services:
   bot:
-    build: .
-    image: chill-remna-bot:local
+    image: ghcr.io/mrvibecodic/chill-remna-bot:latest
+    pull_policy: always
     container_name: remnabot
     restart: unless-stopped
     environment:

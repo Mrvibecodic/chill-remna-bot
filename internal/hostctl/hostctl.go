@@ -146,7 +146,7 @@ func (c *Controller) addPostgresToCompose() error {
 }
 
 func (c *Controller) SelfUpdate(ctx context.Context) error {
-	script := fmt.Sprintf("docker compose -p %s up -d --build", c.project)
+	script := fmt.Sprintf("docker compose -p %s pull && docker compose -p %s up -d", c.project, c.project)
 	args := []string{
 		"run", "-d", "--rm",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
