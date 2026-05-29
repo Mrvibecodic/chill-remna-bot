@@ -40,8 +40,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr, _, _ := a.WebhookConfig()
-	webSrv := web.New(addr, a, log)
+	addr, domain, cacheDir := a.WebhookServer()
+	var webSrv *web.Server
+	if domain != "" {
+		webSrv = web.NewAutocert(domain, cacheDir, a, log)
+	} else {
+		webSrv = web.New(addr, a, log)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(4)

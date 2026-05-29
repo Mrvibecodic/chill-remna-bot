@@ -703,6 +703,19 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setTributeField(ctx, chatID, field, text)
+	case "wh_domain":
+		ui.adminInput = ""
+		d := strings.TrimSpace(text)
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Webhook.Domain = d
+			if d != "" {
+				a.botCfg.Webhook.PublicBaseURL = "https://" + d
+			}
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showWebhooksAdmin(ctx, chatID)
 	case "ref_value":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))

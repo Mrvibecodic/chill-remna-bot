@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 )
 
 func (a *App) Healthy(_ context.Context) error {
@@ -16,6 +17,22 @@ func (a *App) Healthy(_ context.Context) error {
 		return errors.New("bot not installed")
 	}
 	return nil
+}
+
+func (a *App) WebhookServer() (addr, domain, cacheDir string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	addr = ":8080"
+	if a.botCfg != nil {
+		if a.botCfg.Webhook.ListenAddr != "" {
+			addr = a.botCfg.Webhook.ListenAddr
+		}
+		if a.botCfg.Webhook.TLS && a.botCfg.Webhook.Domain != "" {
+			domain = a.botCfg.Webhook.Domain
+		}
+	}
+	cacheDir = filepath.Join(a.cfg.DataDir, "autocert")
+	return
 }
 
 func (a *App) WebhookConfig() (addr string, enabled bool, publicURL string) {

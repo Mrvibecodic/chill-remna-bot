@@ -202,6 +202,8 @@ type WebhookConfig struct {
 	ListenAddr      string `json:"listen_addr"`
 	PublicBaseURL   string `json:"public_base_url"`
 	RemnawaveSecret string `json:"remnawave_secret"`
+	Domain          string `json:"domain"`
+	TLS             bool   `json:"tls"`
 }
 
 type CryptoBotConfig struct {

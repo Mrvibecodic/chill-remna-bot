@@ -145,8 +145,7 @@ func (c *Controller) addPostgresToCompose() error {
 	return os.WriteFile(c.composeFile, out, 0o644)
 }
 
-func (c *Controller) SelfUpdate(ctx context.Context) error {
-	script := fmt.Sprintf("docker compose -p %s pull && docker compose -p %s up -d", c.project, c.project)
+func (c *Controller) runComposeDetached(ctx context.Context, script string) error {
 	args := []string{
 		"run", "-d", "--rm",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
@@ -156,9 +155,47 @@ func (c *Controller) SelfUpdate(ctx context.Context) error {
 		"sh", "-c", script,
 	}
 	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("self-update: %v: %s", err, out)
+		return fmt.Errorf("compose detached: %v: %s", err, out)
 	}
 	return nil
+}
+
+func (c *Controller) SelfUpdate(ctx context.Context) error {
+	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s pull && docker compose -p %s up -d", c.project, c.project))
+}
+
+// PublishWebhookPorts добавляет порты 80/443 сервису bot и пересоздаёт его (detached),
+// чтобы встроенный HTTPS-сервер (autocert) стал доступен снаружи.
+func (c *Controller) PublishWebhookPorts(ctx context.Context) error {
+	if err := c.addWebhookPortsToCompose(); err != nil {
+		return fmt.Errorf("правка compose: %w", err)
+	}
+	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s up -d", c.project))
+}
+
+func (c *Controller) addWebhookPortsToCompose() error {
+	data, err := os.ReadFile(c.composeFile)
+	if err != nil {
+		return err
+	}
+	root := map[string]any{}
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	services, _ := root["services"].(map[string]any)
+	if services == nil {
+		return fmt.Errorf("в compose нет services")
+	}
+	bot, ok := services["bot"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("в compose нет сервиса bot")
+	}
+	bot["ports"] = []any{"80:80", "443:443"}
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.composeFile, out, 0o644)
 }
 
 func (c *Controller) compose(ctx context.Context, args ...string) error {
