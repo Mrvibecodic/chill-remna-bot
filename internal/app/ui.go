@@ -123,22 +123,19 @@ func (a *App) invalidateSubCache(chatID int64) {
 	}
 }
 
-func (a *App) navRow(ctx context.Context, chatID int64, isAdmin bool) []models.InlineKeyboardButton {
+func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardButton {
 	lang := a.lang(chatID)
-	row := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
-	if isAdmin {
-		return row
-	}
+	var row []models.InlineKeyboardButton
 	if a.userHasSub(ctx, chatID) {
 		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
 		if a.renewEligible(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.renew"), "menu:renew"))
 		}
 	} else {
-		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
 		if a.trialAvailable(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.trial_user"), "menu:trial"))
 		}
+		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
 	}
 	row = append(row, btn(i18n.T(lang, "btn.balance"), "menu:balance"))
 	return row
@@ -385,7 +382,8 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		photo = bannerInputFor(assets.SectionAdminStats)
 	} else {
 		rows = a.contactRows()
-		rows = append(rows, a.navRow(ctx, chatID, false))
+		rows = append(rows, a.navRow(ctx, chatID))
+		rows = append(rows, homeRow(lang))
 	}
 	if len(ents) == 0 {
 		caption = a.applyPremium(caption)

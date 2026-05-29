@@ -882,17 +882,13 @@ func TestNavRow(t *testing.T) {
 	defer srv.Close()
 	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
 
-	if row := a.navRow(ctx, 100, true); len(row) != 1 || row[0].CallbackData != "menu:home" {
-		t.Fatalf("админ должен иметь только Главную: %s", btnData(row))
-	}
-
-	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:buy|menu:balance|" {
-		t.Fatalf("юзер без подписки: %s", btnData(row))
+	if row := a.navRow(ctx, user); btnData(row) != "menu:buy|menu:balance|" {
+		t.Fatalf("юзер без подписки (без Главной в строке действий): %s", btnData(row))
 	}
 
 	hasSub = true
 	a.invalidateSubCache(user)
-	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
 		t.Fatalf("юзер с подпиской: %s", btnData(row))
 	}
 }
@@ -981,7 +977,7 @@ func TestStarsFlow(t *testing.T) {
 		t.Fatal("оплата не записана в лог")
 	}
 
-	if row := a.navRow(ctx, user, false); btnData(row) != "menu:home|menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
 		t.Fatalf("после Stars-оплаты ожидались Мои подписки: %s", btnData(row))
 	}
 }
