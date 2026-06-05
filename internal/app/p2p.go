@@ -449,6 +449,12 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		if len(limits.InternalSquads) == 0 && a.botCfg.P2P.SquadUUID != "" {
 			limits.InternalSquads = []string{a.botCfg.P2P.SquadUUID}
 		}
+		if sq := a.botCfg.Pricing.SquadsInt[months]; len(sq) > 0 {
+			limits.InternalSquads = append([]string(nil), sq...)
+		}
+		if e := a.botCfg.Pricing.SquadsExt[months]; e != "" {
+			limits.ExternalSquad = e
+		}
 		limits.TrafficBytes = a.botCfg.Pricing.TrafficBytes(months)
 		limits.DeviceLimit = a.botCfg.Pricing.DeviceLimitFor(months)
 		limits.Strategy = a.botCfg.Pricing.ResetStrategy()

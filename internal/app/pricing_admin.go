@@ -24,6 +24,119 @@ func (a *App) askPriceMonth(ctx context.Context, chatID int64, prefix string) {
 	a.sendKB(ctx, chatID, i18n.T(lang, "admin.ask_price_month"), [][]models.InlineKeyboardButton{row, navBack(lang, back)})
 }
 
+func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
+	lang := a.lang(chatID)
+	a.mu.Lock()
+	panel := a.panel
+	var actInt, gInt []string
+	actExt, gExt := "", ""
+	if a.botCfg != nil {
+		a.botCfg.NormalizePricing()
+		actInt = append([]string(nil), a.botCfg.Pricing.SquadsInt[mo]...)
+		actExt = a.botCfg.Pricing.SquadsExt[mo]
+		gInt = append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
+		gExt = a.botCfg.Plan.ExternalSquadUUID
+	}
+	a.mu.Unlock()
+	back := navBack(lang, "prc:squads")
+	if panel == nil {
+		a.sendKB(ctx, chatID, i18n.T(lang, "squads.no_panel"), [][]models.InlineKeyboardButton{back})
+		return
+	}
+	intSquads, _ := panel.ListSquads(ctx)
+	extSquads, _ := panel.ListExternalSquads(ctx)
+	isActive := func(uuid string) bool {
+		for _, u := range actInt {
+			if u == uuid {
+				return true
+			}
+		}
+		return false
+	}
+	moStr := strconv.Itoa(mo)
+	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+3)
+	for _, sq := range intSquads {
+		mark := "⬜"
+		if isActive(sq.UUID) {
+			mark = "✅"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, "prc:sqi:"+moStr+":"+sq.UUID)})
+	}
+	if len(extSquads) > 0 {
+		rows = append(rows, []models.InlineKeyboardButton{btn("— 📡 External —", "prc:sqm:"+moStr)})
+		for _, sq := range extSquads {
+			mark := "⚪"
+			if actExt == sq.UUID {
+				mark = "🟢"
+			}
+			rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 📡 "+sq.Name, "prc:sqe:"+moStr+":"+sq.UUID)})
+		}
+	}
+	if len(actInt) > 0 || actExt != "" {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "pricing.sq_clear"), "prc:sqclear:"+moStr)})
+	}
+	rows = append(rows, back)
+	gIntCSV, gExtName := a.squadNames(ctx, gInt, gExt)
+	extState := i18n.T(lang, "admin.none")
+	if actExt != "" {
+		_, extState = a.squadNames(ctx, nil, actExt)
+	}
+	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState), rows)
+}
+
+func (a *App) togglePlanSquadInt(mo int, uuid string) {
+	if uuid == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	cur := a.botCfg.Pricing.SquadsInt[mo]
+	for i, u := range cur {
+		if u == uuid {
+			next := append(append([]string(nil), cur[:i]...), cur[i+1:]...)
+			if len(next) == 0 {
+				delete(a.botCfg.Pricing.SquadsInt, mo)
+			} else {
+				a.botCfg.Pricing.SquadsInt[mo] = next
+			}
+			return
+		}
+	}
+	a.botCfg.Pricing.SquadsInt[mo] = append(cur, uuid)
+}
+
+func (a *App) togglePlanSquadExt(mo int, uuid string) {
+	if uuid == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	if a.botCfg.Pricing.SquadsExt[mo] == uuid {
+		delete(a.botCfg.Pricing.SquadsExt, mo)
+	} else {
+		a.botCfg.Pricing.SquadsExt[mo] = uuid
+	}
+}
+
+func (a *App) clearPlanSquads(mo int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.NormalizePricing()
+	delete(a.botCfg.Pricing.SquadsInt, mo)
+	delete(a.botCfg.Pricing.SquadsExt, mo)
+}
+
 func (a *App) formatTrafficLimits() string {
 	pr := a.pricing()
 	var parts []string
@@ -64,6 +177,7 @@ func (a *App) showPricing(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "pricing.btn_base"), "prc:base")},
 		{btn(i18n.T(lang, "pricing.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "pricing.btn_devices"), "prc:devices")},
 		{btn(i18n.T(lang, "pricing.btn_strategy"), "prc:strategy")},
+		{btn(i18n.T(lang, "pricing.btn_squads"), "prc:squads")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -99,6 +213,32 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	lang := a.lang(chatID)
 	switch action {
+	case "squads":
+		var row []models.InlineKeyboardButton
+		for _, mo := range model.PlanMonths {
+			row = append(row, btn(strconv.Itoa(mo)+"м", "prc:sqm:"+strconv.Itoa(mo)))
+		}
+		a.sendKB(ctx, chatID, i18n.T(lang, "pricing.sq_pick_month"), [][]models.InlineKeyboardButton{row, navBack(lang, "menu:pricing")})
+	case "sqm":
+		mo, _ := strconv.Atoi(arg)
+		a.showPlanSquads(ctx, chatID, mo)
+	case "sqi":
+		moStr, uuid, _ := strings.Cut(arg, ":")
+		mo, _ := strconv.Atoi(moStr)
+		a.togglePlanSquadInt(mo, uuid)
+		_ = a.saveBotConfig(ctx)
+		a.showPlanSquads(ctx, chatID, mo)
+	case "sqe":
+		moStr, uuid, _ := strings.Cut(arg, ":")
+		mo, _ := strconv.Atoi(moStr)
+		a.togglePlanSquadExt(mo, uuid)
+		_ = a.saveBotConfig(ctx)
+		a.showPlanSquads(ctx, chatID, mo)
+	case "sqclear":
+		mo, _ := strconv.Atoi(arg)
+		a.clearPlanSquads(mo)
+		_ = a.saveBotConfig(ctx)
+		a.showPlanSquads(ctx, chatID, mo)
 	case "base":
 		a.askPriceMonth(ctx, chatID, "prc")
 	case "price":

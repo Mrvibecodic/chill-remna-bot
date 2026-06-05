@@ -11,6 +11,9 @@ type Pricing struct {
 
 	Devices map[int]int `json:"devices"`
 
+	SquadsInt map[int][]string `json:"squads_int"`
+	SquadsExt map[int]string   `json:"squads_ext"`
+
 	DeviceLimit int `json:"device_limit"`
 
 	TrafficStrategy string `json:"traffic_strategy"`
@@ -92,6 +95,12 @@ func (c *BotConfig) NormalizePricing() {
 	}
 	if p.Devices == nil {
 		p.Devices = map[int]int{}
+	}
+	if p.SquadsInt == nil {
+		p.SquadsInt = map[int][]string{}
+	}
+	if p.SquadsExt == nil {
+		p.SquadsExt = map[int]string{}
 	}
 	if p.TrafficStrategy == "" {
 		p.TrafficStrategy = "MONTH"
