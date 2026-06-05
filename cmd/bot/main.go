@@ -16,6 +16,11 @@ import (
 	_ "remnabot/internal/storage/drivers"
 )
 
+var (
+	commit    = "dev"
+	buildDate = ""
+)
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -24,6 +29,8 @@ func main() {
 		log.Error("конфигурация", "err", err)
 		os.Exit(1)
 	}
+	cfg.Commit = commit
+	cfg.BuildDate = buildDate
 
 	crypter, err := crypto.LoadOrCreate(cfg.SecretKey, cfg.DataDir)
 	if err != nil {
@@ -49,7 +56,7 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
 	var botErr, webErr error
 
 	go func() {
@@ -70,6 +77,11 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunReminders(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+		a.RunUpdateChecker(ctx)
 	}()
 	wg.Wait()
 

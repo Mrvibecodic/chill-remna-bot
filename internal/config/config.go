@@ -17,6 +17,9 @@ type Config struct {
 	SecretKey   string
 
 	PremiumEmoji map[string]string
+
+	Commit    string
+	BuildDate string
 }
 
 func Load() (*Config, error) {

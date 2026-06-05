@@ -60,6 +60,27 @@ type BotConfig struct {
 	Plan SubscriptionPlan `json:"plan"`
 
 	Trial TrialConfig `json:"trial"`
+
+	UpdateCheck UpdateCheckConfig `json:"update_check"`
+}
+
+type UpdateCheckConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Hour       int    `json:"hour"`
+	LastSeenAt string `json:"last_seen_sha"`
+	Init       bool   `json:"init"`
+}
+
+func (c *BotConfig) NormalizeUpdateCheck() {
+	u := &c.UpdateCheck
+	if !u.Init {
+		u.Enabled = true
+		u.Hour = 12
+		u.Init = true
+	}
+	if u.Hour < 0 || u.Hour > 23 {
+		u.Hour = 12
+	}
 }
 
 type TrialConfig struct {

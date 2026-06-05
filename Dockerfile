@@ -1,9 +1,11 @@
 FROM golang:1.23.4-alpine AS build
+ARG COMMIT=dev
+ARG BUILD_DATE=
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bot ./cmd/bot
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" -o /out/bot ./cmd/bot
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose

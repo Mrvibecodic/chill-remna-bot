@@ -265,8 +265,16 @@ func (a *App) showMarketing(ctx context.Context, chatID int64) {
 
 func (a *App) showSystem(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
+	a.mu.Lock()
+	updOn := a.botCfg != nil && a.botCfg.UpdateCheck.Enabled
+	a.mu.Unlock()
+	updLabel := i18n.T(lang, "btn.upd_notify_off")
+	if updOn {
+		updLabel = i18n.T(lang, "btn.upd_notify_on")
+	}
 	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
+		{btn(i18n.T(lang, "btn.check_update"), "upd:check"), btn(updLabel, "upd:toggle")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
 		{btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},

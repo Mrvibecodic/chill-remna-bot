@@ -66,6 +66,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.wizardCallback(ctx, chatID, w, key, val)
 	case "menu":
 		a.onMenu(ctx, chatID, val, isAdmin, cq.From.FirstName, cq.From.Username)
+	case "upd":
+		a.onUpdateCheck(ctx, chatID, val, isAdmin)
 	case "buy":
 		a.onBuyPlan(ctx, chatID, val)
 	case "method":
@@ -401,6 +403,7 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 
 	a.mu.Lock()
 	saved := w.cfg
+	saved.NormalizeUpdateCheck()
 	a.botCfg = &saved
 	a.panel = client
 	delete(a.wiz, chatID)
