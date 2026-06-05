@@ -183,6 +183,11 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string) {
 		if a.store != nil {
 			_ = a.store.SetBlocked(ctx, uid, action == "block")
 		}
+		if action == "unblock" && uid != 0 {
+			ulang := a.lang(uid)
+			a.msg.SendKB(ctx, uid, a.applyPremium(i18n.T(ulang, "guard.user_unblocked")),
+				[][]models.InlineKeyboardButton{homeRow(ulang)})
+		}
 		a.showUser(ctx, chatID, uid)
 	case "wlon", "wloff":
 		uid, _ := strconv.ParseInt(arg, 10, 64)

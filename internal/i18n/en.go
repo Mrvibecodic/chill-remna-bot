@@ -236,7 +236,9 @@ var en = map[string]string{
 		"The name/username looks scam-like (support/admin/verification) — such accounts often DM your clients pretending to be the service. If it is a real person — unblock below.",
 	"guard.user_blocked": "🛑 <b>You did not pass the automatic anti-spam and bot check</b> — access to the bot is restricted.\n\n" +
 		"If you believe this is a mistake, contact support — you will be reviewed and unblocked.",
-	"guard.btn_card":        "👤 Profile card",
+	"guard.btn_card": "👤 Profile card",
+	"guard.user_unblocked": "✅ <b>Check passed — access restored</b>\n\n" +
+		"Sorry for the inconvenience. Tap «Home» and enjoy the bot.",
 	"btn.p2p_allow":         "✅ Allow P2P",
 	"btn.p2p_deny":          "🚫 Revoke P2P",
 	"btn.mysubs":            "📲 My subscriptions",
