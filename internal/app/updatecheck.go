@@ -70,16 +70,56 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func newerThan(commits []ghCommit, current string) []ghCommit {
-	if current == "" || current == "dev" {
-		return nil
-	}
+func sliceBetween(commits []ghCommit, current, latest string) []ghCommit {
+	idxLatest := 0
 	for i, c := range commits {
-		if matchSHA(c.SHA, current) {
-			return commits[:i]
+		if matchSHA(c.SHA, latest) {
+			idxLatest = i
+			break
 		}
 	}
-	return nil
+	idxCur := len(commits)
+	for i, c := range commits {
+		if matchSHA(c.SHA, current) {
+			idxCur = i
+			break
+		}
+	}
+	if idxLatest >= idxCur {
+		return nil
+	}
+	return commits[idxLatest:idxCur]
+}
+
+func (a *App) latestBuiltSHA(ctx context.Context) (string, error) {
+	url := "https://api.github.com/repos/" + updateRepoSlug + "/actions/workflows/docker.yml/runs?branch=main&status=success&per_page=1"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "chill-remna-bot")
+	cl := &http.Client{Timeout: 15 * time.Second}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github status %d", resp.StatusCode)
+	}
+	var out struct {
+		Runs []struct {
+			HeadSHA string `json:"head_sha"`
+		} `json:"workflow_runs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if len(out.Runs) == 0 {
+		return "", nil
+	}
+	return out.Runs[0].HeadSHA, nil
 }
 
 func (a *App) RunUpdateChecker(ctx context.Context) {
@@ -131,14 +171,14 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	if target == 0 {
 		target = a.cfg.AdminID
 	}
-	commits, err := a.fetchCommits(ctx)
-	if err != nil || len(commits) == 0 {
+	latest, err := a.latestBuiltSHA(ctx)
+	if err != nil || latest == "" {
 		if manual {
 			a.sendKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		}
 		return
 	}
-	latest := commits[0].SHA
+	commits, _ := a.fetchCommits(ctx)
 	current := a.cfg.Commit
 	upToDate := matchSHA(latest, current)
 
@@ -159,7 +199,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 		return
 	}
 
-	news := newerThan(commits, current)
+	news := sliceBetween(commits, current, latest)
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "update.available"))
 	sb.WriteString("\n\n")
