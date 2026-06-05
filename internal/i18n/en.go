@@ -98,6 +98,8 @@ var en = map[string]string{
 	"topup.title":            "💼 <b>Top up balance</b>\n\nCurrent balance: <b>%s ₽</b>\n\nChoose an amount:",
 	"topup.btn_custom":       "✏️ Custom amount",
 	"topup.ask_amount":       "Enter top-up amount in RUB (e.g. 250):",
+	"topup.ask_amount_max":   "Enter the top-up amount in RUB — up to %s ₽ (the most expensive plan price):",
+	"topup.too_much":         "❌ Per-top-up maximum is %s ₽ (the most expensive plan price). Enter a smaller amount.",
 	"topup.bad_amount":       "❌ Invalid amount. Enter a number in RUB, e.g. 250.",
 	"topup.choose_method":    "💼 Top up <b>%s ₽</b>\n\nChoose a payment method:",
 	"topup.no_methods":       "🙏 No top-up methods available. Enable YooKassa or CryptoBot.",

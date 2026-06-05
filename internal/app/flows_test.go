@@ -222,7 +222,7 @@ func TestUserButtonWalk(t *testing.T) {
 
 	before = len(fm.texts)
 	a.handleCallback(ctx, cb(u, "menu:topup"))
-	a.handleCallback(ctx, cb(u, "top:amt:100"))
+	a.handleCallback(ctx, cb(u, "top:amt:15000"))
 	a.handleCallback(ctx, cb(u, "top:custom"))
 	a.handleCallback(ctx, cb(u, "top:cancel"))
 	if len(fm.texts) <= before {

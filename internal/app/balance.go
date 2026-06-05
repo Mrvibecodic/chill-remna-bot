@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,8 +14,6 @@ import (
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
 )
-
-var topUpPresets = []int{100, 300, 500, 1000}
 
 func rubToKopecks(s string) (int64, bool) {
 	s = strings.TrimSpace(strings.ReplaceAll(s, ",", "."))
@@ -113,13 +112,34 @@ func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
 	return sb.String(), best
 }
 
+func (a *App) topUpAmounts() ([]int64, int64) {
+	pr := a.pricing()
+	seen := map[int64]bool{}
+	var amts []int64
+	var maxK int64
+	for _, mo := range model.PlanMonths {
+		k, ok := rubToKopecks(pr.Base[mo])
+		if !ok || k <= 0 || seen[k] {
+			continue
+		}
+		seen[k] = true
+		amts = append(amts, k)
+		if k > maxK {
+			maxK = k
+		}
+	}
+	sort.Slice(amts, func(i, j int) bool { return amts[i] < amts[j] })
+	return amts, maxK
+}
+
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
+	amts, _ := a.topUpAmounts()
 	var rows [][]models.InlineKeyboardButton
 	var row []models.InlineKeyboardButton
-	for _, r := range topUpPresets {
-		row = append(row, btn(strconv.Itoa(r)+curSuffix(curRUB), "top:amt:"+strconv.Itoa(r)))
+	for _, k := range amts {
+		row = append(row, btn(kopecksToRub(k)+curSuffix(curRUB), "top:amt:"+strconv.FormatInt(k, 10)))
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -138,12 +158,28 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
 	switch action {
 	case "amt":
-		r, _ := strconv.Atoi(arg)
-		a.getUI(chatID).topUpKopecks = int64(r) * 100
+		k, _ := strconv.ParseInt(arg, 10, 64)
+		amts, _ := a.topUpAmounts()
+		ok := false
+		for _, v := range amts {
+			if v == k {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			a.showTopUp(ctx, chatID)
+			return
+		}
+		a.getUI(chatID).topUpKopecks = k
 		a.showTopUpMethods(ctx, chatID)
 	case "custom":
 		a.getUI(chatID).awaitTopUp = true
-		a.sendKB(ctx, chatID, i18n.T(lang, "topup.ask_amount"),
+		ask := i18n.T(lang, "topup.ask_amount")
+		if _, maxK := a.topUpAmounts(); maxK > 0 {
+			ask = i18n.T(lang, "topup.ask_amount_max", kopecksToRub(maxK))
+		}
+		a.sendKB(ctx, chatID, ask,
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.cancel"), "top:cancel")}})
 	case "cancel":
 		a.getUI(chatID).awaitTopUp = false
@@ -159,6 +195,11 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 	k, ok := rubToKopecks(text)
 	if !ok || k <= 0 {
 		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.bad_amount"),
+			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
+		return
+	}
+	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
 		return
 	}
@@ -197,6 +238,12 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	k := a.getUI(chatID).topUpKopecks
 	if k <= 0 {
 		a.showTopUp(ctx, chatID)
+		return
+	}
+	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+		a.getUI(chatID).topUpKopecks = 0
+		a.sendKB(ctx, chatID, i18n.T(lang, "topup.too_much", kopecksToRub(maxK)),
+			[][]models.InlineKeyboardButton{navBack(lang, "menu:topup")})
 		return
 	}
 	rub := kopecksToRub(k)
