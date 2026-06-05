@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chill-remna-bot — документация</title>
+<meta name="description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа VPN-подписок, оплаты, триал, рефералка, самоменеджмент в Docker.">
+<style>
+:root{
+  --bg:#0c0f17;--bg2:#121622;--card:#161b29;--line:#222a3d;
+  --fg:#e7ecf5;--muted:#9aa6bd;--accent:#5b8cff;--accent2:#27d3a2;--warn:#ffb454;
+  --radius:14px;--maxw:980px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:linear-gradient(180deg,#0c0f17,#0b0e15 40%,#0a0d14);color:var(--fg);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+header.hero{padding:72px 20px 40px;text-align:center;border-bottom:1px solid var(--line);
+  background:radial-gradient(900px 360px at 50% -120px,rgba(91,140,255,.18),transparent)}
+.badge{display:inline-block;font-size:13px;color:var(--accent2);border:1px solid var(--line);
+  background:var(--bg2);padding:4px 12px;border-radius:999px;margin-bottom:18px}
+h1{font-size:clamp(30px,6vw,46px);margin:.1em 0 .25em;letter-spacing:-.02em}
+.lead{color:var(--muted);font-size:clamp(16px,2.4vw,19px);max-width:680px;margin:0 auto 26px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:11px 20px;border-radius:11px;font-weight:600;border:1px solid var(--line)}
+.btn.primary{background:var(--accent);color:#0a0d14;border-color:transparent}
+.btn.ghost{background:var(--bg2);color:var(--fg)}
+nav.toc{position:sticky;top:0;z-index:5;background:rgba(12,15,23,.82);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);padding:10px 0}
+nav.toc .wrap{display:flex;gap:18px;overflow-x:auto;font-size:14px;white-space:nowrap}
+nav.toc a{color:var(--muted)}
+nav.toc a:hover{color:var(--fg);text-decoration:none}
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+h2{font-size:clamp(22px,4vw,30px);margin:0 0 6px;letter-spacing:-.01em}
+h3{font-size:18px;margin:26px 0 8px}
+.sub{color:var(--muted);margin:0 0 20px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px}
+.card h4{margin:0 0 6px;font-size:16px}
+.card p{margin:0;color:var(--muted);font-size:14.5px}
+ul.clean{list-style:none;padding:0;margin:0}
+ul.clean li{padding:9px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+ul.clean li:last-child{border-bottom:0}
+ul.clean b{color:var(--fg)}
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+code{background:#0e1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cfe0ff}
+pre{background:#0e1320;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}
+pre code{background:none;border:0;padding:0;color:#d6e2ff;line-height:1.55}
+.note{background:linear-gradient(0deg,rgba(91,140,255,.06),rgba(91,140,255,.06));border:1px solid var(--line);
+  border-left:3px solid var(--accent);border-radius:10px;padding:12px 16px;color:var(--muted);margin:16px 0}
+.note.warn{border-left-color:var(--warn)}
+.steps{counter-reset:s;padding:0;list-style:none;margin:0}
+.steps li{position:relative;padding:6px 0 18px 44px;border-left:2px solid var(--line);margin-left:14px}
+.steps li:last-child{border-left-color:transparent}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:-15px;top:2px;width:28px;height:28px;
+  border-radius:50%;background:var(--accent);color:#0a0d14;font-weight:700;display:grid;place-items:center;font-size:14px}
+footer{padding:40px 20px 70px;text-align:center;color:var(--muted);font-size:14px}
+.pill{display:inline-block;font-size:12px;color:var(--accent2);border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin-left:6px}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">Open-source · Go · Docker · Remnawave</span>
+    <h1>chill-remna-bot</h1>
+    <p class="lead">Телеграм-бот «магазин&nbsp;+&nbsp;админка» для панели <b>Remnawave</b>. Продаёт доступ к VPN: пользователь выбирает тариф, оплачивает и за пару минут получает ключ. Вся настройка — прямо в Telegram.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Установка за 4 шага</a>
+      <a class="btn ghost" href="https://github.com/Mrvibecodic/chill-remna-bot">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#features">Возможности</a>
+  <a href="#install">Установка</a>
+  <a href="#wizard">Мастер</a>
+  <a href="#admin">Админка</a>
+  <a href="#payments">Платёжки</a>
+  <a href="#webhooks">Вебхуки</a>
+  <a href="#commands">Команды</a>
+  <a href="#env">Переменные</a>
+  <a href="#update">Обновление</a>
+  <a href="#faq">FAQ</a>
+</div></nav>
+
+<main class="wrap">
+
+<section id="features">
+  <h2>Что умеет бот</h2>
+  <p class="sub">Один бинарь на Go, запуск в Docker. База — SQLite или PostgreSQL (бот поднимает Postgres сам). Конфиг хранится в БД зашифрованным и переживает перезапуск.</p>
+
+  <h3>Для пользователя</h3>
+  <div class="grid">
+    <div class="card"><h4>📦 Подписки 1/3/6/12 мес</h4><p>Сроки и цены задаёте вы. Подписка активируется сразу после оплаты — ссылка приходит в чат.</p></div>
+    <div class="card"><h4>🎁 Триал</h4><p>Бесплатный пробный период одной кнопкой, один раз на аккаунт.</p></div>
+    <div class="card"><h4>♻️ Продление</h4><p>Время добавляется к текущему сроку; счётчик трафика при платном продлении обнуляется.</p></div>
+    <div class="card"><h4>💼 Кошелёк в рублях</h4><p>Пополнить и платить с баланса, прогноз «на сколько хватит», промокоды. Суммы пополнения = ценам тарифов, своя сумма не больше самого дорогого тарифа.</p></div>
+    <div class="card"><h4>🎟 Промокоды и рефералка</h4><p>Бонус на баланс или дни подписки; личная ссылка-приглашение с бонусом.</p></div>
+    <div class="card"><h4>🔗 Автопривязка к панели</h4><p>Если учётка уже была в панели (по <code>telegramId</code> или username с TG&nbsp;ID) — бот свяжет её при регистрации; триал таким недоступен (анти-абуз).</p></div>
+  </div>
+
+  <h3>Для администратора <span class="pill">всё в Telegram</span></h3>
+  <ul class="clean">
+    <li><b>💸 Продажи:</b> тарифы (быстрый мастер или тонкая настройка — цена, трафик ГБ, HWID на тариф, стратегия сброса), триал, сквады, все платёжки, история платежей с итогами, аналитика выручки, чеки самозанятого (МойНалог).</li>
+    <li><b>📣 Маркетинг:</b> промокоды, реферальная программа, рассылка всем пользователям, автонапоминания.</li>
+    <li><b>🎨 Интерфейс:</b> свои баннеры на каждый раздел, премиум-эмодзи, контакты, текст соглашения.</li>
+    <li><b>👥 Пользователи:</b> блокировка бота и/или подписки раздельно, вайтлист, доступ к P2P, удаление, ручная связка с панелью.</li>
+    <li><b>🛠 Система:</b> статус панели, самообновление, уведомления об обновлениях, вебхуки, поддомен подписок, лог API-запросов.</li>
+  </ul>
+
+  <div class="note">🔒 <b>Безопасность:</b> автоблок скам-регистраций; экранирование имён (нет HTML-инъекций); верификация вебхуков и защита платежей от дублей; бот управляет в панели только аккаунтами этого пользователя (по <code>telegramId</code>/username — чужие учётки не трогает даже с тегом бота); доступ в админку только у <code>ADMIN_TELEGRAM_ID</code>; конфиг в БД зашифрован.</div>
+</section>
+
+<section id="install">
+  <h2>Установка за 4 шага</h2>
+  <p class="sub">Образ собирает CI и публикует в GHCR: <code>ghcr.io/mrvibecodic/chill-remna-bot:latest</code>. На сервере — только взять <code>docker-compose.yml</code>, вписать два значения и запустить. Никакой сборки на сервере.</p>
+  <p class="muted">Нужно заранее: Linux-сервер с Docker и Docker Compose v2, работающая панель Remnawave, токен бота от <a href="https://t.me/BotFather">@BotFather</a> и ваш Telegram ID от <a href="https://t.me/userinfobot">@userinfobot</a>.</p>
+  <ol class="steps">
+    <li><b>Папка и compose-файл</b>
+      <pre><code>mkdir -p /opt/remnachillbot && cd /opt/remnachillbot
+curl -fsSL -o docker-compose.yml \
+  https://raw.githubusercontent.com/Mrvibecodic/chill-remna-bot/main/docker-compose.yml</code></pre></li>
+    <li><b>Впишите два значения</b> в <code>docker-compose.yml</code>:
+      <pre><code>BOT_TOKEN: "123456789:AAEabc..."   # токен от @BotFather
+ADMIN_TELEGRAM_ID: "000000000"      # ваш Telegram ID (число)</code></pre></li>
+    <li><b>Запуск</b>
+      <pre><code>docker compose pull
+docker compose up -d</code></pre></li>
+    <li><b>Откройте бота</b> и отправьте <code>/start</code> — пройдёт мастер настройки (язык, БД, подключение к панели).</li>
+  </ol>
+  <div class="note warn">Порты 80/443 нужны только для встроенного HTTPS вебхуков (см. ниже). Для базовой продажи их открывать не обязательно.</div>
+</section>
+
+<section id="wizard">
+  <h2>Мастер настройки</h2>
+  <p class="sub">Запускается при первом <code>/start</code> от админа (или командой <code>/setup</code>). Шаги с пояснениями:</p>
+  <ul class="clean">
+    <li><b>Язык</b> — RU/EN интерфейса.</li>
+    <li><b>База данных</b> — SQLite (старт, до нескольких тысяч юзеров) или PostgreSQL 17 (бот поднимает контейнер сам). Переключение позже — миграция встроена.</li>
+    <li><b>Расположение</b> — бот в одной docker-сети с панелью (локально, рекомендуется) или удалённо через публичный HTTPS-домен панели.</li>
+    <li><b>Тип установки панели</b> — официально (Caddy) или скрипт eGames (nginx, защита кукой) — от этого зависит, какие данные доступа спросит бот.</li>
+    <li><b>URL и API-токен панели</b> (роль API; обычный логин не подойдёт).</li>
+  </ul>
+</section>
+
+<section id="admin">
+  <h2>Админка</h2>
+  <p class="sub">Меню админа открывается автоматически (ваш ID в <code>ADMIN_TELEGRAM_ID</code>). Разделы:</p>
+  <div class="grid">
+    <div class="card"><h4>💸 Продажи</h4><p>Быстрая и тонкая настройка тарифов (цена, трафик, HWID, стратегия сброса <code>NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING</code>), триал, сквады, платёжки, история и аналитика, лог заказа (.log), чеки МойНалог.</p></div>
+    <div class="card"><h4>📣 Маркетинг</h4><p>Промокоды (<code>КОД ТИП ЗНАЧЕНИЕ [ЛИМИТ] [ДНЕЙ]</code>), рефералка, рассылка с предпросмотром, напоминания.</p></div>
+    <div class="card"><h4>🎨 Интерфейс</h4><p>Баннеры на каждый раздел (1280×640), премиум-эмодзи, контакты (поддержка+группа), соглашение.</p></div>
+    <div class="card"><h4>👥 Пользователи</h4><p>Карточка с раздельным состоянием бота и подписки. Блок/разблок: бот+подписка / только подписка / только бот — меню показывает лишь применимые опции. Блок подписки = статус <code>DISABLED</code> в панели.</p></div>
+    <div class="card"><h4>🛠 Система</h4><p>Статус панели, <code>/update</code>, проверка и уведомления об обновлениях, вебхуки, поддомен подписок, лог API (200 записей), перенастройка.</p></div>
+    <div class="card"><h4>🛒 Витрина</h4><p>Посмотреть бота глазами обычного пользователя, не выходя из админки.</p></div>
+  </div>
+  <div class="note">🧾 <b>Лог заказа:</b> каждый шаг каждой оплаты (счёт → вебхук → перепроверка по API → действия в панели → дубли → реконсилятор) пишется в журнал. По ext_id платежа или Telegram ID бот пришлёт весь журнал <code>.log</code>-файлом. Хранение — 90 дней.</div>
+</section>
+
+<section id="payments">
+  <h2>Способы оплаты</h2>
+  <p class="sub">Каждый включается отдельно. Цены задаются в рублях.</p>
+  <table>
+    <tr><th>Метод</th><th>Что это</th><th>Валюта</th></tr>
+    <tr><td><b>P2P</b></td><td>Перевод на карту, подтверждение вручную</td><td>₽</td></tr>
+    <tr><td><b>Telegram Stars</b></td><td>Встроенная валюта Telegram</td><td>⭐ (≈ из ₽)</td></tr>
+    <tr><td><b>ЮKassa</b></td><td>Карты/СБП, вебхук с перепроверкой</td><td>₽</td></tr>
+    <tr><td><b>CryptoBot</b></td><td>Крипта по курсу, цены в ₽ (фиат-режим)</td><td>₽ → крипта</td></tr>
+    <tr><td><b>Platega</b></td><td>Карты РФ / СБП (QR), перепроверка по API</td><td>₽</td></tr>
+    <tr><td><b>Tribute</b></td><td>Подписка через Tribute, продления по вебхуку</td><td>по кабинету</td></tr>
+  </table>
+  <div class="note">Идемпотентные платежи + фоновый <b>реконсилятор</b>: если вебхук не дошёл, бот сам перепроверит статус у провайдера и довыдаст подписку — деньги не теряются.</div>
+</section>
+
+<section id="webhooks">
+  <h2>Вебхуки</h2>
+  <p class="sub">ЮKassa, CryptoBot, Platega, Tribute и панель подтверждают события вебхуком. Внутри контейнера бот слушает порт <code>8080</code>.</p>
+  <table>
+    <tr><th>Путь</th><th>Назначение</th></tr>
+    <tr><td><code>GET /healthz</code></td><td>проверка живости</td></tr>
+    <tr><td><code>POST /webhook/yookassa</code></td><td>ЮKassa</td></tr>
+    <tr><td><code>POST /webhook/cryptobot</code></td><td>CryptoBot</td></tr>
+    <tr><td><code>POST /webhook/platega</code></td><td>Platega</td></tr>
+    <tr><td><code>POST /webhook/tribute</code></td><td>Tribute</td></tr>
+    <tr><td><code>POST /webhook/remnawave</code></td><td>события панели</td></tr>
+  </table>
+  <h3>Способ A — встроенный HTTPS (рекомендуется)</h3>
+  <p class="muted">Бот сам получает сертификат Let's Encrypt и слушает 80/443. Направьте домен A-записью на сервер бота, затем в админке: <b>Система → Вебхуки → Публичный HTTPS</b> (вкл) → <b>Домен</b> → <b>Применить</b>. Бот пропишет порты в compose и перезапустится.</p>
+  <h3>Способ B — за reverse-proxy панели</h3>
+  <p class="muted">Бот отдаёт plain HTTP на <code>8080</code>; HTTPS терминирует прокси панели — проксируйте <code>/webhook/</code> → <code>http://remnabot:8080</code>.</p>
+</section>
+
+<section id="commands">
+  <h2>Команды</h2>
+  <table>
+    <tr><th>Команда</th><th>Кому</th><th>Действие</th></tr>
+    <tr><td><code>/start</code></td><td>всем</td><td>старт; новый пользователь регистрируется автоматически</td></tr>
+    <tr><td><code>/buy</code></td><td>всем</td><td>открыть выбор тарифа</td></tr>
+    <tr><td><code>/support</code>, <code>/paysupport</code></td><td>всем</td><td>контакт поддержки (чек-лист Telegram для Stars)</td></tr>
+    <tr><td><code>/terms</code></td><td>всем</td><td>текст соглашения</td></tr>
+    <tr><td><code>/status</code></td><td>админу</td><td>связь с панелью + статистика и ресурсы</td></tr>
+    <tr><td><code>/setup</code></td><td>админу</td><td>пройти мастер заново</td></tr>
+    <tr><td><code>/update</code></td><td>админу</td><td>скачать свежий образ и перезапуститься</td></tr>
+    <tr><td><code>/p2p</code>, <code>/emoji</code>, <code>/welcome</code></td><td>админу</td><td>быстрый вход в P2P / эмодзи / баннер</td></tr>
+  </table>
+</section>
+
+<section id="env">
+  <h2>Переменные окружения</h2>
+  <p class="sub">Задаются в <code>docker-compose.yml</code>. Обязательны только первые две.</p>
+  <table>
+    <tr><th>Переменная</th><th>Обяз.</th><th>По умолчанию</th><th>Описание</th></tr>
+    <tr><td><code>BOT_TOKEN</code></td><td>✅</td><td>—</td><td>токен бота от @BotFather</td></tr>
+    <tr><td><code>ADMIN_TELEGRAM_ID</code></td><td>✅</td><td>—</td><td>ваш Telegram ID — доступ в админку</td></tr>
+    <tr><td><code>DATA_DIR</code></td><td></td><td><code>/data</code></td><td>каталог данных (том <code>bot-data</code>)</td></tr>
+    <tr><td><code>DB_KIND</code></td><td></td><td>—</td><td><code>sqlite</code>/<code>postgres</code>; обычно задаёт мастер</td></tr>
+    <tr><td><code>DATABASE_URL</code></td><td></td><td>—</td><td>DSN Postgres при ручном подключении</td></tr>
+    <tr><td><code>SECRET_KEY</code></td><td></td><td>авто</td><td>ключ шифрования настроек (файл <code>/data/secret.key</code>)</td></tr>
+    <tr><td><code>PANEL_CONTAINER</code></td><td></td><td><code>remnawave</code></td><td>имя контейнера панели (режим «Локально»)</td></tr>
+    <tr><td><code>COMPOSE_HOST_DIR</code></td><td></td><td><code>/opt/remnachillbot</code></td><td>путь к папке бота на хосте</td></tr>
+  </table>
+  <div class="note warn"><b>SECRET_KEY</b> критичен: без него не прочитать зашифрованные настройки. Не теряйте <code>secret.key</code> из тома <code>bot-data</code>.</div>
+</section>
+
+<section id="update">
+  <h2>Обновление и бэкап</h2>
+  <h3>Обновление</h3>
+  <p class="muted">Команда <code>/update</code> или кнопка в <b>Система</b>: бот делает <code>docker compose pull &amp;&amp; up -d</code> через одноразовый контейнер-контроллер и перезапускается. Раз в сутки бот сам сверяется с GitHub и, когда новый образ уже собран CI, присылает админу changelog с кнопкой «Обновить» (самоудаляется через 60 сек).</p>
+  <h3>Бэкап</h3>
+  <p class="muted">Всё состояние — в томе <code>bot-data</code> (SQLite-файл + <code>secret.key</code>). Бэкап = копия тома. Для Postgres — <code>pg_dump</code>. Конфиг зашифрован, поэтому без <code>secret.key</code> не восстановить.</p>
+</section>
+
+<section id="faq">
+  <h2>FAQ</h2>
+  <ul class="clean">
+    <li><b>Нужен ли отдельный nginx/Caddy для вебхуков?</b> Нет — у бота есть встроенный HTTPS (способ A). Либо проксируйте через существующий reverse-proxy панели.</li>
+    <li><b>Что если вебхук не дошёл?</b> Реконсилятор перепроверит платёж у провайдера и довыдаст подписку.</li>
+    <li><b>Можно ли мигрировать SQLite → Postgres?</b> Да, миграция встроена; переключение в мастере/настройках.</li>
+    <li><b>Бот трогает чужие аккаунты в панели?</b> Нет — только привязанные к этому Telegram ID; чужие не меняет даже при совпадении тега.</li>
+    <li><b>Где взять API-токен панели?</b> В дашборде Remnawave создайте API-token с ролью API.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <p>chill-remna-bot — <a href="https://github.com/Mrvibecodic/chill-remna-bot">github.com/Mrvibecodic/chill-remna-bot</a></p>
+  <p class="muted">Бот для панели Remnawave. Не аффилирован с Remnawave или платёжными провайдерами.</p>
+</footer>
+
+</body>
+</html>
