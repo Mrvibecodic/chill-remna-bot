@@ -689,14 +689,7 @@ type botMessenger struct {
 }
 
 func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
-	msg, err := m.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML,
-	})
-	if err != nil {
-		m.log.Error("send message", "err", err)
-		return 0
-	}
-	return msg.ID
+	return m.SendKB(ctx, chatID, text, nil)
 }
 
 func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
@@ -706,8 +699,13 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 	}
 	msg, err := m.b.SendMessage(ctx, params)
 	if err != nil {
-		m.log.Error("send keyboard", "err", err)
-		return 0
+		params.ParseMode = ""
+		params.Text = stripHTMLTags(text)
+		if msg, err = m.b.SendMessage(ctx, params); err != nil {
+			m.log.Error("send message", "err", err)
+			return 0
+		}
+		m.log.Warn("send message: HTML rejected, sent as plain text", "chat_id", chatID)
 	}
 	return msg.ID
 }

@@ -24,6 +24,26 @@ var suspiciousNamePatterns = []string{
 	"refund", "возврат",
 }
 
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return html.UnescapeString(b.String())
+}
+
 func escapeName(s string) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
