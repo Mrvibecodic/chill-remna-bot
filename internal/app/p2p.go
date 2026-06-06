@@ -390,15 +390,15 @@ func (a *App) adminApproveUser(ctx context.Context, adminChat int64, arg string,
 	}
 	alang := a.lang(adminChat)
 	if !ok {
-		a.send(ctx, adminChat, i18n.T(alang, "admin.user_denied"))
+		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_denied"))
 		return
 	}
 	if err := a.store.SetP2PApproved(ctx, uid, true); err != nil {
-		a.send(ctx, adminChat, "❌ "+err.Error())
+		a.sendHome(ctx, adminChat, "❌ "+err.Error())
 		return
 	}
 	a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
-	a.send(ctx, adminChat, i18n.T(alang, "admin.user_ok_done"))
+	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_ok_done"))
 }
 
 func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg string) {
@@ -409,32 +409,32 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 	}
 	req, err := a.store.GetP2PRequest(ctx, id)
 	if err != nil || req == nil || req.Status != model.P2PSubmitted {
-		a.send(ctx, adminChat, i18n.T(alang, "admin.not_found"))
+		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
 	amount := req.Price + curSuffix(a.curFor(model.PayMethodP2P))
 	req.Status = model.P2PApproved
 	req.DecidedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
-		a.send(ctx, adminChat, "❌ "+err.Error())
+		a.sendHome(ctx, adminChat, "❌ "+err.Error())
 		return
 	}
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "approved", "подтверждено администратором")
 	link, expireAt, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, p2pExt(req.ID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
-			a.send(ctx, adminChat, i18n.T(alang, "admin.done"))
+			a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
 			return
 		}
 		req.Status = model.P2PSubmitted
 		req.DecidedAt = ""
 		_ = a.store.UpdateP2PRequest(ctx, req)
-		a.send(ctx, adminChat, i18n.T(alang, "admin.provision_fail", err.Error()))
+		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.provision_fail", err.Error()))
 		return
 	}
 	a.cleanupP2PUser(ctx, req.TelegramID)
 	a.sendSubActive(ctx, req.TelegramID, link, expireAt)
-	a.send(ctx, adminChat, i18n.T(alang, "admin.done"))
+	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
 }
 
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string) (string, string, error) {
@@ -502,7 +502,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.rejectReq = 0
 		req, err := a.store.GetP2PRequest(ctx, id)
 		if err != nil || req == nil {
-			a.send(ctx, chatID, i18n.T(lang, "admin.not_found"))
+			a.sendHome(ctx, chatID, i18n.T(lang, "admin.not_found"))
 			return
 		}
 		req.Status = model.P2PRejected
@@ -516,7 +516,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
 		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
-		a.send(ctx, chatID, i18n.T(lang, "admin.done"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
 	}
 

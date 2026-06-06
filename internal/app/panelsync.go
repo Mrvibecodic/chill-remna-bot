@@ -130,12 +130,12 @@ func (a *App) adminLinkPanel(ctx context.Context, adminChat, uid int64, input st
 	lang := a.lang(adminChat)
 	panel := a.panelClient()
 	if panel == nil || uid == 0 {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_fail", i18n.T(lang, "squads.no_panel")))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_fail", i18n.T(lang, "squads.no_panel")))
 		return
 	}
 	input = strings.TrimSpace(input)
 	if input == "" {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_not_found"))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_not_found"))
 		return
 	}
 	var pu *remnawave.PanelUser
@@ -146,25 +146,25 @@ func (a *App) adminLinkPanel(ctx context.Context, adminChat, uid int64, input st
 		pu, err = panel.FindByUsername(ctx, input)
 	}
 	if err != nil {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_fail", err.Error()))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_fail", err.Error()))
 		return
 	}
 	if pu == nil {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_not_found"))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_not_found"))
 		return
 	}
 	if pu.TelegramID != 0 && pu.TelegramID != uid {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_busy", pu.Username, pu.TelegramID))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_busy", pu.Username, pu.TelegramID))
 		return
 	}
 	if err := panel.LinkTelegramID(ctx, pu.UUID, uid, true); err != nil {
-		a.send(ctx, adminChat, i18n.T(lang, "user.link_fail", err.Error()))
+		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_fail", err.Error()))
 		return
 	}
 	a.markPanelLinked(ctx, uid, pu.ExpireAt)
 	a.log.Info("panel sync: manual link", "tg_id", uid, "panel_user", pu.Username, "uuid", pu.UUID)
 	a.notify(ctx, uid, i18n.T(a.lang(uid), "sync.linked", formatExpire(pu.ExpireAt, a.lang(uid))))
-	a.send(ctx, adminChat, i18n.T(lang, "user.link_done", pu.Username, formatExpire(pu.ExpireAt, lang)))
+	a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_done", pu.Username, formatExpire(pu.ExpireAt, lang)))
 }
 
 func looksLikeUUID(s string) bool {

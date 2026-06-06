@@ -129,17 +129,17 @@ func (a *App) createPromoFromText(ctx context.Context, chatID int64, text string
 	lang := a.lang(chatID)
 	f := strings.Fields(text)
 	if len(f) < 3 {
-		a.send(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
 		return
 	}
 	kind := strings.ToLower(f[1])
 	if kind != model.PromoKindBalance && kind != model.PromoKindDays {
-		a.send(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
 		return
 	}
 	value, _ := strconv.Atoi(f[2])
 	if value <= 0 {
-		a.send(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
 		return
 	}
 	maxUses := 0
