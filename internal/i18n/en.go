@@ -169,7 +169,7 @@ var en = map[string]string{
 	"update.tail":            "Version %s. Tap «Update» — the bot will pull the fresh image and restart.",
 	"update.btn_now":         "⬆️ Update",
 	"update.uptodate":        "✅ You are on the latest version (%s).",
-	"update.no_restart":     "ℹ️ No restart happened: the fresh image is not built yet or you are already up to date. Try later or check the container logs.",
+	"update.no_restart":      "ℹ️ No restart happened: the fresh image is not built yet or you are already up to date. Try later or check the container logs.",
 	"update.check_fail":      "⚠️ Could not check for updates — no connection to GitHub. Try again later.",
 	"welcome.title":          "🖼 <b>/start banner</b>\n\nThe image and text shown on the very first /start. Empty = built-in default is used.",
 	"welcome.btn_image":      "🖼 Image",
