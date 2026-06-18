@@ -444,6 +444,11 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 		[][]models.InlineKeyboardButton{backHomeRow(lang)})
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)), 0o600)
+	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
+		_ = os.Remove(marker)
+		a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
+		return
+	}
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
 		_ = os.Remove(marker)
 		a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))

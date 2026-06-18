@@ -88,13 +88,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
 		})
 	}
-	var nav []models.InlineKeyboardButton
-	if page > 0 {
-		nav = append(nav, btn(i18n.T(lang, "btn.prev"), "usr:page:"+strconv.Itoa(page-1)))
-	}
-	if page+1 < pages {
-		nav = append(nav, btn(i18n.T(lang, "btn.next"), "usr:page:"+strconv.Itoa(page+1)))
-	}
+	nav := paginationRow("usr:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
 	if len(nav) > 0 {
 		rows = append(rows, nav)
 	}

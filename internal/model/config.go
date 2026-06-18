@@ -69,6 +69,11 @@ type UpdateCheckConfig struct {
 	Hour       int    `json:"hour"`
 	LastSeenAt string `json:"last_seen_sha"`
 	Init       bool   `json:"init"`
+	// Channel selects the update channel / git branch: "stable" (main) or "dev".
+	Channel string `json:"channel"`
+	// ChannelChosen is false until the admin has explicitly picked a channel.
+	// Used for the transitional migration that obliges a choice after update.
+	ChannelChosen bool `json:"channel_chosen"`
 }
 
 func (c *BotConfig) NormalizeUpdateCheck() {
@@ -80,6 +85,9 @@ func (c *BotConfig) NormalizeUpdateCheck() {
 	}
 	if u.Hour < 0 || u.Hour > 23 {
 		u.Hour = 12
+	}
+	if u.Channel != "dev" && u.Channel != "stable" {
+		u.Channel = "stable"
 	}
 }
 

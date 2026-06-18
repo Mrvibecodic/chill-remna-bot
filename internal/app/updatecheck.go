@@ -16,6 +16,44 @@ import (
 
 const updateRepoSlug = "Mrvibecodic/chill-remna-bot"
 
+// channelBranch maps an update channel to its git branch.
+func channelBranch(ch string) string {
+	if ch == "dev" {
+		return "dev"
+	}
+	return "main"
+}
+
+// channelTag maps an update channel to its Docker image tag.
+func channelTag(ch string) string {
+	if ch == "dev" {
+		return "dev"
+	}
+	return "latest"
+}
+
+func (a *App) updChannel() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg != nil && a.botCfg.UpdateCheck.Channel == "dev" {
+		return "dev"
+	}
+	return "stable"
+}
+
+func (a *App) channelChosen() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.botCfg != nil && a.botCfg.UpdateCheck.ChannelChosen
+}
+
+func (a *App) channelName(lang string) string {
+	if a.updChannel() == "dev" {
+		return i18n.T(lang, "update.chan_name_dev")
+	}
+	return i18n.T(lang, "update.chan_name_stable")
+}
+
 type ghCommit struct {
 	SHA    string `json:"sha"`
 	Commit struct {
@@ -23,8 +61,8 @@ type ghCommit struct {
 	} `json:"commit"`
 }
 
-func (a *App) fetchCommits(ctx context.Context) ([]ghCommit, error) {
-	url := "https://api.github.com/repos/" + updateRepoSlug + "/commits?sha=main&per_page=30"
+func (a *App) fetchCommits(ctx context.Context, branch string) ([]ghCommit, error) {
+	url := "https://api.github.com/repos/" + updateRepoSlug + "/commits?sha=" + branch + "&per_page=30"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -91,8 +129,8 @@ func sliceBetween(commits []ghCommit, current, latest string) []ghCommit {
 	return commits[idxLatest:idxCur]
 }
 
-func (a *App) latestBuiltSHA(ctx context.Context) (string, error) {
-	url := "https://api.github.com/repos/" + updateRepoSlug + "/actions/workflows/docker.yml/runs?branch=main&status=success&per_page=1"
+func (a *App) latestBuiltSHA(ctx context.Context, branch string) (string, error) {
+	url := "https://api.github.com/repos/" + updateRepoSlug + "/actions/workflows/docker.yml/runs?branch=" + branch + "&status=success&per_page=1"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -171,14 +209,15 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	if target == 0 {
 		target = a.cfg.AdminID
 	}
-	latest, err := a.latestBuiltSHA(ctx)
+	branch := channelBranch(a.updChannel())
+	latest, err := a.latestBuiltSHA(ctx, branch)
 	if err != nil || latest == "" {
 		if manual {
 			a.sendKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		}
 		return
 	}
-	commits, _ := a.fetchCommits(ctx)
+	commits, _ := a.fetchCommits(ctx, branch)
 	current := a.cfg.Commit
 	upToDate := matchSHA(latest, current)
 
@@ -243,8 +282,17 @@ func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdm
 	if !isAdmin {
 		return
 	}
-	switch val {
+	action, arg, _ := strings.Cut(val, ":")
+	switch action {
 	case "now":
+		// Transitional migration: oblige the admin to pick a channel before updating.
+		if !a.channelChosen() {
+			if srcMsgID != 0 {
+				a.msg.Delete(ctx, chatID, srcMsgID)
+			}
+			a.showChannelChooser(ctx, chatID)
+			return
+		}
 		if srcMsgID != 0 {
 			a.msg.Delete(ctx, chatID, srcMsgID)
 		}
@@ -259,6 +307,40 @@ func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdm
 		_ = a.saveBotConfig(ctx)
 		a.showSystem(ctx, chatID)
 	case "check":
+		// Transitional migration: oblige picking a channel before the update check.
+		if !a.channelChosen() {
+			a.showChannelChooser(ctx, chatID)
+			return
+		}
 		a.checkUpdateOnce(ctx, chatID, true)
+	case "chan":
+		a.showChannelChooser(ctx, chatID)
+	case "setchan":
+		a.setChannel(ctx, chatID, arg)
 	}
+}
+
+func (a *App) showChannelChooser(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.sendKB(ctx, chatID, i18n.T(lang, "update.chan_title", a.channelName(lang)), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "update.chan_stable"), "upd:setchan:stable")},
+		{btn(i18n.T(lang, "update.chan_dev"), "upd:setchan:dev")},
+		backHomeRow(lang),
+	})
+}
+
+func (a *App) setChannel(ctx context.Context, chatID int64, ch string) {
+	if ch != "dev" {
+		ch = "stable"
+	}
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.UpdateCheck.Channel = ch
+		a.botCfg.UpdateCheck.ChannelChosen = true
+		a.botCfg.UpdateCheck.LastSeenAt = ""
+	}
+	a.mu.Unlock()
+	_ = a.saveBotConfig(ctx)
+	lang := a.lang(chatID)
+	a.sendKB(ctx, chatID, i18n.T(lang, "update.chan_set", a.channelName(lang)), [][]models.InlineKeyboardButton{homeRow(lang)})
 }

@@ -197,6 +197,20 @@ func navBack(lang, backCB string) []models.InlineKeyboardButton {
 	}
 }
 
+// paginationRow builds a prev/next navigation row. prefix is the callback prefix
+// up to and including the trailing separator (e.g. "usr:page:"); the target page
+// index is appended. Returns nil when there is only a single page.
+func paginationRow(prefix string, page, pages int, prevLabel, nextLabel string) []models.InlineKeyboardButton {
+	var nav []models.InlineKeyboardButton
+	if page > 0 {
+		nav = append(nav, btn(prevLabel, prefix+strconv.Itoa(page-1)))
+	}
+	if page+1 < pages {
+		nav = append(nav, btn(nextLabel, prefix+strconv.Itoa(page+1)))
+	}
+	return nav
+}
+
 func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 	return [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "menu.cat_pay"), "menu:pay"), btn(i18n.T(lang, "menu.cat_marketing"), "menu:marketing")},
@@ -275,6 +289,7 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.update"), "menu:update")},
 		{btn(i18n.T(lang, "btn.check_update"), "upd:check"), btn(updLabel, "upd:toggle")},
+		{btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
 		{btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},

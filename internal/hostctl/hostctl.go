@@ -202,6 +202,41 @@ func (c *Controller) SelfUpdate(ctx context.Context) error {
 	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s pull && docker compose -p %s up -d", c.project, c.project))
 }
 
+// SetImageChannel rewrites the tag of the bot service image in the compose file
+// (e.g. ...:latest -> ...:dev), preserving the registry/repository part.
+func (c *Controller) SetImageChannel(tag string) error {
+	data, err := os.ReadFile(c.composeFile)
+	if err != nil {
+		return err
+	}
+	root := map[string]any{}
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	services, _ := root["services"].(map[string]any)
+	if services == nil {
+		return fmt.Errorf("в compose нет services")
+	}
+	bot, ok := services["bot"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("в compose нет сервиса bot")
+	}
+	img, _ := bot["image"].(string)
+	if img == "" {
+		return fmt.Errorf("у сервиса bot нет image")
+	}
+	base := img
+	if i := strings.LastIndex(img, ":"); i > strings.LastIndex(img, "/") {
+		base = img[:i]
+	}
+	bot["image"] = base + ":" + tag
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.composeFile, out, 0o644)
+}
+
 func (c *Controller) PublishWebhookPorts(ctx context.Context) error {
 	if err := c.addWebhookPortsToCompose(); err != nil {
 		return fmt.Errorf("правка compose: %w", err)
