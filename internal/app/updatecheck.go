@@ -280,7 +280,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	a.setUpdateSeen(ctx, latest)
 }
 
-func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdmin bool, srcMsgID int) {
+func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdmin bool) {
 	if !isAdmin {
 		return
 	}

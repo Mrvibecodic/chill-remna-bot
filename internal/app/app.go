@@ -231,6 +231,9 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
+	// A text message/command is not an inline-button action — drop any stale
+	// edit target from a previous callback so we never edit the wrong message.
+	a.setEditTarget(chatID, 0)
 	userID := int64(0)
 	firstName, username := "", ""
 	if m.From != nil {
