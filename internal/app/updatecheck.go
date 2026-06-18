@@ -318,7 +318,7 @@ func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdm
 
 func (a *App) showChannelChooser(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "update.chan_title", a.channelName(lang)), [][]models.InlineKeyboardButton{
+	a.sendSysKB(ctx, chatID, i18n.T(lang, "update.chan_title", a.channelName(lang)), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "update.chan_stable"), "upd:setchan:stable")},
 		{btn(i18n.T(lang, "update.chan_dev"), "upd:setchan:dev")},
 		backHomeRow(lang),

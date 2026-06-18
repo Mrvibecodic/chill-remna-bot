@@ -397,7 +397,7 @@ func (a *App) handleStatus(ctx context.Context, chatID int64) {
 	rows := a.statusNavRows(lang, isAdmin)
 
 	if !installed || panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "installed.hint"), rows)
+		a.sendSysKB(ctx, chatID, i18n.T(lang, "installed.hint"), rows)
 		return
 	}
 	count, err := panel.SystemStats(ctx)
@@ -549,13 +549,19 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	}
 	doneText := a.applyPremium(i18n.T(a.botLang(), "update.done"))
 	doneRows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
-	if msgID != 0 && a.msg != nil && a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
-		return
+	doneID := msgID
+	if msgID == 0 || a.msg == nil || !a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
+		if msgID != 0 && a.msg != nil {
+			a.msg.Delete(ctx, chatID, msgID)
+		}
+		if a.msg != nil {
+			doneID = a.msg.SendKB(ctx, chatID, doneText, doneRows)
+		}
 	}
-	if msgID != 0 && a.msg != nil {
-		a.msg.Delete(ctx, chatID, msgID)
+	if doneID != 0 && a.msg != nil {
+		id := doneID
+		time.AfterFunc(60*time.Second, func() { a.msg.Delete(context.Background(), chatID, id) })
 	}
-	a.notify(ctx, chatID, i18n.T(a.botLang(), "update.done"))
 }
 
 func (a *App) setEditTarget(chatID int64, msgID int) {

@@ -76,7 +76,7 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 
 	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls
 
-	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
+	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "wh.btn_guide"), "wh:guide")},
 		{btn(i18n.T(lang, "wh.btn_public"), "wh:public"), btn(i18n.T(lang, "wh.btn_domain"), "wh:domain")},
 		{btn(i18n.T(lang, "wh.btn_apply"), "wh:apply")},

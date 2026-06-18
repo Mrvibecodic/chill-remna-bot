@@ -33,7 +33,7 @@ func (a *App) showSubdomain(ctx context.Context, chatID int64) {
 	if display == "" {
 		display = i18n.T(lang, "admin.none")
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "subdomain.title",
+	a.sendSysKB(ctx, chatID, i18n.T(lang, "subdomain.title",
 		i18n.T(lang, statusKey), display), rows)
 }
 

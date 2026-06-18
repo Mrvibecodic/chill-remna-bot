@@ -48,7 +48,7 @@ func (a *App) showNotifyAdmin(ctx context.Context, chatID int64) {
 		win,
 		{btn(i18n.T(lang, "btn.back"), "menu:marketing"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
-	a.sendKB(ctx, chatID, body, rows)
+	a.sendMktKB(ctx, chatID, body, rows)
 }
 
 func formatReminderWindows(rc model.RemindersConfig, lang string) string {

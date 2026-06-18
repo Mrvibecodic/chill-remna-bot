@@ -192,6 +192,18 @@ func (a *App) sendPayKB(ctx context.Context, chatID int64, text string, rows [][
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, text, rows)
 }
 
+func (a *App) sendSysKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, text, rows)
+}
+
+func (a *App) sendIfaceKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, text, rows)
+}
+
+func (a *App) sendMktKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	a.sendKBSection(ctx, chatID, assets.SectionPromoCode, text, rows)
+}
+
 func homeRow(lang string) []models.InlineKeyboardButton {
 	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }
@@ -621,7 +633,7 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 
 func (a *App) showWelcomeAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "welcome.title"), [][]models.InlineKeyboardButton{
+	a.sendIfaceKB(ctx, chatID, i18n.T(lang, "welcome.title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "welcome.btn_image"), "wel:img"), btn(i18n.T(lang, "welcome.btn_text"), "wel:txt")},
 		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
@@ -712,7 +724,7 @@ func (a *App) showEmojiGrid(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")})
-	a.sendKB(ctx, chatID, sb.String(), rows)
+	a.sendIfaceKB(ctx, chatID, sb.String(), rows)
 }
 
 func (a *App) onEmoji(ctx context.Context, chatID int64, val string) {
