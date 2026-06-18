@@ -232,14 +232,20 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
-	p2pOn, starsOn, ykOn, cbOn := false, false, false, false
+	p2pOn, starsOn, ykOn, cbOn, plOn, trbOn := false, false, false, false, false, false
 	strat := "MONTH"
+	addsubOn, addsubGB, addsubInt := false, 0, 0
 	if a.botCfg != nil {
 		p2pOn = a.botCfg.P2P.Enabled
 		starsOn = a.botCfg.Stars.Enabled
 		ykOn = a.botCfg.YooKassa.Enabled
 		cbOn = a.botCfg.CryptoBot.Enabled
+		plOn = a.botCfg.Platega.Enabled
+		trbOn = a.botCfg.Tribute.Enabled
 		strat = a.botCfg.Pricing.ResetStrategy()
+		addsubOn = a.botCfg.AddSub.Enabled
+		addsubGB = a.botCfg.AddSub.TrafficGB
+		addsubInt = len(a.botCfg.AddSub.InternalSquads)
 	}
 	a.mu.Unlock()
 	mark := func(on bool) string {
@@ -250,10 +256,17 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	}
 	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
-		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn),
+		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(trbOn),
 		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
 		internalCSV, externalName,
 	)
+	if addsubOn {
+		traffic := i18n.T(lang, "addsub.unlimited")
+		if addsubGB > 0 {
+			traffic = strconv.Itoa(addsubGB) + " GB"
+		}
+		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
+	}
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick")},
 		{btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},

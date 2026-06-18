@@ -218,7 +218,7 @@ func addSubUsername(telegramID int64, suffix string) string {
 // expireAt, traffic-reset strategy and device limit from the main user A; only
 // squads and traffic are overridden. B carries NO telegramId and tag
 // CHILLBOT_ADD, so it never appears in by-telegram-id lookups.
-func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, suffix string, trafficBytes int64, internalSquads []string, externalSquad string) error {
+func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, suffix string, trafficBytes int64, internalSquads []string) error {
 	a, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
 		return err
@@ -231,7 +231,6 @@ func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, suffix stri
 		DeviceLimit:    a.HwidDeviceLimit,
 		Strategy:       a.TrafficLimitStrategy,
 		InternalSquads: internalSquads,
-		ExternalSquad:  externalSquad,
 	}
 	uname := addSubUsername(telegramID, suffix)
 	existing, err := c.FindByUsername(ctx, uname)

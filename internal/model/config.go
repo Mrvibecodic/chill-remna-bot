@@ -97,12 +97,11 @@ func (c *BotConfig) NormalizeUpdateCheck() {
 // Only squads and traffic are configurable; expiry, reset strategy and device
 // limit are inherited from the main subscription A at sync time.
 type AddSubConfig struct {
-	Enabled           bool     `json:"enabled"`
-	UsernameSuffix    string   `json:"username_suffix"`
-	TrafficGB         int      `json:"traffic_gb"`
-	InternalSquads    []string `json:"internal_squads"`
-	ExternalSquadUUID string   `json:"external_squad_uuid"`
-	Init              bool     `json:"init"`
+	Enabled        bool     `json:"enabled"`
+	UsernameSuffix string   `json:"username_suffix"`
+	TrafficGB      int      `json:"traffic_gb"`
+	InternalSquads []string `json:"internal_squads"`
+	Init           bool     `json:"init"`
 }
 
 func (c *BotConfig) NormalizeAddSub() {

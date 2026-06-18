@@ -7,37 +7,36 @@ import (
 )
 
 // addSubParams snapshots the add-on config (and panel client) under the lock.
-func (a *App) addSubParams() (panel *remnawave.Client, enabled bool, suffix string, trafficBytes int64, internal []string, external string) {
+func (a *App) addSubParams() (panel *remnawave.Client, enabled bool, suffix string, trafficBytes int64, internal []string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	panel = a.panel
 	if a.botCfg == nil {
-		return panel, false, "_addsub", 0, nil, ""
+		return panel, false, "_addsub", 0, nil
 	}
 	c := a.botCfg.AddSub
 	suffix = c.UsernameSuffix
 	if suffix == "" {
 		suffix = "_addsub"
 	}
-	return panel, c.Enabled, suffix, int64(c.TrafficGB) * 1024 * 1024 * 1024,
-		append([]string(nil), c.InternalSquads...), c.ExternalSquadUUID
+	return panel, c.Enabled, suffix, int64(c.TrafficGB) * 1024 * 1024 * 1024, append([]string(nil), c.InternalSquads...)
 }
 
 // syncAddSub upserts the add-on user B for telegramID (best-effort; a failure
 // must never break the main purchase). No-op when the feature is disabled.
 func (a *App) syncAddSub(ctx context.Context, telegramID int64) {
-	panel, enabled, suffix, traffic, internal, external := a.addSubParams()
+	panel, enabled, suffix, traffic, internal := a.addSubParams()
 	if !enabled || panel == nil {
 		return
 	}
-	if err := panel.UpsertAddSub(ctx, telegramID, suffix, traffic, internal, external); err != nil {
+	if err := panel.UpsertAddSub(ctx, telegramID, suffix, traffic, internal); err != nil {
 		a.log.Warn("addsub: upsert", "tg_id", telegramID, "err", err)
 	}
 }
 
 // removeAddSub deletes user B (runs regardless of the toggle, to clean up).
 func (a *App) removeAddSub(ctx context.Context, telegramID int64) {
-	panel, _, suffix, _, _, _ := a.addSubParams()
+	panel, _, suffix, _, _ := a.addSubParams()
 	if panel == nil {
 		return
 	}
@@ -48,7 +47,7 @@ func (a *App) removeAddSub(ctx context.Context, telegramID int64) {
 
 // setAddSubEnabledPanel enables/disables user B alongside the main one.
 func (a *App) setAddSubEnabledPanel(ctx context.Context, telegramID int64, enable bool) {
-	panel, enabled, suffix, _, _, _ := a.addSubParams()
+	panel, enabled, suffix, _, _ := a.addSubParams()
 	if !enabled || panel == nil {
 		return
 	}
