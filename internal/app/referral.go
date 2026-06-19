@@ -150,7 +150,7 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 func (a *App) showReferral(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	if !a.referralCfg().Enabled {
-		a.sendKB(ctx, chatID, i18n.T(lang, "ref.disabled"), [][]models.InlineKeyboardButton{backHomeRow(lang)})
+		a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "ref.disabled"), [][]models.InlineKeyboardButton{backHomeRow(lang)})
 		return
 	}
 	cfg := a.referralCfg()

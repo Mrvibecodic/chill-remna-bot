@@ -226,11 +226,11 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.cb_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:cb")})
 	}
 	if len(rows) == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "topup.no_methods"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.no_methods"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
 	rows = append(rows, navBack(lang, "menu:topup"))
-	a.sendKB(ctx, chatID, i18n.T(lang, "topup.choose_method", kopecksToRub(k)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.choose_method", kopecksToRub(k)), rows)
 }
 
 func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {

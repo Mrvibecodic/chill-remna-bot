@@ -52,7 +52,7 @@ func (a *App) previewBroadcast(ctx context.Context, chatID int64, text string) {
 			count = len(ids)
 		}
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "bcast.preview", count)+"\n\n"+text, [][]models.InlineKeyboardButton{
+	a.sendMktKB(ctx, chatID, i18n.T(lang, "bcast.preview", count)+"\n\n"+text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "bcast.btn_send", count), "bc:send")},
 		navBack(lang, "menu:broadcast"),
 	})

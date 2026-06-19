@@ -21,7 +21,7 @@ func (a *App) showSectionBanners(ctx context.Context, chatID int64) {
 		btn(i18n.T(lang, "btn.back"), "menu:iface"),
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	})
-	a.sendKB(ctx, chatID, i18n.T(lang, "banners.title"), rows)
+	a.sendIfaceKB(ctx, chatID, i18n.T(lang, "banners.title"), rows)
 }
 
 func (a *App) onSectionBanner(ctx context.Context, chatID int64, val string) {

@@ -213,7 +213,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	latest, err := a.latestBuiltSHA(ctx, branch)
 	if err != nil || latest == "" {
 		if manual {
-			a.sendKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{homeRow(lang)})
+			a.sendSysKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		}
 		return
 	}
@@ -233,7 +233,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 		return
 	}
 	if upToDate {
-		a.sendKB(ctx, target, i18n.T(lang, "update.uptodate", shortSHA(latest)), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendSysKB(ctx, target, i18n.T(lang, "update.uptodate", shortSHA(latest)), [][]models.InlineKeyboardButton{homeRow(lang)})
 		a.setUpdateSeen(ctx, latest)
 		return
 	}
@@ -260,7 +260,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	sb.WriteString("\n" + i18n.T(lang, "update.tail", shortSHA(latest)))
 
 	if manual {
-		a.sendKB(ctx, target, sb.String(), [][]models.InlineKeyboardButton{
+		a.sendSysKB(ctx, target, sb.String(), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "update.btn_now"), "upd:now")},
 			homeRow(lang),
 		})

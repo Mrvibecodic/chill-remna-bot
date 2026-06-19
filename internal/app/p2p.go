@@ -136,7 +136,7 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 		rows = append([][]models.InlineKeyboardButton{payBtn}, rows...)
 	}
 	if len(rows) == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), [][]models.InlineKeyboardButton{
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang),
 		})
 		return
@@ -144,7 +144,7 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	rows = append(rows, homeRow(lang))
-	a.sendKB(ctx, chatID, i18n.T(lang, "buy.choose_method", kopecksToRub(bal)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.choose_method", kopecksToRub(bal)), rows)
 }
 
 func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
