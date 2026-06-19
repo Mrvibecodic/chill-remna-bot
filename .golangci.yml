@@ -1,0 +1,24 @@
+version: "2"
+
+# The golangci-lint CI job is informational (non-gating). This config keeps the
+# useful signal while silencing conventional false positives so the run is clean
+# on Go 1.25. Note: golangci-lint v1 never actually ran here — it is built with
+# Go 1.24 and refuses a go1.25 target — so these are long-standing, not new.
+linters:
+  exclusions:
+    generated: lax
+    rules:
+      # Ignoring the error from Close() on rows/response bodies/readers is
+      # conventional (defer / cleanup paths); the error is not actionable.
+      - linters: [errcheck]
+        source: '\.Close\(\)'
+      # Tests routinely ignore setup/teardown errors.
+      - linters: [errcheck]
+        path: _test\.go
+      # De Morgan rewrite is a style preference, not a defect.
+      - linters: [staticcheck]
+        text: 'QF1001'
+      # Intentionally empty branch in a test scaffold.
+      - linters: [staticcheck]
+        path: _test\.go
+        text: 'SA9003'

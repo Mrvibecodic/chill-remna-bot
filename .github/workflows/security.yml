@@ -33,8 +33,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.11"
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
+          # v8 installs golangci-lint v2, which is built with Go 1.25 and so
+          # matches this module's toolchain (v1 binaries are built with Go 1.24
+          # and refuse to lint a go1.25 target).
           version: latest
           args: --timeout=5m
 
