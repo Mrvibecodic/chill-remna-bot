@@ -18,7 +18,7 @@ func (a *App) showBroadcast(ctx context.Context, chatID int64) {
 			count = len(ids)
 		}
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "bcast.title", count), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionPromoCode, i18n.T(lang, "bcast.title", count), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "bcast.btn_new"), "bc:new")},
 		navBack(lang, "menu:marketing"),
 	})

@@ -204,6 +204,12 @@ func (a *App) sendMktKB(ctx context.Context, chatID int64, text string, rows [][
 	a.sendKBSection(ctx, chatID, assets.SectionPromoCode, text, rows)
 }
 
+// sendUsrKB renders an admin Users screen on the shared Users/referral banner
+// so navigation within the section edits the caption in place.
+func (a *App) sendUsrKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, rows)
+}
+
 func homeRow(lang string) []models.InlineKeyboardButton {
 	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }

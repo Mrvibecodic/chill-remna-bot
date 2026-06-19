@@ -93,7 +93,7 @@ func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 		revToday, rev7, rev30, revAll,
 		len(pays), len(payers), totalUsers, conv,
 		popMonths, popCount, methodsStr)
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, text, [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "stats.btn_reload"), "menu:analytics")},
 		navBack(lang, "menu:pay"),
 	})

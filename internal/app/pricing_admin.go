@@ -40,7 +40,7 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	a.mu.Unlock()
 	back := navBack(lang, "prc:squads")
 	if panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squads.no_panel"), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	intSquads, _ := panel.ListSquads(ctx)
@@ -81,7 +81,7 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	if actExt != "" {
 		_, extState = a.squadNames(ctx, nil, actExt)
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState), rows)
 }
 
 func (a *App) togglePlanSquadInt(mo int, uuid string) {

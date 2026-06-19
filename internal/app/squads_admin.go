@@ -19,14 +19,14 @@ func (a *App) showSquads(ctx context.Context, chatID int64) {
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	}
 	if panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squads.no_panel"),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"),
 			[][]models.InlineKeyboardButton{back})
 		return
 	}
 
 	intSquads, err := panel.ListSquads(ctx)
 	if err != nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squads.err", err.Error()),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.err", err.Error()),
 			[][]models.InlineKeyboardButton{back})
 		return
 	}

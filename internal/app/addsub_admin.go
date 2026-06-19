@@ -74,12 +74,12 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	}
 	if panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squads.no_panel"), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	intSquads, err := panel.ListSquads(ctx)
 	if err != nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squads.err", err.Error()), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.err", err.Error()), [][]models.InlineKeyboardButton{back})
 		return
 	}
 
@@ -101,7 +101,7 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "addsub:refresh")})
 	rows = append(rows, back)
-	a.sendKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt)), rows)
 }
 
 func (a *App) toggleAddSubInternal(ctx context.Context, chatID int64, uuid string) {

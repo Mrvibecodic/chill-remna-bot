@@ -65,7 +65,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 		return
 	}
 	if total == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "users.empty"),
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "users.empty"),
 			[][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
@@ -172,7 +172,7 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:list"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
-	a.sendKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock), rows)
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock), rows)
 }
 
 func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExists, subBlocked bool) {
@@ -219,7 +219,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "block.btn_bot"), "usr:blockbot:"+arg)})
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)})
-		a.sendKB(ctx, chatID, i18n.T(lang, "block.ask", arg), rows)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "block.ask", arg), rows)
 	case "unblock":
 		lang := a.lang(chatID)
 		uid, _ := strconv.ParseInt(arg, 10, 64)
@@ -235,7 +235,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "unblock.btn_bot"), "usr:unblockbot:"+arg)})
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)})
-		a.sendKB(ctx, chatID, i18n.T(lang, "unblock.ask", arg), rows)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "unblock.ask", arg), rows)
 	case "blockboth", "blocksub", "blockbot":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		a.applyBlock(ctx, chatID, uid, action, srcMsgID)
@@ -268,7 +268,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.showUser(ctx, chatID, uid)
 	case "del":
 		lang := a.lang(chatID)
-		a.sendKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.del_with_sub"), "usr:delfull:"+arg)},
 			{btn(i18n.T(lang, "btn.del_bot_only"), "usr:delbot:"+arg)},
 			{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)},
@@ -483,7 +483,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	back := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")}
 	if total == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
@@ -555,7 +555,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log")})
 	kbRows = append(kbRows, back)
-	a.sendKB(ctx, chatID, sb.String(), kbRows)
+	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
 }
 
 func padRight(s string, w int) string {
@@ -601,7 +601,7 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		}
 	}
 	if !ok {
-		a.sendKB(ctx, chatID, i18n.T(lang, "subs.none"), [][]models.InlineKeyboardButton{
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.none"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.buy"), "menu:buy")}, home,
 		})
 		return
@@ -637,13 +637,13 @@ func (a *App) showSquadPicker(ctx context.Context, chatID int64) {
 	backRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:p2p"), btn(i18n.T(lang, "btn.home"), "menu:home")}
 
 	if panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squad.fail", i18n.T(lang, "admin.none")),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.fail", i18n.T(lang, "admin.none")),
 			[][]models.InlineKeyboardButton{manualRow, backRow})
 		return
 	}
 	squads, err := panel.ListSquads(ctx)
 	if err != nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squad.fail", err.Error()),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.fail", err.Error()),
 			[][]models.InlineKeyboardButton{manualRow, backRow})
 		return
 	}
@@ -662,14 +662,14 @@ func (a *App) showSquadPicker(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(name, "sq:set:"+sq.UUID)})
 	}
 	if len(rows) == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "squad.empty"),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.empty"),
 			[][]models.InlineKeyboardButton{manualRow, backRow})
 		return
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "squad.clear"), "sq:set:-"), btn(i18n.T(lang, "squad.refresh"), "sq:refresh")},
 		manualRow, backRow)
-	a.sendKB(ctx, chatID, i18n.T(lang, "squad.title", curLabel), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.title", curLabel), rows)
 }
 
 func (a *App) onSquad(ctx context.Context, chatID int64, val string) {

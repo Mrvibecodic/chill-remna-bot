@@ -22,14 +22,14 @@ func (a *App) showAPILog(ctx context.Context, chatID int64, page int) {
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	}
 	if panel == nil {
-		a.sendKB(ctx, chatID, i18n.T(lang, "apilog.no_panel"),
+		a.sendSysKB(ctx, chatID, i18n.T(lang, "apilog.no_panel"),
 			[][]models.InlineKeyboardButton{back})
 		return
 	}
 	all := panel.Logs()
 	total := len(all)
 	if total == 0 {
-		a.sendKB(ctx, chatID, i18n.T(lang, "apilog.empty"),
+		a.sendSysKB(ctx, chatID, i18n.T(lang, "apilog.empty"),
 			[][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "apilog.btn_refresh"), "alog:refresh")},
 				back,
@@ -101,7 +101,7 @@ func (a *App) showAPILog(ctx context.Context, chatID int64, page int) {
 		btn(i18n.T(lang, "apilog.btn_clear"), "alog:clear"),
 	})
 	rows = append(rows, back)
-	a.sendKB(ctx, chatID, sb.String(), rows)
+	a.sendSysKB(ctx, chatID, sb.String(), rows)
 }
 
 func (a *App) onAPILog(ctx context.Context, chatID int64, val string) {
