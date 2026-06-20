@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>chill-remna-bot — документация</title>
 <meta name="description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа VPN-подписок, оплаты, триал, рефералка, самоменеджмент в Docker.">
-<meta name="theme-color" content="#0c0f17">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0d15">
 <meta property="og:type" content="website">
 <meta property="og:title" content="chill-remna-bot — документация">
 <meta property="og:description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа VPN-подписок, оплаты, триал, рефералка.">
@@ -20,60 +20,90 @@
 <link rel="manifest" href="site.webmanifest">
 <style>
 :root{
-  --bg:#0c0f17;--bg2:#121622;--card:#161b29;--line:#222a3d;
-  --fg:#e7ecf5;--muted:#9aa6bd;--accent:#5b8cff;--accent2:#27d3a2;--warn:#ffb454;
-  --radius:14px;--maxw:980px;
+  --bg:#0a0d15;--bg2:#121726;--card:#151a2a;--card2:#192035;--line:#232c42;
+  --fg:#e8edf7;--muted:#97a3bb;--accent:#5b8cff;--accent2:#27d3a2;--warn:#ffb454;
+  --stable:#27d3a2;--dev:#b58bff;
+  --radius:16px;--maxw:1000px;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:linear-gradient(180deg,#0c0f17,#0b0e15 40%,#0a0d14);color:var(--fg);
-  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(1100px 520px at 78% -8%,rgba(91,140,255,.10),transparent),radial-gradient(900px 480px at 8% 4%,rgba(39,211,162,.07),transparent)}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
-header.hero{padding:72px 20px 40px;text-align:center;border-bottom:1px solid var(--line);
-  background:radial-gradient(900px 360px at 50% -120px,rgba(91,140,255,.18),transparent)}
-.badge{display:inline-block;font-size:13px;color:var(--accent2);border:1px solid var(--line);
-  background:var(--bg2);padding:4px 12px;border-radius:999px;margin-bottom:18px}
-h1{font-size:clamp(30px,6vw,46px);margin:.1em 0 .25em;letter-spacing:-.02em}
-.lead{color:var(--muted);font-size:clamp(16px,2.4vw,19px);max-width:680px;margin:0 auto 26px}
+header.hero{padding:84px 20px 46px;text-align:center;border-bottom:1px solid var(--line);
+  background:radial-gradient(1000px 400px at 50% -140px,rgba(91,140,255,.20),transparent)}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--accent2);border:1px solid var(--line);
+  background:rgba(18,23,38,.6);padding:5px 14px;border-radius:999px;margin-bottom:20px;letter-spacing:.02em}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);box-shadow:0 0 0 4px rgba(39,211,162,.18)}
+h1{font-size:clamp(32px,6.5vw,52px);margin:.1em 0 .25em;letter-spacing:-.03em;
+  background:linear-gradient(180deg,#fff,#b9c6e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:clamp(16px,2.4vw,19px);max-width:700px;margin:0 auto 28px}
 .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.btn{display:inline-block;padding:11px 20px;border-radius:11px;font-weight:600;border:1px solid var(--line)}
-.btn.primary{background:var(--accent);color:#0a0d14;border-color:transparent}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:12px;font-weight:600;border:1px solid var(--line);transition:transform .12s ease,border-color .12s ease,box-shadow .12s ease}
+.btn:hover{text-decoration:none;transform:translateY(-2px)}
+.btn.primary{background:linear-gradient(180deg,#6c97ff,#5b8cff);color:#080b12;border-color:transparent;box-shadow:0 8px 24px -10px rgba(91,140,255,.8)}
 .btn.ghost{background:var(--bg2);color:var(--fg)}
-nav.toc{position:sticky;top:0;z-index:5;background:rgba(12,15,23,.82);backdrop-filter:blur(8px);
-  border-bottom:1px solid var(--line);padding:10px 0}
-nav.toc .wrap{display:flex;gap:18px;overflow-x:auto;font-size:14px;white-space:nowrap}
+.btn.ghost:hover{border-color:var(--accent)}
+.hstats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+.hstats .chip{font-size:13px;color:var(--muted);background:rgba(18,23,38,.55);border:1px solid var(--line);border-radius:10px;padding:7px 13px}
+.hstats .chip b{color:var(--fg)}
+nav.toc{position:sticky;top:0;z-index:5;background:rgba(10,13,21,.85);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);padding:11px 0}
+nav.toc .wrap{display:flex;gap:20px;overflow-x:auto;font-size:14px;white-space:nowrap}
 nav.toc a{color:var(--muted)}
 nav.toc a:hover{color:var(--fg);text-decoration:none}
-section{padding:46px 0;border-bottom:1px solid var(--line)}
-h2{font-size:clamp(22px,4vw,30px);margin:0 0 6px;letter-spacing:-.01em}
-h3{font-size:18px;margin:26px 0 8px}
-.sub{color:var(--muted);margin:0 0 20px}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px}
-.card h4{margin:0 0 6px;font-size:16px}
+section{padding:52px 0;border-bottom:1px solid var(--line)}
+h2{font-size:clamp(23px,4vw,32px);margin:0 0 6px;letter-spacing:-.015em}
+h3{font-size:18px;margin:30px 0 10px}
+.sub{color:var(--muted);margin:0 0 22px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+.card{position:relative;background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px;transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;overflow:hidden}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:opacity .14s ease}
+.card:hover{transform:translateY(-3px);border-color:#2e3a57;box-shadow:0 14px 34px -22px rgba(0,0,0,.9)}
+.card:hover::before{opacity:.85}
+.card h4{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .card p{margin:0;color:var(--muted);font-size:14.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.03em;
+  border-radius:999px;padding:2px 9px;border:1px solid transparent;text-transform:uppercase;line-height:1.5}
+.tag::before{content:"";width:6px;height:6px;border-radius:50%}
+.tag.stable{color:var(--stable);background:rgba(39,211,162,.10);border-color:rgba(39,211,162,.35)}
+.tag.stable::before{background:var(--stable)}
+.tag.dev{color:var(--dev);background:rgba(181,139,255,.10);border-color:rgba(181,139,255,.35)}
+.tag.dev::before{background:var(--dev)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:rgba(18,23,38,.5);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:0 0 22px;font-size:13.5px;color:var(--muted)}
+.legend .li{display:flex;align-items:center;gap:8px}
 ul.clean{list-style:none;padding:0;margin:0}
-ul.clean li{padding:9px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+ul.clean li{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted)}
 ul.clean li:last-child{border-bottom:0}
 ul.clean b{color:var(--fg)}
 table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14.5px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600}
+tr:hover td{background:rgba(91,140,255,.04)}
 code{background:#0e1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13.5px;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cfe0ff}
-pre{background:#0e1320;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}
-pre code{background:none;border:0;padding:0;color:#d6e2ff;line-height:1.55}
+pre{background:#0c1120;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}
+pre code{background:none;border:0;padding:0;color:#d6e2ff;line-height:1.6}
 .note{background:linear-gradient(0deg,rgba(91,140,255,.06),rgba(91,140,255,.06));border:1px solid var(--line);
-  border-left:3px solid var(--accent);border-radius:10px;padding:12px 16px;color:var(--muted);margin:16px 0}
+  border-left:3px solid var(--accent);border-radius:10px;padding:13px 16px;color:var(--muted);margin:18px 0}
 .note.warn{border-left-color:var(--warn)}
+.note.dev{border-left-color:var(--dev)}
+.channels{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.chan{border:1px solid var(--line);border-radius:var(--radius);padding:18px;background:linear-gradient(180deg,var(--card),var(--card2))}
+.chan.stable{border-top:3px solid var(--stable)}
+.chan.dev{border-top:3px solid var(--dev)}
+.chan h4{margin:0 0 4px;font-size:17px;display:flex;align-items:center;gap:9px}
+.chan .src{font-size:13px;color:var(--muted);margin:0 0 10px}
+.chan p{margin:0;color:var(--muted);font-size:14.5px}
 .steps{counter-reset:s;padding:0;list-style:none;margin:0}
 .steps li{position:relative;padding:6px 0 18px 44px;border-left:2px solid var(--line);margin-left:14px}
 .steps li:last-child{border-left-color:transparent}
 .steps li::before{counter-increment:s;content:counter(s);position:absolute;left:-15px;top:2px;width:28px;height:28px;
-  border-radius:50%;background:var(--accent);color:#0a0d14;font-weight:700;display:grid;place-items:center;font-size:14px}
-footer{padding:40px 20px 70px;text-align:center;color:var(--muted);font-size:14px}
+  border-radius:50%;background:var(--accent);color:#080b12;font-weight:700;display:grid;place-items:center;font-size:14px}
+footer{padding:46px 20px 76px;text-align:center;color:var(--muted);font-size:14px}
 .pill{display:inline-block;font-size:12px;color:var(--accent2);border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin-left:6px}
 .muted{color:var(--muted)}
 
@@ -81,52 +111,62 @@ footer{padding:40px 20px 70px;text-align:center;color:var(--muted);font-size:14p
 img,svg{max-width:100%;height:auto}
 h1,h2,h3,h4,p,li{overflow-wrap:anywhere}
 :where(p,li,td) code{word-break:break-word}
-section{scroll-margin-top:62px}
-.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:8px 0;border:1px solid var(--line);border-radius:10px}
-.tw table{margin:0;border:0;min-width:480px}
+section{scroll-margin-top:64px}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:8px 0;border:1px solid var(--line);border-radius:12px}
+.tw table{margin:0;min-width:480px}
 .tw th,.tw td{border-left:0;border-right:0}
 nav.toc .wrap{scrollbar-width:thin}
-
 @media (max-width:760px){
-  header.hero{padding:54px 16px 32px}
-  section{padding:36px 0}
-  h3{margin-top:22px}
-  .grid{grid-template-columns:1fr}
+  header.hero{padding:60px 18px 38px}
+  section{padding:40px 0}
+  h3{margin-top:24px}
+  .grid,.channels{grid-template-columns:1fr}
 }
 @media (max-width:560px){
   body{font-size:15.5px}
   .wrap{padding:0 15px}
-  header.hero{padding:42px 14px 28px}
+  header.hero{padding:46px 14px 30px}
   .lead{margin-bottom:22px}
   .cta{gap:10px}
-  .cta .btn{flex:1 1 160px;text-align:center}
-  section{padding:30px 0}
+  .cta .btn{flex:1 1 170px;justify-content:center;padding:12px 16px}
+  .hstats{gap:8px;margin-top:20px}
+  section{padding:32px 0}
   nav.toc .wrap{gap:16px}
   pre{padding:13px;font-size:12.5px;border-radius:10px}
   pre code{line-height:1.5}
   th,td{padding:9px 10px}
+  .legend{gap:10px;padding:11px 14px}
+  .chan{padding:16px}
   .steps li{padding-left:40px;margin-left:12px}
-  .note{padding:11px 14px}
+  .note{padding:12px 14px}
 }
-@media (min-width:1280px){ :root{--maxw:1040px} }
+@media (min-width:1320px){ :root{--maxw:1080px} }
+@media (hover:none){ .card:hover,.btn:hover{transform:none} }
 </style>
 </head>
 <body>
 
 <header class="hero">
   <div class="wrap">
-    <span class="badge">Open-source · Go · Docker · Remnawave</span>
+    <span class="badge"><span class="dot"></span>Open-source · Go · Docker · Remnawave</span>
     <h1>chill-remna-bot</h1>
     <p class="lead">Телеграм-бот «магазин&nbsp;+&nbsp;админка» для панели <b>Remnawave</b>. Продаёт доступ к VPN: пользователь выбирает тариф, оплачивает и за пару минут получает ключ. Вся настройка — прямо в Telegram.</p>
     <div class="cta">
-      <a class="btn primary" href="#install">Установка за 4 шага</a>
+      <a class="btn primary" href="#install">🚀 Установка за 4 шага</a>
       <a class="btn ghost" href="https://github.com/Mrvibecodic/chill-remna-bot">GitHub</a>
+    </div>
+    <div class="hstats">
+      <span class="chip">⚙️ Один бинарь на <b>Go</b></span>
+      <span class="chip">🐳 Запуск в <b>Docker</b></span>
+      <span class="chip">💳 <b>6</b> способов оплаты</span>
+      <span class="chip">🗄 SQLite / <b>PostgreSQL</b></span>
     </div>
   </div>
 </header>
 
 <nav class="toc"><div class="wrap">
   <a href="#features">Возможности</a>
+  <a href="#channels">Каналы релизов</a>
   <a href="#install">Установка</a>
   <a href="#wizard">Мастер</a>
   <a href="#admin">Админка</a>
@@ -144,26 +184,55 @@ nav.toc .wrap{scrollbar-width:thin}
   <h2>Что умеет бот</h2>
   <p class="sub">Один бинарь на Go, запуск в Docker. База — SQLite или PostgreSQL (бот поднимает Postgres сам). Конфиг хранится в БД зашифрованным и переживает перезапуск.</p>
 
+  <div class="legend">
+    <span class="li"><span class="tag stable">stable</span> уже в <code>main</code> → образ <code>:latest</code></span>
+    <span class="li"><span class="tag dev">dev</span> пока в ветке <code>dev</code> → образ <code>:dev</code> (превью)</span>
+  </div>
+
   <h3>Для пользователя</h3>
   <div class="grid">
-    <div class="card"><h4>📦 Подписки 1/3/6/12 мес</h4><p>Сроки и цены задаёте вы. Подписка активируется сразу после оплаты — ссылка приходит в чат.</p></div>
-    <div class="card"><h4>🎁 Триал</h4><p>Бесплатный пробный период одной кнопкой, один раз на аккаунт.</p></div>
-    <div class="card"><h4>♻️ Продление</h4><p>Время добавляется к текущему сроку; счётчик трафика при платном продлении обнуляется.</p></div>
-    <div class="card"><h4>💼 Кошелёк в рублях</h4><p>Пополнить и платить с баланса, прогноз «на сколько хватит», промокоды. Суммы пополнения = ценам тарифов, своя сумма не больше самого дорогого тарифа.</p></div>
-    <div class="card"><h4>🎟 Промокоды и рефералка</h4><p>Бонус на баланс или дни подписки; личная ссылка-приглашение с бонусом.</p></div>
-    <div class="card"><h4>🔗 Автопривязка к панели</h4><p>Если учётка уже была в панели (по <code>telegramId</code> или username с TG&nbsp;ID) — бот свяжет её при регистрации; триал таким недоступен (анти-абуз).</p></div>
+    <div class="card"><h4>📦 Подписки 1/3/6/12 мес <span class="tag stable">stable</span></h4><p>Сроки и цены задаёте вы. Подписка активируется сразу после оплаты — ссылка приходит в чат.</p></div>
+    <div class="card"><h4>🎁 Триал <span class="tag stable">stable</span></h4><p>Бесплатный пробный период одной кнопкой, один раз на аккаунт.</p></div>
+    <div class="card"><h4>♻️ Продление <span class="tag stable">stable</span></h4><p>Время добавляется к текущему сроку; счётчик трафика при платном продлении обнуляется.</p></div>
+    <div class="card"><h4>💼 Кошелёк в рублях <span class="tag stable">stable</span></h4><p>Пополнить и платить с баланса, прогноз «на сколько хватит», промокоды. Суммы пополнения = ценам тарифов, своя сумма не больше самого дорогого тарифа.</p></div>
+    <div class="card"><h4>🎟 Промокоды и рефералка <span class="tag stable">stable</span></h4><p>Бонус на баланс или дни подписки; личная ссылка-приглашение с бонусом.</p></div>
+    <div class="card"><h4>🔗 Автопривязка к панели <span class="tag stable">stable</span></h4><p>Если учётка уже была в панели (по <code>telegramId</code> или username с TG&nbsp;ID) — бот свяжет её при регистрации; триал таким недоступен (анти-абуз).</p></div>
+    <div class="card"><h4>➕ Доп-подписка (add-on) <span class="tag dev">dev</span></h4><p>Опциональная вторая подписка в панели (суффикс <code>_addsub</code>) со своими internal-сквадами и лимитом трафика. Срок, стратегия сброса и лимит устройств наследуются от основной. Выключена по умолчанию.</p></div>
   </div>
 
   <h3>Для администратора <span class="pill">всё в Telegram</span></h3>
   <ul class="clean">
-    <li><b>💸 Продажи:</b> тарифы (быстрый мастер или тонкая настройка — цена, трафик ГБ, HWID на тариф, стратегия сброса), триал, сквады, все платёжки, история платежей с итогами, аналитика выручки, чеки самозанятого (МойНалог).</li>
-    <li><b>📣 Маркетинг:</b> промокоды, реферальная программа, рассылка всем пользователям, автонапоминания.</li>
-    <li><b>🎨 Интерфейс:</b> свои баннеры на каждый раздел, премиум-эмодзи, контакты, текст соглашения.</li>
-    <li><b>👥 Пользователи:</b> блокировка бота и/или подписки раздельно, вайтлист, доступ к P2P, удаление, ручная связка с панелью.</li>
-    <li><b>🛠 Система:</b> статус панели, самообновление, уведомления об обновлениях, вебхуки, поддомен подписок, лог API-запросов.</li>
+    <li><b>💸 Продажи</b> <span class="tag stable">stable</span> — тарифы (быстрый мастер или тонкая настройка: цена, трафик ГБ, HWID на тариф, стратегия сброса), триал, сквады, все платёжки, история платежей с итогами, аналитика выручки, чеки самозанятого (МойНалог).</li>
+    <li><b>📣 Маркетинг</b> <span class="tag stable">stable</span> — промокоды, реферальная программа, рассылка всем пользователям, автонапоминания.</li>
+    <li><b>🎨 Интерфейс</b> <span class="tag stable">stable</span> — свои баннеры на каждый раздел, премиум-эмодзи, контакты, текст соглашения.</li>
+    <li><b>👥 Пользователи</b> <span class="tag stable">stable</span> — блокировка бота и/или подписки раздельно, вайтлист, доступ к P2P, удаление, ручная связка с панелью.</li>
+    <li><b>🛠 Система</b> <span class="tag stable">stable</span> — статус панели, самообновление с выбором канала (stable/dev), уведомления об обновлениях, вебхуки, поддомен подписок, лог API-запросов.</li>
+    <li><b>🖱 Редактирование «на месте»</b> <span class="tag dev">dev</span> — экраны админки и пользователя обновляются прямо в текущем сообщении (общие баннеры разделов вместо «удалить+прислать заново»); меню реорганизованы по UX-практикам Telegram-ботов.</li>
+    <li><b>➕ Доп-подписка в продажах</b> <span class="tag dev">dev</span> — управление add-on подпиской: трафик B, internal-сквады B, вкл/выкл прямо в разделе «Продажи».</li>
+    <li><b>📨 Контакты ссылкой/@юзернеймом</b> <span class="tag dev">dev</span> — поддержку и группу можно задать как <code>https://t.me/...</code> или <code>@username</code>.</li>
   </ul>
 
   <div class="note">🔒 <b>Безопасность:</b> автоблок скам-регистраций; экранирование имён (нет HTML-инъекций); верификация вебхуков и защита платежей от дублей; бот управляет в панели только аккаунтами этого пользователя (по <code>telegramId</code>/username — чужие учётки не трогает даже с тегом бота); доступ в админку только у <code>ADMIN_TELEGRAM_ID</code>; конфиг в БД зашифрован.</div>
+
+  <div class="note dev">🧪 <b>Надёжность и CI (ветка <code>dev</code>):</b> восстановление после паник, отправка с учётом лимитов Telegram (429), корректное завершение фоновых задач при остановке; в CI — <code>govulncheck</code> (жёсткий гейт по известным CVE) и <code>golangci-lint v2</code>.</div>
+</section>
+
+<section id="channels">
+  <h2>Каналы релизов</h2>
+  <p class="sub">Образы собирает CI и публикует в GHCR. Канал выбирается тегом образа — и прямо в боте: <b>Система → Обновление → канал</b>.</p>
+  <div class="channels">
+    <div class="chan stable">
+      <h4>🟢 Stable <span class="tag stable">main</span></h4>
+      <p class="src"><code>ghcr.io/mrvibecodic/chill-remna-bot:latest</code></p>
+      <p>Собирается из ветки <code>main</code>. Рекомендуется для продакшена — сюда попадает только проверенное.</p>
+    </div>
+    <div class="chan dev">
+      <h4>🟣 Dev (превью) <span class="tag dev">dev</span></h4>
+      <p class="src"><code>ghcr.io/mrvibecodic/chill-remna-bot:dev</code></p>
+      <p>Собирается из ветки <code>dev</code>. Новые возможности появляются здесь раньше: доп-подписка, редактирование экранов «на месте», реорганизованные меню, контакты ссылкой/@username.</p>
+    </div>
+  </div>
+  <div class="note">↻ Переключить канал можно без потери данных — состояние живёт в томе <code>bot-data</code>. После смены канала бот предложит обновиться на соответствующий образ.</div>
 </section>
 
 <section id="install">
@@ -172,7 +241,7 @@ nav.toc .wrap{scrollbar-width:thin}
   <p class="muted">Нужно заранее: Linux-сервер с Docker и Docker Compose v2, работающая панель Remnawave, токен бота от <a href="https://t.me/BotFather">@BotFather</a> и ваш Telegram ID от <a href="https://t.me/userinfobot">@userinfobot</a>.</p>
   <ol class="steps">
     <li><b>Папка и compose-файл</b>
-      <pre><code>mkdir -p /opt/remnachillbot && cd /opt/remnachillbot
+      <pre><code>mkdir -p /opt/remnachillbot &amp;&amp; cd /opt/remnachillbot
 curl -fsSL -o docker-compose.yml \
   https://raw.githubusercontent.com/Mrvibecodic/chill-remna-bot/main/docker-compose.yml</code></pre></li>
     <li><b>Впишите два значения</b> в <code>docker-compose.yml</code>:
@@ -202,18 +271,20 @@ docker compose up -d</code></pre></li>
   <h2>Админка</h2>
   <p class="sub">Меню админа открывается автоматически (ваш ID в <code>ADMIN_TELEGRAM_ID</code>). Разделы:</p>
   <div class="grid">
-    <div class="card"><h4>💸 Продажи</h4><p>Быстрая и тонкая настройка тарифов (цена, трафик, HWID, стратегия сброса <code>NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING</code>), триал, сквады, платёжки, история и аналитика, лог заказа (.log), чеки МойНалог.</p></div>
-    <div class="card"><h4>📣 Маркетинг</h4><p>Промокоды (<code>КОД ТИП ЗНАЧЕНИЕ [ЛИМИТ] [ДНЕЙ]</code>), рефералка, рассылка с предпросмотром, напоминания.</p></div>
-    <div class="card"><h4>🎨 Интерфейс</h4><p>Баннеры на каждый раздел (1280×640), премиум-эмодзи, контакты (поддержка+группа), соглашение.</p></div>
-    <div class="card"><h4>👥 Пользователи</h4><p>Карточка с раздельным состоянием бота и подписки. Блок/разблок: бот+подписка / только подписка / только бот — меню показывает лишь применимые опции. Блок подписки = статус <code>DISABLED</code> в панели.</p></div>
-    <div class="card"><h4>🛠 Система</h4><p>Статус панели, <code>/update</code>, проверка и уведомления об обновлениях, вебхуки, поддомен подписок, лог API (200 записей), перенастройка.</p></div>
-    <div class="card"><h4>🛒 Витрина</h4><p>Посмотреть бота глазами обычного пользователя, не выходя из админки.</p></div>
+    <div class="card"><h4>💸 Продажи <span class="tag stable">stable</span></h4><p>Быстрая и тонкая настройка тарифов (цена, трафик, HWID, стратегия сброса <code>NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING</code>), триал, сквады, платёжки, история и аналитика, лог заказа (.log), чеки МойНалог.</p></div>
+    <div class="card"><h4>➕ Доп-подписка <span class="tag dev">dev</span></h4><p>В разделе «Продажи»: включить add-on подписку B, задать её лимит трафика и internal-сквады. Вторая ссылка пользователю не выдаётся — подписка создаётся в панели как второй аккаунт с суффиксом <code>_addsub</code>.</p></div>
+    <div class="card"><h4>📣 Маркетинг <span class="tag stable">stable</span></h4><p>Промокоды (<code>КОД ТИП ЗНАЧЕНИЕ [ЛИМИТ] [ДНЕЙ]</code>), рефералка, рассылка с предпросмотром, напоминания.</p></div>
+    <div class="card"><h4>🎨 Интерфейс <span class="tag stable">stable</span></h4><p>Баннеры на каждый раздел (1280×640), премиум-эмодзи, контакты (поддержка+группа), соглашение. <span class="muted">Контакты можно задать ссылкой или @username</span> <span class="tag dev">dev</span>.</p></div>
+    <div class="card"><h4>👥 Пользователи <span class="tag stable">stable</span></h4><p>Карточка с раздельным состоянием бота и подписки. Блок/разблок: бот+подписка / только подписка / только бот — меню показывает лишь применимые опции. Блок подписки = статус <code>DISABLED</code> в панели.</p></div>
+    <div class="card"><h4>🛠 Система <span class="tag stable">stable</span></h4><p>Статус панели, <code>/update</code> с выбором канала (stable/dev), проверка и уведомления об обновлениях, вебхуки, поддомен подписок, лог API (200 записей), перенастройка.</p></div>
+    <div class="card"><h4>🛒 Витрина <span class="tag stable">stable</span></h4><p>Посмотреть бота глазами обычного пользователя, не выходя из админки.</p></div>
+    <div class="card"><h4>🖱 Экраны «на месте» <span class="tag dev">dev</span></h4><p>Подразделы редактируются прямо на баннере родительского раздела — без мельтешения «удалить+прислать». Меню реорганизованы по UX-практикам Telegram-ботов.</p></div>
   </div>
   <div class="note">🧾 <b>Лог заказа:</b> каждый шаг каждой оплаты (счёт → вебхук → перепроверка по API → действия в панели → дубли → реконсилятор) пишется в журнал. По ext_id платежа или Telegram ID бот пришлёт весь журнал <code>.log</code>-файлом. Хранение — 90 дней.</div>
 </section>
 
 <section id="payments">
-  <h2>Способы оплаты</h2>
+  <h2>Способы оплаты <span class="tag stable">stable</span></h2>
   <p class="sub">Каждый включается отдельно. Цены задаются в рублях.</p>
   <div class="tw"><table>
     <tr><th>Метод</th><th>Что это</th><th>Валюта</th></tr>
@@ -255,7 +326,7 @@ docker compose up -d</code></pre></li>
     <tr><td><code>/terms</code></td><td>всем</td><td>текст соглашения</td></tr>
     <tr><td><code>/status</code></td><td>админу</td><td>связь с панелью + статистика и ресурсы</td></tr>
     <tr><td><code>/setup</code></td><td>админу</td><td>пройти мастер заново</td></tr>
-    <tr><td><code>/update</code></td><td>админу</td><td>скачать свежий образ и перезапуститься</td></tr>
+    <tr><td><code>/update</code></td><td>админу</td><td>скачать свежий образ (канал stable/dev) и перезапуститься</td></tr>
     <tr><td><code>/p2p</code>, <code>/emoji</code>, <code>/welcome</code></td><td>админу</td><td>быстрый вход в P2P / эмодзи / баннер</td></tr>
   </table></div>
 </section>
@@ -280,7 +351,7 @@ docker compose up -d</code></pre></li>
 <section id="update">
   <h2>Обновление и бэкап</h2>
   <h3>Обновление</h3>
-  <p class="muted">Команда <code>/update</code> или кнопка в <b>Система</b>: бот делает <code>docker compose pull &amp;&amp; up -d</code> через одноразовый контейнер-контроллер и перезапускается. Раз в сутки бот сам сверяется с GitHub и, когда новый образ уже собран CI, присылает админу changelog с кнопкой «Обновить» (самоудаляется через 60 сек).</p>
+  <p class="muted">Команда <code>/update</code> или кнопка в <b>Система</b>: бот делает <code>docker compose pull &amp;&amp; up -d</code> через одноразовый контейнер-контроллер и перезапускается. Можно выбрать канал — <b>stable</b> (<code>:latest</code>) или <b>dev</b> (<code>:dev</code>). Раз в сутки бот сам сверяется с GitHub и, когда новый образ уже собран CI, присылает админу changelog с кнопкой «Обновить» (самоудаляется через 60 сек).</p>
   <h3>Бэкап</h3>
   <p class="muted">Всё состояние — в томе <code>bot-data</code> (SQLite-файл + <code>secret.key</code>). Бэкап = копия тома. Для Postgres — <code>pg_dump</code>. Конфиг зашифрован, поэтому без <code>secret.key</code> не восстановить.</p>
 </section>
@@ -288,6 +359,7 @@ docker compose up -d</code></pre></li>
 <section id="faq">
   <h2>FAQ</h2>
   <ul class="clean">
+    <li><b>Чем отличается канал <code>dev</code> от <code>latest</code>?</b> <code>:latest</code> собирается из ветки <code>main</code> (стабильное), <code>:dev</code> — из ветки <code>dev</code> (новые возможности раньше). Канал переключается в боте без потери данных.</li>
     <li><b>Нужен ли отдельный nginx/Caddy для вебхуков?</b> Нет — у бота есть встроенный HTTPS (способ A). Либо проксируйте через существующий reverse-proxy панели.</li>
     <li><b>Что если вебхук не дошёл?</b> Реконсилятор перепроверит платёж у провайдера и довыдаст подписку.</li>
     <li><b>Можно ли мигрировать SQLite → Postgres?</b> Да, миграция встроена; переключение в мастере/настройках.</li>
