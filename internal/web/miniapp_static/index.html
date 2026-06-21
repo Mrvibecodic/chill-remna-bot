@@ -255,6 +255,10 @@ const IC={
 const app=document.getElementById('app');
 const balchip=document.getElementById('balchip');
 let TOKEN=null;
+const WEB=!(tg&&tg.initData); // browser cabinet vs Telegram mini-app
+function getStoredToken(){try{return WEB?localStorage.getItem('cab_tok'):null;}catch(e){return null;}}
+function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}catch(e){}}
+function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
 let STATE={balanceK:0,methods:[]};
 let backFn=null; // current back handler for TG BackButton
 
@@ -290,19 +294,20 @@ async function authenticate(){
   const a=await api('/api/miniapp/auth',{method:'POST',body:JSON.stringify({init_data:tg.initData}),noRetry:true});
   TOKEN=a.token;return TOKEN;
 }
+function mkErr(status,msg){var e=new Error(msg||('http '+status));e.status=status;return e;}
 async function api(path,opts={}){
   const h=Object.assign({'Content-Type':'application/json'},opts.headers||{});
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch(path,Object.assign({},opts,{headers:h}));
-  if(r.status===401&&!opts.noRetry&&tg&&tg.initData){
+  if(r.status===401&&!opts.noRetry&&!WEB&&tg&&tg.initData){
     await authenticate();
     const h2=Object.assign({'Content-Type':'application/json'},opts.headers||{});
     h2['Authorization']='Bearer '+TOKEN;
     const r2=await fetch(path,Object.assign({},opts,{headers:h2}));
-    if(!r2.ok)throw new Error('http '+r2.status);
+    if(!r2.ok)throw mkErr(r2.status,null);
     return r2.json();
   }
-  if(!r.ok)throw new Error('http '+r.status);
+  if(!r.ok){var em=null;try{var j=await r.json();if(j&&j.error)em=j.error;}catch(e){}throw mkErr(r.status,em);}
   return r.json();
 }
 async function post(path,body){return api(path,{method:'POST',body:JSON.stringify(body||{})});}
@@ -375,7 +380,7 @@ function render(me,menu,sub,plans){
   }else{
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.shield+'</div>';
     h+='<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div></div>';
-    if(menu.trial_available)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
+    if(menu.trial_available&&!WEB)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
   }
   if(plans.plans&&plans.plans.length){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div>';
@@ -418,7 +423,7 @@ function buyPlan(months,label){
   haptic('tap');
   var methods=[];
   if(STATE.balanceK>0)methods.push('balance');
-  (STATE.methods||[]).forEach(function(m){if(m!=='balance')methods.push(m);});
+  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars'))methods.push(m);});
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
   var p=planByMonths(months);
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+
@@ -486,7 +491,8 @@ async function openMore(){
       '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
     h+='</div>';
   }
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
+  h+='<button class="btn ghost" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function promoApply(el){
@@ -638,13 +644,50 @@ function renderConnect(){
   view(h,boot);
   drawQR(d.sub_url);
 }
+/* ---- web cabinet login ---- */
+function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
+function cabLogout(){clearToken();renderLogin();}
+async function renderLogin(){
+  setBack(null);
+  var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.shield+' Вход</span></div>'+
+    '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:4px">Войдите через Telegram или по email.</div></div>';
+  if(cfg.bot_username)h+='<div class="sec-title">'+IC.bolt+'Через Telegram</div><div class="card" style="display:flex;justify-content:center"><div id="tglogin"></div></div>';
+  h+='<div class="sec-title">'+IC.tag+'По email</div><div class="card">'+
+    '<input id="lemail" class="field" type="email" placeholder="Email" autocomplete="email">'+
+    '<input id="lpass" class="field" style="margin-top:8px" type="password" placeholder="Пароль (мин. 6)" autocomplete="current-password">'+
+    '<button class="btn" style="margin-top:10px" onclick="cabLogin(this)">'+IC.check+'Войти</button>'+
+    '<button class="btn sec" style="margin-top:8px" onclick="cabRegister(this)">'+IC.plus+'Зарегистрироваться</button>'+
+    '<div class="hint" style="margin-top:8px;font-size:12px">Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.</div></div>';
+  h+='</div>';
+  view(h,null);
+  if(cfg.bot_username){var sc=document.createElement('script');sc.async=true;sc.src='https://telegram.org/js/telegram-widget.js?22';
+    sc.setAttribute('data-telegram-login',cfg.bot_username);sc.setAttribute('data-size','large');sc.setAttribute('data-onauth','onTGAuth(user)');sc.setAttribute('data-request-access','write');
+    var m=document.getElementById('tglogin');if(m)m.appendChild(sc);}
+}
+window.onTGAuth=function(user){renderLoginBusy();post('/api/cabinet/auth/telegram',user).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
+function renderLoginBusy(){skSimple();}
+async function cabEmail(path,el){
+  var email=cabVal('lemail'),pass=cabVal('lpass');
+  if(!email||!pass){toast('Заполните email и пароль','err');return;}
+  haptic('tap');busy(el,true);
+  try{var r=await post(path,{email:email,password:pass});if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
+  catch(e){toast(e.message||'Ошибка','err');}
+  busy(el,false);
+}
+function cabLogin(el){cabEmail('/api/cabinet/auth/login',el);}
+function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
+
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
   try{
-    if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
+    if(WEB){
+      if(!TOKEN)TOKEN=getStoredToken();
+      if(!TOKEN){renderLogin();return;}
+    }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
     skMain();
-    await authenticate();
+    if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
@@ -652,7 +695,7 @@ async function boot(){
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);
-  }catch(e){view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
+  }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }
 boot();
 </script>
