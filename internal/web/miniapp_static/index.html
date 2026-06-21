@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Кабинет</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="qrcode.min.js"></script>
 <style>
 :root{
   /* premium dark palette — independent of TG theme, but accent picks up tg.button_color */
@@ -177,6 +178,16 @@ svg{width:18px;height:18px;flex:none;vertical-align:middle}
   opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:50;display:flex;align-items:center;gap:9px;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast svg{width:18px;height:18px;flex:0 0 auto}
+.qrbox{background:#fff;padding:10px;border-radius:14px;line-height:0;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+.seg{display:flex;gap:6px;background:var(--surface);border:1px solid var(--stroke);border-radius:12px;padding:4px;margin:16px 0 10px}
+.segbtn{flex:1;border:0;background:transparent;color:var(--muted);font-weight:600;font-size:14px;padding:10px;border-radius:9px;cursor:pointer;transition:background .2s,color .2s;font-family:inherit}
+.segbtn.on{background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff}
+.appc{background:var(--surface);border:1px solid var(--stroke);border-radius:16px;padding:14px;margin-bottom:10px;backdrop-filter:blur(12px)}
+.appc.feat{border-color:transparent;background:linear-gradient(var(--bg-2),var(--bg-2)) padding-box,linear-gradient(120deg,var(--accent),var(--accent-2)) border-box}
+.apphead{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+.appname{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.appdesc{font-size:12.5px;color:var(--muted);margin:6px 0 2px}
+.fbadge{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:999px;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
 </style>
 </head>
 <body>
@@ -210,7 +221,8 @@ const IC={
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
   tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><path d="M7 7h.01"/></svg>',
-  globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>'
+  globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
+  download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>'
 };
 
 const app=document.getElementById('app');
@@ -243,12 +255,26 @@ function view(html,back){
 }
 
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function jsq(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function rub(k){return (Math.round(k)/100).toLocaleString('ru-RU');}
 
+async function authenticate(){
+  if(!tg||!tg.initData)throw new Error('Откройте через Telegram');
+  const a=await api('/api/miniapp/auth',{method:'POST',body:JSON.stringify({init_data:tg.initData}),noRetry:true});
+  TOKEN=a.token;return TOKEN;
+}
 async function api(path,opts={}){
   const h=Object.assign({'Content-Type':'application/json'},opts.headers||{});
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch(path,Object.assign({},opts,{headers:h}));
+  if(r.status===401&&!opts.noRetry&&tg&&tg.initData){
+    await authenticate();
+    const h2=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+    h2['Authorization']='Bearer '+TOKEN;
+    const r2=await fetch(path,Object.assign({},opts,{headers:h2}));
+    if(!r2.ok)throw new Error('http '+r2.status);
+    return r2.json();
+  }
   if(!r.ok)throw new Error('http '+r.status);
   return r.json();
 }
@@ -263,11 +289,24 @@ function toast(msg,kind){
   t.classList.add('show');
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);
 }
+function copyDone(ok){if(ok){haptic('ok');toast('Скопировано','ok');}else{haptic('err');toast('Не удалось скопировать','err');}}
+function fallbackCopy(t){try{var ta=document.createElement('textarea');ta.value=t;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,String(t).length);var ok=document.execCommand('copy');document.body.removeChild(ta);return ok;}catch(e){return false;}}
 function copy(t){
-  try{if(navigator.clipboard)navigator.clipboard.writeText(t);}catch(e){}
-  haptic('ok');toast('Скопировано',  'ok');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){copyDone(true);},function(){copyDone(fallbackCopy(t));});
+    return;
+  }
+  copyDone(fallbackCopy(t));
 }
-function openL(u){if(tg)tg.openLink(u);else window.open(u,'_blank');}
+function openL(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank');}
+function openDeep(u){try{window.location.href=u;}catch(e){}}
+function armReturnRefresh(){
+  var fired=false;
+  function fire(){if(fired)return;fired=true;document.removeEventListener('visibilitychange',onv);boot();}
+  function onv(){if(!document.hidden)setTimeout(fire,600);}
+  document.addEventListener('visibilitychange',onv);
+  setTimeout(function(){if(!fired)document.removeEventListener('visibilitychange',onv);},180000);
+}
 function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';el.style.pointerEvents=on?'none':'';}}
 
 function devicesText(s){
@@ -294,7 +333,8 @@ function render(me,menu,sub,plans){
     if(d!==null)h+='<div class="metric"><span class="l">'+IC.device+'Устройства</span><b>'+esc(d)+'</b></div>';
     if(sub.sub_url)h+='<div class="linkbox"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div>';
     h+='</div>';
-    if(sub.sub_url)h+='<button class="btn" onclick="copy(\''+esc(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';
+    if(sub.sub_url){h+='<button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>';
+      h+='<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
     if(menu.can_renew)h+='<div class="hint center">Для продления выберите период ниже</div>';
   }else{
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.shield+'</div>';
@@ -359,24 +399,25 @@ function buyPlan(months,label){
   }
   h+='<div class="sec-title">Способ оплаты</div>';
   methods.forEach(function(m){
-    h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\')">'+(METHOD_LABELS[m]||m)+'</button>';
+    h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
   });
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
-async function pay(months,method){
-  haptic('tap');
+async function pay(months,method,el){
+  haptic('tap');busy(el,true);
   try{const r=await post('/api/miniapp/checkout',{months:months,method:method});
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.pay_url){
       if(r.invoice&&tg&&tg.openInvoice){
         tg.openInvoice(r.pay_url,function(st){if(st==='paid')boot();});
-      }else{openL(r.pay_url);toast('Откройте оплату во вкладке, затем обновите экран','ok');}
+      }else{openL(r.pay_url);armReturnRefresh();toast('Откройте оплату во вкладке, затем вернитесь — обновим сами','ok');}
       return;
     }
     if(r.redirect){toast('Этот способ оплаты доступен в боте','err');return;}
     haptic('err');toast(r.error||'Не удалось оплатить','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  finally{busy(el,false);}
 }
 
 /* ---- "more": balance, promo, referral ---- */
@@ -388,26 +429,27 @@ async function openMore(){
     '<div class="title">'+rub(STATE.balanceK)+' ₽</div>'+
     '<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button></div>';
   h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
-    '<button class="btn" style="margin-top:10px" onclick="promoApply()">'+IC.check+'Применить</button></div>';
+    '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
   if(ref&&ref.enabled){
     var bonus=(ref.bonus_kind==='days')?(ref.bonus_value+' дн.'):(ref.bonus_value+' ₽');
     h+='<div class="sec-title">'+IC.gift+'Пригласить друга</div><div class="card">'+
       '<div class="hint">Бонус: <b style="color:var(--text)">'+esc(bonus)+'</b>'+(ref.on_first_pay?' за первую оплату':' за регистрацию')+'. Приглашено: '+(ref.count||0)+'</div>';
     if(ref.link){h+='<div class="mono" style="margin-top:10px">'+esc(ref.link)+'</div>'+
-      '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+esc(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
+      '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
     h+='</div>';
   }
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
-async function promoApply(){
-  var el=document.getElementById('promoIn'); var code=el?el.value.trim():'';
+async function promoApply(el){
+  var inp=document.getElementById('promoIn'); var code=inp?inp.value.trim():'';
   if(!code)return;
-  haptic('tap');
+  haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/promo',{code:code});
-    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');boot();}
-    else{haptic('err');toast(r.message||'Не удалось','err');}
+    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');boot();return;}
+    haptic('err');toast(r.message||'Не удалось','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  finally{busy(el,false);}
 }
 
 /* ---- top-up ---- */
@@ -428,30 +470,136 @@ function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
     '<div class="title">'+esc(label)+'</div><div class="until">Способ пополнения</div></div>';
-  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\')">'+(METHOD_LABELS2[m]||m)+'</button>';});
+  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+(METHOD_LABELS2[m]||m)+'</button>';});
   h+='<button class="btn ghost" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
   view(h,topupOpen);
 }
-async function topupPay(kopecks,method){
-  haptic('tap');
+async function topupPay(kopecks,method,el){
+  haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
-    if(r.ok&&r.pay_url){openL(r.pay_url);toast('Откройте оплату, затем обновите экран','ok');return;}
+    if(r.ok&&r.pay_url){openL(r.pay_url);armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  finally{busy(el,false);}
 }
 
+/* ---- connect (apps + deeplinks + QR) ---- */
+var CONNECT=null,CONNECT_OS='android';
+function detectOS(){
+  try{var p=(tg&&tg.platform)||'';if(p==='ios'||p==='macos')return 'ios';if(p==='android')return 'android';}catch(e){}
+  var ua=(navigator.userAgent||'').toLowerCase();
+  if(/iphone|ipad|ipod|mac os|macintosh/.test(ua))return 'ios';
+  return 'android';
+}
+function connectList(){return (CONNECT_OS==='ios'?(CONNECT&&CONNECT.ios):(CONNECT&&CONNECT.android))||[];}
+var APP_CONFIG_PATHS=['/assets/.app-config-v2.json','/assets/app-config.json','/assets/app-config-v2.json'];
+function subOrigin(u){try{return new URL(u).origin;}catch(e){return '';}}
+function locJS(m,lang){if(!m||typeof m!=='object')return '';return m[lang]||m.en||m.ru||(function(){for(var k in m){if(m[k])return m[k];}return '';})();}
+function substJS(t,sub,user){return String(t==null?'':t).split('{{SUBSCRIPTION_LINK}}').join(sub).split('{{USERNAME}}').join(user||'');}
+function deeplinkStd(scheme,sub){if(!scheme||!sub)return '';return scheme.charAt(scheme.length-1)==='='?(scheme+encodeURIComponent(sub)):(scheme+sub);}
+function parseConfig(j,sub,user,lang){
+  var res={ios:[],android:[]};
+  if(!j||!j.platforms)return res;
+  ['ios','android'].forEach(function(os){
+    var p=j.platforms[os];if(!p)return;
+    if(Array.isArray(p)){
+      p.forEach(function(ap){
+        var dto={name:ap.name,featured:!!ap.isFeatured,deeplink:deeplinkStd(ap.urlScheme,sub),add_desc:locJS(ap.addSubscriptionStep&&ap.addSubscriptionStep.description,lang),installs:[]};
+        ((ap.installationStep&&ap.installationStep.buttons)||[]).forEach(function(b){if(b.buttonLink)dto.installs.push({text:locJS(b.buttonText,lang),url:b.buttonLink});});
+        if(dto.deeplink||dto.installs.length)res[os].push(dto);
+      });
+    }else if(p.apps&&p.apps.length){
+      p.apps.forEach(function(ap){
+        var dto={name:ap.name,featured:!!ap.featured,deeplink:'',add_desc:'',installs:[]};
+        (ap.blocks||[]).forEach(function(bl){(bl.buttons||[]).forEach(function(b){
+          if(b.type==='subscriptionLink'){if(!dto.deeplink&&b.link){dto.deeplink=substJS(b.link,sub,user);if(!dto.add_desc)dto.add_desc=locJS(bl.description,lang);}}
+          else if(b.type==='external'){if(b.link)dto.installs.push({text:locJS(b.text,lang),url:substJS(b.link,sub,user)});}
+        });});
+        if(dto.deeplink||dto.installs.length)res[os].push(dto);
+      });
+    }
+    res[os].sort(function(a,b){return (b.featured?1:0)-(a.featured?1:0);});
+  });
+  return res;
+}
+async function fetchConfigClient(sub,user,lang){
+  var origin=subOrigin(sub);if(!origin)return null;
+  for(var i=0;i<APP_CONFIG_PATHS.length;i++){
+    try{
+      var r=await fetch(origin+APP_CONFIG_PATHS[i]);
+      if(!r.ok)continue;
+      var txt=await r.text();
+      if(!txt||txt.replace(/^\s+/,'').charAt(0)==='<')continue;
+      var j=JSON.parse(txt);
+      var res=parseConfig(j,sub,user,lang);
+      if(res.ios.length||res.android.length)return res;
+    }catch(e){}
+  }
+  return null;
+}
+async function openConnect(){
+  haptic('tap');skSimple();setBack(boot);
+  try{
+    var d=await api('/api/miniapp/connect');CONNECT=d;
+    var hasI=CONNECT.ios&&CONNECT.ios.length,hasA=CONNECT.android&&CONNECT.android.length;
+    CONNECT_OS=detectOS();
+    if(CONNECT_OS==='ios'&&!hasI&&hasA)CONNECT_OS='android';
+    if(CONNECT_OS==='android'&&!hasA&&hasI)CONNECT_OS='ios';
+    renderConnect();
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');boot();}
+}
+function setOS(os){haptic('tap');CONNECT_OS=os;renderConnect();}
+function drawQR(text){
+  if(!text)return;
+  var el=document.getElementById('qrbox');if(!el)return;
+  try{
+    if(typeof qrcode==='undefined'){var w=document.getElementById('qrwrap');if(w)w.style.display='none';return;}
+    var qr=qrcode(0,'M');qr.addData(text);qr.make();
+    el.innerHTML=qr.createSvgTag({cellSize:4,margin:1,scalable:true});
+    var svg=el.querySelector('svg');if(svg){svg.removeAttribute('width');svg.removeAttribute('height');svg.style.width='150px';svg.style.height='150px';svg.style.display='block';}
+  }catch(e){var w=document.getElementById('qrwrap');if(w)w.style.display='none';}
+}
+function renderConnect(){
+  var d=CONNECT||{};
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.download+' Подключение</span>'+IC.shield+'</div>'+
+    '<div class="title">Установите приложение</div><div class="hint" style="margin-top:4px">Установите приложение и нажмите «Добавить подписку» — она импортируется сама.</div>';
+  if(d.sub_url)h+='<div id="qrwrap" style="display:flex;flex-direction:column;align-items:center;margin-top:16px"><div id="qrbox" class="qrbox"></div>'+
+    '<div class="hint center" style="margin-top:8px">Наведите камеру другого устройства, чтобы перенести подписку</div></div>';
+  h+='</div>';
+  var hasI=d.ios&&d.ios.length,hasA=d.android&&d.android.length;
+  if(hasI&&hasA){
+    h+='<div class="seg"><button class="segbtn'+(CONNECT_OS==='android'?' on':'')+'" onclick="setOS(\'android\')">Android</button>'+
+      '<button class="segbtn'+(CONNECT_OS==='ios'?' on':'')+'" onclick="setOS(\'ios\')">iPhone / iOS</button></div>';
+  }
+  var list=connectList();
+  if(!list.length){
+    h+='<div class="hint center" style="margin-top:16px">Список приложений недоступен. Скопируйте ссылку и добавьте её в приложение вручную.</div>';
+    if(d.sub_url)h+='<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(d.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';
+  }
+  list.forEach(function(ap){
+    h+='<div class="appc'+(ap.featured?' feat':'')+'"><div class="apphead"><span class="appname">'+esc(ap.name)+(ap.featured?'<span class="fbadge">Рекомендуем</span>':'')+'</span></div>';
+    if(ap.add_desc)h+='<div class="appdesc">'+esc(ap.add_desc)+'</div>';
+    if(ap.deeplink)h+='<button class="btn" onclick="openDeep(\''+jsq(ap.deeplink)+'\')">'+IC.bolt+'Добавить подписку</button>';
+    (ap.installs||[]).forEach(function(b){
+      h+='<button class="btn sec" onclick="openL(\''+jsq(b.url)+'\')">'+IC.download+esc(b.text||'Установить')+'</button>';
+    });
+    h+='</div>';
+  });
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
+  drawQR(d.sub_url);
+}
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
   try{
     if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
     skMain();
-    const a=await api('/api/miniapp/auth',{method:'POST',body:JSON.stringify({init_data:tg.initData})});
-    TOKEN=a.token;
+    await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
-    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu;
+    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);

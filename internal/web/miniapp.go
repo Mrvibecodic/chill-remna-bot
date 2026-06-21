@@ -42,6 +42,10 @@ type MiniProvider interface {
 	MiniTopUpOptions(ctx context.Context, tgID int64) MiniTopUpOptionsDTO
 	// MiniTopUp creates a balance top-up payment (yk/cb) and returns the URL.
 	MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string) MiniActionDTO
+
+	// MiniConnect returns install apps + deeplinks for the user's subscription,
+	// sourced from their subscription page (iOS + Android only).
+	MiniConnect(ctx context.Context, tgID int64) MiniConnectDTO
 }
 
 type MiniReferralDTO struct {
@@ -140,6 +144,31 @@ type MiniPlansDTO struct {
 	// Strategy is the traffic reset strategy shared by all plans
 	// (NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING).
 	Strategy string `json:"strategy,omitempty"`
+}
+
+// MiniConnectButtonDTO is one install button (store link) for an app.
+type MiniConnectButtonDTO struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+// MiniConnectAppDTO is one VPN client app the user can install and import the
+// subscription into via its deeplink.
+type MiniConnectAppDTO struct {
+	ID       string                 `json:"id"`
+	Name     string                 `json:"name"`
+	Featured bool                   `json:"featured,omitempty"`
+	Deeplink string                 `json:"deeplink,omitempty"`
+	AddDesc  string                 `json:"add_desc,omitempty"`
+	Installs []MiniConnectButtonDTO `json:"installs,omitempty"`
+}
+
+// MiniConnectDTO carries the subscription URL plus the iOS/Android app lists.
+type MiniConnectDTO struct {
+	SubURL   string              `json:"sub_url,omitempty"`
+	Username string              `json:"username,omitempty"`
+	Android  []MiniConnectAppDTO `json:"android,omitempty"`
+	IOS      []MiniConnectAppDTO `json:"ios,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -340,4 +369,14 @@ func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method))
+}
+
+func (s *Server) handleMiniConnect(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniConnect(ctx, id))
 }

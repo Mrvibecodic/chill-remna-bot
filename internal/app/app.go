@@ -80,6 +80,9 @@ type App struct {
 	infraMu    sync.Mutex
 	infraCache *infraCacheEntry
 
+	connectMu    sync.Mutex
+	connectCache *connectCacheEntry
+
 	botUserMu sync.Mutex
 	botUser   string
 
