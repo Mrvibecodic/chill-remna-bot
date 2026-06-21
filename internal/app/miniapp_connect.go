@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -15,9 +16,6 @@ import (
 
 // appConfigTTL bounds how long the subscription page's app-config is cached.
 const appConfigTTL = 6 * time.Hour
-
-// connectHTTP fetches the public app-config from the subscription page host.
-var connectHTTP = &http.Client{Timeout: 4 * time.Second}
 
 // connectUA is a browser-like User-Agent so a WAF/Cloudflare in front of the
 // subscription page does not reject the fetch as a bot.
@@ -155,14 +153,8 @@ func appConfigBase(subURL string) string {
 
 // tryFetchParse GETs one candidate URL and parses it as either the v2 or the
 // standard schema. ok is true only when at least one iOS/Android app is found.
-func (a *App) tryFetchParse(ctx context.Context, base, path string) (*appConfigV2, *appConfig, bool) {
-	full := base + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
-	if err != nil {
-		return nil, nil, false
-	}
-	// Full browser-like headers: some subscription hosts only serve the asset to
-	// requests that look like a real browser navigation from the page itself.
+// setConnectHeaders makes the request look like a real in-page browser fetch.
+func setConnectHeaders(req *http.Request, base string) {
 	req.Header.Set("User-Agent", connectUA)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8")
@@ -170,7 +162,16 @@ func (a *App) tryFetchParse(ctx context.Context, base, path string) (*appConfigV
 	req.Header.Set("Sec-Fetch-Dest", "empty")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	resp, err := connectHTTP.Do(req)
+}
+
+func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path string) (*appConfigV2, *appConfig, bool) {
+	full := base + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
+	if err != nil {
+		return nil, nil, false
+	}
+	setConnectHeaders(req, base)
+	resp, err := client.Do(req)
 	if err != nil {
 		a.log.Warn("miniapp connect: app-config fetch error", "url", full, "err", err)
 		return nil, nil, false
@@ -205,15 +206,41 @@ func (a *App) tryFetchParse(ctx context.Context, base, path string) (*appConfigV
 
 // fetchAppConfig returns the parsed config for the subscription host, trying
 // the known paths, cached for appConfigTTL with stale-on-error fallback.
-func (a *App) fetchAppConfig(ctx context.Context, base string) *connectCacheEntry {
+func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectCacheEntry {
 	a.connectMu.Lock()
 	ce := a.connectCache
 	a.connectMu.Unlock()
 	if ce != nil && ce.base == base && time.Since(ce.fetchedAt) < appConfigTTL {
 		return ce
 	}
+
+	// Subscription pages gate the app-config behind a session cookie the server
+	// sets when the page is loaded (HttpOnly), returning 404 to cookieless
+	// requests. So prime a cookie jar by loading the user's sub page first, then
+	// fetch the asset with that cookie — exactly what a real browser does.
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Timeout: 4 * time.Second, Jar: jar}
+	if subURL != "" {
+		if req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil); err == nil {
+			// Full browser *navigation* headers: the subscription middleware returns
+			// 404 to anything that doesn't look like a real browser visit.
+			req.Header.Set("User-Agent", connectUA)
+			req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+			req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8")
+			req.Header.Set("Sec-Fetch-Dest", "document")
+			req.Header.Set("Sec-Fetch-Mode", "navigate")
+			req.Header.Set("Sec-Fetch-Site", "none")
+			req.Header.Set("Sec-Fetch-User", "?1")
+			req.Header.Set("Upgrade-Insecure-Requests", "1")
+			if resp, err := client.Do(req); err == nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+				_ = resp.Body.Close()
+			}
+		}
+	}
+
 	for _, p := range appConfigPaths {
-		v2, std, ok := a.tryFetchParse(ctx, base, p)
+		v2, std, ok := a.tryFetchParse(ctx, client, base, p)
 		if ok {
 			ne := &connectCacheEntry{base: base, v2: v2, std: std, fetchedAt: time.Now()}
 			a.connectMu.Lock()
@@ -316,7 +343,7 @@ func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	if base == "" {
 		return dto
 	}
-	ce := a.fetchAppConfig(ctx, base)
+	ce := a.fetchAppConfig(ctx, base, subURL)
 	if ce == nil {
 		return dto
 	}
