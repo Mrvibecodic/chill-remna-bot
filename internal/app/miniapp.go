@@ -124,3 +124,57 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 	}
 	return dto
 }
+
+// MiniTrial activates the free trial (mirrors activateTrial's core). Read of
+// availability uses the same predicate as the chat bot.
+func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
+	if !a.trialAvailable(ctx, tgID) {
+		return web.MiniActionDTO{Error: "триал недоступен"}
+	}
+	link, expireAt, err := a.trialProvision(ctx, tgID)
+	if err != nil {
+		return web.MiniActionDTO{Error: err.Error()}
+	}
+	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
+}
+
+// MiniCheckout buys/renews a period. Only the "balance" method completes
+// in-app (reuses finalizePurchase, the same provisioning core as the chat
+// flow); other methods return Redirect=true (handled in a later stage).
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string) web.MiniActionDTO {
+	valid := false
+	for _, m := range model.PlanMonths {
+		if m == months {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return web.MiniActionDTO{Error: "неверный период"}
+	}
+	if method != model.PayMethodBalance {
+		return web.MiniActionDTO{Redirect: true, Error: "этот способ оплаты пока доступен в боте"}
+	}
+
+	priceStr := a.pricing().Base[months]
+	kopecks, ok := rubToKopecks(priceStr)
+	if priceStr == "" || !ok || kopecks <= 0 {
+		return web.MiniActionDTO{Error: "тариф недоступен"}
+	}
+	if a.store == nil {
+		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	}
+	deducted, err := a.store.DeductBalance(ctx, tgID, kopecks)
+	if err != nil {
+		return web.MiniActionDTO{Error: err.Error()}
+	}
+	if !deducted {
+		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
+	}
+	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "")
+	if err != nil {
+		_ = a.store.AddBalance(ctx, tgID, kopecks) // refund on provisioning failure
+		return web.MiniActionDTO{Error: err.Error()}
+	}
+	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
+}

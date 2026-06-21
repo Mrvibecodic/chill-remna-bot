@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -249,14 +250,25 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trial.not_available"))
 		return
 	}
+	link, expireAt, err := a.trialProvision(ctx, chatID)
+	if err != nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", err.Error()))
+		return
+	}
+	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// trialProvision performs the panel-side trial provisioning and bookkeeping
+// (no chat messages, no availability check). Shared source of truth for the
+// chat handler and the Mini App. Callers must check trialAvailable first.
+func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string, error) {
 	a.mu.Lock()
 	panel := a.panel
 	tr := a.botCfg.Trial
 	strategy := a.botCfg.Pricing.ResetStrategy()
 	a.mu.Unlock()
 	if panel == nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", "panel offline"))
-		return
+		return "", "", errors.New("panel offline")
 	}
 	link, expireAt, err := panel.CreateOrUpdateUserDays(ctx, chatID, tr.Days, remnawave.UserLimits{
 		TrafficBytes:   int64(tr.TrafficGB) * 1024 * 1024 * 1024,
@@ -266,8 +278,7 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 		Strategy:       strategy,
 	})
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", err.Error()))
-		return
+		return "", "", err
 	}
 	link = a.rewriteSub(link)
 	if a.store != nil {
@@ -280,6 +291,5 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 	}
 	a.invalidateSubCache(chatID)
 	a.syncAddSub(ctx, chatID)
-
-	a.sendSubActive(ctx, chatID, link, expireAt)
+	return link, expireAt, nil
 }

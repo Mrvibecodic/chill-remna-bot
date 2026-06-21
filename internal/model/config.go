@@ -161,6 +161,7 @@ const (
 	PayMethodCryptoBot = "cryptobot"
 	PayMethodPlatega   = "platega"
 	PayMethodTribute   = "tribute"
+	PayMethodBalance   = "balance"
 )
 
 const (

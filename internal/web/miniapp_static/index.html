@@ -47,6 +47,7 @@ const tg=window.Telegram&&window.Telegram.WebApp;
 if(tg){tg.ready();tg.expand();}
 const app=document.getElementById('app');
 let TOKEN=null;
+let STATE={balanceK:0,methods:[]};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 async function api(path,opts={}){
   const h=Object.assign({'Content-Type':'application/json'},opts.headers||{});
@@ -69,16 +70,16 @@ function render(me,menu,sub,plans){
     if(sub.sub_url)h+='<div class="row" style="display:block"><div class="hint" style="margin-bottom:4px">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div>';
     h+='</div>';
     if(sub.sub_url)h+='<button class="btn" onclick="copy(\''+esc(sub.sub_url)+'\')">Скопировать ссылку</button>';
-    if(menu.can_renew)h+='<button class="btn sec" onclick="alert(\'Продление будет на след. этапе\')">Продлить</button>';
+    if(menu.can_renew)h+='<div class="hint" style="text-align:center;margin-top:8px">Для продления выберите период ниже.</div>';
   }else{
     h+='<div class="card"><div class="big">Подписка не активна</div><div class="hint">Выберите тариф ниже.</div></div>';
-    if(menu.trial_available)h+='<button class="btn sec" onclick="alert(\'Триал — на след. этапе\')">Попробовать бесплатно</button>';
+    if(menu.trial_available)h+='<button class="btn sec" onclick="doTrial(this)">Попробовать бесплатно</button>';
   }
   if(plans.plans&&plans.plans.length){
     h+='<h3>Тарифы</h3>';
     plans.plans.forEach((p,i)=>{
       const best=i===Math.min(2,plans.plans.length-1);
-      h+='<div class="tcard'+(best?' best':'')+'"><div><b>'+p.months+' мес.</b>';
+      h+='<div class="tcard'+(best?' best':'')+'" onclick="buyPlan('+p.months+',\''+esc(p.price)+' '+esc(p.currency)+'\')"><div><b>'+p.months+' мес.</b>';
       if(p.traffic_gb)h+='<div class="hint">'+p.traffic_gb+' ГБ'+(p.devices?' · '+p.devices+' устр.':'')+'</div>';
       h+='</div><div class="price">'+esc(p.price)+' '+esc(p.currency)+'</div></div>';
     });
@@ -88,6 +89,25 @@ function render(me,menu,sub,plans){
 }
 function copy(t){if(tg&&navigator.clipboard)navigator.clipboard.writeText(t);if(tg)tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred('success');}
 function openL(u){if(tg)tg.openLink(u);else window.open(u,'_blank');}
+async function post(path,body){return api(path,{method:'POST',body:JSON.stringify(body||{})});}
+function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';}}
+async function doTrial(el){
+  busy(el,true);
+  try{const r=await post('/api/miniapp/trial');
+    if(r.ok){if(tg&&tg.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');boot();}
+    else{alert(r.error||'Не удалось активировать триал');busy(el,false);}
+  }catch(e){alert('Ошибка: '+e.message);busy(el,false);}
+}
+async function buyPlan(months,label){
+  var hasBal=STATE.methods.indexOf('balance')>=0 || STATE.balanceK>0;
+  if(!hasBal){alert('Оплата этого тарифа — через бота. Откройте бота и выберите способ оплаты.');return;}
+  if(!confirm('Оплатить '+months+' мес. ('+label+') с баланса?'))return;
+  try{const r=await post('/api/miniapp/checkout',{months:months,method:'balance'});
+    if(r.ok){if(tg&&tg.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');boot();}
+    else if(r.redirect){alert('Этот способ оплаты пока доступен в боте.');}
+    else{alert(r.error||'Не удалось оплатить');}
+  }catch(e){alert('Ошибка: '+e.message);}
+}
 async function boot(){
   try{
     if(!tg||!tg.initData){app.innerHTML='<div class="card err">Откройте через Telegram.</div>';return;}
@@ -96,6 +116,7 @@ async function boot(){
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
+    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[];
     render(me,menu,sub,plans);
   }catch(e){app.innerHTML='<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>';}
 }

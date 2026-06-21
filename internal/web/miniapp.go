@@ -28,6 +28,24 @@ type MiniProvider interface {
 	MiniMenu(ctx context.Context, tgID int64) MiniMenuDTO
 	MiniSubscription(ctx context.Context, tgID int64) MiniSubDTO
 	MiniPlans(ctx context.Context, tgID int64) MiniPlansDTO
+
+	// MiniTrial activates the free trial (mirrors the chat trial flow).
+	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
+	// MiniCheckout performs an in-app purchase for the given period+method.
+	// Currently only the "balance" method completes in-app; others set
+	// Redirect=true so the front-end points the user to the bot.
+	MiniCheckout(ctx context.Context, tgID int64, months int, method string) MiniActionDTO
+}
+
+// MiniActionDTO is the result of an action (trial/checkout): on success it
+// carries the fresh subscription link + expiry; otherwise an error message or
+// a Redirect hint (use the bot for this payment method).
+type MiniActionDTO struct {
+	OK       bool   `json:"ok"`
+	SubURL   string `json:"sub_url,omitempty"`
+	ExpireAt string `json:"expire_at,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Redirect bool   `json:"redirect,omitempty"`
 }
 
 type MiniMeDTO struct {
@@ -171,4 +189,37 @@ func (s *Server) handleMiniPlans(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniPlans(ctx, id))
+}
+
+func (s *Server) handleMiniTrial(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniTrial(ctx, id))
+}
+
+func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	body, err := readAllLimited(r, 8*1024)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Months int    `json:"months"`
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method))
 }
