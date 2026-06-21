@@ -511,6 +511,13 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	startRows := [][]models.InlineKeyboardButton{backHomeRow(lang)}
 	startMsgID := src
 	if startMsgID == 0 || !a.msg.EditText(ctx, chatID, startMsgID, startText, startRows) {
+		// The source message can't be edited in place (e.g. it's a banner/photo
+		// "update available" notice — editMessageText fails on media messages).
+		// Delete it so it doesn't linger, then post the flow as a fresh message
+		// that can later morph into the "updated" result.
+		if startMsgID != 0 {
+			a.msg.Delete(ctx, chatID, startMsgID)
+		}
 		startMsgID = a.msg.SendKB(ctx, chatID, startText, startRows)
 	}
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
@@ -549,6 +556,9 @@ func (a *App) updateFailMsg(ctx context.Context, chatID int64, msgID int, err er
 	rows := [][]models.InlineKeyboardButton{homeRow(lang)}
 	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, text, rows) {
 		return
+	}
+	if msgID != 0 {
+		a.msg.Delete(ctx, chatID, msgID)
 	}
 	a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
 }
