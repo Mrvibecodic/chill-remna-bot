@@ -67,6 +67,20 @@ func validateTelegramLogin(fields map[string]string, botToken string, ttl time.D
 
 func (s *Server) cabinetOK() bool { return s.mini != nil && s.mini.CabinetEnabled() }
 
+// requireHTTPS makes sure the cabinet is never served over plain HTTP. Static
+// GETs are redirected to https; API calls are refused.
+func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request, api bool) bool {
+	if isSecure(r) {
+		return true
+	}
+	if api || r.Method != http.MethodGet {
+		writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "требуется HTTPS"})
+		return false
+	}
+	http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+	return false
+}
+
 // authThrottled rate-limits the internet-facing auth endpoints per client IP.
 func (s *Server) authThrottled(w http.ResponseWriter, r *http.Request) bool {
 	if s.authLimiter != nil && !s.authLimiter.allow(clientIP(r)) {
@@ -87,6 +101,9 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !s.requireHTTPS(w, r, true) {
+		return
+	}
 	s.setSecurityHeaders(w, true)
 	writeJSON(w, http.StatusOK, map[string]any{"bot_username": s.mini.CabinetBotUsername()})
 }
@@ -97,10 +114,14 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	if !s.requireHTTPS(w, r, true) {
+		return
+	}
 	s.setSecurityHeaders(w, true)
 	if s.authThrottled(w, r) {
 		return
 	}
+
 	body, err := readAllLimited(r, 16*1024)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -143,6 +164,9 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register bool) {
 	if !s.cabinetOK() {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.requireHTTPS(w, r, true) {
 		return
 	}
 	s.setSecurityHeaders(w, true)
@@ -189,6 +213,9 @@ func (s *Server) handleCabinetLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCabinetStatic(w http.ResponseWriter, r *http.Request) {
 	if !s.cabinetOK() {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.requireHTTPS(w, r, false) {
 		return
 	}
 	s.setSecurityHeaders(w, true)

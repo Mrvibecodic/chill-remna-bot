@@ -54,6 +54,8 @@ type MiniProvider interface {
 	CabinetEnsureUser(ctx context.Context, tgID int64)
 	CabinetEmailRegister(ctx context.Context, email, password string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
+	// MiniBlocked reports whether the user is blocked by an admin.
+	MiniBlocked(ctx context.Context, tgID int64) bool
 }
 
 type MiniReferralDTO struct {
@@ -243,6 +245,10 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	id, web, ok = s.miniAuth(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return 0, false, false
+	}
+	if s.mini.MiniBlocked(r.Context(), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ заблокирован"})
 		return 0, false, false
 	}
 	return id, web, true

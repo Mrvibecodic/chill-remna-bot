@@ -53,21 +53,34 @@ func (rl *rateLimiter) allow(key string) bool {
 }
 
 // clientIP returns the best-effort client IP, honoring a reverse proxy's
-// forwarding headers (the bot is commonly behind nginx/Cloudflare).
+// forwarding headers (the bot is commonly behind nginx/Cloudflare). Forwarded
+// values are only accepted if they parse to a real, globally-routable unicast
+// address, so a spoofed or garbage header (e.g. a multicast 232.x.x.x) is
+// ignored and we fall back to the real TCP peer.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if rip := r.Header.Get("X-Real-IP"); rip != "" {
-		return strings.TrimSpace(rip)
-	}
+	peer := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+		peer = host
 	}
-	return r.RemoteAddr
+	for _, h := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
+		v := r.Header.Get(h)
+		if v == "" {
+			continue
+		}
+		if i := strings.IndexByte(v, ','); i > 0 {
+			v = v[:i]
+		}
+		if ip := net.ParseIP(strings.TrimSpace(v)); ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
+			return ip.String()
+		}
+	}
+	return peer
+}
+
+// isSecure reports whether the request reached us over HTTPS, directly or via a
+// TLS-terminating reverse proxy.
+func isSecure(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // setSecurityHeaders applies baseline hardening headers. frameDeny is used for

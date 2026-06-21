@@ -42,6 +42,15 @@ func (a *App) CabinetPath() string {
 func (a *App) CabinetBotUsername() string { return a.botUsername(context.Background()) }
 
 // CabinetEnsureUser makes sure a Telegram-signed cabinet user exists locally.
+// MiniBlocked reports whether the user is blocked (gates mini-app + cabinet).
+func (a *App) MiniBlocked(ctx context.Context, tgID int64) bool {
+	if a.store == nil {
+		return false
+	}
+	u, _ := a.store.GetUser(ctx, tgID)
+	return u != nil && u.Blocked
+}
+
 func (a *App) CabinetEnsureUser(ctx context.Context, tgID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, tgID)
