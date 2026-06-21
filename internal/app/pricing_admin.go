@@ -173,7 +173,6 @@ func (a *App) showPricing(ctx context.Context, chatID int64) {
 	pr := a.pricing()
 	table := a.formatPlansTable(lang)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.title", curRUB, pr.ResetStrategy(), table), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "pricing.btn_quick"), "prc:quick")},
 		{btn(i18n.T(lang, "pricing.btn_base"), "prc:base")},
 		{btn(i18n.T(lang, "pricing.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "pricing.btn_devices"), "prc:devices")},
 		{btn(i18n.T(lang, "pricing.btn_strategy"), "prc:strategy")},

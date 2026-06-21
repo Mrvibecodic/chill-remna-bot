@@ -155,6 +155,8 @@ var en = map[string]string{
 	"btn.upd_notify_on":       "🔔 Notifications: on",
 	"btn.upd_notify_off":      "🔕 Notifications: off",
 	"btn.home":                "🏠 Home",
+	"btn.toggle_on":           "✅ Enabled",
+	"btn.toggle_off":          "❌ Disabled",
 	"btn.cancel":              "⬅️ Cancel",
 	"btn.reconfig":            "🔧 Reconfigure",
 	"menu.cat_iface":          "🎨 Interface",
@@ -215,8 +217,8 @@ var en = map[string]string{
 	"btn.del_with_sub": "🗑 Bot + panel subscription",
 	"btn.del_bot_only": "🤖 Bot only",
 	"user.del_ask":     "🗑 <b>Delete user</b>\n\nUser <code>%s</code> will be removed from the bot.\n\nAlso delete THEIR subscription in the Remnawave panel? Only their account is deleted — nothing else is affected.",
-	"btn.prev":         "⬅️",
-	"btn.next":         "➡️",
+	"btn.prev":         "‹ Prev",
+	"btn.next":         "Next ›",
 
 	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
 		"People registered in the bot. Block and delete affect the bot ONLY and do NOT touch " +

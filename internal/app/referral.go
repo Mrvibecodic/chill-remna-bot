@@ -257,7 +257,7 @@ func (a *App) showReferralAdmin(ctx context.Context, chatID int64) {
 	}
 	text := i18n.T(lang, "refadm.title", mark(cfg.Enabled), kind, cfg.BonusValue, when, inviteeDesc, cfg.Percent)
 	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "refadm.btn_toggle"), "ref:toggle")},
+		{toggleBtn(lang, cfg.Enabled, "ref:toggle")},
 		{btn(i18n.T(lang, "refadm.btn_kind"), "ref:kind"), btn(i18n.T(lang, "refadm.btn_value"), "ref:value")},
 		{btn(i18n.T(lang, "refadm.btn_when"), "ref:when")},
 		{btn(i18n.T(lang, "refadm.btn_invitee_kind"), "ref:ikind"), btn(i18n.T(lang, "refadm.btn_invitee_value"), "ref:ivalue")},

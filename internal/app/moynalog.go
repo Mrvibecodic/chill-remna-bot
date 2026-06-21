@@ -89,7 +89,7 @@ func (a *App) showMoyNalogAdmin(ctx context.Context, chatID int64) {
 	}
 	text := i18n.T(lang, "mn.title", mark, login, pass, name)
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "mn.btn_toggle"), "mn:toggle")},
+		{toggleBtn(lang, cfg.Enabled, "mn:toggle")},
 		{btn(i18n.T(lang, "mn.btn_login"), "mn:login"), btn(i18n.T(lang, "mn.btn_pass"), "mn:pass")},
 		{btn(i18n.T(lang, "mn.btn_name"), "mn:name")},
 		navBack(lang, "menu:pay"),

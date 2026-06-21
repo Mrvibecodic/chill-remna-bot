@@ -214,6 +214,16 @@ func homeRow(lang string) []models.InlineKeyboardButton {
 	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }
 
+// toggleBtn renders an on/off button whose label reflects the current state,
+// so the admin sees the state without reading the title.
+func toggleBtn(lang string, on bool, cb string) models.InlineKeyboardButton {
+	key := "btn.toggle_off"
+	if on {
+		key = "btn.toggle_on"
+	}
+	return btn(i18n.T(lang, key), cb)
+}
+
 func navBack(lang, backCB string) []models.InlineKeyboardButton {
 	return []models.InlineKeyboardButton{
 		btn(i18n.T(lang, "btn.back"), backCB),
@@ -292,8 +302,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
 	}
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick")},
-		{btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
+		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick"), btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
 		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},

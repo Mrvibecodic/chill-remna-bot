@@ -805,7 +805,7 @@ func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption str
 }
 
 func backHomeRow(lang string) []models.InlineKeyboardButton {
-	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back_home"), "x:home")}
+	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }
 
 func btn(text, data string) models.InlineKeyboardButton {

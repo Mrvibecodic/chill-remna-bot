@@ -43,7 +43,7 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 		i18n.T(lang, statusKey), days, gbStr, hwidStr, internalCSV, externalName)
 
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "admin.btn_toggle"), "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
+		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
