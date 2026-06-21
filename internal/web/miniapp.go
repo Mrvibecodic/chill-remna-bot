@@ -25,14 +25,14 @@ type MiniProvider interface {
 	MiniBotToken() string
 
 	MiniMe(ctx context.Context, tgID int64) MiniMeDTO
-	MiniMenu(ctx context.Context, tgID int64) MiniMenuDTO
+	MiniMenu(ctx context.Context, tgID int64, web bool) MiniMenuDTO
 	MiniSubscription(ctx context.Context, tgID int64) MiniSubDTO
 	MiniPlans(ctx context.Context, tgID int64) MiniPlansDTO
 
 	// MiniTrial activates the free trial (mirrors the chat trial flow).
 	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
 	// MiniCheckout performs an in-app purchase for the given period+method.
-	MiniCheckout(ctx context.Context, tgID int64, months int, method string) MiniActionDTO
+	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool) MiniActionDTO
 
 	// MiniReferral returns the user's referral info (mirrors showReferral).
 	MiniReferral(ctx context.Context, tgID int64) MiniReferralDTO
@@ -265,13 +265,13 @@ func (s *Server) handleMiniMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMiniMenu(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniMenu(ctx, id))
+	writeJSON(w, http.StatusOK, s.mini.MiniMenu(ctx, id, web))
 }
 
 func (s *Server) handleMiniSubscription(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +309,7 @@ func (s *Server) handleMiniTrial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
@@ -328,7 +328,7 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web))
 }
 
 func (s *Server) handleMiniReferral(w http.ResponseWriter, r *http.Request) {

@@ -70,7 +70,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	payURL, invoiceID, err := a.cbCreateInvoice(ctx, chatID, months, price)
+	payURL, invoiceID, err := a.cbCreateInvoice(ctx, chatID, months, price, false)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
 		return
@@ -198,7 +198,7 @@ func (a *App) onCBAdmin(ctx context.Context, chatID int64, val string) {
 
 // cbCreateInvoice creates a CryptoBot invoice + pending record and returns the
 // pay URL and invoice id. Shared by chat flow and Mini App.
-func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, price string) (string, int64, error) {
+func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, price string, web bool) (string, int64, error) {
 	client := a.cbClient()
 	if client == nil {
 		return "", 0, errors.New("cryptobot не настроен")
@@ -217,6 +217,9 @@ func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, pri
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months})
 	}
 	payURL := inv.MiniAppInvoiceURL
+	if web && inv.WebAppInvoiceURL != "" {
+		payURL = inv.WebAppInvoiceURL // browser cabinet: pay without Telegram
+	}
 	if payURL == "" {
 		payURL = inv.BotInvoiceURL
 	}

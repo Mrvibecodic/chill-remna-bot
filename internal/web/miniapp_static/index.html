@@ -207,6 +207,12 @@ svg{width:18px;height:18px;flex:none;vertical-align:middle}
 .pass .stub .c .v{font-size:14px;font-weight:800;color:#fff}
 .pass .stub .c:nth-child(2){text-align:center}
 .pass .stub .c:last-child{text-align:right}
+body.web .wrap{max-width:880px}
+.cols{display:flex;flex-direction:column;gap:10px}
+@media(min-width:700px){
+  body.web .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  body.web .cols>.plan,body.web .cols>.appc{margin-bottom:0}
+}
 .coins{display:flex;justify-content:center;margin-top:14px}
 .coins svg{width:128px;height:48px}
 .payhead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
@@ -256,6 +262,7 @@ const app=document.getElementById('app');
 const balchip=document.getElementById('balchip');
 let TOKEN=null;
 const WEB=!(tg&&tg.initData); // browser cabinet vs Telegram mini-app
+try{if(WEB)document.body.classList.add('web');}catch(e){}
 function getStoredToken(){try{return WEB?localStorage.getItem('cab_tok'):null;}catch(e){return null;}}
 function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}catch(e){}}
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
@@ -383,7 +390,7 @@ function render(me,menu,sub,plans){
     if(menu.trial_available&&!WEB)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
   }
   if(plans.plans&&plans.plans.length){
-    h+='<div class="sec-title">'+IC.tag+'Тарифы</div>';
+    h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
     plans.plans.forEach((p,i)=>{
       const best=i===Math.min(2,plans.plans.length-1);
       const lab=esc(p.price)+' '+esc(p.currency);
@@ -391,6 +398,7 @@ function render(me,menu,sub,plans){
         '<div class="pl"><span class="pm">'+monthsWord(p.months)+'</span><span class="ps">'+esc(planSub(p))+(p.countries&&p.countries.length?(' · 🌍 '+p.countries.length+' '+plural(p.countries.length,'страна','страны','стран')):'')+'</span></div>'+
         '<span class="price">'+lab+'</span></div>';
     });
+    h+='</div>';
   }
   if(menu.support_url)h+='<button class="btn sec" onclick="openSmart(\''+jsq(menu.support_url)+'\')">'+IC.life+'Поддержка</button>';
   if(menu.group_url)h+='<button class="btn sec" onclick="openSmart(\''+jsq(menu.group_url)+'\')">'+IC.users+'Наша группа</button>';
@@ -627,10 +635,12 @@ function renderConnect(){
       '<button class="segbtn'+(CONNECT_OS==='ios'?' on':'')+'" onclick="setOS(\'ios\')">iPhone / iOS</button></div>';
   }
   var list=connectList();
+  var grid=list.length>1;
   if(!list.length){
     h+='<div class="hint center" style="margin-top:16px">Список приложений недоступен. Скопируйте ссылку и добавьте её в приложение вручную.</div>';
     if(d.sub_url)h+='<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(d.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';
   }
+  if(grid)h+='<div class="cols">';
   list.forEach(function(ap){
     h+='<div class="appc'+(ap.featured?' feat':'')+'"><div class="apphead"><span class="appname">'+esc(ap.name)+(ap.featured?'<span class="fbadge">Рекомендуем</span>':'')+'</span></div>';
     if(ap.add_desc)h+='<div class="appdesc">'+esc(ap.add_desc)+'</div>';
@@ -640,6 +650,7 @@ function renderConnect(){
     });
     h+='</div>';
   });
+  if(grid)h+='</div>';
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
   drawQR(d.sub_url);

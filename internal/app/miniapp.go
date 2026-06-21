@@ -36,7 +36,7 @@ func (a *App) MiniMe(ctx context.Context, tgID int64) web.MiniMeDTO {
 
 // MiniMenu mirrors navRow: it reports exactly which actions the chat bot would
 // offer this user, plus the enabled payment methods and contact links.
-func (a *App) MiniMenu(ctx context.Context, tgID int64) web.MiniMenuDTO {
+func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuDTO {
 	dto := web.MiniMenuDTO{
 		HasSub:         a.userHasSub(ctx, tgID),
 		TrialAvailable: a.trialAvailable(ctx, tgID),
@@ -50,7 +50,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64) web.MiniMenuDTO {
 	if a.botCfg != nil {
 		c := a.botCfg
 		dto.GroupURL = c.Contact.GroupURL
-		if c.Stars.Enabled {
+		if c.Stars.Enabled && !web_ {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodStars)
 		}
 		if c.YooKassa.Enabled {
@@ -168,7 +168,7 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 // MiniCheckout buys/renews a period. Only the "balance" method completes
 // in-app (reuses finalizePurchase, the same provisioning core as the chat
 // flow); other methods return Redirect=true (handled in a later stage).
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string) web.MiniActionDTO {
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string, web_ bool) web.MiniActionDTO {
 	valid := false
 	for _, m := range model.PlanMonths {
 		if m == months {
@@ -180,10 +180,13 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 		return web.MiniActionDTO{Error: "неверный период"}
 	}
 	if method == model.PayMethodP2P {
+		if web_ && tgID < 0 {
+			return web.MiniActionDTO{Error: "оплата переводом для email-аккаунтов появится позже — используйте карту или криптовалюту"}
+		}
 		return a.MiniP2P(ctx, tgID, months)
 	}
 	if method != model.PayMethodBalance {
-		payURL, invoice, err := a.miniPayURL(ctx, tgID, months, method)
+		payURL, invoice, err := a.miniPayURL(ctx, tgID, months, method, web_)
 		if err != nil {
 			return web.MiniActionDTO{Error: err.Error()}
 		}
