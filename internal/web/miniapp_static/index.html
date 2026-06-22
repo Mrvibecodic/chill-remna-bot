@@ -217,7 +217,7 @@ body.web .wrap{max-width:960px}
 .ulogout{width:auto;margin:0;padding:9px 13px;font-size:13px;flex:none}
 .cols{display:flex;flex-direction:column;gap:10px}
 @media(min-width:700px){
-  body.web .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  body.web .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
   body.web .cols>.plan,body.web .cols>.appc{margin-bottom:0}
 }
 .coins{display:flex;justify-content:center;margin-top:14px}
@@ -231,10 +231,12 @@ body.web .wrap{max-width:960px}
 .btnrow .btn{margin-top:10px}
 body.web .authwrap{max-width:420px;margin:0 auto}
 @media(min-width:700px){
-  body.web .acctgrp{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start}
+  body.web .acctgrp{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:stretch;margin-bottom:16px}
   body.web .acctgrp>.ublock,body.web .acctgrp>.pass{margin-bottom:0}
-  body.web .btnrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  body.web .acctgrp>.ublock{align-self:start}
+  body.web .btnrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
   body.web .btnrow>.btn{margin-top:0}
+  body.web .sec-title{margin-top:26px}
 }
 </style>
 </head>
