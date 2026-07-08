@@ -42,8 +42,8 @@ func (a *App) onBroadcast(ctx context.Context, chatID int64, val string) {
 			a.showBroadcast(ctx, chatID)
 			return
 		}
-		a.runBroadcast(chatID, text)
 		a.sendKB(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{navBack(lang, "menu:marketing")})
+		a.runBroadcast(chatID, text, a.screenMsgID(chatID))
 	}
 }
 
@@ -96,7 +96,7 @@ func (a *App) expandBroadcastVars(text string, u *model.User, lang string) strin
 	).Replace(text)
 }
 
-func (a *App) runBroadcast(adminChat int64, text string) {
+func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 	if a.store == nil {
 		return
 	}
@@ -130,11 +130,10 @@ func (a *App) runBroadcast(adminChat int64, text string) {
 				failed++
 			}
 		}
-		id := a.msg.Send(ctx, adminChat, a.applyPremium(i18n.T(lang, "bcast.done", sent, failed)))
-		if id != 0 {
-			time.AfterFunc(60*time.Second, func() {
-				a.msg.Delete(a.bgContext(), adminChat, id)
-			})
+		doneText := a.applyPremium(i18n.T(lang, "bcast.done", sent, failed))
+		doneRows := [][]models.InlineKeyboardButton{navBack(lang, "menu:marketing")}
+		if statusID == 0 || !a.msg.EditText(ctx, adminChat, statusID, doneText, doneRows) {
+			a.msg.SendKB(ctx, adminChat, doneText, doneRows)
 		}
 	}()
 }

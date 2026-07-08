@@ -727,6 +727,15 @@ func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 	}
 }
 
+func (a *App) screenMsgID(chatID int64) int {
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if ids := a.screen[chatID]; len(ids) > 0 {
+		return ids[len(ids)-1]
+	}
+	return 0
+}
+
 func (a *App) send(ctx context.Context, chatID int64, text string) {
 	t := a.applyPremium(text)
 	a.emit(ctx, chatID, func() int { return a.msg.Send(ctx, chatID, t) })

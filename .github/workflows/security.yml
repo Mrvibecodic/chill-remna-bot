@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.11"
+          go-version: "1.25.12"
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.11"
+          go-version: "1.25.12"
       - uses: golangci/golangci-lint-action@v8
         with:
           # v8 installs golangci-lint v2, which is built with Go 1.25+ and so
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.11"
+          go-version: "1.25.12"
       - name: Run gosec
         uses: securego/gosec@master
         with:
