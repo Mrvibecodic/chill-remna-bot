@@ -615,6 +615,34 @@ func (c *Client) EnableByTelegramID(ctx context.Context, telegramID int64) (bool
 	return c.setSubEnabled(ctx, telegramID, true)
 }
 
+// RevokeDevicesByTelegramID rotates the user's proxy credentials
+// (POST /api/users/{uuid}/actions/revoke with revokeOnlyPasswords=true). This
+// disconnects ALL currently connected devices while keeping the same
+// subscription URL, so clients only need to refresh the subscription to
+// reconnect. ok=false when the user is unknown to the panel.
+func (c *Client) RevokeDevicesByTelegramID(ctx context.Context, telegramID int64) (bool, error) {
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return false, err
+	}
+	if u == nil || u.Uuid == "" {
+		return false, nil
+	}
+	if !ownedByBot(u, telegramID) {
+		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
+	}
+	body := map[string]any{"revokeOnlyPasswords": true}
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(u.Uuid)+"/actions/revoke", body)
+	if err != nil {
+		return false, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return false, classifyHTTP(resp)
+	}
+	return true, nil
+}
+
 func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, string, bool) {
 	u, err := c.findByTelegram(ctx, telegramID)
 	if err != nil || u == nil || u.SubscriptionURL == "" {

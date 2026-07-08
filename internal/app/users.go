@@ -680,11 +680,13 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	if sup := a.supportURL(); sup != "" {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "btn.support"), URL: sup}})
 	}
-	rows = append(rows, home)
 	if status == remnawave.StatusDisabled {
+		rows = append(rows, home)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.blocked"), rows)
 		return
 	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
+	rows = append(rows, home)
 	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
