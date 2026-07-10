@@ -1092,6 +1092,7 @@ func (b *base) SetWhitelisted(ctx context.Context, telegramID int64, on bool) er
 // AddWhitelistID добавляет Telegram ID в предзаполненный вайтлист (до регистрации).
 func (b *base) AddWhitelistID(ctx context.Context, telegramID int64) error {
 	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение telegramID передаётся биндовым параметром
 		"INSERT INTO whitelist (telegram_id) VALUES ("+b.ph(1)+") ON CONFLICT(telegram_id) DO NOTHING",
 		telegramID)
 	return err
@@ -1100,6 +1101,7 @@ func (b *base) AddWhitelistID(ctx context.Context, telegramID int64) error {
 // RemoveWhitelistID убирает Telegram ID из предзаполненного вайтлиста.
 func (b *base) RemoveWhitelistID(ctx context.Context, telegramID int64) error {
 	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение telegramID передаётся биндовым параметром
 		"DELETE FROM whitelist WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
