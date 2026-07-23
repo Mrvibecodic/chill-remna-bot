@@ -47,6 +47,10 @@ type MiniProvider interface {
 	// sourced from their subscription page (iOS + Android only).
 	MiniConnect(ctx context.Context, tgID int64) MiniConnectDTO
 
+	// MiniResetDevices rotates the user's credentials and clears all their HWID
+	// devices (mirrors the chat "reset devices" flow). Available in the cabinet too.
+	MiniResetDevices(ctx context.Context, tgID int64) MiniActionDTO
+
 	// --- web cabinet (browser site; reuses everything above except trial) ---
 	CabinetEnabled() bool
 	CabinetPath() string
@@ -426,4 +430,14 @@ func (s *Server) handleMiniConnect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniConnect(ctx, id))
+}
+
+func (s *Server) handleMiniResetDevices(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniResetDevices(ctx, id))
 }

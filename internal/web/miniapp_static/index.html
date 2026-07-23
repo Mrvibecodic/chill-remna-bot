@@ -414,6 +414,7 @@ function render(me,menu,sub,plans){
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
+    h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     if(menu.can_renew)h+='<div class="hint center">Для продления выберите период ниже</div>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
@@ -447,6 +448,24 @@ async function doTrial(el){
   try{const r=await post('/api/miniapp/trial');
     if(r.ok){haptic('ok');boot();}
     else{haptic('err');toast(r.error||'Не удалось активировать триал','err');busy(el,false);}
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
+}
+
+function confirmAsk(msg,cb){
+  if(tg&&tg.showConfirm){try{tg.showConfirm(msg,function(ok){cb(!!ok);});return;}catch(e){}}
+  cb(window.confirm(msg));
+}
+function askResetDevices(el){
+  haptic('tap');
+  confirmAsk('Сбросить все устройства?\n\nОни отключатся от VPN, а ключи доступа обновятся. Чтобы снова подключиться, обновите подписку на каждом нужном устройстве.',function(ok){
+    if(ok)doResetDevices(el);
+  });
+}
+async function doResetDevices(el){
+  busy(el,true);
+  try{const r=await post('/api/miniapp/devices/reset');
+    if(r.ok){haptic('ok');toast('Готово. Обновите подписку на устройствах','ok');boot();}
+    else{haptic('err');toast(r.error||'Не удалось сбросить устройства','err');busy(el,false);}
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
 }
 

@@ -280,7 +280,7 @@ var en = map[string]string{
 	"sub.tz_msk":            "MSK (Moscow time)",
 	"sub.devices":           "📱 Devices: <b>%s</b>",
 	"dev.btn_reset":         "🔄 Reset devices",
-	"dev.reset_confirm":     "🔄 <b>Reset devices</b>\n\nAll devices will be disconnected from the VPN. To use it again, <b>refresh the subscription</b> on each device you need — after that everything will work.\n\nContinue?",
+	"dev.reset_confirm":     "🔄 <b>Reset devices</b>\n\nAll devices will be disconnected from the VPN and the access keys will be renewed. To use it again, <b>refresh the subscription</b> on each device you need — after that everything will work.\n\nContinue?",
 	"dev.btn_reset_yes":     "✅ Yes, reset",
 	"dev.done":              "✅ Devices have been reset.\n\nTo get the VPN working again, refresh the subscription on each device.",
 	"dev.fail":              "❌ Could not reset devices. Try again later or contact support.",

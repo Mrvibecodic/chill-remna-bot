@@ -615,32 +615,110 @@ func (c *Client) EnableByTelegramID(ctx context.Context, telegramID int64) (bool
 	return c.setSubEnabled(ctx, telegramID, true)
 }
 
-// RevokeDevicesByTelegramID rotates the user's proxy credentials
-// (POST /api/users/{uuid}/actions/revoke with revokeOnlyPasswords=true). This
-// disconnects ALL currently connected devices while keeping the same
-// subscription URL, so clients only need to refresh the subscription to
-// reconnect. ok=false when the user is unknown to the panel.
-func (c *Client) RevokeDevicesByTelegramID(ctx context.Context, telegramID int64) (bool, error) {
+// DeviceResetResult reports what ResetDevicesByTelegramID actually did on the
+// panel, so callers can warn on a partial result.
+type DeviceResetResult struct {
+	KeysRotated bool  // proxy credentials rotated (all connected devices dropped)
+	HwidCleared bool  // all HWID device registrations deleted (slots freed)
+	Removed     int   // HWID devices removed (best-effort, from the pre-count)
+	HwidErr     error // delete-all failed (non-fatal: keys were still rotated)
+}
+
+// ResetDevicesByTelegramID fully resets a user's devices: it rotates the proxy
+// credentials — dropping every currently connected client while keeping the same
+// subscription URL — AND deletes all of the user's HWID device registrations,
+// freeing the per-user device slots. Both endpoints exist on every supported
+// panel (minimum 2.7.4). A failed delete-all is reported via HwidErr but does not
+// fail the reset, since the credential rotation has already applied.
+// found=false when the user is unknown to the panel.
+func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64) (res DeviceResetResult, found bool, err error) {
 	u, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return false, err
+		return DeviceResetResult{}, false, err
 	}
 	if u == nil || u.Uuid == "" {
-		return false, nil
+		return DeviceResetResult{}, false, nil
 	}
 	if !ownedByBot(u, telegramID) {
-		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
+		return DeviceResetResult{}, false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
 	}
+
+	// Count devices first so we can report how many slots were freed (best-effort).
+	pre := c.hwidCount(ctx, u.Uuid)
+
+	// 1) Rotate credentials — drops every connected device. Hard-fails the reset.
+	if err := c.revokeUser(ctx, u.Uuid); err != nil {
+		return DeviceResetResult{}, true, err
+	}
+	res.KeysRotated = true
+
+	// 2) Delete all HWID registrations so the device-limit slots are freed.
+	if derr := c.deleteAllHwid(ctx, u.Uuid); derr != nil {
+		res.HwidErr = derr
+	} else {
+		res.HwidCleared = true
+		if pre > 0 {
+			res.Removed = pre
+		}
+	}
+	return res, true, nil
+}
+
+// revokeUser rotates the user's proxy credentials
+// (POST /api/users/{uuid}/actions/revoke with revokeOnlyPasswords=true), keeping
+// the same subscription URL so clients only need to refresh to reconnect.
+func (c *Client) revokeUser(ctx context.Context, uuid string) error {
 	body := map[string]any{"revokeOnlyPasswords": true}
-	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(u.Uuid)+"/actions/revoke", body)
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(uuid)+"/actions/revoke", body)
 	if err != nil {
-		return false, fmt.Errorf("нет связи с панелью: %w", err)
+		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return false, classifyHTTP(resp)
+		return classifyHTTP(resp)
 	}
-	return true, nil
+	return nil
+}
+
+// deleteAllHwid removes every HWID device registered to the user
+// (POST /api/hwid/devices/delete-all with {userUuid}).
+func (c *Client) deleteAllHwid(ctx context.Context, uuid string) error {
+	body := map[string]any{"userUuid": uuid}
+	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete-all", body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return classifyHTTP(resp)
+	}
+	return nil
+}
+
+// hwidCount returns the number of HWID devices currently registered to the user,
+// or -1 when it can't be determined. Best-effort; never fails the caller.
+func (c *Client) hwidCount(ctx context.Context, uuid string) int {
+	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+url.PathEscape(uuid), nil)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return -1
+	}
+	var env struct {
+		Response struct {
+			Total   int               `json:"total"`
+			Devices []json.RawMessage `json:"devices"`
+		} `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return -1
+	}
+	if env.Response.Total > 0 {
+		return env.Response.Total
+	}
+	return len(env.Response.Devices)
 }
 
 func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, string, bool) {
