@@ -182,6 +182,16 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
   opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:50;display:flex;align-items:center;gap:9px;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast svg{width:18px;height:18px;flex:0 0 auto}
+.cmodal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:22px;
+  background:rgba(4,7,12,.62);backdrop-filter:blur(6px);opacity:0;transition:opacity .2s}
+.cmodal.show{display:flex;opacity:1}
+.cmodal-card{width:100%;max-width:360px;background:var(--surface-2);border:1px solid var(--stroke-strong);
+  border-radius:var(--radius);padding:20px;backdrop-filter:blur(24px) saturate(140%);
+  box-shadow:0 24px 70px rgba(0,0,0,.6);transform:translateY(10px) scale(.98);transition:transform .2s}
+.cmodal.show .cmodal-card{transform:none}
+.cmodal-msg{font-size:14.5px;line-height:1.5;color:var(--text);white-space:pre-line;margin-bottom:18px}
+.cmodal-btns{display:flex;gap:10px}
+.cmodal-btns .btn{margin-top:0}
 .qrbox{background:#fff;padding:10px;border-radius:14px;line-height:0;box-shadow:0 6px 20px rgba(0,0,0,.3)}
 .seg{display:flex;gap:6px;background:var(--surface);border:1px solid var(--stroke);border-radius:12px;padding:4px;margin:16px 0 10px}
 .segbtn{flex:1;border:0;background:transparent;color:var(--muted);font-weight:600;font-size:14px;padding:10px;border-radius:9px;cursor:pointer;transition:background .2s,color .2s;font-family:inherit}
@@ -451,15 +461,38 @@ async function doTrial(el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
 }
 
-function confirmAsk(msg,cb){
+function confirmAsk(msg,cb,opts){
   if(tg&&tg.showConfirm){try{tg.showConfirm(msg,function(ok){cb(!!ok);});return;}catch(e){}}
-  cb(window.confirm(msg));
+  showModalConfirm(msg,cb,opts||{});
+}
+// showModalConfirm is the in-app confirmation used on the web cabinet (and as a
+// fallback in Telegram if tg.showConfirm is unavailable) — a styled dialog in the
+// app's own look, instead of the browser's default window.confirm.
+function showModalConfirm(msg,cb,opts){
+  var ov=document.getElementById('cmodal');
+  if(!ov){
+    ov=document.createElement('div');ov.id='cmodal';ov.className='cmodal';
+    ov.innerHTML='<div class="cmodal-card" role="dialog" aria-modal="true"><div class="cmodal-msg"></div><div class="cmodal-btns"><button class="btn sec" data-no></button><button class="btn" data-yes></button></div></div>';
+    document.body.appendChild(ov);
+  }
+  var done=false;
+  function finish(v){if(done)return;done=true;ov.classList.remove('show');document.removeEventListener('keydown',onKey);setTimeout(function(){cb(v);},120);}
+  function onKey(e){if(e.key==='Escape')finish(false);else if(e.key==='Enter')finish(true);}
+  ov.querySelector('.cmodal-msg').textContent=msg;
+  var yes=ov.querySelector('[data-yes]'),no=ov.querySelector('[data-no]');
+  yes.textContent=(opts&&opts.yes)||'Да';
+  no.textContent=(opts&&opts.no)||'Отмена';
+  yes.onclick=function(){finish(true);};
+  no.onclick=function(){finish(false);};
+  ov.onclick=function(e){if(e.target===ov)finish(false);};
+  document.addEventListener('keydown',onKey);
+  void ov.offsetWidth;ov.classList.add('show');
 }
 function askResetDevices(el){
   haptic('tap');
   confirmAsk('Сбросить все устройства?\n\nОни отключатся от VPN, а ключи доступа обновятся. Чтобы снова подключиться, обновите подписку на каждом нужном устройстве.',function(ok){
     if(ok)doResetDevices(el);
-  });
+  },{yes:'Сбросить',no:'Отмена'});
 }
 async function doResetDevices(el){
   busy(el,true);

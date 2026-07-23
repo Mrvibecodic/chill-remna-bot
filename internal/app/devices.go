@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -37,7 +38,8 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 			return
 		}
 		if res.HwidErr != nil {
-			a.log.Warn("reset devices: HWID delete-all failed; keys rotated only", "tg", chatID, "err", res.HwidErr)
+			a.log.Warn("reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", chatID, "err", res.HwidErr)
+			a.clearHwidInBackground(chatID, res.UUID)
 		}
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.done"), [][]models.InlineKeyboardButton{
 			navBack(lang, "menu:mysubs"),
@@ -66,8 +68,59 @@ func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDT
 		return web.MiniActionDTO{Error: "подписка не найдена"}
 	}
 	if res.HwidErr != nil {
-		a.log.Warn("miniapp reset devices: HWID delete-all failed; keys rotated only", "tg", tgID, "err", res.HwidErr)
+		a.log.Warn("miniapp reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", tgID, "err", res.HwidErr)
+		a.clearHwidInBackground(tgID, res.UUID)
 	}
 	a.invalidateSubCache(tgID)
 	return web.MiniActionDTO{OK: true}
+}
+
+// hwidBackgroundBudget bounds a background HWID-cleanup retry so a permanently
+// unreachable panel can't leave a goroutine spinning forever.
+const hwidBackgroundBudget = 15 * time.Minute
+
+// clearHwidInBackground keeps retrying the HWID delete-all for uuid after the
+// synchronous attempts in ResetDevicesByTelegramID were exhausted, until it
+// succeeds or the budget runs out. Deduped per uuid so repeated resets don't
+// stack goroutines. Best-effort: the reset itself already succeeded (keys were
+// rotated); this only frees the leftover device slots.
+func (a *App) clearHwidInBackground(tgID int64, uuid string) {
+	if uuid == "" {
+		return
+	}
+	a.hwidMu.Lock()
+	if a.hwidRetrying == nil {
+		a.hwidRetrying = map[string]bool{}
+	}
+	if a.hwidRetrying[uuid] {
+		a.hwidMu.Unlock()
+		return
+	}
+	a.hwidRetrying[uuid] = true
+	a.hwidMu.Unlock()
+
+	go func() {
+		defer func() {
+			a.hwidMu.Lock()
+			delete(a.hwidRetrying, uuid)
+			a.hwidMu.Unlock()
+			if r := recover(); r != nil {
+				a.log.Error("hwid background retry panicked", "tg", tgID, "err", r)
+			}
+		}()
+		a.mu.Lock()
+		panel := a.panel
+		a.mu.Unlock()
+		if panel == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), hwidBackgroundBudget)
+		defer cancel()
+		if err := panel.DeleteAllHwidUntil(ctx, uuid); err != nil {
+			a.log.Warn("hwid delete-all gave up after background retries", "tg", tgID, "err", err)
+			return
+		}
+		a.log.Info("hwid delete-all succeeded on background retry", "tg", tgID)
+		a.invalidateSubCache(tgID)
+	}()
 }
