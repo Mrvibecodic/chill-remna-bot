@@ -180,7 +180,7 @@ func (c *Controller) addPostgresToCompose() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.composeFile, out, 0o644)
+	return os.WriteFile(c.composeFile, out, 0o600)
 }
 
 func (c *Controller) runComposeDetached(ctx context.Context, script string) error {
@@ -234,7 +234,7 @@ func (c *Controller) SetImageChannel(tag string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.composeFile, out, 0o644)
+	return os.WriteFile(c.composeFile, out, 0o600)
 }
 
 // PortsBusy probes whether the given host ports are already in use. It runs a
@@ -299,7 +299,7 @@ func (c *Controller) setBotPorts(ports []any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.composeFile, out, 0o644)
+	return os.WriteFile(c.composeFile, out, 0o600)
 }
 
 func (c *Controller) addWebhookPortsToCompose() error {

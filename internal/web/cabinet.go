@@ -3,13 +3,13 @@ package web
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"html"
 	"io"
 	"io/fs"
-	"math/rand"
 	"net/http"
 	"sort"
 	"strconv"
@@ -317,8 +317,16 @@ var fpAlphabet = []byte("abcdefghijklmnopqrstuvwxyz0123456789")
 
 func randToken(n int) string {
 	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// Cosmetic (anti-fingerprint) use only; on the rare read error fall back
+		// to a deterministic pad rather than failing the request.
+		for i := range b {
+			b[i] = fpAlphabet[i%len(fpAlphabet)]
+		}
+		return string(b)
+	}
 	for i := range b {
-		b[i] = fpAlphabet[rand.Intn(len(fpAlphabet))]
+		b[i] = fpAlphabet[int(b[i])%len(fpAlphabet)]
 	}
 	return string(b)
 }

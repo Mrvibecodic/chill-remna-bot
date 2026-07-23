@@ -617,7 +617,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		var webApproved int
 		var terms, trial sql.NullString
 		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved); err != nil {
-			urows.Close()
+			_ = urows.Close()
 			return nil, err
 		}
 		u.P2PApproved = approved != 0
@@ -631,10 +631,10 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		snap.Users = append(snap.Users, u)
 	}
 	if err := urows.Err(); err != nil {
-		urows.Close()
+		_ = urows.Close()
 		return nil, err
 	}
-	urows.Close()
+	_ = urows.Close()
 
 	prows, err := b.db.QueryContext(ctx,
 		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments")
@@ -644,16 +644,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for prows.Next() {
 		var p model.Payment
 		if err := prows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
-			prows.Close()
+			_ = prows.Close()
 			return nil, err
 		}
 		snap.Payments = append(snap.Payments, p)
 	}
 	if err := prows.Err(); err != nil {
-		prows.Close()
+		_ = prows.Close()
 		return nil, err
 	}
-	prows.Close()
+	_ = prows.Close()
 
 	rrows, err := b.db.QueryContext(ctx,
 		"SELECT id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at FROM p2p_requests")
@@ -663,16 +663,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for rrows.Next() {
 		var r model.P2PRequest
 		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt); err != nil {
-			rrows.Close()
+			_ = rrows.Close()
 			return nil, err
 		}
 		snap.P2P = append(snap.P2P, r)
 	}
 	if err := rrows.Err(); err != nil {
-		rrows.Close()
+		_ = rrows.Close()
 		return nil, err
 	}
-	rrows.Close()
+	_ = rrows.Close()
 
 	mrows, err := b.db.QueryContext(ctx, "SELECT section, file_id FROM media_cache")
 	if err != nil {
@@ -681,16 +681,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for mrows.Next() {
 		var m MediaItem
 		if err := mrows.Scan(&m.Section, &m.FileID); err != nil {
-			mrows.Close()
+			_ = mrows.Close()
 			return nil, err
 		}
 		snap.Media = append(snap.Media, m)
 	}
 	if err := mrows.Err(); err != nil {
-		mrows.Close()
+		_ = mrows.Close()
 		return nil, err
 	}
-	mrows.Close()
+	_ = mrows.Close()
 
 	if promos, err := b.ListPromos(ctx); err == nil {
 		snap.Promos = promos
@@ -704,16 +704,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for urows2.Next() {
 		var u PromoUse
 		if err := urows2.Scan(&u.Code, &u.TelegramID, &u.CreatedAt); err != nil {
-			urows2.Close()
+			_ = urows2.Close()
 			return nil, err
 		}
 		snap.PromoUses = append(snap.PromoUses, u)
 	}
 	if err := urows2.Err(); err != nil {
-		urows2.Close()
+		_ = urows2.Close()
 		return nil, err
 	}
-	urows2.Close()
+	_ = urows2.Close()
 
 	lrows, err := b.db.QueryContext(ctx,
 		"SELECT id, ext_id, telegram_id, method, stage, detail, created_at FROM payment_log")
@@ -723,16 +723,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for lrows.Next() {
 		var e model.PayLogEntry
 		if err := lrows.Scan(&e.ID, &e.ExtID, &e.TelegramID, &e.Method, &e.Stage, &e.Detail, &e.CreatedAt); err != nil {
-			lrows.Close()
+			_ = lrows.Close()
 			return nil, err
 		}
 		snap.PayLogs = append(snap.PayLogs, e)
 	}
 	if err := lrows.Err(); err != nil {
-		lrows.Close()
+		_ = lrows.Close()
 		return nil, err
 	}
-	lrows.Close()
+	_ = lrows.Close()
 
 	return snap, nil
 }
