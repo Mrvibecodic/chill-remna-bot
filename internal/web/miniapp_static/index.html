@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Кабинет</title>
+<title>Личный кабинет</title>
+<meta name="description" content="Личный кабинет: управление подпиской, устройствами и оплатой.">
+<meta name="theme-color" content="#0b0f17">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b0f17'/><path d='M17.6 4.5 8.8 18.2h5.7l-1.6 9.3 9.3-13.9h-6z' fill='%235b8cff'/></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b0f17'/><path d='M17.6 4.5 8.8 18.2h5.7l-1.6 9.3 9.3-13.9h-6z' fill='%235b8cff'/></svg>">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="qrcode.min.js"></script>
 <style>
@@ -389,6 +393,11 @@ function armReturnRefresh(){
   setTimeout(function(){if(!fired)document.removeEventListener('visibilitychange',onv);},180000);
 }
 function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';el.style.pointerEvents=on?'none':'';}}
+// Ask before closing the mini-app while a payment is in flight, so a stray
+// swipe-down doesn't abandon it. Cleared in boot() once we're back to a stable
+// state (and right after the Stars invoice closes). No-op in the web cabinet.
+function payGuardOn(){try{if(tg&&tg.enableClosingConfirmation)tg.enableClosingConfirmation();}catch(e){}}
+function payGuardOff(){try{if(tg&&tg.disableClosingConfirmation)tg.disableClosingConfirmation();}catch(e){}}
 
 function devicesText(s){
   if(!s.devices_ok)return null;
@@ -574,8 +583,9 @@ async function pay(months,method,el){
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){
+      payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
-        tg.openInvoice(r.pay_url,function(st){if(st==='paid')boot();});
+        tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
       }else{if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату во вкладке, затем вернитесь — обновим сами','ok');}}
       return;
     }
@@ -651,7 +661,7 @@ function topupPick(kopecks,label){
 async function topupPay(kopecks,method,el){
   haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
-    if(r.ok&&r.pay_url){if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
+    if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{busy(el,false);}
@@ -815,6 +825,7 @@ function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
+  payGuardOff();
   try{
     if(WEB){
       if(!TOKEN)TOKEN=getStoredToken();
