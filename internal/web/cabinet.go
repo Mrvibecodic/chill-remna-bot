@@ -255,6 +255,10 @@ func (s *Server) handleCabinetP2PScreenshot(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
 	}
+	// Hard-cap the whole request body so an oversized upload can't spool large
+	// temp files to disk (ParseMultipartForm's argument is only the in-memory
+	// threshold, not a total limit).
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return

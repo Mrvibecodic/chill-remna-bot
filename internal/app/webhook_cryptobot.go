@@ -34,7 +34,10 @@ type cryptoBotUpdate struct {
 
 func verifyCryptoBotSignature(signatureHex, token string, body []byte) error {
 	if token == "" {
-		return nil
+		// No token configured means CryptoBot isn't set up; without a token we
+		// can't verify the signature, so refuse rather than trust the body (the
+		// webhook route is always registered for the other providers).
+		return errors.New("cryptobot webhook: token not configured")
 	}
 	if signatureHex == "" {
 		return errors.New("cryptobot webhook: signature header missing")

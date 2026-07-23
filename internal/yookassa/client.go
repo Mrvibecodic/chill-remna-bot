@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -104,5 +105,5 @@ func (c *Client) CreatePayment(ctx context.Context, value, currency, description
 }
 
 func (c *Client) GetPayment(ctx context.Context, id string) (*Payment, error) {
-	return c.do(ctx, http.MethodGet, "/payments/"+id, nil, "")
+	return c.do(ctx, http.MethodGet, "/payments/"+url.PathEscape(id), nil, "")
 }

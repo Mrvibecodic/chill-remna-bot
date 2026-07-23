@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -485,7 +486,30 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
 }
 
+const finalizeLockShards = 64
+
+func extLockIndex(s string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return int(h.Sum32() % finalizeLockShards)
+}
+
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string) (string, string, error) {
+	// Serialize duplicate deliveries of the same payment and bail before we touch
+	// the panel if it's already been finalized (the panel extend happens below,
+	// before the AddPayment idempotency barrier, so without this two concurrent
+	// deliveries would each extend the subscription).
+	if extID != "" {
+		lk := &a.finalizeLk[extLockIndex(extID)]
+		lk.Lock()
+		defer lk.Unlock()
+		if a.store != nil {
+			if done, _ := a.store.PaymentByExtID(ctx, extID); done {
+				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж уже финализирован — пропуск")
+				return "", "", storage.ErrDuplicateExtID
+			}
+		}
+	}
 	a.mu.Lock()
 	panel := a.panel
 	limits := remnawave.UserLimits{}
