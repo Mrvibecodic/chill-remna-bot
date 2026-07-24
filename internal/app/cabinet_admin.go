@@ -151,11 +151,20 @@ func (a *App) adminApproveWebUser(ctx context.Context, adminChat int64, arg stri
 	delete(cabNotified, uid)
 	cabNotifyMu.Unlock()
 	if !ok {
-		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_denied"))
+		// Отказ персистентный: юзер при повторном входе увидит «доступ
+		// отклонён», а новые заявки админу слаться не будут (см. CabinetGate).
+		if a.store != nil {
+			_ = a.store.SetWebDenied(ctx, uid, true)
+		}
+		if uid > 0 {
+			a.notify(ctx, uid, i18n.T(a.lang(uid), "cabinet.denied"))
+		}
+		a.sendHome(ctx, adminChat, i18n.T(alang, "cabinet.denied_admin"))
 		return
 	}
 	if a.store != nil {
 		_ = a.store.SetWebApproved(ctx, uid, true)
+		_ = a.store.SetWebDenied(ctx, uid, false)
 	}
 	if uid > 0 {
 		a.notify(ctx, uid, i18n.T(a.lang(uid), "cabinet.approved"))

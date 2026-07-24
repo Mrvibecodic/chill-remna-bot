@@ -315,6 +315,8 @@ var en = map[string]string{
 	"cabinet.req_tg":        "via Telegram",
 	"cabinet.req_email":     "Email",
 	"cabinet.approved":      "✅ Your web cabinet access is approved. Sign in again.",
+	"cabinet.denied":        "⛔️ Your web cabinet access was declined by the administrator.",
+	"cabinet.denied_admin":  "⛔️ Request declined. The user will see a rejection on sign-in; no new requests will be sent.",
 	"cabinet.branding":      "🎨 Brand: title <b>%s</b> · description %s · favicon %s",
 	"cabinet.btn_title":     "✏️ Title",
 	"cabinet.btn_desc":      "✏️ Description",

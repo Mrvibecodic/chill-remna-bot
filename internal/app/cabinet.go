@@ -86,15 +86,26 @@ func (a *App) cabinetNeedsApproval(isEmail bool) bool {
 	return false
 }
 
+// errCabinetDenied is returned on sign-in when the admin explicitly rejected
+// the account's access request (persisted in users.web_denied). Unlike the
+// pending state, a denied account does NOT re-notify the admin.
+var errCabinetDenied = errors.New("доступ отклонён администратором")
+
 // CabinetGate enforces the "approve new web users" policy. It returns an error
-// (and notifies the admin once) when the account still needs approval.
+// (and notifies the admin once) when the account still needs approval, or a
+// permanent "denied" error when the admin already rejected the request.
 func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
 	if !a.cabinetNeedsApproval(isEmail) {
 		return nil
 	}
 	if a.store != nil {
-		if u, _ := a.store.GetUser(ctx, tgID); u != nil && u.WebApproved {
-			return nil
+		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
+			if u.WebApproved {
+				return nil
+			}
+			if u.WebDenied {
+				return errCabinetDenied
+			}
 		}
 	}
 	cabNotifyMu.Lock()

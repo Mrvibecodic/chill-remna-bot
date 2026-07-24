@@ -434,6 +434,12 @@ func (s *fakeStore) SetWebApproved(_ context.Context, tgID int64, approved bool)
 	}
 	return nil
 }
+func (s *fakeStore) SetWebDenied(_ context.Context, tgID int64, denied bool) error {
+	if s.users != nil && s.users[tgID] != nil {
+		s.users[tgID].WebDenied = denied
+	}
+	return nil
+}
 func (s *fakeStore) GetWebUserByEmail(_ context.Context, email string) (*model.WebUser, error) {
 	if s.webUsers != nil {
 		if u, ok := s.webUsers[email]; ok {

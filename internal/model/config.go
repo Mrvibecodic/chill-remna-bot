@@ -247,6 +247,10 @@ type User struct {
 	RefEarned    int64
 	Whitelisted  bool
 	WebApproved  bool
+	// WebDenied: админ явно отклонил заявку на вход в веб-кабинет. Пока флаг
+	// стоит, повторные заявки админу не шлются, а юзер при попытке входа видит
+	// «доступ отклонён». Снимается ручным одобрением (adm:wok).
+	WebDenied bool
 }
 
 type P2PRequest struct {

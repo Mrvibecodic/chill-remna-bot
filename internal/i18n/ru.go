@@ -315,6 +315,8 @@ var ru = map[string]string{
 	"cabinet.req_tg":        "Через Telegram",
 	"cabinet.req_email":     "Email",
 	"cabinet.approved":      "✅ Ваш доступ в веб-кабинет одобрен. Войдите снова.",
+	"cabinet.denied":        "⛔️ Доступ в веб-кабинет отклонён администратором.",
+	"cabinet.denied_admin":  "⛔️ Заявка отклонена. Пользователь при попытке входа увидит отказ, новые заявки приходить не будут.",
 	"cabinet.branding":      "🎨 Бренд: заголовок <b>%s</b> · описание %s · фавикон %s",
 	"cabinet.btn_title":     "✏️ Заголовок",
 	"cabinet.btn_desc":      "✏️ Описание",
