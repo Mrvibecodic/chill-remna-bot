@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>chill-remna-bot — документация</title>
-<meta name="description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа VPN-подписок, оплаты, триал, рефералка, самоменеджмент в Docker.">
+<meta name="description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа подписок, оплаты, триал, рефералка, самоменеджмент в Docker.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0d15">
 <meta property="og:type" content="website">
 <meta property="og:title" content="chill-remna-bot — документация">
-<meta property="og:description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа VPN-подписок, оплаты, триал, рефералка.">
+<meta property="og:description" content="Телеграм-бот «магазин + админка» для панели Remnawave: продажа подписок, оплаты, триал, рефералка.">
 <meta property="og:image" content="icon-512.png">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -150,7 +150,7 @@ nav.toc .wrap{scrollbar-width:thin}
   <div class="wrap">
     <span class="badge"><span class="dot"></span>Open-source · Go · Docker · Remnawave</span>
     <h1>chill-remna-bot</h1>
-    <p class="lead">Телеграм-бот «магазин&nbsp;+&nbsp;админка» для панели <b>Remnawave</b>. Продаёт доступ к VPN: пользователь выбирает тариф, оплачивает и за пару минут получает ключ. Вся настройка — прямо в Telegram.</p>
+    <p class="lead">Телеграм-бот «магазин&nbsp;+&nbsp;админка» для панели <b>Remnawave</b>. Пользователь выбирает тариф, оплачивает и за пару минут получает ключ. Вся настройка — прямо в Telegram.</p>
     <div class="cta">
       <a class="btn primary" href="#install">🚀 Установка за 4 шага</a>
       <a class="btn ghost" href="https://github.com/Mrvibecodic/chill-remna-bot">GitHub</a>
@@ -199,9 +199,9 @@ nav.toc .wrap{scrollbar-width:thin}
     <div class="card"><h4>🔗 Автопривязка к панели <span class="tag stable">stable</span></h4><p>Если учётка уже была в панели (по <code>telegramId</code> или username с TG&nbsp;ID) — бот свяжет её при регистрации; триал таким недоступен (анти-абуз).</p></div>
     <div class="card"><h4>➕ Доп-подписка (add-on) <span class="tag stable">stable</span></h4><p>Опциональная вторая подписка в панели (суффикс <code>_addsub</code>) со своими internal-сквадами и лимитом трафика. Срок, стратегия сброса и лимит устройств наследуются от основной. Выключена по умолчанию.</p></div>
     <div class="card"><h4>📱 Mini App <span class="tag stable">stable</span></h4><p>Приложение-кнопка внутри Telegram: покупка, продление, баланс, промокоды и рефералка — без выхода из чата.</p></div>
-    <div class="card"><h4>🌐 Веб-кабинет <span class="tag stable">stable</span></h4><p>Личный кабинет сайтом в браузере (вход через Telegram или e-mail+пароль). На настраиваемом пути, с <code>noindex</code>, anti-fingerprint и локальным хостингом флагов — ничего со сторонних CDN.</p></div>
+    <div class="card"><h4>🌐 Веб-кабинет <span class="tag stable">stable</span></h4><p>Личный кабинет сайтом в браузере (вход через Telegram или e-mail+пароль). На настраиваемом пути, с <code>noindex</code>, anti-fingerprint и локальным хостингом флагов — ничего со сторонних CDN. P2P со скриншотом прямо в кабинете, опциональная модерация новых регистраций.</p></div>
     <div class="card"><h4>⬇️ Экран «Подключить» <span class="tag stable">stable</span></h4><p>Подтягивает приложения под все платформы (iOS / Android / Windows / macOS / Linux / TV) со страницы подписки и импортирует ключ в один тап; QR для переноса на другое устройство.</p></div>
-    <div class="card"><h4>🔄 Сброс устройств <span class="tag dev">dev</span></h4><p>Отключить все свои устройства одной кнопкой — в боте, Mini App и веб-кабинете. Ключи доступа обновятся, старые устройства отключатся; чтобы снова пользоваться, обновите подписку на нужных устройствах.</p></div>
+    <div class="card"><h4>🔄 Сброс устройств <span class="tag stable">stable</span></h4><p>Отключить все свои устройства одной кнопкой — в боте, Mini App и веб-кабинете. Ключи доступа обновятся, старые устройства отключатся; чтобы снова пользоваться, обновите подписку на нужных устройствах.</p></div>
   </div>
 
   <h3>Для администратора <span class="pill">всё в Telegram</span></h3>
@@ -214,11 +214,12 @@ nav.toc .wrap{scrollbar-width:thin}
     <li><b>🖱 Редактирование «на месте»</b> <span class="tag stable">stable</span> — экраны админки и пользователя обновляются прямо в текущем сообщении (общие баннеры разделов вместо «удалить+прислать заново»); меню реорганизованы по UX-практикам Telegram-ботов.</li>
     <li><b>➕ Доп-подписка в продажах</b> <span class="tag stable">stable</span> — управление add-on подпиской: трафик B, internal-сквады B, вкл/выкл прямо в разделе «Продажи».</li>
     <li><b>📨 Контакты ссылкой/@юзернеймом</b> <span class="tag stable">stable</span> — поддержку и группу можно задать как <code>https://t.me/...</code> или <code>@username</code>.</li>
+    <li><b>🖌 Свой дизайн мини-аппа и кабинета</b> <span class="tag stable">stable</span> — смонтируйте папку <code>/custom</code> со своими файлами: они перекроют вшитую статику (<code>index.html</code> общий, <code>miniapp.html</code>/<code>cabinet.html</code> раздельные), правки видны без перезапуска.</li>
   </ul>
 
   <div class="note">🔒 <b>Безопасность:</b> автоблок скам-регистраций; экранирование имён (нет HTML-инъекций); верификация вебхуков и защита платежей от дублей; бот управляет в панели только аккаунтами этого пользователя (по <code>telegramId</code>/username — чужие учётки не трогает даже с тегом бота); доступ в админку только у <code>ADMIN_TELEGRAM_ID</code>; конфиг в БД зашифрован.</div>
 
-  <div class="note dev">🧪 <b>Надёжность и CI (ветка <code>dev</code>):</b> восстановление после паник, отправка с учётом лимитов Telegram (429), корректное завершение фоновых задач при остановке; в CI — <code>govulncheck</code> (жёсткий гейт по известным CVE) и <code>golangci-lint v2</code>.</div>
+  <div class="note">🧪 <b>Надёжность и CI:</b> восстановление после паник, отправка с учётом лимитов Telegram (429), корректное завершение фоновых задач при остановке; в CI — <code>govulncheck</code> (жёсткий гейт по известным CVE) и <code>golangci-lint v2</code>.</div>
 </section>
 
 <section id="channels">
@@ -233,7 +234,7 @@ nav.toc .wrap{scrollbar-width:thin}
     <div class="chan dev">
       <h4>🟣 Dev (превью) <span class="tag dev">dev</span></h4>
       <p class="src"><code>ghcr.io/mrvibecodic/chill-remna-bot:dev</code></p>
-      <p>Собирается из ветки <code>dev</code>. Новые возможности появляются здесь раньше: доп-подписка, редактирование экранов «на месте», реорганизованные меню, контакты ссылкой/@username.</p>
+      <p>Собирается из ветки <code>dev</code>. Новые возможности появляются здесь раньше и после проверки попадают в stable.</p>
     </div>
   </div>
   <div class="note">↻ Переключить канал можно без потери данных — состояние живёт в томе <code>bot-data</code>. После смены канала бот предложит обновиться на соответствующий образ.</div>
@@ -347,6 +348,7 @@ docker compose up -d</code></pre></li>
     <tr><td><code>DB_KIND</code></td><td></td><td>—</td><td><code>sqlite</code>/<code>postgres</code>; обычно задаёт мастер</td></tr>
     <tr><td><code>DATABASE_URL</code></td><td></td><td>—</td><td>DSN Postgres при ручном подключении</td></tr>
     <tr><td><code>SECRET_KEY</code></td><td></td><td>авто</td><td>ключ шифрования настроек (файл <code>/data/secret.key</code>)</td></tr>
+    <tr><td><code>CUSTOM_STATIC_DIR</code></td><td></td><td><code>/custom</code></td><td>папка со своим дизайном мини-аппа/кабинета (оверлей поверх вшитой статики)</td></tr>
     <tr><td><code>PANEL_CONTAINER</code></td><td></td><td><code>remnawave</code></td><td>имя контейнера панели (режим «Локально»)</td></tr>
     <tr><td><code>COMPOSE_HOST_DIR</code></td><td></td><td><code>/opt/remnachillbot</code></td><td>путь к папке бота на хосте</td></tr>
   </table></div>
@@ -367,7 +369,7 @@ docker compose up -d</code></pre></li>
     <li><b>Чем отличается канал <code>dev</code> от <code>latest</code>?</b> <code>:latest</code> собирается из ветки <code>main</code> (стабильное), <code>:dev</code> — из ветки <code>dev</code> (новые возможности раньше). Канал переключается в боте без потери данных.</li>
     <li><b>Нужен ли отдельный nginx/Caddy для вебхуков?</b> Нет — у бота есть встроенный HTTPS (способ A). Либо проксируйте через существующий reverse-proxy панели.</li>
     <li><b>Работает ли веб-кабинет за reverse-proxy?</b> Да, встроенный HTTPS не нужен: кабинет отдаётся тем же портом, что и вебхуки. Но проксировать надо весь домен (<code>location /</code>), а не только <code>/webhook/</code>, и передавать <code>X-Forwarded-Proto: https</code>. Пример конфига — в README.</li>
-    <li><b>Можно ли поставить свой дизайн мини-аппа и кабинета?</b> Да <span class="tag dev">dev</span> — смонтируйте папку со своими файлами в <code>/custom</code>: они перекроют вшитые (<code>index.html</code> общий, <code>miniapp.html</code>/<code>cabinet.html</code> — раздельные), правки видны без перезапуска. Подробности — в README.</li>
+    <li><b>Можно ли поставить свой дизайн мини-аппа и кабинета?</b> Да — смонтируйте папку со своими файлами в <code>/custom</code>: они перекроют вшитые (<code>index.html</code> общий, <code>miniapp.html</code>/<code>cabinet.html</code> — раздельные), правки видны без перезапуска. Подробности — в README.</li>
     <li><b>Что если вебхук не дошёл?</b> Реконсилятор перепроверит платёж у провайдера и довыдаст подписку.</li>
     <li><b>Можно ли мигрировать SQLite → Postgres?</b> Да, миграция встроена; переключение в мастере/настройках.</li>
     <li><b>Бот трогает чужие аккаунты в панели?</b> Нет — только привязанные к этому Telegram ID; чужие не меняет даже при совпадении тега.</li>
