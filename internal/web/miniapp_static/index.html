@@ -789,6 +789,8 @@ function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():''
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
   setBack(null);
+  balchip.style.display='none';balchip.innerHTML='';
+  STATE={balanceK:0,methods:[]};
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Вход</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Войдите через Telegram или по email.</div></div>';
