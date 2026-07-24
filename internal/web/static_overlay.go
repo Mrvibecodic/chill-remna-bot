@@ -78,6 +78,7 @@ func (s *Server) readIndexHTML(specific string) ([]byte, error) {
 			if n == "" {
 				continue
 			}
+			// #nosec G304 -- staticDir задаёт оператор (env), имена файлов — фиксированный список, пользовательского ввода нет
 			if b, err := os.ReadFile(filepath.Join(s.staticDir, n)); err == nil {
 				return b, nil
 			}
