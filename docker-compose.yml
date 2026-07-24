@@ -18,6 +18,9 @@ services:
       - bot-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/remnachillbot:/compose
+      # Свой дизайн мини-аппа/кабинета: раскомментируйте и положите файлы в ./custom
+      # (index.html — общий, miniapp.html / cabinet.html — раздельные; см. README)
+      # - /opt/remnachillbot/custom:/custom:ro
 
 volumes:
   bot-data:

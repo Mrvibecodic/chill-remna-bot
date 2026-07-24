@@ -32,6 +32,7 @@ type Server struct {
 	cacheDir    string
 	mini        MiniProvider
 	authLimiter *rateLimiter
+	staticDir   string
 }
 
 // SetMiniApp wires the Mini App data provider. Routes read it live, so it may

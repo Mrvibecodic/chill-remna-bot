@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"html"
 	"io"
-	"io/fs"
 	"net/http"
 	"sort"
 	"strconv"
@@ -305,12 +304,12 @@ func (s *Server) handleCabinetStatic(w http.ResponseWriter, r *http.Request) {
 		s.serveCabinetHTML(w)
 		return
 	}
-	sub, err := fs.Sub(miniStaticFS, "miniapp_static")
+	fsys, err := s.staticFS()
 	if err != nil {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return
 	}
-	http.StripPrefix(p, http.FileServer(http.FS(sub))).ServeHTTP(w, r)
+	http.StripPrefix(p, http.FileServer(http.FS(fsys))).ServeHTTP(w, r)
 }
 
 var fpAlphabet = []byte("abcdefghijklmnopqrstuvwxyz0123456789")
@@ -335,7 +334,7 @@ func randToken(n int) string {
 // injected, and (in anti-fingerprint mode) randomized markers so the page is
 // harder to identify as this bot's cabinet.
 func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
-	data, err := miniStaticFS.ReadFile("miniapp_static/index.html")
+	data, err := s.readIndexHTML("cabinet.html")
 	if err != nil {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return
