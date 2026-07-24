@@ -317,7 +317,7 @@ docker compose up -d</code></pre></li>
   <h3>Способ A — встроенный HTTPS (рекомендуется)</h3>
   <p class="muted">Бот сам получает сертификат Let's Encrypt и слушает 80/443. Направьте домен A-записью на сервер бота, затем в админке: <b>Система → Вебхуки → Публичный HTTPS</b> (вкл) → <b>Домен</b> → <b>Применить</b>. Бот пропишет порты в compose и перезапустится.</p>
   <h3>Способ B — за reverse-proxy панели</h3>
-  <p class="muted">Бот отдаёт plain HTTP на <code>8080</code>; HTTPS терминирует прокси панели — проксируйте <code>/webhook/</code> → <code>http://remnabot:8080</code>.</p>
+  <p class="muted">Бот отдаёт plain HTTP на <code>8080</code>; HTTPS терминирует прокси панели — проксируйте <code>/webhook/</code> → <code>http://remnabot:8080</code>. Если включены <b>Mini App / веб-кабинет</b>, этого мало: они живут на других путях того же порта (<code>/miniapp/</code>, <code>/api/</code>, путь кабинета, <code>/flags/</code>) — проксируйте на бот весь домен (<code>location /</code>) и обязательно передавайте <code>X-Forwarded-Proto: https</code>, иначе кабинет ответит «требуется HTTPS». Готовый пример nginx — в <a href="https://github.com/Mrvibecodic/chill-remna-bot#readme">README</a>, раздел «Reverse-proxy и безопасность».</p>
   <div class="note">🛡 <b>Прод — reverse-proxy:</b> для Mini App и веб-кабинета не выставляйте бинарь напрямую в интернет. Caddy/nginx или Cloudflare перед ботом: TLS с <b>wildcard-сертом</b> <code>*.домен</code> (индивидуальный серт светит хост в Certificate Transparency — кабинет легко найти), бот на <code>127.0.0.1:8080</code> под обычным пользователем, фаервол наружу только 80/443, скрытый origin, fail2ban/CrowdSec; кабинет, панель и страницу подписки — на разных доменах. Подробнее — в <a href="https://github.com/Mrvibecodic/chill-remna-bot#readme">README</a>.</div>
 </section>
 
@@ -366,6 +366,7 @@ docker compose up -d</code></pre></li>
   <ul class="clean">
     <li><b>Чем отличается канал <code>dev</code> от <code>latest</code>?</b> <code>:latest</code> собирается из ветки <code>main</code> (стабильное), <code>:dev</code> — из ветки <code>dev</code> (новые возможности раньше). Канал переключается в боте без потери данных.</li>
     <li><b>Нужен ли отдельный nginx/Caddy для вебхуков?</b> Нет — у бота есть встроенный HTTPS (способ A). Либо проксируйте через существующий reverse-proxy панели.</li>
+    <li><b>Работает ли веб-кабинет за reverse-proxy?</b> Да, встроенный HTTPS не нужен: кабинет отдаётся тем же портом, что и вебхуки. Но проксировать надо весь домен (<code>location /</code>), а не только <code>/webhook/</code>, и передавать <code>X-Forwarded-Proto: https</code>. Пример конфига — в README.</li>
     <li><b>Что если вебхук не дошёл?</b> Реконсилятор перепроверит платёж у провайдера и довыдаст подписку.</li>
     <li><b>Можно ли мигрировать SQLite → Postgres?</b> Да, миграция встроена; переключение в мастере/настройках.</li>
     <li><b>Бот трогает чужие аккаунты в панели?</b> Нет — только привязанные к этому Telegram ID; чужие не меняет даже при совпадении тега.</li>
