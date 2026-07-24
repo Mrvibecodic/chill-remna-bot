@@ -11,6 +11,10 @@ type Config struct {
 	BotToken string
 	AdminID  int64
 	DataDir  string
+	// StaticDir — папка с кастомной статикой мини-аппа/кабинета (оверлей поверх
+	// вшитой); env CUSTOM_STATIC_DIR, по умолчанию /custom. Если папки нет —
+	// работает вшитый дизайн.
+	StaticDir string
 
 	DBKind      string
 	DatabaseURL string
@@ -26,6 +30,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		BotToken:     strings.TrimSpace(os.Getenv("BOT_TOKEN")),
 		DataDir:      envOr("DATA_DIR", "/data"),
+		StaticDir:    envOr("CUSTOM_STATIC_DIR", "/custom"),
 		DBKind:       strings.TrimSpace(os.Getenv("DB_KIND")),
 		DatabaseURL:  strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		SecretKey:    os.Getenv("SECRET_KEY"),

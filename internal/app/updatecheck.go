@@ -243,8 +243,10 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	sb.WriteString(i18n.T(lang, "update.available"))
 	sb.WriteString("\n\n")
 	if len(news) == 0 {
-		sb.WriteString(i18n.T(lang, "update.commit_latest", html.EscapeString(firstLine(commits[0].Commit.Message))))
-		sb.WriteString("\n")
+		if len(commits) > 0 {
+			sb.WriteString(i18n.T(lang, "update.commit_latest", html.EscapeString(firstLine(commits[0].Commit.Message))))
+			sb.WriteString("\n")
+		}
 	} else {
 		limit := len(news)
 		if limit > 15 {

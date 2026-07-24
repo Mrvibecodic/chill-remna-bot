@@ -182,6 +182,16 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
   opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:50;display:flex;align-items:center;gap:9px;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast svg{width:18px;height:18px;flex:0 0 auto}
+.cmodal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:22px;
+  background:rgba(4,7,12,.62);backdrop-filter:blur(6px);opacity:0;transition:opacity .2s}
+.cmodal.show{display:flex;opacity:1}
+.cmodal-card{width:100%;max-width:360px;background:var(--surface-2);border:1px solid var(--stroke-strong);
+  border-radius:var(--radius);padding:20px;backdrop-filter:blur(24px) saturate(140%);
+  box-shadow:0 24px 70px rgba(0,0,0,.6);transform:translateY(10px) scale(.98);transition:transform .2s}
+.cmodal.show .cmodal-card{transform:none}
+.cmodal-msg{font-size:14.5px;line-height:1.5;color:var(--text);white-space:pre-line;margin-bottom:18px}
+.cmodal-btns{display:flex;gap:10px}
+.cmodal-btns .btn{margin-top:0}
 .qrbox{background:#fff;padding:10px;border-radius:14px;line-height:0;box-shadow:0 6px 20px rgba(0,0,0,.3)}
 .seg{display:flex;gap:6px;background:var(--surface);border:1px solid var(--stroke);border-radius:12px;padding:4px;margin:16px 0 10px}
 .segbtn{flex:1;border:0;background:transparent;color:var(--muted);font-weight:600;font-size:14px;padding:10px;border-radius:9px;cursor:pointer;transition:background .2s,color .2s;font-family:inherit}
@@ -379,6 +389,11 @@ function armReturnRefresh(){
   setTimeout(function(){if(!fired)document.removeEventListener('visibilitychange',onv);},180000);
 }
 function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';el.style.pointerEvents=on?'none':'';}}
+// Ask before closing the mini-app while a payment is in flight, so a stray
+// swipe-down doesn't abandon it. Cleared in boot() once we're back to a stable
+// state (and right after the Stars invoice closes). No-op in the web cabinet.
+function payGuardOn(){try{if(tg&&tg.enableClosingConfirmation)tg.enableClosingConfirmation();}catch(e){}}
+function payGuardOff(){try{if(tg&&tg.disableClosingConfirmation)tg.disableClosingConfirmation();}catch(e){}}
 
 function devicesText(s){
   if(!s.devices_ok)return null;
@@ -414,6 +429,7 @@ function render(me,menu,sub,plans){
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
+    h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     if(menu.can_renew)h+='<div class="hint center">Для продления выберите период ниже</div>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
@@ -447,6 +463,47 @@ async function doTrial(el){
   try{const r=await post('/api/miniapp/trial');
     if(r.ok){haptic('ok');boot();}
     else{haptic('err');toast(r.error||'Не удалось активировать триал','err');busy(el,false);}
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
+}
+
+function confirmAsk(msg,cb,opts){
+  if(tg&&tg.showConfirm){try{tg.showConfirm(msg,function(ok){cb(!!ok);});return;}catch(e){}}
+  showModalConfirm(msg,cb,opts||{});
+}
+// showModalConfirm is the in-app confirmation used on the web cabinet (and as a
+// fallback in Telegram if tg.showConfirm is unavailable) — a styled dialog in the
+// app's own look, instead of the browser's default window.confirm.
+function showModalConfirm(msg,cb,opts){
+  var ov=document.getElementById('cmodal');
+  if(!ov){
+    ov=document.createElement('div');ov.id='cmodal';ov.className='cmodal';
+    ov.innerHTML='<div class="cmodal-card" role="dialog" aria-modal="true"><div class="cmodal-msg"></div><div class="cmodal-btns"><button class="btn sec" data-no></button><button class="btn" data-yes></button></div></div>';
+    document.body.appendChild(ov);
+  }
+  var done=false;
+  function finish(v){if(done)return;done=true;ov.classList.remove('show');document.removeEventListener('keydown',onKey);setTimeout(function(){cb(v);},120);}
+  function onKey(e){if(e.key==='Escape')finish(false);else if(e.key==='Enter')finish(true);}
+  ov.querySelector('.cmodal-msg').textContent=msg;
+  var yes=ov.querySelector('[data-yes]'),no=ov.querySelector('[data-no]');
+  yes.textContent=(opts&&opts.yes)||'Да';
+  no.textContent=(opts&&opts.no)||'Отмена';
+  yes.onclick=function(){finish(true);};
+  no.onclick=function(){finish(false);};
+  ov.onclick=function(e){if(e.target===ov)finish(false);};
+  document.addEventListener('keydown',onKey);
+  void ov.offsetWidth;ov.classList.add('show');
+}
+function askResetDevices(el){
+  haptic('tap');
+  confirmAsk('Сбросить все устройства?\n\nОни отключатся от VPN, а ключи доступа обновятся. Чтобы снова подключиться, обновите подписку на каждом нужном устройстве.',function(ok){
+    if(ok)doResetDevices(el);
+  },{yes:'Сбросить',no:'Отмена'});
+}
+async function doResetDevices(el){
+  busy(el,true);
+  try{const r=await post('/api/miniapp/devices/reset');
+    if(r.ok){haptic('ok');toast('Готово. Обновите подписку на устройствах','ok');boot();}
+    else{haptic('err');toast(r.error||'Не удалось сбросить устройства','err');busy(el,false);}
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
 }
 
@@ -522,8 +579,9 @@ async function pay(months,method,el){
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){
+      payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
-        tg.openInvoice(r.pay_url,function(st){if(st==='paid')boot();});
+        tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
       }else{if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату во вкладке, затем вернитесь — обновим сами','ok');}}
       return;
     }
@@ -599,7 +657,7 @@ function topupPick(kopecks,label){
 async function topupPay(kopecks,method,el){
   haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
-    if(r.ok&&r.pay_url){if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
+    if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{busy(el,false);}
@@ -731,6 +789,8 @@ function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():''
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
   setBack(null);
+  balchip.style.display='none';balchip.innerHTML='';
+  STATE={balanceK:0,methods:[]};
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Вход</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Войдите через Telegram или по email.</div></div>';
@@ -763,6 +823,7 @@ function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
+  payGuardOff();
   try{
     if(WEB){
       if(!TOKEN)TOKEN=getStoredToken();

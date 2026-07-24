@@ -3,13 +3,12 @@ package web
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"html"
 	"io"
-	"io/fs"
-	"math/rand"
 	"net/http"
 	"sort"
 	"strconv"
@@ -255,6 +254,10 @@ func (s *Server) handleCabinetP2PScreenshot(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
 	}
+	// Hard-cap the whole request body so an oversized upload can't spool large
+	// temp files to disk (ParseMultipartForm's argument is only the in-memory
+	// threshold, not a total limit).
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -301,20 +304,28 @@ func (s *Server) handleCabinetStatic(w http.ResponseWriter, r *http.Request) {
 		s.serveCabinetHTML(w)
 		return
 	}
-	sub, err := fs.Sub(miniStaticFS, "miniapp_static")
+	fsys, err := s.staticFS()
 	if err != nil {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return
 	}
-	http.StripPrefix(p, http.FileServer(http.FS(sub))).ServeHTTP(w, r)
+	http.StripPrefix(p, http.FileServer(http.FS(fsys))).ServeHTTP(w, r)
 }
 
 var fpAlphabet = []byte("abcdefghijklmnopqrstuvwxyz0123456789")
 
 func randToken(n int) string {
 	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// Cosmetic (anti-fingerprint) use only; on the rare read error fall back
+		// to a deterministic pad rather than failing the request.
+		for i := range b {
+			b[i] = fpAlphabet[i%len(fpAlphabet)]
+		}
+		return string(b)
+	}
 	for i := range b {
-		b[i] = fpAlphabet[rand.Intn(len(fpAlphabet))]
+		b[i] = fpAlphabet[int(b[i])%len(fpAlphabet)]
 	}
 	return string(b)
 }
@@ -323,7 +334,7 @@ func randToken(n int) string {
 // injected, and (in anti-fingerprint mode) randomized markers so the page is
 // harder to identify as this bot's cabinet.
 func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
-	data, err := miniStaticFS.ReadFile("miniapp_static/index.html")
+	data, err := s.readIndexHTML("cabinet.html")
 	if err != nil {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return

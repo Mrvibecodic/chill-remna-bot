@@ -77,6 +77,16 @@ type App struct {
 	subMu    sync.Mutex
 	subCache map[int64]subCacheEntry
 
+	// hwidRetrying dedupes background HWID delete-all retries by panel uuid, so a
+	// user tapping "reset devices" repeatedly can't pile up goroutines.
+	hwidMu       sync.Mutex
+	hwidRetrying map[string]bool
+
+	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
+	// delivered twice concurrently (webhook redelivery vs reconciler vs manual
+	// check) can't extend the panel subscription more than once.
+	finalizeLk [finalizeLockShards]sync.Mutex
+
 	infraMu    sync.Mutex
 	infraCache *infraCacheEntry
 

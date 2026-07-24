@@ -32,6 +32,7 @@ type Server struct {
 	cacheDir    string
 	mini        MiniProvider
 	authLimiter *rateLimiter
+	staticDir   string
 }
 
 // SetMiniApp wires the Mini App data provider. Routes read it live, so it may
@@ -62,6 +63,7 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("GET /api/miniapp/topup/options", s.handleMiniTopUpOptions)
 	mux.HandleFunc("POST /api/miniapp/topup", s.handleMiniTopUp)
 	mux.HandleFunc("GET /api/miniapp/connect", s.handleMiniConnect)
+	mux.HandleFunc("POST /api/miniapp/devices/reset", s.handleMiniResetDevices)
 	mux.HandleFunc("GET /miniapp/", s.handleMiniStatic)
 	mux.HandleFunc("GET /api/cabinet/config", s.handleCabinetConfig)
 	mux.HandleFunc("POST /api/cabinet/auth/telegram", s.handleCabinetTelegramAuth)

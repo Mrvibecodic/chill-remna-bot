@@ -55,6 +55,7 @@ func main() {
 		webSrv = web.New(addr, a, log)
 	}
 	webSrv.SetMiniApp(a)
+	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
 	wg.Add(5)

@@ -129,7 +129,7 @@ func flagToISO(flag string) string {
 	if len(rs) != 2 || !isRegionalIndicator(rs[0]) || !isRegionalIndicator(rs[1]) {
 		return ""
 	}
-	return string([]byte{byte('a' + (rs[0] - 0x1F1E6)), byte('a' + (rs[1] - 0x1F1E6))})
+	return string([]byte{byte('a' + (rs[0] - 0x1F1E6)), byte('a' + (rs[1] - 0x1F1E6))}) //#nosec G115 -- regional-indicator runes are guarded, offset maps to a..z
 }
 
 func anyInSet(list []string, set map[string]bool) bool {

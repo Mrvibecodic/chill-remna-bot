@@ -20,7 +20,7 @@ func resourceStats() string {
 	} else {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		b.WriteString("🧠 Память процесса: " + humanBytes(int64(m.Sys)) + "\n")
+		b.WriteString("🧠 Память процесса: " + humanBytes(int64(m.Sys)) + "\n") //#nosec G115 -- memory byte counts are always within int64 range
 	}
 	if pct, ok := cgroupCPUPercent(200 * time.Millisecond); ok {
 		b.WriteString(fmt.Sprintf("⚙️ CPU: %.1f%% от ВМ (%d ядер)\n", pct, runtime.NumCPU()))
@@ -51,18 +51,18 @@ func cgroupMemory() (int64, int64, bool) {
 		if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
 			if s := strings.TrimSpace(string(data)); s != "max" {
 				if l, e := strconv.ParseUint(s, 10, 64); e == nil {
-					limit = int64(l)
+					limit = int64(l) //#nosec G115 -- memory byte counts are always within int64 range
 				}
 			}
 		}
-		return int64(used), limit, true
+		return int64(used), limit, true //#nosec G115 -- memory byte counts are always within int64 range
 	}
 	if used, ok := readUintFile("/sys/fs/cgroup/memory/memory.usage_in_bytes"); ok {
 		var limit int64
 		if l, ok := readUintFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); ok && l < (1<<62) {
-			limit = int64(l)
+			limit = int64(l) //#nosec G115 -- memory byte counts are always within int64 range
 		}
-		return int64(used), limit, true
+		return int64(used), limit, true //#nosec G115 -- memory byte counts are always within int64 range
 	}
 	return 0, 0, false
 }
