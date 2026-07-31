@@ -98,6 +98,9 @@
 4. **Ваш Telegram ID** (число). Откройте [@userinfobot](https://t.me/userinfobot) → он пришлёт ваш `Id`, например `000000000`. Это `ADMIN_TELEGRAM_ID` — у этого аккаунта будет доступ в админку.
 
 5. **API-токен панели Remnawave** — создаётся в дашборде панели (раздел с API-ключами, роль API). Его **не** надо вписывать в файл — введёте в мастере внутри бота.
+   На панели **3.x** у токенов есть скоупы. При обновлении панели они мигрируют сами, но если создаёте токен заново — боту нужны:
+   `users:` list, stream, by-username, create, update, delete, reset-traffic, revoke-subscription; `hwid-user-devices:` list-by-user, delete-all; `internal-squads:list`, `external-squads:list`, `hosts:list`, `system:stats`.
+   Без `users:stream` бот не сможет найти пользователя по Telegram ID.
 
 ---
 
