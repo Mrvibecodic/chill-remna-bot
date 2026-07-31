@@ -231,8 +231,9 @@ var en = map[string]string{
 	"user.sub_blocked": "🛑 Subscription is blocked in the panel (DISABLED).\nLink:\n<code>%s</code>",
 	"user.no_sub":      "📭 No active subscription in the panel.",
 	"btn.link_panel":   "🔗 Link panel account",
-	"user.link_ask": "🔗 <b>Link to a panel account</b>\n\nEnter the <b>username</b> or <b>UUID</b> of the panel account to bind to TG ID <code>%d</code>.\n\n" +
+	"user.link_ask": "🔗 <b>Link to a panel account</b>\n\nEnter the <b>username</b>, <b>ID</b> or <b>UUID</b> of the panel account to bind to TG ID <code>%d</code>.\n\n" +
 		"Linking sets telegramId and the bot tag on the account — the user will manage it from the bot, and the trial becomes unavailable for them.",
+	"user.link_ambiguous": "⚠️ Ambiguous input: those digits match both a user ID (<code>%s</code>) and a username (<code>%s</code>). Enter the username or the UUID instead.",
 	"user.link_not_found": "❌ Panel account not found.",
 	"user.link_busy":      "❌ Account <code>%s</code> is already bound to another Telegram ID: <code>%d</code>.",
 	"user.link_done":      "✅ Linked: <code>%s</code> · subscription until %s.",

@@ -117,7 +117,7 @@ func (a *App) resetAddSubDevices(ctx context.Context, telegramID int64) {
 	if res.HwidErr != nil {
 		a.log.Warn("addsub: HWID delete-all failed; keys rotated, retrying in background",
 			"tg_id", telegramID, "err", res.HwidErr)
-		a.clearHwidInBackground(telegramID, res.UUID)
+		a.clearHwidInBackground(telegramID, res.Ref)
 	}
 }
 
@@ -168,7 +168,7 @@ func (a *App) retryAddSubResetInBackground(telegramID int64) {
 				continue
 			}
 			if found && res.HwidErr != nil {
-				a.clearHwidInBackground(telegramID, res.UUID)
+				a.clearHwidInBackground(telegramID, res.Ref)
 			}
 			if found {
 				a.log.Info("addsub: сброс устройств доп-подписки добит в фоне", "tg_id", telegramID)

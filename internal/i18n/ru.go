@@ -231,8 +231,9 @@ var ru = map[string]string{
 	"user.sub_blocked": "🛑 Подписка заблокирована в панели (DISABLED).\nСсылка:\n<code>%s</code>",
 	"user.no_sub":      "📭 Активной подписки в панели нет.",
 	"btn.link_panel":   "🔗 Связать с панелью",
-	"user.link_ask": "🔗 <b>Связка с учёткой панели</b>\n\nВведите <b>username</b> или <b>UUID</b> учётки в панели, которую нужно привязать к TG ID <code>%d</code>.\n\n" +
+	"user.link_ask": "🔗 <b>Связка с учёткой панели</b>\n\nВведите <b>username</b>, <b>ID</b> или <b>UUID</b> учётки в панели, которую нужно привязать к TG ID <code>%d</code>.\n\n" +
 		"После связки учётке проставляются telegramId и тег бота — пользователь сможет управлять ею из бота, а триал для него станет недоступен.",
+	"user.link_ambiguous": "⚠️ Неоднозначный ввод: под этим числом есть и пользователь с ID (<code>%s</code>), и пользователь с таким username (<code>%s</code>). Введите username или UUID.",
 	"user.link_not_found": "❌ Учётка в панели не найдена.",
 	"user.link_busy":      "❌ Учётка <code>%s</code> уже привязана к другому Telegram ID: <code>%d</code>.",
 	"user.link_done":      "✅ Связано: <code>%s</code> · подписка до %s.",

@@ -330,7 +330,7 @@ func TestAddSubStatusReportsTraffic(t *testing.T) {
 	p.addUser("tg_42_addsub", "b-uuid", BotTagAdd)
 	c := addSubClient(t, p)
 	info, ok := c.AddSubStatus(context.Background(), 42, "")
-	if !ok || info.UUID != "b-uuid" || info.Limit != 100 || info.Used != 40 {
+	if !ok || info.Ref.Key() != "b-uuid" || info.Limit != 100 || info.Used != 40 {
 		t.Fatalf("info = %+v ok=%v", info, ok)
 	}
 	if info.Exhausted {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"remnabot/internal/model"
@@ -41,6 +43,11 @@ type Client struct {
 	// HWID delete-all retry tuning (0 = use defaults). Overridable in tests.
 	hwidRetryBase time.Duration
 	hwidRetryMax  time.Duration
+
+	// gen caches which API dialect this panel speaks (see panelGen).
+	gen       atomic.Int32
+	probeMu   sync.Mutex
+	lastProbe time.Time
 
 	logMu sync.Mutex
 	logs  []APIEvent
@@ -166,8 +173,174 @@ func (c *Client) SystemStats(ctx context.Context) (int, error) {
 	return out.Response.Users.TotalUsers, nil
 }
 
+// Remnawave 3.0.0 removed the user uuid from the API entirely (users are keyed
+// by a numeric id) and dropped GET /api/users/by-telegram-id in favour of
+// GET /api/users/stream?telegramId=. This client speaks both dialects and works
+// out which one the panel in front of it uses, so one build keeps running
+// against 2.7.4+ and 3.x alike.
+type panelGen int32
+
+const (
+	genUnknown panelGen = iota
+	genLegacy           // before 3.0.0: user addressed by uuid
+	genV3               // 3.0.0+: user addressed by numeric id
+)
+
+// genRecheckEvery bounds how often an empty lookup may re-probe the panel, so a
+// panel upgraded under a running bot is picked up without a restart while an
+// unknown user doesn't double every request.
+const genRecheckEvery = 10 * time.Minute
+
+// UserRef identifies a panel user in whichever dialect the panel speaks. It is
+// opaque to callers: they carry it around (a background retry, a log line) and
+// hand it back to the client.
+type UserRef struct {
+	uuid string
+	id   int64
+}
+
+func (r UserRef) Empty() bool { return r.uuid == "" && r.id <= 0 }
+
+// Key is a stable string for dedup maps and log lines.
+func (r UserRef) Key() string {
+	if r.uuid != "" {
+		return r.uuid
+	}
+	if r.id > 0 {
+		return strconv.FormatInt(r.id, 10)
+	}
+	return ""
+}
+
+// path is the identifier as it goes into a URL path segment.
+func (r UserRef) path() string { return url.PathEscape(r.Key()) }
+
+// apply points a request body at this user the way the panel expects it.
+func (r UserRef) apply(body map[string]any) map[string]any {
+	if r.uuid != "" {
+		body["uuid"] = r.uuid
+	} else {
+		body["id"] = r.id
+	}
+	return body
+}
+
+// hwidBody is the /api/hwid/devices body naming this user.
+func (r UserRef) hwidBody() map[string]any {
+	if r.uuid != "" {
+		return map[string]any{"userUuid": r.uuid}
+	}
+	return map[string]any{"userId": r.id}
+}
+
+func (c *Client) generation() panelGen { return panelGen(c.gen.Load()) }
+
+func (c *Client) noteGen(g panelGen) {
+	if g != genUnknown {
+		c.gen.Store(int32(g))
+	}
+}
+
+// noteUser learns the dialect for free from any user payload that came back.
+func (c *Client) noteUser(u *panelUser) {
+	switch {
+	case u == nil:
+	case u.Uuid != "":
+		c.noteGen(genLegacy)
+	case u.ID > 0:
+		c.noteGen(genV3)
+	}
+}
+
+// probeGen asks the panel which dialect it speaks: /api/users/stream exists only
+// from 3.0.0 on. Deliberately careful — a wrong answer here sends every lookup
+// to a route the panel doesn't have:
+//   - 200 counts only when the body really is a stream envelope (a proxy or a
+//     catch-all answering 200 to anything proves nothing);
+//   - any other client-side refusal means a pre-3.0.0 panel. Not just 404: on
+//     2.x the request matches GET /api/users/:uuid, whose uuid validation
+//     answers 400;
+//   - auth errors, rate limiting, 5xx and transport failures decide nothing —
+//     the caller must treat that as "don't know", never as "no such user".
+//
+// Attempts are rate-limited by genRecheckEvery (including the fruitless ones),
+// so a flaky panel can't turn every lookup into two requests, and the HTTP call
+// is made outside the lock so concurrent lookups don't queue up behind it.
+func (c *Client) probeGen(ctx context.Context) panelGen {
+	c.probeMu.Lock()
+	if g := c.generation(); !c.lastProbe.IsZero() && time.Since(c.lastProbe) < genRecheckEvery {
+		c.probeMu.Unlock()
+		return g
+	}
+	c.lastProbe = time.Now()
+	c.probeMu.Unlock()
+
+	resp, err := c.do(ctx, http.MethodGet, "/api/users/stream?size=1", nil)
+	if err != nil {
+		return c.generation()
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return c.generation()
+		}
+		var env struct {
+			Response *struct {
+				Users *[]json.RawMessage `json:"users"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(body, &env) == nil && env.Response != nil && env.Response.Users != nil {
+			c.noteGen(genV3)
+		}
+	case undecidedStatus(resp.StatusCode):
+		// auth / rate limit / server trouble — proves nothing
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		c.noteGen(genLegacy)
+	}
+	return c.generation()
+}
+
+// undecidedStatus marks answers that say nothing about the panel's API version.
+func undecidedStatus(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusProxyAuthRequired,
+		http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return code >= 500
+}
+
+// resetGen forgets the cached dialect, so the next lookup probes again. Used
+// when a route that must exist in that dialect answers "no such route" — e.g.
+// the panel was rolled back from 3.x while the bot kept running.
+func (c *Client) resetGen() {
+	c.gen.Store(int32(genUnknown))
+	c.probeMu.Lock()
+	c.lastProbe = time.Time{}
+	c.probeMu.Unlock()
+}
+
+// routeGone recognises the framework's "no such route here" 404 — the shape a
+// panel answers with once an endpoint has been removed (3.0.0 dropped
+// by-telegram-id): a message like "Cannot GET /api/...". The panel's own
+// "no such user" 404 looks different (typed error, its own message), and a
+// body that says neither is treated as the ordinary not-found so a panel that
+// answers tersely keeps behaving exactly as before.
+func routeGone(body []byte) bool {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(body, &env) != nil {
+		return false
+	}
+	return strings.HasPrefix(env.Message, "Cannot ")
+}
+
 type panelUser struct {
 	Uuid            string `json:"uuid"`
+	ID              int64  `json:"id"`
 	ExpireAt        string `json:"expireAt"`
 	SubscriptionURL string `json:"subscriptionUrl"`
 	Tag             string `json:"tag"`
@@ -185,6 +358,15 @@ type panelUser struct {
 	UserTraffic      struct {
 		UsedTrafficBytes int64 `json:"usedTrafficBytes"`
 	} `json:"userTraffic"`
+}
+
+// ref is how this user is addressed by this panel: uuid before 3.0.0, numeric
+// id from 3.0.0 on.
+func (u *panelUser) ref() UserRef {
+	if u == nil {
+		return UserRef{}
+	}
+	return UserRef{uuid: u.Uuid, id: u.ID}
 }
 
 // usedBytes returns the user's used traffic regardless of where the panel put
@@ -211,14 +393,20 @@ type PanelUser struct {
 	Status          string
 	TrafficLimit    int64
 	TrafficUsed     int64
+	// ID is the numeric identifier (panel 3.0.0+); UUID is the pre-3.0.0 one.
+	// Ref is whichever of them this panel actually understands.
+	ID  int64
+	Ref UserRef
 }
 
 func toPanelUser(u *panelUser) *PanelUser {
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return nil
 	}
 	return &PanelUser{
 		UUID:            u.Uuid,
+		ID:              u.ID,
+		Ref:             u.ref(),
 		Username:        u.Username,
 		TelegramID:      u.TelegramID,
 		ExpireAt:        u.ExpireAt,
@@ -307,7 +495,7 @@ func (c *Client) findAddSub(ctx context.Context, mainUsername string, telegramID
 		if err != nil {
 			return nil, want, err
 		}
-		if u == nil || u.UUID == "" {
+		if u == nil || u.Ref.Empty() {
 			continue
 		}
 		if u.Tag != BotTagAdd {
@@ -386,7 +574,7 @@ func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, opt AddSubO
 // UpsertAddSubForUser is UpsertAddSub for an already-fetched main user, so the
 // admin backfill can walk the panel's user list without re-reading each user.
 func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt AddSubOptions) (res AddSubUpsert, err error) {
-	if main.UUID == "" || main.ExpireAt == "" || expired(main.ExpireAt) {
+	if main.Ref.Empty() || main.ExpireAt == "" || expired(main.ExpireAt) {
 		return res, nil
 	}
 	// Never build an add-on of an add-on.
@@ -420,7 +608,7 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 				return res, err
 			}
 			res.Done = true
-			if err := c.deleteUser(ctx, existing.UUID); err != nil {
+			if err := c.deleteUser(ctx, existing.Ref); err != nil {
 				return res, err
 			}
 			res.Migrated = true
@@ -434,7 +622,7 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		if legacy := legacyAddSubUsername(main.TelegramID, opt.Suffix); legacy != want {
 			if old, lerr := c.FindByUsername(ctx, legacy); lerr == nil && old != nil && old.Tag == BotTagAdd {
 				res.Legacy = old.Username
-				if err := c.deleteUser(ctx, old.UUID); err != nil {
+				if err := c.deleteUser(ctx, old.Ref); err != nil {
 					return res, err
 				}
 				res.Migrated = true
@@ -443,7 +631,7 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 	}
 
 	if existing != nil {
-		patch := map[string]any{"uuid": existing.UUID, "expireAt": main.ExpireAt}
+		patch := existing.Ref.apply(map[string]any{"expireAt": main.ExpireAt})
 		// Status is only touched when the two are out of step: mirroring A's
 		// block, or lifting a leftover block on B. Writing ACTIVE otherwise
 		// would un-limit a B whose traffic the panel had just capped.
@@ -462,7 +650,7 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		}
 		res.Done = true
 		if opt.ResetTraffic {
-			return res, c.ResetTraffic(ctx, existing.UUID)
+			return res, c.ResetTraffic(ctx, existing.Ref)
 		}
 		return res, nil
 	}
@@ -514,13 +702,13 @@ func (c *Client) findAddSubFor(ctx context.Context, telegramID int64, suffix str
 	return u, err
 }
 
-func (c *Client) deleteUser(ctx context.Context, uuid string) error {
-	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+url.PathEscape(uuid), nil)
+func (c *Client) deleteUser(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+ref.path(), nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -530,27 +718,27 @@ func (c *Client) deleteUser(ctx context.Context, uuid string) error {
 // still be resolved from A's username.
 func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix string) error {
 	u, err := c.findAddSubFor(ctx, telegramID, suffix)
-	if err != nil || u == nil || u.UUID == "" {
+	if err != nil || u == nil || u.Ref.Empty() {
 		return err
 	}
-	return c.deleteUser(ctx, u.UUID)
+	return c.deleteUser(ctx, u.Ref)
 }
 
 func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix string, enable bool) error {
 	u, err := c.findAddSubFor(ctx, telegramID, suffix)
-	if err != nil || u == nil || u.UUID == "" {
+	if err != nil || u == nil || u.Ref.Empty() {
 		return err
 	}
 	status := StatusDisabled
 	if enable {
 		status = "ACTIVE"
 	}
-	resp, err := c.do(ctx, http.MethodPatch, "/api/users", map[string]any{"uuid": u.UUID, "status": status})
+	resp, err := c.do(ctx, http.MethodPatch, "/api/users", u.Ref.apply(map[string]any{"status": status}))
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -559,7 +747,7 @@ func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix 
 // AddSubInfo is a read-only snapshot of the add-on subscription B, for the
 // user-facing screens. Limit 0 means unlimited.
 type AddSubInfo struct {
-	UUID      string
+	Ref       UserRef
 	Username  string
 	Status    string
 	Limit     int64
@@ -572,11 +760,11 @@ type AddSubInfo struct {
 // nothing, so the screen degrades gracefully.
 func (c *Client) AddSubStatus(ctx context.Context, telegramID int64, suffix string) (AddSubInfo, bool) {
 	u, err := c.findAddSubFor(ctx, telegramID, suffix)
-	if err != nil || u == nil || u.UUID == "" {
+	if err != nil || u == nil || u.Ref.Empty() {
 		return AddSubInfo{}, false
 	}
 	info := AddSubInfo{
-		UUID:     u.UUID,
+		Ref:      u.Ref,
 		Username: u.Username,
 		Status:   u.Status,
 		Limit:    u.TrafficLimit,
@@ -595,16 +783,16 @@ func (c *Client) ResetAddSubDevices(ctx context.Context, telegramID int64, suffi
 	if err != nil {
 		return DeviceResetResult{}, false, err
 	}
-	if u == nil || u.UUID == "" {
+	if u == nil || u.Ref.Empty() {
 		return DeviceResetResult{}, false, nil
 	}
-	res.UUID = u.UUID
-	pre := c.hwidCount(ctx, u.UUID)
-	if err := c.revokeUser(ctx, u.UUID); err != nil {
+	res.Ref = u.Ref
+	pre := c.hwidCount(ctx, u.Ref)
+	if err := c.revokeUser(ctx, u.Ref); err != nil {
 		return res, true, err
 	}
 	res.KeysRotated = true
-	if derr := c.deleteAllHwidRetry(ctx, u.UUID, hwidSyncAttempts); derr != nil {
+	if derr := c.deleteAllHwidRetry(ctx, u.Ref, hwidSyncAttempts); derr != nil {
 		res.HwidErr = derr
 	} else {
 		res.HwidCleared = true
@@ -630,18 +818,15 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 	}
 	expire := nextExpire(existing, months)
 
-	if existing != nil && existing.Uuid != "" {
+	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := map[string]any{
-			"uuid":     existing.Uuid,
-			"expireAt": expire,
-		}
+		patch := existing.ref().apply(map[string]any{"expireAt": expire})
 		applyLimits(patch, limits)
 		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 		if err == nil {
-			_ = c.ResetTraffic(ctx, existing.Uuid)
+			_ = c.ResetTraffic(ctx, existing.ref())
 		}
 		return link, expireAt, err
 	}
@@ -669,11 +854,11 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 	}
 	expire := base.AddDate(0, 0, days).Format(time.RFC3339)
 
-	if existing != nil && existing.Uuid != "" {
+	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := map[string]any{"uuid": existing.Uuid, "expireAt": expire}
+		patch := existing.ref().apply(map[string]any{"expireAt": expire})
 		applyLimits(patch, limits)
 		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
@@ -863,13 +1048,13 @@ func (c *Client) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, nil
 }
 
-func (c *Client) ResetTraffic(ctx context.Context, uuid string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(uuid)+"/actions/reset-traffic", nil)
+func (c *Client) ResetTraffic(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+ref.path()+"/actions/reset-traffic", nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -880,19 +1065,14 @@ func (c *Client) DeleteByTelegramID(ctx context.Context, telegramID int64) (bool
 	if err != nil {
 		return false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return false, nil
 	}
 	if !ownedByBot(u, telegramID) {
 		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — удалять его запрещено", telegramID)
 	}
-	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+u.Uuid, nil)
-	if err != nil {
-		return false, fmt.Errorf("нет связи с панелью: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
-		return false, classifyHTTP(resp)
+	if err := c.deleteUser(ctx, u.ref()); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -902,7 +1082,7 @@ func (c *Client) setSubEnabled(ctx context.Context, telegramID int64, enable boo
 	if err != nil {
 		return false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return false, nil
 	}
 	if !ownedByBot(u, telegramID) {
@@ -912,13 +1092,13 @@ func (c *Client) setSubEnabled(ctx context.Context, telegramID int64, enable boo
 	if enable {
 		status = "ACTIVE"
 	}
-	body := map[string]any{"uuid": u.Uuid, "status": status}
+	body := u.ref().apply(map[string]any{"status": status})
 	resp, err := c.do(ctx, http.MethodPatch, "/api/users", body)
 	if err != nil {
 		return false, fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return false, classifyHTTP(resp)
 	}
 	return true, nil
@@ -935,11 +1115,11 @@ func (c *Client) EnableByTelegramID(ctx context.Context, telegramID int64) (bool
 // DeviceResetResult reports what ResetDevicesByTelegramID actually did on the
 // panel, so callers can warn on a partial result.
 type DeviceResetResult struct {
-	UUID        string // panel user uuid (set once found); lets the caller keep retrying delete-all
-	KeysRotated bool   // proxy credentials rotated (all connected devices dropped)
-	HwidCleared bool   // all HWID device registrations deleted (slots freed)
-	Removed     int    // HWID devices removed (best-effort, from the pre-count)
-	HwidErr     error  // delete-all still failing after the synchronous retries (keys were still rotated)
+	Ref         UserRef // panel user reference (set once found); lets the caller keep retrying delete-all
+	KeysRotated bool    // proxy credentials rotated (all connected devices dropped)
+	HwidCleared bool    // all HWID device registrations deleted (slots freed)
+	Removed     int     // HWID devices removed (best-effort, from the pre-count)
+	HwidErr     error   // delete-all still failing after the synchronous retries (keys were still rotated)
 }
 
 // ResetDevicesByTelegramID fully resets a user's devices: it rotates the proxy
@@ -957,19 +1137,19 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 	if err != nil {
 		return DeviceResetResult{}, false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return DeviceResetResult{}, false, nil
 	}
 	if !ownedByBot(u, telegramID) {
 		return DeviceResetResult{}, false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
 	}
-	res.UUID = u.Uuid
+	res.Ref = u.ref()
 
 	// Count devices first so we can report how many slots were freed (best-effort).
-	pre := c.hwidCount(ctx, u.Uuid)
+	pre := c.hwidCount(ctx, u.ref())
 
 	// 1) Rotate credentials — drops every connected device. Hard-fails the reset.
-	if err := c.revokeUser(ctx, u.Uuid); err != nil {
+	if err := c.revokeUser(ctx, u.ref()); err != nil {
 		return res, true, err
 	}
 	res.KeysRotated = true
@@ -977,7 +1157,7 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 	// 2) Delete all HWID registrations so the device-limit slots are freed.
 	//    Retried synchronously a few times; a persistent failure is handed back
 	//    via HwidErr for the caller to finish in the background (until success).
-	if derr := c.deleteAllHwidRetry(ctx, u.Uuid, hwidSyncAttempts); derr != nil {
+	if derr := c.deleteAllHwidRetry(ctx, u.ref(), hwidSyncAttempts); derr != nil {
 		res.HwidErr = derr
 	} else {
 		res.HwidCleared = true
@@ -992,7 +1172,7 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 // maxAttempts > 0) maxAttempts have been made, backing off exponentially between
 // tries. maxAttempts <= 0 means "keep going until ctx is done". Returns the last
 // error seen (nil on success).
-func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempts int) error {
+func (c *Client) deleteAllHwidRetry(ctx context.Context, ref UserRef, maxAttempts int) error {
 	base := c.hwidRetryBase
 	if base <= 0 {
 		base = 500 * time.Millisecond
@@ -1004,7 +1184,7 @@ func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempt
 	backoff := base
 	var last error
 	for attempt := 1; ; attempt++ {
-		if last = c.deleteAllHwid(ctx, uuid); last == nil {
+		if last = c.deleteAllHwid(ctx, ref); last == nil {
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -1031,21 +1211,21 @@ func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempt
 // DeleteAllHwidUntil keeps retrying the HWID delete-all (with backoff) until it
 // succeeds or ctx is done. Used for the best-effort background cleanup after a
 // device reset whose synchronous delete-all attempts didn't get through.
-func (c *Client) DeleteAllHwidUntil(ctx context.Context, uuid string) error {
-	return c.deleteAllHwidRetry(ctx, uuid, 0)
+func (c *Client) DeleteAllHwidUntil(ctx context.Context, ref UserRef) error {
+	return c.deleteAllHwidRetry(ctx, ref, 0)
 }
 
 // revokeUser rotates the user's proxy credentials
 // (POST /api/users/{uuid}/actions/revoke with revokeOnlyPasswords=true), keeping
 // the same subscription URL so clients only need to refresh to reconnect.
-func (c *Client) revokeUser(ctx context.Context, uuid string) error {
+func (c *Client) revokeUser(ctx context.Context, ref UserRef) error {
 	body := map[string]any{"revokeOnlyPasswords": true}
-	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(uuid)+"/actions/revoke", body)
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+ref.path()+"/actions/revoke", body)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -1053,14 +1233,13 @@ func (c *Client) revokeUser(ctx context.Context, uuid string) error {
 
 // deleteAllHwid removes every HWID device registered to the user
 // (POST /api/hwid/devices/delete-all with {userUuid}).
-func (c *Client) deleteAllHwid(ctx context.Context, uuid string) error {
-	body := map[string]any{"userUuid": uuid}
-	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete-all", body)
+func (c *Client) deleteAllHwid(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete-all", ref.hwidBody())
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -1068,8 +1247,8 @@ func (c *Client) deleteAllHwid(ctx context.Context, uuid string) error {
 
 // hwidCount returns the number of HWID devices currently registered to the user,
 // or -1 when it can't be determined. Best-effort; never fails the caller.
-func (c *Client) hwidCount(ctx context.Context, uuid string) int {
-	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+url.PathEscape(uuid), nil)
+func (c *Client) hwidCount(ctx context.Context, ref UserRef) int {
+	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+ref.path(), nil)
 	if err != nil {
 		return -1
 	}
@@ -1126,12 +1305,12 @@ type DeviceInfo struct {
 // is unknown to the panel or HWID data is unavailable.
 func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (DeviceInfo, bool) {
 	u, err := c.findByTelegram(ctx, telegramID)
-	if err != nil || u == nil || u.Uuid == "" {
+	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
 	info := DeviceInfo{Limit: u.HwidDeviceLimit, HasLimit: u.HwidDeviceLimit > 0}
 
-	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+url.PathEscape(u.Uuid), nil)
+	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+u.ref().path(), nil)
 	if err != nil {
 		return DeviceInfo{}, false
 	}
@@ -1155,33 +1334,132 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	return info, true
 }
 
+// errPanelDialect is returned when the panel can't be asked which API version
+// it speaks. Callers must surface it: silently reporting "no such user" would
+// turn a temporary panel outage into "your subscription is gone", and a renewal
+// into creating a second account.
+var errPanelDialect = errors.New("не удалось определить версию API панели")
+
+// findByTelegram resolves a user by telegram id in whichever dialect the panel
+// speaks (see panelGen).
 func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
+	if c.generation() == genV3 {
+		u, gone, err := c.findByTelegramStream(ctx, telegramID)
+		if err != nil {
+			return nil, err
+		}
+		if !gone {
+			return u, nil
+		}
+		// The route that must exist on 3.x is gone: the panel was rolled back.
+		c.resetGen()
+	}
+	// Legacy route first while the dialect is unknown: on a pre-3.0.0 panel a
+	// found user answers the question by itself, at no extra cost.
+	u, gone, err := c.findByTelegramLegacy(ctx, telegramID)
 	if err != nil {
-		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+		return nil, err
+	}
+	if u != nil {
+		return u, nil
+	}
+	if !gone && c.generation() == genLegacy {
+		// Known pre-3.0.0 panel answering its own "no such user".
+		return nil, nil
+	}
+	// Either the route is gone (3.x), or the dialect isn't settled yet: ask
+	// once (the answer is cached) instead of guessing.
+	switch c.probeGen(ctx) {
+	case genV3:
+		u2, gone2, err2 := c.findByTelegramStream(ctx, telegramID)
+		if err2 != nil {
+			return nil, err2
+		}
+		if gone2 {
+			return nil, errPanelDialect
+		}
+		return u2, nil
+	case genLegacy:
+		return nil, nil
+	}
+	if gone {
+		// The old route is definitely gone and we could not find out what
+		// replaced it — reporting "no such user" here would look like a lost
+		// subscription and make a renewal create a second account.
+		return nil, errPanelDialect
+	}
+	return nil, nil
+}
+
+// findByTelegramStream is the 3.0.0+ lookup: GET /api/users/stream?telegramId=.
+// gone=true means the route itself is not there (wrong base URL, or a panel
+// older than 3.0.0).
+func (c *Client) findByTelegramStream(ctx context.Context, telegramID int64) (u *panelUser, gone bool, err error) {
+	path := "/api/users/stream?size=1&telegramId=" + strconv.FormatInt(telegramID, 10)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, true, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, classifyHTTP(resp)
+		return nil, false, classifyHTTP(resp)
+	}
+	var env struct {
+		Response struct {
+			Users []panelUser `json:"users"`
+		} `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, false, err
+	}
+	// Never trust the filter blindly: a panel (or anything in front of it) that
+	// ignores telegramId would otherwise hand out another subscriber's account.
+	for i := range env.Response.Users {
+		if env.Response.Users[i].TelegramID != telegramID {
+			continue
+		}
+		c.noteUser(&env.Response.Users[i])
+		return &env.Response.Users[i], false, nil
+	}
+	return nil, false, nil
+}
+
+// findByTelegramLegacy is the pre-3.0.0 lookup, removed by the panel in 3.0.0.
+// gone=true means the route itself no longer exists, as opposed to the panel
+// answering that it has no such user.
+func (c *Client) findByTelegramLegacy(ctx context.Context, telegramID int64) (u *panelUser, gone bool, err error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, routeGone(body), nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, classifyHTTP(resp)
 	}
 	var env struct {
 		Response json.RawMessage `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var arr []panelUser
 	if json.Unmarshal(env.Response, &arr) == nil && len(arr) > 0 {
-		return &arr[0], nil
+		c.noteUser(&arr[0])
+		return &arr[0], false, nil
 	}
 	var one panelUser
-	if json.Unmarshal(env.Response, &one) == nil && one.Uuid != "" {
-		return &one, nil
+	if json.Unmarshal(env.Response, &one) == nil && !one.ref().Empty() {
+		c.noteUser(&one)
+		return &one, false, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 func (c *Client) FindByTelegramID(ctx context.Context, telegramID int64) (*PanelUser, error) {
@@ -1196,8 +1474,10 @@ func (c *Client) FindByUsername(ctx context.Context, username string) (*PanelUse
 	return c.fetchOne(ctx, "/api/users/by-username/"+url.PathEscape(username))
 }
 
-func (c *Client) FindByUUID(ctx context.Context, uuid string) (*PanelUser, error) {
-	return c.fetchOne(ctx, "/api/users/"+url.PathEscape(uuid))
+// FindByRef looks a user up by whatever identifier this panel uses in paths:
+// the uuid before 3.0.0, the numeric id from 3.0.0 on.
+func (c *Client) FindByRef(ctx context.Context, ref string) (*PanelUser, error) {
+	return c.fetchOne(ctx, "/api/users/"+url.PathEscape(ref))
 }
 
 func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) {
@@ -1218,6 +1498,7 @@ func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) 
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, fmt.Errorf("разбор ответа панели: %w", err)
 	}
+	c.noteUser(&env.Response)
 	return toPanelUser(&env.Response), nil
 }
 
@@ -1241,6 +1522,7 @@ func (c *Client) ListUsersPage(ctx context.Context, start, size int) ([]PanelUse
 	}
 	out := make([]PanelUser, 0, len(env.Response.Users))
 	for i := range env.Response.Users {
+		c.noteUser(&env.Response.Users[i])
 		if pu := toPanelUser(&env.Response.Users[i]); pu != nil {
 			out = append(out, *pu)
 		}
@@ -1248,8 +1530,8 @@ func (c *Client) ListUsersPage(ctx context.Context, start, size int) ([]PanelUse
 	return out, env.Response.Total, nil
 }
 
-func (c *Client) LinkTelegramID(ctx context.Context, uuid string, telegramID int64, setTag bool) error {
-	body := map[string]any{"uuid": uuid, "telegramId": telegramID}
+func (c *Client) LinkTelegramID(ctx context.Context, ref UserRef, telegramID int64, setTag bool) error {
+	body := ref.apply(map[string]any{"telegramId": telegramID})
 	if setTag {
 		body["tag"] = BotTag
 	}
@@ -1258,7 +1540,7 @@ func (c *Client) LinkTelegramID(ctx context.Context, uuid string, telegramID int
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -1279,6 +1561,7 @@ func (c *Client) upsertCall(ctx context.Context, method, path string, body any) 
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return "", "", err
 	}
+	c.noteUser(&env.Response)
 	return env.Response.SubscriptionURL, env.Response.ExpireAt, nil
 }
 
@@ -1290,6 +1573,17 @@ func nextExpire(existing *panelUser, months int) string {
 		}
 	}
 	return base.AddDate(0, months, 0).Format(time.RFC3339)
+}
+
+// writeOK covers every success code a write may answer with across panel
+// generations: 3.0.0 turned several 200s into 201 (create) and 204/202
+// (delete and background work), so a fixed 200 check would break on it.
+func writeOK(code int) bool {
+	switch code {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return true
+	}
+	return false
 }
 
 func classifyHTTP(resp *http.Response) error {
