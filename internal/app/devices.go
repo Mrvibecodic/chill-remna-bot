@@ -41,6 +41,10 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 			a.log.Warn("reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", chatID, "err", res.HwidErr)
 			a.clearHwidInBackground(chatID, res.UUID)
 		}
+		// The add-on subscription holds registrations for the same devices, so
+		// the reset must cover it too: otherwise the freed slots and the
+		// rotated keys only apply to half of what the client actually uses.
+		a.resetAddSubDevices(ctx, chatID)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.done"), [][]models.InlineKeyboardButton{
 			navBack(lang, "menu:mysubs"),
 		})
@@ -71,6 +75,7 @@ func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDT
 		a.log.Warn("miniapp reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", tgID, "err", res.HwidErr)
 		a.clearHwidInBackground(tgID, res.UUID)
 	}
+	a.resetAddSubDevices(ctx, tgID)
 	a.invalidateSubCache(tgID)
 	return web.MiniActionDTO{OK: true}
 }

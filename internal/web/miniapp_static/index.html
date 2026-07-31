@@ -399,6 +399,22 @@ function devicesText(s){
   if(!s.devices_ok)return null;
   return s.has_limit? (s.devices_used+' / '+s.device_limit) : (''+s.devices_used);
 }
+function gbText(b){
+  var gb=(Number(b)||0)/1073741824;
+  var s=gb.toFixed(1);
+  return (s.slice(-2)==='.0'?s.slice(0,-2):s)+' ГБ';
+}
+// Add-on ("доп-сервер") state: its nodes are merged into the same subscription
+// link, so its traffic must be visible here too — otherwise running out shows up
+// only as a stub entry inside the client's server list.
+function addSubText(s){
+  if(!s.addsub_ok)return null;
+  if(s.addsub_off)return 'выкл';
+  if(s.addsub_exhausted)return 'исчерпан';
+  if(!s.addsub_limit)return 'безлимит';
+  var left=Number(s.addsub_limit)-Number(s.addsub_used||0);
+  return gbText(left>0?left:0);
+}
 
 /* ---- skeletons ---- */
 function skMain(){
@@ -417,6 +433,7 @@ function render(me,menu,sub,plans){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
+    var atext=addSubText(sub);
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
       '<div class="pl"><span class="brand">ДОСТУП · BOARDING</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
@@ -424,6 +441,7 @@ function render(me,menu,sub,plans){
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
         (dleft!==null?'<div class="c"><div class="k">ОСТАЛОСЬ</div><div class="v">'+dleft+' '+daysWord(dleft)+'</div></div>':'')+
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
+        (atext!==null?'<div class="c"><div class="k">ДОП-СЕРВЕР</div><div class="v">'+esc(atext)+'</div></div>':'')+
       '</div></div>';
     h+='<div class="acctgrp">'+ub+pass+'</div>';
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';

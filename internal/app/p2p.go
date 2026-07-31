@@ -545,7 +545,8 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
 	a.invalidateSubCache(telegramID)
-	a.syncAddSub(ctx, telegramID)
+	// Paid renewal: A's traffic was just reset, so B's must follow.
+	a.syncAddSub(ctx, telegramID, true)
 	if a.store != nil {
 		if err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,

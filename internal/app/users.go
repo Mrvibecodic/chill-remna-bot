@@ -423,6 +423,9 @@ func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode strin
 			} else {
 				didSub = true
 			}
+			// Mirror of applyBlock: without this B stays DISABLED forever and
+			// the subscription merge silently stops for an unblocked user.
+			a.setAddSubEnabledPanel(ctx, uid, true)
 		}
 		a.invalidateSubCache(uid)
 	}
@@ -483,10 +486,12 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	panel := a.panel
 	a.mu.Unlock()
 	if deleteSub && panel != nil {
+		// B first: it is resolved through A's username, so deleting A first
+		// would leave an orphan add-on user in the panel.
+		a.removeAddSub(ctx, uid)
 		if _, err := panel.DeleteByTelegramID(ctx, uid); err != nil {
 			a.notify(ctx, adminChat, "⚠️ "+err.Error())
 		}
-		a.removeAddSub(ctx, uid)
 	}
 	a.invalidateSubCache(uid)
 	_ = a.store.DeletePaymentsByUser(ctx, uid)
@@ -687,8 +692,44 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
+}
+
+// addSubLine renders the add-on subscription's state ("доп-сервер") under the
+// devices line. Without it the only signal a user gets when the add-on traffic
+// runs out is a stub entry inside the config. Returns "" when the feature is
+// off, the user has no add-on, or the panel can't be read — the screen then
+// looks exactly as before.
+func (a *App) addSubLine(ctx context.Context, chatID int64) string {
+	info, ok := a.addSubStatus(ctx, chatID)
+	if !ok {
+		return ""
+	}
+	lang := a.lang(chatID)
+	switch {
+	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
+		return "\n" + i18n.T(lang, "sub.addsub_off")
+	case info.Exhausted:
+		return "\n" + i18n.T(lang, "sub.addsub_out")
+	case info.Limit <= 0:
+		return "\n" + i18n.T(lang, "sub.addsub_unlim")
+	}
+	left := info.Limit - info.Used
+	if left < 0 {
+		left = 0
+	}
+	return "\n" + i18n.T(lang, "sub.addsub", formatGB(left), formatGB(info.Limit))
+}
+
+// formatGB renders a byte count as GB with one decimal (trailing ".0" dropped).
+func formatGB(b int64) string {
+	if b <= 0 {
+		return "0"
+	}
+	gb := float64(b) / (1024 * 1024 * 1024)
+	s := strconv.FormatFloat(gb, 'f', 1, 64)
+	return strings.TrimSuffix(s, ".0")
 }
 
 // devicesLine renders a read-only "connected[/allowed]" devices line for the

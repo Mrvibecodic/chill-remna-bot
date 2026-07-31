@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -176,6 +177,26 @@ type panelUser struct {
 
 	TrafficLimitStrategy string `json:"trafficLimitStrategy"`
 	HwidDeviceLimit      int    `json:"hwidDeviceLimit"`
+
+	TrafficLimitBytes int64 `json:"trafficLimitBytes"`
+	// Used traffic moved into the nested userTraffic object in the panel
+	// contract; the flat field is still read as a fallback for older payloads.
+	UsedTrafficBytes int64 `json:"usedTrafficBytes"`
+	UserTraffic      struct {
+		UsedTrafficBytes int64 `json:"usedTrafficBytes"`
+	} `json:"userTraffic"`
+}
+
+// usedBytes returns the user's used traffic regardless of where the panel put
+// it in the payload (nested userTraffic, or the flat legacy field).
+func (u *panelUser) usedBytes() int64 {
+	if u == nil {
+		return 0
+	}
+	if u.UserTraffic.UsedTrafficBytes > 0 {
+		return u.UserTraffic.UsedTrafficBytes
+	}
+	return u.UsedTrafficBytes
 }
 
 type PanelUser struct {
@@ -187,6 +208,9 @@ type PanelUser struct {
 	Tag             string
 	Strategy        string
 	DeviceLimit     int
+	Status          string
+	TrafficLimit    int64
+	TrafficUsed     int64
 }
 
 func toPanelUser(u *panelUser) *PanelUser {
@@ -202,6 +226,9 @@ func toPanelUser(u *panelUser) *PanelUser {
 		Tag:             u.Tag,
 		Strategy:        u.TrafficLimitStrategy,
 		DeviceLimit:     u.HwidDeviceLimit,
+		Status:          u.Status,
+		TrafficLimit:    u.TrafficLimitBytes,
+		TrafficUsed:     u.usedBytes(),
 	}
 }
 
@@ -216,64 +243,279 @@ func ownedByBot(u *panelUser, telegramID int64) bool {
 
 const BotTagAdd = "CHILLBOT_ADD"
 
-func addSubUsername(telegramID int64, suffix string) string {
-	if suffix == "" {
-		suffix = "_addsub"
+const DefaultAddSubSuffix = "_addsub"
+
+// addSubSuffixRe keeps the configured suffix inside what the panel accepts in a
+// username; anything else would make every derived name invalid, silently
+// disabling auto-discovery for everyone, so it falls back to the default.
+var addSubSuffixRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,20}$`)
+
+func normalizeAddSubSuffix(suffix string) string {
+	if !addSubSuffixRe.MatchString(suffix) {
+		return DefaultAddSubSuffix
 	}
-	return fmt.Sprintf("tg_%d%s", telegramID, suffix)
+	return suffix
+}
+
+// addSubUsername builds B's panel username from A's ACTUAL username, which is
+// exactly what the subscription middleware's auto-discovery looks up ("имя B =
+// полное имя A + суффикс"). For bot-created accounts A is tg_<id>, so the name
+// is unchanged; for accounts adopted from the panel (linked by telegramId, any
+// username) this is what makes the merge discoverable at all.
+func addSubUsername(mainUsername, suffix string) string {
+	return mainUsername + normalizeAddSubSuffix(suffix)
+}
+
+// legacyAddSubUsername is the name older bot builds always used, regardless of
+// A's real username. Still looked up, so an existing add-on user is recognised
+// as the bot's own instead of being treated as someone else's account.
+func legacyAddSubUsername(telegramID int64, suffix string) string {
+	return fmt.Sprintf("tg_%d%s", telegramID, normalizeAddSubSuffix(suffix))
+}
+
+// panelUsernameRe mirrors the panel's own rule for usernames (3-36 chars of
+// letters, digits, underscore and dash).
+var panelUsernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,36}$`)
+
+// addSubNames returns the name B should live under, followed by the legacy name
+// to fall back on (deduped). mainUsername may be empty when A is already gone —
+// then only the legacy name is known. A derived name the panel would refuse
+// (A's username is long enough that the suffix pushes it over 36 chars) falls
+// back to the short legacy name, so syncing keeps working instead of failing on
+// every call — the merge for that user then needs a manual binding.
+func addSubNames(mainUsername string, telegramID int64, suffix string) []string {
+	legacy := legacyAddSubUsername(telegramID, suffix)
+	if mainUsername == "" {
+		return []string{legacy}
+	}
+	want := addSubUsername(mainUsername, suffix)
+	if want == legacy || !panelUsernameRe.MatchString(want) {
+		return []string{legacy}
+	}
+	return []string{want, legacy}
+}
+
+// findAddSub returns the bot-owned add-on user B (nil when there is none) and
+// the username B should live under. A user sitting on the wanted name that is
+// NOT the bot's is an error; on the legacy name it is simply ignored, since
+// that name is only consulted for migration.
+func (c *Client) findAddSub(ctx context.Context, mainUsername string, telegramID int64, suffix string) (*PanelUser, string, error) {
+	names := addSubNames(mainUsername, telegramID, suffix)
+	want := names[0]
+	for i, name := range names {
+		u, err := c.FindByUsername(ctx, name)
+		if err != nil {
+			return nil, want, err
+		}
+		if u == nil || u.UUID == "" {
+			continue
+		}
+		if u.Tag != BotTagAdd {
+			if i == 0 {
+				return nil, want, fmt.Errorf("addsub: пользователь %s принадлежит не боту", name)
+			}
+			continue
+		}
+		return u, want, nil
+	}
+	return nil, want, nil
+}
+
+// expired reports whether an RFC3339 expiry is in the past. Unparsable values
+// are treated as not expired, so a panel quirk never silently skips a user.
+func expired(expireAt string) bool {
+	t, err := time.Parse(time.RFC3339, expireAt)
+	if err != nil {
+		return false
+	}
+	return !t.After(time.Now().UTC())
+}
+
+// AddSubOptions carries everything the bot decides about the add-on user B.
+type AddSubOptions struct {
+	// Suffix appended to A's username to build B's ("" = "_addsub").
+	Suffix string
+	// TrafficBytes is B's own traffic allowance; 0 = unlimited.
+	TrafficBytes int64
+	// InternalSquads are B's squads (B's servers are what gets merged in).
+	InternalSquads []string
+	// ResetTraffic zeroes B's counters. Must be set exactly when A's traffic
+	// was reset too (paid renewal), so both subscriptions stay in step.
+	ResetTraffic bool
+	// MigrateLegacyName recreates an add-on that still lives under the old
+	// tg_<id>+suffix name under the discoverable one. The panel has no rename,
+	// so this DELETES the old user — which would break a manual binding wired
+	// to its subscription URL in the middleware. Therefore it never runs on the
+	// automatic paths: only from the explicit admin "sync everyone" action.
+	MigrateLegacyName bool
+}
+
+// AddSubUpsert reports what an upsert actually did.
+type AddSubUpsert struct {
+	// Done is true when B was created or updated (false = the user was skipped:
+	// expired, no expiry, or an add-on itself — not an error).
+	Done bool
+	// Legacy carries the username of an add-on found under the old naming
+	// scheme. Outside migration it keeps being managed exactly as before and is
+	// only reported, so an admin can decide when to move it.
+	Legacy string
+	// Migrated is true when that legacy user was replaced by a correctly named
+	// one during this call.
+	Migrated bool
 }
 
 // UpsertAddSub creates/updates the add-on user B for telegramID. B inherits
 // expireAt, traffic-reset strategy and device limit from the main user A; only
 // squads and traffic are overridden. B carries NO telegramId and tag
 // CHILLBOT_ADD, so it never appears in by-telegram-id lookups.
-func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, suffix string, trafficBytes int64, internalSquads []string) error {
+func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, opt AddSubOptions) (AddSubUpsert, error) {
 	a, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return err
+		return AddSubUpsert{}, err
 	}
-	if a == nil || a.ExpireAt == "" {
-		return nil
+	main := toPanelUser(a)
+	if main == nil {
+		return AddSubUpsert{}, nil
+	}
+	if main.TelegramID == 0 {
+		main.TelegramID = telegramID
+	}
+	return c.UpsertAddSubForUser(ctx, *main, opt)
+}
+
+// UpsertAddSubForUser is UpsertAddSub for an already-fetched main user, so the
+// admin backfill can walk the panel's user list without re-reading each user.
+func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt AddSubOptions) (res AddSubUpsert, err error) {
+	if main.UUID == "" || main.ExpireAt == "" || expired(main.ExpireAt) {
+		return res, nil
+	}
+	// Never build an add-on of an add-on.
+	if main.Tag == BotTagAdd || strings.HasSuffix(main.Username, normalizeAddSubSuffix(opt.Suffix)) {
+		return res, nil
 	}
 	limits := UserLimits{
-		TrafficBytes:   trafficBytes,
-		DeviceLimit:    a.HwidDeviceLimit,
-		Strategy:       a.TrafficLimitStrategy,
-		InternalSquads: internalSquads,
+		TrafficBytes:   opt.TrafficBytes,
+		DeviceLimit:    main.DeviceLimit,
+		Strategy:       main.Strategy,
+		InternalSquads: opt.InternalSquads,
 	}
-	uname := addSubUsername(telegramID, suffix)
-	existing, err := c.FindByUsername(ctx, uname)
+	existing, want, err := c.findAddSub(ctx, main.Username, main.TelegramID, opt.Suffix)
 	if err != nil {
-		return err
+		return res, err
 	}
-	if existing != nil && existing.UUID != "" {
-		if existing.Tag != BotTagAdd {
-			return fmt.Errorf("addsub: пользователь %s принадлежит не боту", uname)
+	mainDisabled := strings.EqualFold(main.Status, StatusDisabled)
+
+	// An add-on still living under the legacy name can't be auto-discovered by
+	// the middleware. It is NOT touched by default: an admin may have wired its
+	// subscription URL into the middleware as a manual binding, and both
+	// deleting it and letting it go stale would break a merge that works today.
+	// So it keeps being managed exactly as before, and the move to the
+	// discoverable name happens only on the explicit admin action.
+	if existing != nil && existing.Username != want {
+		res.Legacy = existing.Username
+		if opt.MigrateLegacyName {
+			// New user first, old one only after it exists — a failure in
+			// between must never leave the subscriber without an add-on.
+			if err := c.createAddSub(ctx, want, main, limits, opt.TrafficBytes, mainDisabled); err != nil {
+				return res, err
+			}
+			res.Done = true
+			if err := c.deleteUser(ctx, existing.UUID); err != nil {
+				return res, err
+			}
+			res.Migrated = true
+			return res, nil
 		}
-		patch := map[string]any{"uuid": existing.UUID, "expireAt": a.ExpireAt}
-		applyLimits(patch, limits)
-		_, _, err = c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-		return err
 	}
+	// A previous migration may have created the new B and then failed to delete
+	// the old one. Once the new name resolves first, that leftover would never
+	// be looked at again, so the migrating pass probes the legacy name too.
+	if existing != nil && existing.Username == want && opt.MigrateLegacyName {
+		if legacy := legacyAddSubUsername(main.TelegramID, opt.Suffix); legacy != want {
+			if old, lerr := c.FindByUsername(ctx, legacy); lerr == nil && old != nil && old.Tag == BotTagAdd {
+				res.Legacy = old.Username
+				if err := c.deleteUser(ctx, old.UUID); err != nil {
+					return res, err
+				}
+				res.Migrated = true
+			}
+		}
+	}
+
+	if existing != nil {
+		patch := map[string]any{"uuid": existing.UUID, "expireAt": main.ExpireAt}
+		// Status is only touched when the two are out of step: mirroring A's
+		// block, or lifting a leftover block on B. Writing ACTIVE otherwise
+		// would un-limit a B whose traffic the panel had just capped.
+		switch {
+		case mainDisabled:
+			patch["status"] = StatusDisabled
+		case strings.EqualFold(existing.Status, StatusDisabled):
+			patch["status"] = "ACTIVE"
+		}
+		applyLimits(patch, limits)
+		// Unlike A, B's traffic allowance is fully bot-owned, so "unlimited"
+		// (0) must be written explicitly instead of being left as-is.
+		patch["trafficLimitBytes"] = opt.TrafficBytes
+		if _, _, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch); err != nil {
+			return res, err
+		}
+		res.Done = true
+		if opt.ResetTraffic {
+			return res, c.ResetTraffic(ctx, existing.UUID)
+		}
+		return res, nil
+	}
+
+	if err := c.createAddSub(ctx, want, main, limits, opt.TrafficBytes, mainDisabled); err != nil {
+		return res, err
+	}
+	res.Done = true
+	return res, nil
+}
+
+func (c *Client) createAddSub(ctx context.Context, username string, main PanelUser, limits UserLimits, trafficBytes int64, disabled bool) error {
 	body := map[string]any{
-		"username": uname,
-		"expireAt": a.ExpireAt,
+		"username": username,
+		"expireAt": main.ExpireAt,
 		"tag":      BotTagAdd,
 	}
+	if disabled {
+		body["status"] = StatusDisabled
+	}
 	applyLimits(body, limits)
-	_, _, err = c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	body["trafficLimitBytes"] = trafficBytes
+	_, _, err := c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 	return err
 }
 
-func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix string) error {
-	u, err := c.FindByUsername(ctx, addSubUsername(telegramID, suffix))
-	if err != nil || u == nil || u.UUID == "" {
-		return err
+// mainUsernameFor returns A's panel username, or "" when A is genuinely gone
+// (deleted). A lookup FAILURE is returned as an error and never degraded to "":
+// that would narrow the search to the legacy name and quietly skip a B living
+// under the derived one — leaving a blocked user served or an orphan behind.
+func (c *Client) mainUsernameFor(ctx context.Context, telegramID int64) (string, error) {
+	a, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return "", err
 	}
-	if u.Tag != BotTagAdd {
-		return nil
+	if a == nil {
+		return "", nil
 	}
-	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+u.UUID, nil)
+	return a.Username, nil
+}
+
+// findAddSubFor resolves B for a telegram id, going through A's username.
+func (c *Client) findAddSubFor(ctx context.Context, telegramID int64, suffix string) (*PanelUser, error) {
+	main, err := c.mainUsernameFor(ctx, telegramID)
+	if err != nil {
+		return nil, err
+	}
+	u, _, err := c.findAddSub(ctx, main, telegramID, suffix)
+	return u, err
+}
+
+func (c *Client) deleteUser(ctx context.Context, uuid string) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+url.PathEscape(uuid), nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
@@ -284,15 +526,22 @@ func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix stri
 	return nil
 }
 
-func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix string, enable bool) error {
-	u, err := c.FindByUsername(ctx, addSubUsername(telegramID, suffix))
+// DeleteAddSub removes the add-on user B. Call it BEFORE deleting A, so B can
+// still be resolved from A's username.
+func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix string) error {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
 	if err != nil || u == nil || u.UUID == "" {
 		return err
 	}
-	if u.Tag != BotTagAdd {
-		return nil
+	return c.deleteUser(ctx, u.UUID)
+}
+
+func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix string, enable bool) error {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil || u == nil || u.UUID == "" {
+		return err
 	}
-	status := "DISABLED"
+	status := StatusDisabled
 	if enable {
 		status = "ACTIVE"
 	}
@@ -305,6 +554,65 @@ func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix 
 		return classifyHTTP(resp)
 	}
 	return nil
+}
+
+// AddSubInfo is a read-only snapshot of the add-on subscription B, for the
+// user-facing screens. Limit 0 means unlimited.
+type AddSubInfo struct {
+	UUID      string
+	Username  string
+	Status    string
+	Limit     int64
+	Used      int64
+	Exhausted bool
+}
+
+// AddSubStatus returns B's traffic/status snapshot. ok=false when the user has
+// no add-on subscription (or the panel can't be read) — callers then show
+// nothing, so the screen degrades gracefully.
+func (c *Client) AddSubStatus(ctx context.Context, telegramID int64, suffix string) (AddSubInfo, bool) {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil || u == nil || u.UUID == "" {
+		return AddSubInfo{}, false
+	}
+	info := AddSubInfo{
+		UUID:     u.UUID,
+		Username: u.Username,
+		Status:   u.Status,
+		Limit:    u.TrafficLimit,
+		Used:     u.TrafficUsed,
+	}
+	info.Exhausted = info.Limit > 0 && info.Used >= info.Limit
+	return info, true
+}
+
+// ResetAddSubDevices mirrors ResetDevicesByTelegramID onto the add-on user B:
+// the middleware forwards the client's HWID headers to B as well, so B's device
+// slots fill up with the same devices and must be freed by the same reset.
+// found=false when the user has no add-on subscription.
+func (c *Client) ResetAddSubDevices(ctx context.Context, telegramID int64, suffix string) (res DeviceResetResult, found bool, err error) {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil {
+		return DeviceResetResult{}, false, err
+	}
+	if u == nil || u.UUID == "" {
+		return DeviceResetResult{}, false, nil
+	}
+	res.UUID = u.UUID
+	pre := c.hwidCount(ctx, u.UUID)
+	if err := c.revokeUser(ctx, u.UUID); err != nil {
+		return res, true, err
+	}
+	res.KeysRotated = true
+	if derr := c.deleteAllHwidRetry(ctx, u.UUID, hwidSyncAttempts); derr != nil {
+		res.HwidErr = derr
+	} else {
+		res.HwidCleared = true
+		if pre > 0 {
+			res.Removed = pre
+		}
+	}
+	return res, true, nil
 }
 
 type UserLimits struct {

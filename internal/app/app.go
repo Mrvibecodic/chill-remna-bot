@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -81,6 +82,10 @@ type App struct {
 	// user tapping "reset devices" repeatedly can't pile up goroutines.
 	hwidMu       sync.Mutex
 	hwidRetrying map[string]bool
+
+	// addSubSyncing guards the add-on backfill, so two admins can't walk the
+	// whole panel user list at the same time.
+	addSubSyncing atomic.Bool
 
 	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
 	// delivered twice concurrently (webhook redelivery vs reconciler vs manual

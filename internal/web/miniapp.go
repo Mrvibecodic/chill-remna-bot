@@ -150,6 +150,15 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+
+	// AddSub* describe the add-on ("доп-сервер") subscription that the
+	// subscription middleware merges into the same link. AddSubOK is false when
+	// the feature is off or the user has none — the front-end shows nothing then.
+	AddSubOK        bool  `json:"addsub_ok"`
+	AddSubUsed      int64 `json:"addsub_used,omitempty"`
+	AddSubLimit     int64 `json:"addsub_limit,omitempty"`
+	AddSubExhausted bool  `json:"addsub_exhausted,omitempty"`
+	AddSubOff       bool  `json:"addsub_off,omitempty"`
 }
 
 type MiniPlanDTO struct {
