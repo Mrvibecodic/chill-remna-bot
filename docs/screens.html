@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>chill-remna-bot — как выглядит бот</title>
+<meta name="description" content="Все экраны бота: витрина для пользователя, админка, Telegram Mini App и веб-кабинет. Скриншоты сняты кодом бота на демо-данных.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0d15">
+<meta property="og:type" content="website">
+<meta property="og:title" content="chill-remna-bot — как выглядит бот">
+<meta property="og:description" content="Все экраны: пользователь, админка, Mini App и веб-кабинет.">
+<meta property="og:image" content="icon-512.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png" sizes="16x16" type="image/png">
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<style>
+
+:root{
+  --bg:#0a0d15;--bg2:#121726;--card:#151a2a;--card2:#192035;--line:#232c42;
+  --fg:#e8edf7;--muted:#97a3bb;--accent:#5b8cff;--accent2:#27d3a2;--warn:#ffb454;
+  --stable:#27d3a2;--dev:#b58bff;
+  --radius:16px;--maxw:1000px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(1100px 520px at 78% -8%,rgba(91,140,255,.10),transparent),radial-gradient(900px 480px at 8% 4%,rgba(39,211,162,.07),transparent)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+header.hero{padding:84px 20px 46px;text-align:center;border-bottom:1px solid var(--line);
+  background:radial-gradient(1000px 400px at 50% -140px,rgba(91,140,255,.20),transparent)}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--accent2);border:1px solid var(--line);
+  background:rgba(18,23,38,.6);padding:5px 14px;border-radius:999px;margin-bottom:20px;letter-spacing:.02em}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);box-shadow:0 0 0 4px rgba(39,211,162,.18)}
+h1{font-size:clamp(32px,6.5vw,52px);margin:.1em 0 .25em;letter-spacing:-.03em;
+  background:linear-gradient(180deg,#fff,#b9c6e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:clamp(16px,2.4vw,19px);max-width:700px;margin:0 auto 28px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:12px;font-weight:600;border:1px solid var(--line);transition:transform .12s ease,border-color .12s ease,box-shadow .12s ease}
+.btn:hover{text-decoration:none;transform:translateY(-2px)}
+.btn.primary{background:linear-gradient(180deg,#6c97ff,#5b8cff);color:#080b12;border-color:transparent;box-shadow:0 8px 24px -10px rgba(91,140,255,.8)}
+.btn.ghost{background:var(--bg2);color:var(--fg)}
+.btn.ghost:hover{border-color:var(--accent)}
+.hstats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+.hstats .chip{font-size:13px;color:var(--muted);background:rgba(18,23,38,.55);border:1px solid var(--line);border-radius:10px;padding:7px 13px}
+.hstats .chip b{color:var(--fg)}
+nav.toc{position:sticky;top:0;z-index:5;background:rgba(10,13,21,.85);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);padding:11px 0}
+nav.toc .wrap{display:flex;gap:20px;overflow-x:auto;font-size:14px;white-space:nowrap}
+nav.toc a{color:var(--muted)}
+nav.toc a:hover{color:var(--fg);text-decoration:none}
+section{padding:52px 0;border-bottom:1px solid var(--line)}
+h2{font-size:clamp(23px,4vw,32px);margin:0 0 6px;letter-spacing:-.015em}
+h3{font-size:18px;margin:30px 0 10px}
+.sub{color:var(--muted);margin:0 0 22px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+.card{position:relative;background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px;transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;overflow:hidden}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:opacity .14s ease}
+.card:hover{transform:translateY(-3px);border-color:#2e3a57;box-shadow:0 14px 34px -22px rgba(0,0,0,.9)}
+.card:hover::before{opacity:.85}
+.card h4{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card p{margin:0;color:var(--muted);font-size:14.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.03em;
+  border-radius:999px;padding:2px 9px;border:1px solid transparent;text-transform:uppercase;line-height:1.5}
+.tag::before{content:"";width:6px;height:6px;border-radius:50%}
+.tag.stable{color:var(--stable);background:rgba(39,211,162,.10);border-color:rgba(39,211,162,.35)}
+.tag.stable::before{background:var(--stable)}
+.tag.dev{color:var(--dev);background:rgba(181,139,255,.10);border-color:rgba(181,139,255,.35)}
+.tag.dev::before{background:var(--dev)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:rgba(18,23,38,.5);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:0 0 22px;font-size:13.5px;color:var(--muted)}
+.legend .li{display:flex;align-items:center;gap:8px}
+ul.clean{list-style:none;padding:0;margin:0}
+ul.clean li{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+ul.clean li:last-child{border-bottom:0}
+ul.clean b{color:var(--fg)}
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14.5px}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+tr:hover td{background:rgba(91,140,255,.04)}
+code{background:#0e1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cfe0ff}
+pre{background:#0c1120;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}
+pre code{background:none;border:0;padding:0;color:#d6e2ff;line-height:1.6}
+.note{background:linear-gradient(0deg,rgba(91,140,255,.06),rgba(91,140,255,.06));border:1px solid var(--line);
+  border-left:3px solid var(--accent);border-radius:10px;padding:13px 16px;color:var(--muted);margin:18px 0}
+.note.warn{border-left-color:var(--warn)}
+.note.dev{border-left-color:var(--dev)}
+.channels{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.chan{border:1px solid var(--line);border-radius:var(--radius);padding:18px;background:linear-gradient(180deg,var(--card),var(--card2))}
+.chan.stable{border-top:3px solid var(--stable)}
+.chan.dev{border-top:3px solid var(--dev)}
+.chan h4{margin:0 0 4px;font-size:17px;display:flex;align-items:center;gap:9px}
+.chan .src{font-size:13px;color:var(--muted);margin:0 0 10px}
+.chan p{margin:0;color:var(--muted);font-size:14.5px}
+.steps{counter-reset:s;padding:0;list-style:none;margin:0}
+.steps li{position:relative;padding:6px 0 18px 44px;border-left:2px solid var(--line);margin-left:14px}
+.steps li:last-child{border-left-color:transparent}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:-15px;top:2px;width:28px;height:28px;
+  border-radius:50%;background:var(--accent);color:#080b12;font-weight:700;display:grid;place-items:center;font-size:14px}
+footer{padding:46px 20px 76px;text-align:center;color:var(--muted);font-size:14px}
+.pill{display:inline-block;font-size:12px;color:var(--accent2);border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin-left:6px}
+.muted{color:var(--muted)}
+
+/* responsive helpers */
+img,svg{max-width:100%;height:auto}
+h1,h2,h3,h4,p,li{overflow-wrap:anywhere}
+:where(p,li,td) code{word-break:break-word}
+section{scroll-margin-top:64px}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:8px 0;border:1px solid var(--line);border-radius:12px}
+.tw table{margin:0;min-width:480px}
+.tw th,.tw td{border-left:0;border-right:0}
+nav.toc .wrap{scrollbar-width:thin}
+@media (max-width:760px){
+  header.hero{padding:60px 18px 38px}
+  section{padding:40px 0}
+  h3{margin-top:24px}
+  .grid,.channels{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  body{font-size:15.5px}
+  .wrap{padding:0 15px}
+  header.hero{padding:46px 14px 30px}
+  .lead{margin-bottom:22px}
+  .cta{gap:10px}
+  .cta .btn{flex:1 1 170px;justify-content:center;padding:12px 16px}
+  .hstats{gap:8px;margin-top:20px}
+  section{padding:32px 0}
+  nav.toc .wrap{gap:16px}
+  pre{padding:13px;font-size:12.5px;border-radius:10px}
+  pre code{line-height:1.5}
+  th,td{padding:9px 10px}
+  .legend{gap:10px;padding:11px 14px}
+  .chan{padding:16px}
+  .steps li{padding-left:40px;margin-left:12px}
+  .note{padding:12px 14px}
+}
+@media (min-width:1320px){ :root{--maxw:1080px} }
+@media (hover:none){ .card:hover,.btn:hover{transform:none} }
+
+/* --- галерея --- */
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0 22px}
+.seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px}
+.seg button{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;
+  padding:7px 14px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--accent);color:#fff}
+.seg button:hover:not(.on){color:var(--fg)}
+.count{margin-left:auto;color:var(--muted);font-size:14px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:18px}
+.gallery.wide{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+figure.shot{margin:0;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  cursor:zoom-in;transition:transform .15s ease,border-color .15s ease}
+figure.shot:hover{transform:translateY(-2px);border-color:var(--accent)}
+figure.shot img{display:block;width:100%;height:auto;background:var(--bg2)}
+figure.shot figcaption{padding:10px 12px;font-size:13.5px;color:var(--muted);line-height:1.4;border-top:1px solid var(--line)}
+.lb{position:fixed;inset:0;background:rgba(5,7,12,.92);display:none;align-items:center;justify-content:center;
+  z-index:50;padding:24px;cursor:zoom-out;backdrop-filter:blur(4px)}
+.lb.on{display:flex}
+.lb img{max-width:min(100%,900px);max-height:92vh;border-radius:12px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.lb .cap{position:absolute;left:0;right:0;bottom:14px;text-align:center;color:var(--muted);font-size:14px;padding:0 20px}
+.lb .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:34px;color:#fff;opacity:.55;
+  padding:10px 18px;cursor:pointer;user-select:none}
+.lb .nav:hover{opacity:1}
+.lb .prev{left:4px} .lb .next{right:4px}
+.hide{display:none !important}
+@media (max-width:560px){ .gallery{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+  .gallery.wide{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span>140 экранов · демо-данные</span>
+    <h1>Как выглядит бот</h1>
+    <p class="lead">Витрина для пользователя, админка целиком, Telegram&nbsp;Mini&nbsp;App и веб-кабинет. Все тексты, кнопки и числа на скриншотах отрисованы кодом бота, данные вымышленные.</p>
+    <div class="cta">
+      <a class="btn primary" href="index.html">← К документации</a>
+      <a class="btn ghost" href="https://github.com/Mrvibecodic/chill-remna-bot">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="index.html#features">Возможности</a>
+  <a href="index.html#install">Установка</a>
+  <a href="index.html#admin">Админка</a>
+  <a href="index.html#payments">Платёжки</a>
+  <a href="screens.html">Скриншоты</a>
+  <a href="index.html#faq">FAQ</a>
+</div></nav>
+
+<main class="wrap">
+
+<section>
+  <div class="controls">
+    <div class="seg" id="segGroup">
+      <button data-g="user" class="on">Пользователь</button>
+      <button data-g="admin">Админка</button>
+      <button data-g="miniapp">Mini App</button>
+      <button data-g="cabinet">Веб-кабинет</button>
+    </div>
+    <div class="seg" id="segTheme">
+      <button data-t="dark" class="on">Тёмная тема</button>
+      <button data-t="light">Светлая</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="gallery" id="g-user"><figure class="shot" data-name="user_menu" data-group="user"><img loading="lazy" src="screens/dark/user/user_menu.webp" alt="Главное меню пользователя"><figcaption>Главное меню пользователя</figcaption></figure>
+<figure class="shot" data-name="user_plans" data-group="user"><img loading="lazy" src="screens/dark/user/user_plans.webp" alt="Выбор тарифа"><figcaption>Выбор тарифа</figcaption></figure>
+<figure class="shot" data-name="user_methods" data-group="user"><img loading="lazy" src="screens/dark/user/user_methods.webp" alt="Способы оплаты"><figcaption>Способы оплаты</figcaption></figure>
+<figure class="shot" data-name="user_mysubs" data-group="user"><img loading="lazy" src="screens/dark/user/user_mysubs.webp" alt="Моя подписка"><figcaption>Моя подписка</figcaption></figure>
+<figure class="shot" data-name="user_balance" data-group="user"><img loading="lazy" src="screens/dark/user/user_balance.webp" alt="Кошелёк"><figcaption>Кошелёк</figcaption></figure>
+<figure class="shot" data-name="user_topup" data-group="user"><img loading="lazy" src="screens/dark/user/user_topup.webp" alt="Пополнение баланса"><figcaption>Пополнение баланса</figcaption></figure>
+<figure class="shot" data-name="user_topup_methods" data-group="user"><img loading="lazy" src="screens/dark/user/user_topup_methods.webp" alt="Способы пополнения"><figcaption>Способы пополнения</figcaption></figure>
+<figure class="shot" data-name="user_referral" data-group="user"><img loading="lazy" src="screens/dark/user/user_referral.webp" alt="Реферальная программа"><figcaption>Реферальная программа</figcaption></figure>
+<figure class="shot" data-name="user_promo" data-group="user"><img loading="lazy" src="screens/dark/user/user_promo.webp" alt="Промокод"><figcaption>Промокод</figcaption></figure>
+<figure class="shot" data-name="user_squadpicker" data-group="user"><img loading="lazy" src="screens/dark/user/user_squadpicker.webp" alt="Выбор локаций"><figcaption>Выбор локаций</figcaption></figure>
+<figure class="shot" data-name="user_menu_new" data-group="user"><img loading="lazy" src="screens/dark/user/user_menu_new.webp" alt="Меню нового пользователя (без подписки)"><figcaption>Меню нового пользователя (без подписки)</figcaption></figure>
+<figure class="shot" data-name="user_terms" data-group="user"><img loading="lazy" src="screens/dark/user/user_terms.webp" alt="Пользовательское соглашение"><figcaption>Пользовательское соглашение</figcaption></figure>
+<figure class="shot" data-name="user_p2p_card" data-group="user"><img loading="lazy" src="screens/dark/user/user_p2p_card.webp" alt="Оплата переводом: реквизиты"><figcaption>Оплата переводом: реквизиты</figcaption></figure>
+<figure class="shot" data-name="user_p2p_wait_shot" data-group="user"><img loading="lazy" src="screens/dark/user/user_p2p_wait_shot.webp" alt="Просьба прислать скриншот оплаты"><figcaption>Просьба прислать скриншот оплаты</figcaption></figure>
+<figure class="shot" data-name="user_p2p_submitted" data-group="user"><img loading="lazy" src="screens/dark/user/user_p2p_submitted.webp" alt="Скриншот отправлен на проверку"><figcaption>Скриншот отправлен на проверку</figcaption></figure>
+<figure class="shot" data-name="user_remind_sub" data-group="user"><img loading="lazy" src="screens/dark/user/user_remind_sub.webp" alt="Напоминание об окончании подписки"><figcaption>Напоминание об окончании подписки</figcaption></figure>
+<figure class="shot" data-name="user_remind_trial" data-group="user"><img loading="lazy" src="screens/dark/user/user_remind_trial.webp" alt="Напоминание об окончании триала"><figcaption>Напоминание об окончании триала</figcaption></figure></div>
+  <div class="gallery hide" id="g-admin"><figure class="shot" data-name="admin_menu" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_menu.webp" alt="Главное меню админа"><figcaption>Главное меню админа</figcaption></figure>
+<figure class="shot" data-name="admin_pay" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_pay.webp" alt="Раздел «Продажи»"><figcaption>Раздел «Продажи»</figcaption></figure>
+<figure class="shot" data-name="admin_iface" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_iface.webp" alt="Раздел «Интерфейс»"><figcaption>Раздел «Интерфейс»</figcaption></figure>
+<figure class="shot" data-name="admin_marketing" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_marketing.webp" alt="Раздел «Маркетинг»"><figcaption>Раздел «Маркетинг»</figcaption></figure>
+<figure class="shot" data-name="admin_system" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_system.webp" alt="Раздел «Система»"><figcaption>Раздел «Система»</figcaption></figure>
+<figure class="shot" data-name="admin_users" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_users.webp" alt="Список пользователей"><figcaption>Список пользователей</figcaption></figure>
+<figure class="shot" data-name="admin_user_card" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_user_card.webp" alt="Карточка пользователя"><figcaption>Карточка пользователя</figcaption></figure>
+<figure class="shot" data-name="admin_whitelist" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_whitelist.webp" alt="Белый список"><figcaption>Белый список</figcaption></figure>
+<figure class="shot" data-name="admin_payments" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_payments.webp" alt="История платежей"><figcaption>История платежей</figcaption></figure>
+<figure class="shot" data-name="admin_analytics" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_analytics.webp" alt="Аналитика"><figcaption>Аналитика</figcaption></figure>
+<figure class="shot" data-name="admin_pricing" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_pricing.webp" alt="Тарифы и цены"><figcaption>Тарифы и цены</figcaption></figure>
+<figure class="shot" data-name="admin_plan_squads" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_plan_squads.webp" alt="Локации тарифа"><figcaption>Локации тарифа</figcaption></figure>
+<figure class="shot" data-name="admin_squads" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_squads.webp" alt="Локации по умолчанию"><figcaption>Локации по умолчанию</figcaption></figure>
+<figure class="shot" data-name="admin_p2p" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_p2p.webp" alt="P2P-переводы"><figcaption>P2P-переводы</figcaption></figure>
+<figure class="shot" data-name="admin_stars" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_stars.webp" alt="Telegram Stars"><figcaption>Telegram Stars</figcaption></figure>
+<figure class="shot" data-name="admin_yookassa" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_yookassa.webp" alt="ЮKassa"><figcaption>ЮKassa</figcaption></figure>
+<figure class="shot" data-name="admin_cryptobot" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_cryptobot.webp" alt="CryptoBot"><figcaption>CryptoBot</figcaption></figure>
+<figure class="shot" data-name="admin_platega" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_platega.webp" alt="Platega"><figcaption>Platega</figcaption></figure>
+<figure class="shot" data-name="admin_tribute" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_tribute.webp" alt="Tribute"><figcaption>Tribute</figcaption></figure>
+<figure class="shot" data-name="admin_moynalog" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_moynalog.webp" alt="МойНалог"><figcaption>МойНалог</figcaption></figure>
+<figure class="shot" data-name="admin_trial" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_trial.webp" alt="Пробный период"><figcaption>Пробный период</figcaption></figure>
+<figure class="shot" data-name="admin_trial_squads" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_trial_squads.webp" alt="Локации триала"><figcaption>Локации триала</figcaption></figure>
+<figure class="shot" data-name="admin_referral" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_referral.webp" alt="Настройки рефералки"><figcaption>Настройки рефералки</figcaption></figure>
+<figure class="shot" data-name="admin_promo" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_promo.webp" alt="Промокоды"><figcaption>Промокоды</figcaption></figure>
+<figure class="shot" data-name="admin_broadcast" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_broadcast.webp" alt="Рассылка"><figcaption>Рассылка</figcaption></figure>
+<figure class="shot" data-name="admin_notify" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_notify.webp" alt="Напоминания"><figcaption>Напоминания</figcaption></figure>
+<figure class="shot" data-name="admin_addsub" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_addsub.webp" alt="Доп. подписка"><figcaption>Доп. подписка</figcaption></figure>
+<figure class="shot" data-name="admin_addsub_squads" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_addsub_squads.webp" alt="Локации доп. подписки"><figcaption>Локации доп. подписки</figcaption></figure>
+<figure class="shot" data-name="admin_miniapp" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_miniapp.webp" alt="Мини-приложение"><figcaption>Мини-приложение</figcaption></figure>
+<figure class="shot" data-name="admin_cabinet" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_cabinet.webp" alt="Веб-кабинет"><figcaption>Веб-кабинет</figcaption></figure>
+<figure class="shot" data-name="admin_webhooks" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_webhooks.webp" alt="Вебхуки"><figcaption>Вебхуки</figcaption></figure>
+<figure class="shot" data-name="admin_webhook_guide" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_webhook_guide.webp" alt="Инструкция по вебхукам"><figcaption>Инструкция по вебхукам</figcaption></figure>
+<figure class="shot" data-name="admin_subdomain" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_subdomain.webp" alt="Домен подписки"><figcaption>Домен подписки</figcaption></figure>
+<figure class="shot" data-name="admin_contacts" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_contacts.webp" alt="Контакты и оферта"><figcaption>Контакты и оферта</figcaption></figure>
+<figure class="shot" data-name="admin_banners" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_banners.webp" alt="Баннеры разделов"><figcaption>Баннеры разделов</figcaption></figure>
+<figure class="shot" data-name="admin_banner_one" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_banner_one.webp" alt="Баннер раздела"><figcaption>Баннер раздела</figcaption></figure>
+<figure class="shot" data-name="admin_welcome" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_welcome.webp" alt="Приветствие"><figcaption>Приветствие</figcaption></figure>
+<figure class="shot" data-name="admin_emoji" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_emoji.webp" alt="Премиум-эмодзи"><figcaption>Премиум-эмодзи</figcaption></figure>
+<figure class="shot" data-name="admin_apilog" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_apilog.webp" alt="Лог API панели"><figcaption>Лог API панели</figcaption></figure>
+<figure class="shot" data-name="admin_channel" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_channel.webp" alt="Канал обновлений"><figcaption>Канал обновлений</figcaption></figure>
+<figure class="shot" data-name="admin_rsimport" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_rsimport.webp" alt="Импорт из remnashop"><figcaption>Импорт из remnashop</figcaption></figure>
+<figure class="shot" data-name="admin_status" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_status.webp" alt="Статус подключения к панели"><figcaption>Статус подключения к панели</figcaption></figure>
+<figure class="shot" data-name="admin_user_request" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_user_request.webp" alt="Заявка нового пользователя на P2P"><figcaption>Заявка нового пользователя на P2P</figcaption></figure>
+<figure class="shot" data-name="admin_payment_check" data-group="admin"><img loading="lazy" src="screens/dark/admin/admin_payment_check.webp" alt="Проверка оплаты по скриншоту"><figcaption>Проверка оплаты по скриншоту</figcaption></figure></div>
+  <div class="gallery hide" id="g-miniapp"><figure class="shot" data-name="miniapp_main" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_main.webp" alt="Главный экран с активной подпиской"><figcaption>Главный экран с активной подпиской</figcaption></figure>
+<figure class="shot" data-name="miniapp_main_new" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_main_new.webp" alt="Без подписки — доступен триал"><figcaption>Без подписки — доступен триал</figcaption></figure>
+<figure class="shot" data-name="miniapp_checkout" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_checkout.webp" alt="Оплата тарифа: выбор способа"><figcaption>Оплата тарифа: выбор способа</figcaption></figure>
+<figure class="shot" data-name="miniapp_checkout_new" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_checkout_new.webp" alt="Оплата 1 месяца, новый пользователь"><figcaption>Оплата 1 месяца, новый пользователь</figcaption></figure>
+<figure class="shot" data-name="miniapp_p2p_card" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_p2p_card.webp" alt="Перевод на карту и загрузка чека"><figcaption>Перевод на карту и загрузка чека</figcaption></figure>
+<figure class="shot" data-name="miniapp_connect" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_connect.webp" alt="Подключение: приложения, deeplink и QR"><figcaption>Подключение: приложения, deeplink и QR</figcaption></figure>
+<figure class="shot" data-name="miniapp_more" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_more.webp" alt="Ещё: рефералка и промокод"><figcaption>Ещё: рефералка и промокод</figcaption></figure>
+<figure class="shot" data-name="miniapp_topup" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_topup.webp" alt="Пополнение баланса: суммы"><figcaption>Пополнение баланса: суммы</figcaption></figure>
+<figure class="shot" data-name="miniapp_topup_methods" data-group="miniapp"><img loading="lazy" src="screens/miniapp/miniapp_topup_methods.webp" alt="Пополнение баланса: способы"><figcaption>Пополнение баланса: способы</figcaption></figure></div>
+  <div class="gallery wide hide" id="g-cabinet"><figure class="shot" data-name="cabinet_main_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_main_desktop.webp" alt="Главный экран кабинета (десктоп)"><figcaption>Главный экран кабинета (десктоп)</figcaption></figure>
+<figure class="shot" data-name="cabinet_main_mobile" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_main_mobile.webp" alt="Главный экран кабинета (мобильный)"><figcaption>Главный экран кабинета (мобильный)</figcaption></figure>
+<figure class="shot" data-name="cabinet_login_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_login_desktop.webp" alt="Вход: Telegram или e-mail"><figcaption>Вход: Telegram или e-mail</figcaption></figure>
+<figure class="shot" data-name="cabinet_login_mobile" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_login_mobile.webp" alt="Вход с телефона"><figcaption>Вход с телефона</figcaption></figure>
+<figure class="shot" data-name="cabinet_checkout_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_checkout_desktop.webp" alt="Оплата тарифа в браузере"><figcaption>Оплата тарифа в браузере</figcaption></figure>
+<figure class="shot" data-name="cabinet_connect_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_connect_desktop.webp" alt="Подключение приложений"><figcaption>Подключение приложений</figcaption></figure>
+<figure class="shot" data-name="cabinet_connect_mobile" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_connect_mobile.webp" alt="Подключение с телефона"><figcaption>Подключение с телефона</figcaption></figure>
+<figure class="shot" data-name="cabinet_more_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_more_desktop.webp" alt="Рефералка и промокод"><figcaption>Рефералка и промокод</figcaption></figure>
+<figure class="shot" data-name="cabinet_topup_desktop" data-group="cabinet"><img loading="lazy" src="screens/cabinet/cabinet_topup_desktop.webp" alt="Пополнение баланса"><figcaption>Пополнение баланса</figcaption></figure></div>
+</section>
+
+<section>
+  <h2>Как сняты эти скриншоты</h2>
+  <ul class="clean">
+    <li><b>Тексты и кнопки — из кода.</b> Экраны чата собраны прогоном настоящих функций бота: тестовый мессенджер записывает ровно то, что бот отправил бы в Telegram, вместе с inline-клавиатурой. Ни одна строка интерфейса не набрана вручную.</li>
+    <li><b>Оформление чата — стилями официального клиента.</b> Пузырь, клавиатура, кодовые блоки, обои и цвета тем взяты из исходников Telegram&nbsp;Web&nbsp;K (<code>web.telegram.org/k</code>): его же CSS, те же рендереры обоев, та же формула цвета кнопок от среднего цвета обоев. Шапка чата — единственный дорисованный элемент.</li>
+    <li><b>Mini App и веб-кабинет — живые скриншоты.</b> Снято с настоящего веб-сервера бота, поднятого на тестовой базе и заглушке панели; экран «Подключить» действительно сходил за списком приложений.</li>
+    <li><b>Данные вымышленные:</b> демо-панель на 1482 пользователя, цены 199/549/999/1790&nbsp;₽, домен <code>sub.example.com</code>. Реальных пользователей и доменов на скриншотах нет.</li>
+  </ul>
+</section>
+
+</main>
+
+<div class="lb" id="lb">
+  <span class="nav prev" id="lbPrev">‹</span>
+  <img id="lbImg" src="" alt="">
+  <span class="nav next" id="lbNext">›</span>
+  <div class="cap" id="lbCap"></div>
+</div>
+
+<footer>
+  <p>chill-remna-bot — <a href="https://github.com/Mrvibecodic/chill-remna-bot">github.com/Mrvibecodic/chill-remna-bot</a></p>
+  <p class="muted">Бот для панели Remnawave. Не аффилирован с Remnawave или платёжными провайдерами.</p>
+</footer>
+
+<script>
+(function(){
+  var group = 'user', theme = 'dark';
+  var galleries = {};
+  ['user','admin','miniapp','cabinet'].forEach(function(g){ galleries[g] = document.getElementById('g-'+g); });
+  var themed = {user:1, admin:1};
+
+  function apply(){
+    Object.keys(galleries).forEach(function(g){ galleries[g].classList.toggle('hide', g !== group); });
+    document.getElementById('segTheme').style.visibility = themed[group] ? 'visible' : 'hidden';
+    if(themed[group]){
+      galleries[group].querySelectorAll('img').forEach(function(img){
+        var f = img.closest('.shot');
+        img.src = 'screens/' + theme + '/' + f.dataset.group + '/' + f.dataset.name + '.webp';
+      });
+    }
+    document.getElementById('count').textContent = galleries[group].children.length + ' экранов';
+  }
+
+  document.getElementById('segGroup').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    this.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on'); group = b.dataset.g; apply();
+  });
+  document.getElementById('segTheme').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    this.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on'); theme = b.dataset.t; apply();
+  });
+
+  var lb = document.getElementById('lb'), lbImg = document.getElementById('lbImg'), lbCap = document.getElementById('lbCap');
+  var cur = null;
+  function open(fig){
+    cur = fig;
+    lbImg.src = fig.querySelector('img').src;
+    lbCap.textContent = fig.querySelector('figcaption').textContent;
+    lb.classList.add('on');
+  }
+  function step(d){
+    if(!cur) return;
+    var items = Array.prototype.slice.call(galleries[group].children);
+    var i = items.indexOf(cur) + d;
+    if(i < 0) i = items.length - 1; if(i >= items.length) i = 0;
+    open(items[i]);
+  }
+  document.addEventListener('click', function(e){
+    var fig = e.target.closest('figure.shot');
+    if(fig){ open(fig); return; }
+    if(e.target.id === 'lbPrev'){ step(-1); return; }
+    if(e.target.id === 'lbNext'){ step(1); return; }
+    if(lb.classList.contains('on') && e.target.closest('#lb')){ lb.classList.remove('on'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if(!lb.classList.contains('on')) return;
+    if(e.key === 'Escape') lb.classList.remove('on');
+    else if(e.key === 'ArrowLeft') step(-1);
+    else if(e.key === 'ArrowRight') step(1);
+  });
+
+  apply();
+})();
+</script>
+</body>
+</html>
