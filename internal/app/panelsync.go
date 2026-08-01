@@ -53,8 +53,13 @@ func (a *App) findPanelAccount(ctx context.Context, panel *remnawave.Client, cha
 	if pu, err := panel.FindByTelegramID(ctx, chatID); err == nil && pu != nil {
 		return pu
 	}
-	if pu, err := panel.FindByUsername(ctx, fmt.Sprintf("tg_%d", chatID)); err == nil && pu != nil {
-		return pu
+	// tg_<id> — наша схема имён, rs_<id> — схема remnashop: после переезда
+	// аккаунты в панели остаются с его именами, и находить их по прямому
+	// запросу дешевле, чем сканировать весь список.
+	for _, prefix := range []string{"tg_", "rs_"} {
+		if pu, err := panel.FindByUsername(ctx, fmt.Sprintf("%s%d", prefix, chatID)); err == nil && pu != nil {
+			return pu
+		}
 	}
 	return a.scanPanelByID(ctx, panel, chatID)
 }

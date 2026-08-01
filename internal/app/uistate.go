@@ -24,6 +24,9 @@ type uiState struct {
 
 	p2pSubmitMsgID int
 	p2pShotMsgID   int
+
+	// Мастер переезда с remnashop: ждём файл дампа.
+	awaitRSDump bool
 }
 
 func (a *App) getUI(chatID int64) *uiState {

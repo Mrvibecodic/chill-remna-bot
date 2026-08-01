@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -25,6 +28,7 @@ import (
 	"remnabot/internal/model"
 	"remnabot/internal/moynalog"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/rsimport"
 	"remnabot/internal/storage"
 )
 
@@ -48,6 +52,7 @@ type messenger interface {
 	AnswerPreCheckout(ctx context.Context, id string, ok bool, errMsg string)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
+	Download(ctx context.Context, fileID string) ([]byte, error)
 }
 
 type App struct {
@@ -111,7 +116,26 @@ type App struct {
 
 	payLogPurgedAt time.Time
 
+	// rsMu защищает разобранные дампы remnashop: их кладёт фоновая горутина
+	// разбора, а читает обработчик кнопки «Импортировать».
+	rsMu   sync.Mutex
+	rsDump map[int64]*rsimport.Data
+
 	bgCtx context.Context
+
+	// runInline выполняет фоновые задачи синхронно — нужно тестам, чтобы
+	// проверять результат сразу после вызова обработчика.
+	runInline bool
+}
+
+// spawn выполняет длинную работу в фоне: апдейты Telegram обрабатываются одним
+// воркером, и синхронный импорт на тысячу пользователей заморозил бы бота.
+func (a *App) spawn(f func()) {
+	if a.runInline {
+		f()
+		return
+	}
+	go f()
 }
 
 type subCacheEntry struct {
@@ -277,6 +301,8 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 		a.handleMessage(ctx, update.Message)
 	case update.Message != nil && len(update.Message.Photo) > 0:
 		a.handlePhoto(ctx, update.Message)
+	case update.Message != nil && update.Message.Document != nil:
+		a.handleDocument(ctx, update.Message)
 	}
 }
 
@@ -1081,6 +1107,35 @@ func (m botMessenger) SendDocument(ctx context.Context, chatID int64, filename s
 	if err != nil {
 		m.log.Error("send document", "err", err)
 	}
+}
+
+// Download скачивает файл, присланный в чат. Telegram отдаёт боту файлы не
+// больше 20 МБ, поэтому читаем с запасом и обрываем всё, что больше.
+func (m botMessenger) Download(ctx context.Context, fileID string) ([]byte, error) {
+	f, err := m.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.b.FileDownloadLink(f), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("telegram отдал %s", resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDumpBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDumpBytes {
+		return nil, errors.New("файл слишком большой")
+	}
+	return data, nil
 }
 
 func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {

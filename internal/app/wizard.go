@@ -90,6 +90,7 @@ const (
 	cbClose     = "x"
 	cbAddSub    = "addsub"
 	cbDevices   = "dev"
+	cbRSImport  = "rsimp"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -242,6 +243,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 	case cbDevices:
 		a.onDevices(ctx, chatID, val)
+	case cbRSImport:
+		if isAdmin {
+			a.onRSImport(ctx, chatID, val)
+		}
 	case cbTerms:
 
 		a.onTerms(ctx, chatID, val, cq.From.FirstName, cq.From.Username)

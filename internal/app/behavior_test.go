@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,6 +29,8 @@ type fakeMsg struct {
 	live     map[int]string
 	deleted  []int
 	invoices []string
+	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
+	downloads map[string][]byte
 }
 
 func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
@@ -69,6 +72,15 @@ func (f *fakeMsg) CreateInvoiceLink(_ context.Context, _, _, payload, currency s
 func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, _ bool, _ string) {}
 func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, _ []byte, _ string) {
 	f.add("DOC:" + filename)
+}
+func (f *fakeMsg) Download(_ context.Context, fileID string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.downloads[fileID]
+	if !ok {
+		return nil, errors.New("нет такого файла")
+	}
+	return data, nil
 }
 func (f *fakeMsg) add(s string) int {
 	f.mu.Lock()
