@@ -320,6 +320,7 @@ func (b *base) SetBlocked(ctx context.Context, telegramID int64, blocked bool) e
 func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	// Автосписание лежит в отдельной таблице: если не удалить его вместе с
 	// пользователем, планировщик продолжит списывать деньги за удалённого.
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
@@ -1178,6 +1179,7 @@ func (b *base) CreateInvite(ctx context.Context, inv *model.Invite) error {
 	if inv.CreatedAt == "" {
 		inv.CreatedAt = nowStr()
 	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, err := b.db.ExecContext(ctx,
 		"INSERT INTO invites (code, max_uses, used, expires_at, created_at, revoked, note) "+
 			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+")",
