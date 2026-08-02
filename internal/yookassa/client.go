@@ -37,10 +37,14 @@ func (e *APIError) Retriable() bool {
 	return e.Status == http.StatusAccepted || e.Status >= 500
 }
 
-// ShopSide сообщает, что дело в настройках магазина или в самой ЮKassa, а не в
-// карте пользователя: писать пользователю «не хватило средств» тут нельзя.
+// ShopSide сообщает, что дело в настройках магазина, в запросе бота или в самой
+// ЮKassa, а не в карте пользователя: писать пользователю «не хватило средств»
+// тут нельзя. 400 (invalid_request) — тоже сюда: так ЮKassa отвечает на битые
+// параметры запроса (валюта, формат суммы, payment_method_id), и разбираться с
+// этим должен админ, а не пользователь.
 func (e *APIError) ShopSide() bool {
-	return e.Retriable() || e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
+	return e.Retriable() || e.Status == http.StatusBadRequest ||
+		e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
 }
 
 type Client struct {

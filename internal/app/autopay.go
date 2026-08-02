@@ -107,6 +107,10 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 	}
 	if prev != nil {
 		ap.CreatedAt = prev.CreatedAt
+		// Отметку «за этот период уже списано» сохраняем: ручная оплата с
+		// сохранением карты не должна открывать дорогу повторному списанию за
+		// период, на котором застряло продление.
+		ap.PaidPeriod = prev.PaidPeriod
 	}
 	if err := a.store.SetAutoPay(ctx, ap); err != nil {
 		a.log.Warn("autopay: сохранение способа оплаты", "tg_id", chatID, "err", err)

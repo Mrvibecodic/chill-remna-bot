@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS autopay (
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT '',
     last_pay_at TEXT NOT NULL DEFAULT '',
-    paid_period TEXT NOT NULL DEFAULT '',
     next_try_at TEXT NOT NULL DEFAULT '',
     fails       INTEGER NOT NULL DEFAULT 0,
     last_error  TEXT NOT NULL DEFAULT ''

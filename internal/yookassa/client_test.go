@@ -106,3 +106,27 @@ func TestChargeSaved(t *testing.T) {
 		t.Fatalf("SavedMethodTitle = %q", pay.SavedMethodTitle())
 	}
 }
+
+// 400/401/403/5xx/202 — проблема магазина или запроса, пользователю такие
+// ошибки как «карта не прошла» показывать нельзя.
+func TestAPIErrorClassification(t *testing.T) {
+	cases := map[int]struct{ shop, retry bool }{
+		202: {true, true},
+		400: {true, false},
+		401: {true, false},
+		403: {true, false},
+		500: {true, true},
+		502: {true, true},
+		402: {false, false}, // payment required — как раз про деньги
+		404: {false, false},
+	}
+	for code, want := range cases {
+		e := &APIError{Status: code}
+		if e.ShopSide() != want.shop || e.Retriable() != want.retry {
+			t.Errorf("код %d: ShopSide=%v Retriable=%v, ожидалось %+v", code, e.ShopSide(), e.Retriable(), want)
+		}
+	}
+	if (&APIError{Status: 400, Description: "invalid currency"}).Error() != "ЮKassa HTTP 400: invalid currency" {
+		t.Error("текст ошибки с описанием")
+	}
+}
