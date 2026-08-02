@@ -32,9 +32,10 @@ func (e *APIError) Error() string {
 }
 
 // Retriable сообщает, что запрос имеет смысл повторить тем же ключом
-// идемпотентности (ЮKassa ещё обрабатывает предыдущий или у неё сбой).
+// идемпотентности (ЮKassa ещё обрабатывает предыдущий, сработал лимит
+// запросов или у неё сбой).
 func (e *APIError) Retriable() bool {
-	return e.Status == http.StatusAccepted || e.Status >= 500
+	return e.Status == http.StatusAccepted || e.Status == http.StatusTooManyRequests || e.Status >= 500
 }
 
 // ShopSide сообщает, что дело в настройках магазина, в запросе бота или в самой

@@ -115,6 +115,7 @@ func TestAPIErrorClassification(t *testing.T) {
 		400: {true, false},
 		401: {true, false},
 		403: {true, false},
+		429: {true, true}, // rate limit — временно, ретраим, карта ни при чём
 		500: {true, true},
 		502: {true, true},
 		402: {false, false}, // payment required — как раз про деньги
