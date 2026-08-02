@@ -131,28 +131,35 @@ func TestAutoPay_DueWindow(t *testing.T) {
 	ap := &model.AutoPay{TelegramID: 46, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 1, Enabled: true}
 	_ = fs.SetAutoPay(ctx, ap)
 
-	if a.autoPayDue(ctx, ap, now) {
+	if _, due := a.autoPayDue(ctx, ap, now); due {
 		t.Fatal("за 10 дней до конца списывать рано")
 	}
 	_ = fs.SetSubExpiry(ctx, 46, now.Add(12*time.Hour).Format(time.RFC3339), "paid")
-	if !a.autoPayDue(ctx, ap, now) {
+	if _, due := a.autoPayDue(ctx, ap, now); !due {
 		t.Fatal("за полдня до конца пора списывать")
 	}
 
 	ap.NextTryAt = now.Add(6 * time.Hour).Format(time.RFC3339)
-	if a.autoPayDue(ctx, ap, now) {
+	if _, due := a.autoPayDue(ctx, ap, now); due {
 		t.Fatal("пауза после неудачной попытки должна соблюдаться")
 	}
 	ap.NextTryAt = ""
 
+	// Страховка от повторного списания: оплата меньше суток назад.
+	ap.LastPayAt = now.Add(-2 * time.Hour).Format(time.RFC3339)
+	if _, due := a.autoPayDue(ctx, ap, now); due {
+		t.Fatal("сразу после оплаты списывать повторно нельзя")
+	}
+	ap.LastPayAt = ""
+
 	ap.Enabled = false
-	if a.autoPayDue(ctx, ap, now) {
+	if _, due := a.autoPayDue(ctx, ap, now); due {
 		t.Fatal("выключенное автопродление списывать нельзя")
 	}
 	ap.Enabled = true
 
 	_ = fs.SetBlocked(ctx, 46, true)
-	if a.autoPayDue(ctx, ap, now) {
+	if _, due := a.autoPayDue(ctx, ap, now); due {
 		t.Fatal("заблокированному пользователю списывать нельзя")
 	}
 }
@@ -207,5 +214,33 @@ func TestMonthsWord(t *testing.T) {
 	}
 	if got := monthsWord(model.LangEN, 3); got != "3 months" {
 		t.Errorf("monthsWord(en,3) = %q", got)
+	}
+}
+
+// Проблема магазина (нет цены / не настроена касса) не должна выглядеть для
+// пользователя как «не хватило средств» и не должна копить ему неудачи.
+func TestAutoPay_ShopIssueDoesNotBlameUser(t *testing.T) {
+	a, fs := autoPayApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	a.botCfg.Pricing = model.Pricing{} // цен нет
+	a.botCfg.NormalizePricing()
+	_ = fs.UpsertUser(ctx, 60)
+	ap := &model.AutoPay{TelegramID: 60, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 1, Enabled: true}
+	_ = fs.SetAutoPay(ctx, ap)
+
+	reason := a.chargeAutoPay(ctx, ap, now, now.Add(time.Hour))
+	if reason == "" {
+		t.Fatal("проблема магазина должна возвращаться наверх для одного уведомления админу")
+	}
+	cur, _ := fs.GetAutoPay(ctx, 60)
+	if cur.Fails != 0 {
+		t.Fatalf("неудачи пользователя копиться не должны: fails=%d", cur.Fails)
+	}
+	if !cur.Enabled {
+		t.Fatal("автопродление не должно выключаться из-за настроек магазина")
+	}
+	if cur.NextTryAt == "" {
+		t.Fatal("следующая попытка должна быть отложена")
 	}
 }

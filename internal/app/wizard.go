@@ -148,6 +148,12 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 	case cbYKCheck:
 		a.onYKCheck(ctx, chatID, val)
+	case cbAutoPay:
+		a.onAutoPayUser(ctx, chatID, val)
+	case cbAccess:
+		if isAdmin {
+			a.onAccess(ctx, chatID, val)
+		}
 	case cbCBCheck:
 		a.onCBCheck(ctx, chatID, val)
 	case cbCB:

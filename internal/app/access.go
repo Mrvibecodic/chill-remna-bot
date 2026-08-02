@@ -26,29 +26,54 @@ import (
 // inviteCodeLen — длина кода приглашения в символах base32 (без паддинга).
 const inviteCodeLen = 12
 
-// accessMode возвращает текущий режим публичности.
+// accessMode возвращает текущий режим публичности. Только читает: конфиг
+// нормализуется при загрузке и при смене режима, иначе каждое входящее
+// сообщение писало бы в общий botCfg параллельно с его сохранением.
 func (a *App) accessMode() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.botCfg == nil {
 		return model.AccessPublic
 	}
-	a.botCfg.NormalizeAccess()
-	return a.botCfg.AccessMode
+	switch a.botCfg.AccessMode {
+	case model.AccessPublic, model.AccessInvite, model.AccessWhitelist:
+		return a.botCfg.AccessMode
+	}
+	if a.botCfg.WhitelistMode {
+		return model.AccessWhitelist
+	}
+	return model.AccessPublic
 }
 
-// setAccessMode переключает режим публичности и сохраняет конфиг.
-func (a *App) setAccessMode(ctx context.Context, mode string) {
+// setAccessMode переключает режим публичности и сохраняет конфиг. При закрытии
+// ранее публичного бота уже зарегистрированные пользователи получают доступ
+// автоматически — иначе переключение тумблера мгновенно отрезало бы от бота
+// всех действующих (в том числе платящих) клиентов.
+func (a *App) setAccessMode(ctx context.Context, mode string) int64 {
 	a.mu.Lock()
+	wasPublic := true
 	if a.botCfg != nil {
+		wasPublic = !a.botCfg.AccessClosed()
 		a.botCfg.AccessMode = mode
 		// Legacy-флаг выставляем явно: NormalizeAccess при расхождении верит
 		// именно ему (расхождение означает, что конфиг писала старая версия).
-		a.botCfg.WhitelistMode = mode == model.AccessWhitelist
+		a.botCfg.WhitelistMode = mode != model.AccessPublic
 		a.botCfg.NormalizeAccess()
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
+
+	var granted int64
+	if wasPublic && mode != model.AccessPublic && a.store != nil {
+		n, err := a.store.WhitelistAllUsers(ctx)
+		if err != nil {
+			a.log.Warn("access: выдача доступа существующим пользователям", "err", err)
+		} else {
+			granted = n
+			a.log.Info("access: доступ сохранён существующим пользователям", "count", n, "mode", mode)
+		}
+	}
+	return granted
 }
 
 // accessGranted сообщает, есть ли у пользователя персональный доступ: он в
@@ -62,6 +87,20 @@ func (a *App) accessGranted(ctx context.Context, chatID int64) bool {
 	}
 	ok, _ := a.store.IsWhitelistID(ctx, chatID)
 	return ok
+}
+
+// MiniAccessDenied — тот же гейт, что и denyAccess, для мини-аппа и веб-кабинета
+// (они ходят мимо обработчиков чата, поэтому проверку надо повторить). Админ и
+// публичный режим проходят всегда; сообщений пользователю тут не шлём —
+// интерфейс сам покажет отказ.
+func (a *App) MiniAccessDenied(ctx context.Context, tgID int64) bool {
+	if tgID == a.cfg.AdminID {
+		return false
+	}
+	if a.accessMode() == model.AccessPublic {
+		return false
+	}
+	return a.store != nil && !a.accessGranted(ctx, tgID)
 }
 
 // newInviteCode генерит непредсказуемый код приглашения.
@@ -78,19 +117,31 @@ func newInviteCode() string {
 	return strings.ToLower(code)
 }
 
-// inviteLink собирает ссылку-приглашение для кода.
+// inviteLink собирает ссылку-приглашение для кода. Пустая строка — если бот не
+// смог узнать свой @username (тогда карточка показывает подсказку, а не огрызок
+// ссылки, который админ по ошибке отправит клиенту).
 func (a *App) inviteLink(ctx context.Context, code string) string {
 	if u := a.botUsername(ctx); u != "" {
 		return "https://t.me/" + u + "?start=inv_" + code
 	}
-	return "inv_" + code
+	return ""
 }
 
 // redeemInvite активирует приглашение по коду из /start. Возвращает текст для
-// пользователя (пустой — если код не наш/не нужен) и признак успеха.
+// пользователя (пустой — если делать нечего) и признак успеха.
 func (a *App) redeemInvite(ctx context.Context, chatID int64, code string) (string, bool) {
 	lang := a.lang(chatID)
+	code = strings.ToLower(strings.TrimSpace(code))
 	if a.store == nil || code == "" {
+		return "", false
+	}
+	// Приглашения работают только в своём режиме: иначе старая ссылка тихо
+	// открывала бы вход в боте, переведённом на белый список.
+	if a.accessMode() != model.AccessInvite {
+		return "", false
+	}
+	// Забаненный не должен сжигать активацию чужого приглашения.
+	if a.userBlocked(ctx, chatID) {
 		return "", false
 	}
 	if a.accessGranted(ctx, chatID) {
@@ -107,11 +158,14 @@ func (a *App) redeemInvite(ctx context.Context, chatID int64, code string) (stri
 	}
 	_ = a.store.UpsertUser(ctx, chatID)
 	if err := a.store.SetWhitelisted(ctx, chatID, true); err != nil {
-		a.log.Warn("invite: выдача доступа", "tg_id", chatID, "err", err)
+		// Активация уже списана, но доступа нет — честно говорим об этом и
+		// зовём в поддержку, а не рисуем «добро пожаловать».
+		a.log.Error("invite: выдача доступа", "tg_id", chatID, "err", err)
+		return i18n.T(lang, "inv.grant_failed"), false
 	}
 	a.log.Info("invite: доступ выдан", "tg_id", chatID, "code", code)
 	alang := a.lang(a.cfg.AdminID)
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "inv.used_admin", a.userLabelByID(ctx, chatID), code))
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "inv.used_admin", code, a.userLabelByID(ctx, chatID)))
 	return i18n.T(lang, "inv.ok"), true
 }
 
@@ -125,6 +179,9 @@ func (a *App) showAccess(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		if ids, err := a.store.ListWhitelistIDs(ctx); err == nil {
 			wl = len(ids)
+		}
+		if n, err := a.store.CountWhitelisted(ctx); err == nil {
+			wl += n
 		}
 	}
 	text := i18n.T(lang, "access.title", modeName, i18n.T(lang, "access.hint_"+mode), active, total, wl)
@@ -177,8 +234,11 @@ func (a *App) inviteStats(ctx context.Context) (active, total int) {
 	return active, len(list)
 }
 
+// invitesPageSize — сколько приглашений показываем на одной странице.
+const invitesPageSize = 10
+
 // showInvites — список приглашений с состоянием и кнопками отзыва/удаления.
-func (a *App) showInvites(ctx context.Context, chatID int64) {
+func (a *App) showInvites(ctx context.Context, chatID int64, page int) {
 	lang := a.lang(chatID)
 	if a.store == nil {
 		return
@@ -188,17 +248,27 @@ func (a *App) showInvites(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
+	if page < 0 {
+		page = 0
+	}
+	pages := (len(list) + invitesPageSize - 1) / invitesPageSize
+	if page >= pages && pages > 0 {
+		page = pages - 1
+	}
+	from := page * invitesPageSize
+	to := from + invitesPageSize
+	if to > len(list) {
+		to = len(list)
+	}
+	if from > len(list) {
+		from = len(list)
+	}
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "inv.btn_new"), "acc:new")},
 	}
 	now := time.Now().UTC()
-	shown := 0
-	for i := range list {
+	for i := from; i < to; i++ {
 		inv := list[i]
-		if shown >= 20 {
-			break
-		}
-		shown++
 		state := i18n.T(lang, "inv.state_active")
 		switch {
 		case inv.Revoked:
@@ -216,8 +286,10 @@ func (a *App) showInvites(ctx context.Context, chatID int64) {
 		if inv.ExpiresAt != "" {
 			label += " · " + shortDate(inv.ExpiresAt)
 		}
-		row := []models.InlineKeyboardButton{btn(label, "acc:show:"+inv.Code)}
-		rows = append(rows, row)
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "acc:show:"+inv.Code)})
+	}
+	if nav := paginationRow("acc:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
 	}
 	title := i18n.T(lang, "inv.list_title", len(list))
 	if len(list) == 0 {
@@ -237,10 +309,13 @@ func (a *App) showInvite(ctx context.Context, chatID int64, code string) {
 	}
 	inv, err := a.store.GetInvite(ctx, code)
 	if err != nil || inv == nil {
-		a.showInvites(ctx, chatID)
+		a.showInvites(ctx, chatID, 0)
 		return
 	}
 	link := a.inviteLink(ctx, inv.Code)
+	if link == "" {
+		link = i18n.T(lang, "inv.no_link", inv.Code)
+	}
 	uses := strconv.Itoa(inv.Used)
 	if inv.MaxUses > 0 {
 		uses += " / " + strconv.Itoa(inv.MaxUses)
@@ -280,24 +355,29 @@ func (a *App) onAccess(ctx context.Context, chatID int64, val string) {
 	case "mode":
 		switch arg {
 		case model.AccessPublic, model.AccessInvite, model.AccessWhitelist:
-			a.setAccessMode(ctx, arg)
+			if n := a.setAccessMode(ctx, arg); n > 0 {
+				a.notify(ctx, chatID, i18n.T(lang, "access.grandfathered", n))
+			}
 		}
 		a.showAccess(ctx, chatID)
 	case "new":
 		a.getUI(chatID).adminInput = "inv_days"
 		a.askInput(ctx, chatID, i18n.T(lang, "inv.ask_days"), "menu:access")
 	case "list":
-		a.showInvites(ctx, chatID)
+		a.showInvites(ctx, chatID, 0)
+	case "page":
+		p, _ := strconv.Atoi(arg)
+		a.showInvites(ctx, chatID, p)
 	case "revoke":
 		if a.store != nil && arg != "" {
 			_ = a.store.RevokeInvite(ctx, arg)
 		}
-		a.showInvites(ctx, chatID)
+		a.showInvites(ctx, chatID, 0)
 	case "del":
 		if a.store != nil && arg != "" {
 			_ = a.store.DeleteInvite(ctx, arg)
 		}
-		a.showInvites(ctx, chatID)
+		a.showInvites(ctx, chatID, 0)
 	}
 }
 

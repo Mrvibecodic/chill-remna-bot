@@ -109,3 +109,54 @@ func TestAutoPayStore(t *testing.T) {
 		}
 	})
 }
+
+// Закрытие публичного бота сохраняет доступ уже зарегистрированным.
+func TestWhitelistAllUsers(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{31, 32, 33} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.SetWhitelisted(ctx, 31, true); err != nil {
+			t.Fatal(err)
+		}
+		n, err := st.WhitelistAllUsers(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Fatalf("ожидалось 2 обновлённых пользователя, получено %d", n)
+		}
+		cnt, err := st.CountWhitelisted(ctx)
+		if err != nil || cnt != 3 {
+			t.Fatalf("CountWhitelisted = %d, err=%v", cnt, err)
+		}
+		for _, id := range []int64{31, 32, 33} {
+			u, _ := st.GetUser(ctx, id)
+			if u == nil || !u.Whitelisted {
+				t.Fatalf("пользователь %d должен иметь доступ: %+v", id, u)
+			}
+		}
+	})
+}
+
+// Повторное включение автопродления снимает паузу до следующей попытки.
+func TestAutoPayEnableClearsRetryPause(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		_ = st.UpsertUser(ctx, 41)
+		_ = st.SetAutoPay(ctx, &model.AutoPay{TelegramID: 41, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 1, Enabled: false})
+		if err := st.UpdateAutoPayResult(ctx, 41, "", "2099-01-01T00:00:00Z", 2, "нет денег"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetAutoPayEnabled(ctx, 41, true); err != nil {
+			t.Fatal(err)
+		}
+		ap, _ := st.GetAutoPay(ctx, 41)
+		if ap.NextTryAt != "" || ap.Fails != 0 || ap.LastError != "" {
+			t.Fatalf("включение должно сбрасывать паузу и счётчик: %+v", ap)
+		}
+	})
+}

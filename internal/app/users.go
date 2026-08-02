@@ -298,13 +298,10 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		}
 		a.showUser(ctx, chatID, uid)
 	case "wlmode":
-		// Совместимость со старой кнопкой: тумблер «вайтлист вкл/выкл».
-		if a.accessMode() == model.AccessWhitelist {
-			a.setAccessMode(ctx, model.AccessPublic)
-		} else {
-			a.setAccessMode(ctx, model.AccessWhitelist)
-		}
-		a.showUsers(ctx, chatID, 0)
+		// Старая кнопка «вайтлист вкл/выкл» из давних сообщений в чате: молча
+		// менять режим по ней нельзя (можно случайно закрыть или открыть бота),
+		// поэтому просто открываем экран доступа.
+		a.showAccess(ctx, chatID)
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
@@ -669,9 +666,14 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		}
 	}
 	if !ok {
-		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.none"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "btn.buy"), "menu:buy")}, home,
-		})
+		rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}}
+		// Автопродление можно было подключить и до того, как подписка кончилась:
+		// выключить его должно быть можно и с этого экрана.
+		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+			rows = append(rows, row)
+		}
+		rows = append(rows, home)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.none"), rows)
 		return
 	}
 	rows := [][]models.InlineKeyboardButton{}
@@ -679,20 +681,16 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "btn.support"), URL: sup}})
 	}
 	if status == remnawave.StatusDisabled {
+		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+			rows = append(rows, row)
+		}
 		rows = append(rows, home)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.blocked"), rows)
 		return
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
-	// Автопродление показываем, если оно доступно в магазине или уже подключено
-	// у этого пользователя — выключить его должно быть можно всегда.
-	apOn := a.autoPayOn(ctx, chatID)
-	if a.autoPayAvailable() || apOn {
-		state := i18n.T(lang, "ap.state_off")
-		if apOn {
-			state = i18n.T(lang, "ap.state_on")
-		}
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_row", state), "ap:show")})
+	if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+		rows = append(rows, row)
 	}
 	rows = append(rows, home)
 	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)

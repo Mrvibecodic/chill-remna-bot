@@ -15,6 +15,34 @@ import (
 
 var BaseURL = "https://api.yookassa.ru/v3"
 
+// APIError — ответ ЮKassa с кодом, отличным от 200. Код важен вызывающей
+// стороне: 202 значит «запрос с этим Idempotence-Key ещё обрабатывается»
+// (надо повторить тем же ключом), 401/403/5xx — проблема магазина или самой
+// ЮKassa, а не карты пользователя.
+type APIError struct {
+	Status      int
+	Description string
+}
+
+func (e *APIError) Error() string {
+	if e.Description != "" {
+		return fmt.Sprintf("ЮKassa HTTP %d: %s", e.Status, e.Description)
+	}
+	return fmt.Sprintf("ЮKassa вернула HTTP %d", e.Status)
+}
+
+// Retriable сообщает, что запрос имеет смысл повторить тем же ключом
+// идемпотентности (ЮKassa ещё обрабатывает предыдущий или у неё сбой).
+func (e *APIError) Retriable() bool {
+	return e.Status == http.StatusAccepted || e.Status >= 500
+}
+
+// ShopSide сообщает, что дело в настройках магазина или в самой ЮKassa, а не в
+// карте пользователя: писать пользователю «не хватило средств» тут нельзя.
+func (e *APIError) ShopSide() bool {
+	return e.Retriable() || e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
+}
+
 type Client struct {
 	shopID string
 	secret string
@@ -102,10 +130,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, idemKey 
 			Description string `json:"description"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&e)
-		if e.Description != "" {
-			return nil, fmt.Errorf("ЮKassa HTTP %d: %s", resp.StatusCode, e.Description)
-		}
-		return nil, fmt.Errorf("ЮKassa вернула HTTP %d", resp.StatusCode)
+		return nil, &APIError{Status: resp.StatusCode, Description: e.Description}
 	}
 	var p Payment
 	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {

@@ -39,6 +39,8 @@ type Storage interface {
 	RemoveWhitelistID(ctx context.Context, telegramID int64) error
 	IsWhitelistID(ctx context.Context, telegramID int64) (bool, error)
 	ListWhitelistIDs(ctx context.Context) ([]int64, error)
+	WhitelistAllUsers(ctx context.Context) (int64, error)
+	CountWhitelisted(ctx context.Context) (int, error)
 
 	CreateInvite(ctx context.Context, inv *model.Invite) error
 	GetInvite(ctx context.Context, code string) (*model.Invite, error)
@@ -1297,7 +1299,7 @@ func (b *base) GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay
 func (b *base) SetAutoPayEnabled(ctx context.Context, telegramID int64, on bool) error {
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"UPDATE autopay SET enabled = "+b.ph(1)+", fails = 0, last_error = '' WHERE telegram_id = "+b.ph(2),
+		"UPDATE autopay SET enabled = "+b.ph(1)+", fails = 0, last_error = '', next_try_at = '' WHERE telegram_id = "+b.ph(2),
 		boolToInt(on), telegramID)
 	return err
 }
@@ -1338,4 +1340,27 @@ func (b *base) DeleteAutoPay(ctx context.Context, telegramID int64) error {
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, err := b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
+}
+
+// WhitelistAllUsers выдаёт доступ всем уже зарегистрированным пользователям.
+// Нужно при закрытии ранее публичного бота: иначе смена режима мгновенно
+// отрезала бы действующих клиентов. Возвращает число затронутых строк.
+func (b *base) WhitelistAllUsers(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "UPDATE users SET whitelisted = 1 WHERE whitelisted = 0")
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
+}
+
+// CountWhitelisted — сколько пользователей уже имеют доступ (в т.ч. впущенные
+// по приглашению).
+func (b *base) CountWhitelisted(ctx context.Context) (int, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE whitelisted = 1").Scan(&n)
+	return n, err
 }

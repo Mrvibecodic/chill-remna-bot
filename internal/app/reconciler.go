@@ -91,6 +91,10 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 	switch {
 	case pay.Status == "succeeded" && pay.Paid:
 		a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency)
+		// Платёж мог быть сделан с сохранением карты: если вебхук не дошёл и
+		// оплату добил реконсилятор, предложение про автопродление всё равно
+		// должно уйти — иначе способ оплаты потеряется молча.
+		a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay)
 	case pay.Status == "canceled":
 		_ = st.ResolvePending(ctx, pi.ID)
 	}

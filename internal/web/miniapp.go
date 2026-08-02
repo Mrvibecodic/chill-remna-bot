@@ -71,6 +71,10 @@ type MiniProvider interface {
 	CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filename string, data []byte) error
 	// MiniBlocked reports whether the user is blocked by an admin.
 	MiniBlocked(ctx context.Context, tgID int64) bool
+	// MiniAccessDenied reports whether the bot's publicity mode (invite-only /
+	// whitelist) keeps this user out — the Mini App and the cabinet must honour
+	// the same gate as the chat bot.
+	MiniAccessDenied(ctx context.Context, tgID int64) bool
 	// CabinetFlag returns a self-hosted country-flag SVG by ISO code.
 	CabinetFlag(code string) ([]byte, bool)
 }
@@ -303,6 +307,10 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	}
 	if s.mini.MiniBlocked(r.Context(), id) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ заблокирован"})
+		return 0, false, false
+	}
+	if s.mini.MiniAccessDenied(r.Context(), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ к боту ограничен"})
 		return 0, false, false
 	}
 	return id, web, true

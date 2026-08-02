@@ -125,6 +125,27 @@ type fakeStore struct {
 	seq       int64
 }
 
+func (s *fakeStore) WhitelistAllUsers(context.Context) (int64, error) {
+	var n int64
+	for _, u := range s.users {
+		if !u.Whitelisted {
+			u.Whitelisted = true
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) CountWhitelisted(context.Context) (int, error) {
+	n := 0
+	for _, u := range s.users {
+		if u.Whitelisted {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) CreateInvite(_ context.Context, inv *model.Invite) error {
 	if s.invites == nil {
 		s.invites = map[string]*model.Invite{}

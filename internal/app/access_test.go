@@ -133,3 +133,131 @@ func TestInviteViaStartCommand(t *testing.T) {
 		t.Fatal("по неверному коду доступ выдаваться не должен")
 	}
 }
+
+// Регресс: колбэки экрана «Доступ» и автопродления должны реально роутиться
+// в handleCallback, а не падать в «меню устарело».
+func TestCallbackRouting_AccessAndAutoPay(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.YooKassa = model.YooKassaConfig{Enabled: true, ShopID: "s", SecretKey: "k", AutoPay: true}
+	ctx := context.Background()
+
+	// Админ переключает режим публичности кнопкой.
+	a.handleCallback(ctx, cb(100, "acc:mode:invite"))
+	if a.accessMode() != model.AccessInvite {
+		t.Fatalf("режим не переключился: %q", a.accessMode())
+	}
+
+	// Пользователь включает автопродление кнопкой из предложения.
+	_ = fs.UpsertUser(ctx, 555)
+	_ = fs.SetWhitelisted(ctx, 555, true)
+	_ = fs.SetAutoPay(ctx, &model.AutoPay{TelegramID: 555, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 1})
+	a.handleCallback(ctx, cb(555, "ap:on"))
+	if !a.autoPayOn(ctx, 555) {
+		t.Fatal("кнопка «включить автопродление» не сработала")
+	}
+	a.handleCallback(ctx, cb(555, "ap:off"))
+	if a.autoPayOn(ctx, 555) {
+		t.Fatal("кнопка «отключить автопродление» не сработала")
+	}
+
+	// Не-админ не может трогать экран доступа.
+	a.handleCallback(ctx, cb(555, "acc:mode:public"))
+	if a.accessMode() != model.AccessInvite {
+		t.Fatal("обычный пользователь не должен менять режим публичности")
+	}
+}
+
+// Закрытие ранее публичного бота сохраняет доступ действующим пользователям.
+func TestAccess_GrandfathersExistingUsers(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 910)
+	_ = fs.UpsertUser(ctx, 911)
+
+	if n := a.setAccessMode(ctx, model.AccessInvite); n != 2 {
+		t.Fatalf("ожидалось 2 сохранённых доступа, получено %d", n)
+	}
+	for _, id := range []int64{910, 911} {
+		if a.denyAccess(ctx, id, false) {
+			t.Fatalf("действующий пользователь %d не должен терять доступ", id)
+		}
+	}
+	if !a.denyAccess(ctx, 912, false) {
+		t.Fatal("новый пользователь без приглашения проходить не должен")
+	}
+}
+
+// Приглашения действуют только в своём режиме, забаненный активацию не тратит.
+func TestInvite_ModeAndBlocked(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	a.setAccessMode(ctx, model.AccessWhitelist)
+	_ = fs.CreateInvite(ctx, &model.Invite{Code: "old1", MaxUses: 1})
+
+	if _, ok := a.redeemInvite(ctx, 920, "old1"); ok {
+		t.Fatal("в режиме вайтлиста старое приглашение работать не должно")
+	}
+	if a.accessGranted(ctx, 920) {
+		t.Fatal("доступ выдан мимо режима")
+	}
+
+	a.setAccessMode(ctx, model.AccessInvite)
+	_ = fs.UpsertUser(ctx, 921)
+	_ = fs.SetBlocked(ctx, 921, true)
+	if _, ok := a.redeemInvite(ctx, 921, "old1"); ok {
+		t.Fatal("забаненный не должен активировать приглашение")
+	}
+	if inv, _ := fs.GetInvite(ctx, "old1"); inv.Used != 0 {
+		t.Fatalf("активация не должна тратиться забаненным: used=%d", inv.Used)
+	}
+	// Код в другом регистре и с пробелами всё равно принимается.
+	if _, ok := a.redeemInvite(ctx, 922, " OLD1 "); !ok {
+		t.Fatal("код должен нормализоваться (регистр/пробелы)")
+	}
+}
+
+// Мини-апп и веб-кабинет обязаны уважать режим публичности.
+func TestMiniAccessDenied(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+
+	if a.MiniAccessDenied(ctx, 930) {
+		t.Fatal("в публичном режиме мини-апп должен пускать всех")
+	}
+	a.setAccessMode(ctx, model.AccessInvite)
+	if !a.MiniAccessDenied(ctx, 930) {
+		t.Fatal("в закрытом режиме посторонний не должен попадать в мини-апп")
+	}
+	if a.MiniAccessDenied(ctx, a.cfg.AdminID) {
+		t.Fatal("админ проходит всегда")
+	}
+	_ = fs.UpsertUser(ctx, 930)
+	_ = fs.SetWhitelisted(ctx, 930, true)
+	if a.MiniAccessDenied(ctx, 930) {
+		t.Fatal("впущенный пользователь должен проходить")
+	}
+}
+
+// Откат на старую версию бота не должен открывать закрытый бот всем.
+func TestNormalizeAccess_FailsClosed(t *testing.T) {
+	// Так режим ставит сам бот (setAccessMode): режим + legacy-флаг «закрыт».
+	cfg := &model.BotConfig{AccessMode: model.AccessInvite, WhitelistMode: true}
+	cfg.NormalizeAccess()
+	if cfg.AccessMode != model.AccessInvite || !cfg.WhitelistMode {
+		t.Fatalf("режим приглашений должен сохраняться и помечать бота закрытым: %q/%v", cfg.AccessMode, cfg.WhitelistMode)
+	}
+	// Старая версия перезаписала конфиг, поле access_mode потеряно.
+	old := &model.BotConfig{WhitelistMode: true}
+	old.NormalizeAccess()
+	if old.AccessMode != model.AccessWhitelist {
+		t.Fatalf("после отката бот должен остаться закрытым, получено %q", old.AccessMode)
+	}
+	// Админ выключил вайтлист в старой версии — уважаем.
+	opened := &model.BotConfig{AccessMode: model.AccessInvite, WhitelistMode: false}
+	opened.NormalizeAccess()
+	if opened.AccessMode != model.AccessPublic {
+		t.Fatalf("выключенный в старой версии вайтлист должен открывать бота, получено %q", opened.AccessMode)
+	}
+}

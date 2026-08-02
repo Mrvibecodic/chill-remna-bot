@@ -103,7 +103,15 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, months int) web.MiniAc
 	}
 	_ = a.store.UpsertUser(ctx, tgID)
 	u, _ := a.store.GetUser(ctx, tgID)
-	if !a.p2pAllowed(u) {
+	// «Перевод всем без одобрения» распространяется на Telegram-аккаунты.
+	// E-mail-аккаунт кабинета (отрицательный синтетический id) заводится без
+	// подтверждения почты, поэтому реквизиты по нему выдаём только после
+	// ручного одобрения — иначе карты вытягиваются регистрацией на любой ящик.
+	allowed := a.p2pAllowed(u)
+	if tgID < 0 {
+		allowed = u != nil && u.P2PApproved
+	}
+	if !allowed {
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: "Доступ к оплате переводом ещё не подтверждён администратором — запрос отправлен. Попробуйте позже."}
 	}

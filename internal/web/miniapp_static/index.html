@@ -455,6 +455,8 @@ function render(me,menu,sub,plans){
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
     h+='<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div></div>';
     if(menu.trial_available&&!WEB)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
+    // Автопродление могло остаться включённым с прошлой подписки — дать выключить.
+    if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
   }
   if(plans.plans&&plans.plans.length){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';

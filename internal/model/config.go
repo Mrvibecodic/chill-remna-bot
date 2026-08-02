@@ -38,22 +38,31 @@ const (
 )
 
 // NormalizeAccess приводит режим публичности к валидному значению и держит
-// legacy-флаг WhitelistMode в синхроне с новым AccessMode:
-//   - конфиг старой версии (AccessMode пустой) читается по WhitelistMode;
-//   - дальше источник правды — AccessMode, а WhitelistMode переписывается,
-//     чтобы откат на старую версию бота не потерял вайтлист.
+// legacy-флаг WhitelistMode в синхроне с новым AccessMode.
+//
+// Legacy-флаг трактуется как «бот закрыт» (режим не публичный) — так откат на
+// старую версию бота, которая знает только WhitelistMode, оставляет бота
+// ЗАКРЫТЫМ, а не открывает его всем: приглашённые уже помечены whitelisted и
+// проходят и по старой логике. Рассинхрон значений возможен только если конфиг
+// писала старая версия — тогда верим её флагу.
 func (c *BotConfig) NormalizeAccess() {
 	valid := c.AccessMode == AccessPublic || c.AccessMode == AccessInvite || c.AccessMode == AccessWhitelist
-	// Рассинхрон возможен только если конфиг писала старая версия бота (она
-	// знает лишь WhitelistMode) — тогда верим ей.
-	if !valid || c.WhitelistMode != (c.AccessMode == AccessWhitelist) {
-		if c.WhitelistMode {
+	closed := c.AccessMode == AccessWhitelist || c.AccessMode == AccessInvite
+	if !valid || c.WhitelistMode != closed {
+		switch {
+		case c.WhitelistMode && (!valid || c.AccessMode == AccessPublic):
 			c.AccessMode = AccessWhitelist
-		} else if !valid || c.AccessMode == AccessWhitelist {
+		case !c.WhitelistMode:
 			c.AccessMode = AccessPublic
 		}
 	}
-	c.WhitelistMode = c.AccessMode == AccessWhitelist
+	c.WhitelistMode = c.AccessMode != AccessPublic
+}
+
+// AccessClosed сообщает, ограничен ли вход в бота (любой режим кроме
+// публичного).
+func (c *BotConfig) AccessClosed() bool {
+	return c.AccessMode == AccessWhitelist || c.AccessMode == AccessInvite
 }
 
 // Invite — одноразовая (или многоразовая) ссылка-приглашение в бота.
