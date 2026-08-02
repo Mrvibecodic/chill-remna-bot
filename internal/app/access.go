@@ -100,7 +100,19 @@ func (a *App) MiniAccessDenied(ctx context.Context, tgID int64) bool {
 	if a.accessMode() == model.AccessPublic {
 		return false
 	}
-	return a.store != nil && !a.accessGranted(ctx, tgID)
+	if a.store == nil {
+		return false
+	}
+	// E-mail-аккаунты кабинета (отрицательный синтетический id) вайтлистом
+	// Telegram-ID не описываются: их допуском заведует модерация кабинета.
+	// В закрытом боте пускаем тех, кого админ одобрил (WebApproved) — как и
+	// до апгрейда; остальных заворачиваем, CabinetGate отправит их в обычную
+	// очередь на одобрение.
+	if tgID < 0 {
+		u, _ := a.store.GetUser(ctx, tgID)
+		return u == nil || !u.WebApproved
+	}
+	return !a.accessGranted(ctx, tgID)
 }
 
 // newInviteCode генерит непредсказуемый код приглашения.

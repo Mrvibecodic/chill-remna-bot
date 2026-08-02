@@ -99,12 +99,21 @@ var errCabinetAccess = errors.New("доступ к боту ограничен �
 // (and notifies the admin once) when the account still needs approval, or a
 // permanent "denied" error when the admin already rejected the request.
 func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
-	// Режим публичности бота действует и на кабинет: закрытый бот не должен
-	// пускать через веб тех, кого он не пускает в чат.
-	if a.MiniAccessDenied(ctx, tgID) {
+	needApproval := a.cabinetNeedsApproval(isEmail)
+	if isEmail {
+		// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
+		// закрытом боте (приглашения/вайтлист) для него обязательна модерация
+		// кабинета: ранее одобренные (WebApproved) проходят как раньше,
+		// остальные попадают в обычную очередь на одобрение к админу.
+		if a.accessMode() != model.AccessPublic {
+			needApproval = true
+		}
+	} else if a.MiniAccessDenied(ctx, tgID) {
+		// Telegram-аккаунт: закрытый бот не пускает через веб тех, кого он не
+		// пускает в чат.
 		return errCabinetAccess
 	}
-	if !a.cabinetNeedsApproval(isEmail) {
+	if !needApproval {
 		return nil
 	}
 	if a.store != nil {

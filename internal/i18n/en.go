@@ -665,7 +665,7 @@ var en = map[string]string{
 	"ap.when_days":         "%d day(s) before the subscription expires",
 
 	// --- Admin: YooKassa recurring payments and open P2P ---
-	"admin.yk_auto_block":   "\n\n🔁 Recurring: %s · %d day(s) before expiry · offered first: %s\nUsers with auto-renewal: %d\nNote: recurring payments must be enabled for your shop in the YooKassa dashboard.",
+	"admin.yk_auto_block":   "\n\n🔁 Recurring: %s · charged %d day(s) before expiry\nUsers with auto-renewal: %d\nThe user is offered auto-renewal after a successful card payment. Note: recurring payments must be enabled for your shop in the YooKassa dashboard.",
 	"admin.yk_btn_auto":     "🔁 Recurring on/off",
 	"admin.yk_btn_autodays": "📅 Days before charge",
 	"admin.yk_ask_autodays": "How many days before expiry should we charge? Send a number from 0 to 14 (0 — on the expiry date).",

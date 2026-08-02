@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 )
 
@@ -259,5 +262,53 @@ func TestNormalizeAccess_FailsClosed(t *testing.T) {
 	opened.NormalizeAccess()
 	if opened.AccessMode != model.AccessPublic {
 		t.Fatalf("выключенный в старой версии вайтлист должен открывать бота, получено %q", opened.AccessMode)
+	}
+}
+
+// E-mail-аккаунты кабинета (отрицательный id) в закрытом боте: одобренные
+// админом работают как до апгрейда, неодобренные идут в очередь на одобрение,
+// а не получают глухой отказ «доступ ограничен».
+func TestClosedBot_EmailCabinetAccounts(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	a.setAccessMode(ctx, model.AccessWhitelist)
+
+	const approved, pending = int64(-100), int64(-101)
+	_ = fs.UpsertUser(ctx, approved)
+	_ = fs.SetWebApproved(ctx, approved, true)
+	_ = fs.UpsertUser(ctx, pending)
+
+	if a.MiniAccessDenied(ctx, approved) {
+		t.Fatal("одобренный e-mail-аккаунт должен проходить в закрытом боте")
+	}
+	if err := a.CabinetGate(ctx, approved, true); err != nil {
+		t.Fatalf("одобренный e-mail-аккаунт: %v", err)
+	}
+	if !a.MiniAccessDenied(ctx, pending) {
+		t.Fatal("неодобренный e-mail-аккаунт не должен проходить в API закрытого бота")
+	}
+	err := a.CabinetGate(ctx, pending, true)
+	if err == nil {
+		t.Fatal("неодобренный e-mail-аккаунт должен ждать одобрения")
+	}
+	if errors.Is(err, errCabinetAccess) {
+		t.Fatal("ожидалась очередь на одобрение, а не глухой отказ")
+	}
+
+	// В публичном боте без политики модерации e-mail проходит как раньше.
+	a.setAccessMode(ctx, model.AccessPublic)
+	if err := a.CabinetGate(ctx, pending, true); err != nil {
+		t.Fatalf("публичный бот: %v", err)
+	}
+}
+
+// Экран админки ЮKassa не должен содержать несовпавших плейсхолдеров
+// (регресс: в шаблоне оставался лишний %s после выпиливания настройки).
+func TestYKAdminScreenPlaceholders(t *testing.T) {
+	for _, lang := range []string{model.LangRU, model.LangEN} {
+		got := i18n.T(lang, "admin.yk_auto_block", "on", 3, 7)
+		if strings.Contains(got, "%!") || strings.Contains(got, "MISSING") {
+			t.Fatalf("битый шаблон admin.yk_auto_block (%s): %q", lang, got)
+		}
 	}
 }
