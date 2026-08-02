@@ -94,6 +94,14 @@ func TestAutoPayStore(t *testing.T) {
 			t.Fatalf("исход попытки не сохранён: %+v", got)
 		}
 
+		if err := st.MarkAutoPayCharged(ctx, 21, "2026-02-01T00:00:00Z", "20260301", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = st.GetAutoPay(ctx, 21)
+		if got.PaidPeriod != "20260301" || got.Fails != 0 || got.LastError != "" {
+			t.Fatalf("отметка об оплаченном периоде не сохранена: %+v", got)
+		}
+
 		list, err := st.ListAutoPay(ctx)
 		if err != nil || len(list) != 1 {
 			t.Fatalf("список автосписаний: %d err=%v", len(list), err)

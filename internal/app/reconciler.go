@@ -90,11 +90,12 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s paid=%v", pay.Status, pay.Paid)
 	switch {
 	case pay.Status == "succeeded" && pay.Paid:
-		a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency)
 		// Платёж мог быть сделан с сохранением карты: если вебхук не дошёл и
 		// оплату добил реконсилятор, предложение про автопродление всё равно
-		// должно уйти — иначе способ оплаты потеряется молча.
-		a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay)
+		// должно уйти — но ровно один раз, только когда подписка реально выдана.
+		if a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency) {
+			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay)
+		}
 	case pay.Status == "canceled":
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
@@ -142,27 +143,31 @@ func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *mode
 	}
 }
 
-func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *model.PendingInvoice, amount string) {
+// reconcileFinalize добивает недоставленную оплату. Возвращает true, только
+// если подписка была выдана именно этим вызовом (дубли и ошибки — false), чтобы
+// вызывающий не повторял разовые действия вроде предложения автопродления.
+func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *model.PendingInvoice, amount string) bool {
 	if pi.Purpose == "topup" {
 		if err := a.finalizeTopUp(ctx, pi.TelegramID, pi.Kopecks, pi.Method, amount, pi.ExtID); err != nil &&
 			!errors.Is(err, storage.ErrDuplicateExtID) {
 			a.log.Warn("reconciler: topup", "ext_id", pi.ExtID, "err", err)
-			return
+			return false
 		}
 		_ = st.ResolvePending(ctx, pi.ID)
-		return
+		return false
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, pi.TelegramID, pi.Months, pi.Method, amount, pi.ExtID)
 	if err != nil {
 
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			_ = st.ResolvePending(ctx, pi.ID)
-			return
+			return false
 		}
 		a.log.Warn("reconciler: finalize", "method", pi.Method, "ext_id", pi.ExtID, "err", err)
-		return
+		return false
 	}
 	_ = st.ResolvePending(ctx, pi.ID)
 	a.sendSubActive(ctx, pi.TelegramID, link, expireAt)
 	a.log.Info("reconciler: finalized late payment", "method", pi.Method, "ext_id", pi.ExtID, "chat_id", pi.TelegramID)
+	return true
 }

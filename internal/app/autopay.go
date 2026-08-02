@@ -194,7 +194,11 @@ func (a *App) showAutoPay(ctx context.Context, chatID int64) {
 	if card == "" {
 		card = i18n.T(lang, "ap.card_unknown")
 	}
-	text := i18n.T(lang, "ap.on_title", monthsWord(lang, ap.Months), price+curSuffix(curRUB), card, a.autoPayDaysText(lang))
+	cur := ap.Currency
+	if pr := a.pricing().Currency; pr != "" {
+		cur = pr
+	}
+	text := i18n.T(lang, "ap.on_title", monthsWord(lang, ap.Months), price+curSuffix(curSymbol(cur)), card, a.autoPayDaysText(lang))
 	if ap.Fails > 0 {
 		text += "\n\n" + i18n.T(lang, "ap.fails", ap.Fails, model.AutoPayMaxFails)
 	}
@@ -317,7 +321,7 @@ func (a *App) autoPayDue(ctx context.Context, ap *model.AutoPay, now time.Time) 
 	}
 	// Страховка от повторного списания: если оплата (ручная или автоматическая)
 	// была меньше суток назад, не списываем, даже если срок подписки почему-то
-	// не сдвинулся (например, панель не ответила и продление не записалось).
+	// не сдвинулся.
 	if ap.LastPayAt != "" {
 		if t, err := time.Parse(time.RFC3339, ap.LastPayAt); err == nil && now.Sub(t) < 24*time.Hour {
 			return time.Time{}, false
@@ -338,7 +342,40 @@ func (a *App) autoPayDue(ctx context.Context, ap *model.AutoPay, now time.Time) 
 	if now.Before(exp.Add(-time.Duration(days) * 24 * time.Hour)) {
 		return time.Time{}, false
 	}
+	// За этот период деньги уже списаны: если продление в панели не удалось,
+	// срок подписки не сдвинулся — но списывать второй раз нельзя. Платёж лежит
+	// в очереди незавершённых, его добьёт реконсилятор.
+	if ap.PaidPeriod != "" && ap.PaidPeriod == autoPayPeriod(exp) {
+		return time.Time{}, false
+	}
 	return exp, true
+}
+
+// autoPayPeriod — метка периода подписки (дата окончания), за который списываем.
+func autoPayPeriod(exp time.Time) string { return exp.UTC().Format("20060102") }
+
+// curSymbol печатает валюту так же, как остальной бот: рубли — символом,
+// прочие — кодом.
+func curSymbol(cur string) string {
+	switch strings.ToUpper(cur) {
+	case "", "RUB", "RUR":
+		return curRUB
+	}
+	return strings.ToUpper(cur)
+}
+
+// currencyCode проверяет, что валюта задана трёхбуквенным кодом (а не, скажем,
+// символом «₽», в котором тоже три байта) — иначе ЮKassa вернёт 400.
+func currencyCode(cur string) bool {
+	if len([]rune(cur)) != 3 {
+		return false
+	}
+	for _, r := range strings.ToUpper(cur) {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // chargeAutoPay делает одну попытку списания за период, заканчивающийся exp.
@@ -352,8 +389,8 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	}
 	pr := a.pricing()
 	value := pr.Fiat(model.PayMethodYooKassa, months)
-	currency := pr.Currency
-	if len(currency) != 3 {
+	currency := strings.ToUpper(pr.Currency)
+	if !currencyCode(currency) {
 		currency = "RUB"
 	}
 	client := a.ykClient()
@@ -367,7 +404,7 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	}
 	// Ключ идемпотентности привязан к периоду, а не к дате попытки: повтор
 	// после обрыва связи попадёт в тот же платёж, а не создаст второй.
-	idem := fmt.Sprintf("ap-%d-%s-%d", ap.TelegramID, exp.UTC().Format("20060102"), ap.Fails)
+	idem := fmt.Sprintf("ap-%d-%s-%d", ap.TelegramID, autoPayPeriod(exp), ap.Fails)
 	desc := i18n.T(lang, "yk.invoice_desc", months)
 	pay, err := client.ChargeSaved(ctx, ap.MethodID, value, currency, desc, ap.TelegramID, months, idem)
 	if err != nil {
@@ -375,8 +412,14 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 		var apiErr *yookassa.APIError
 		switch {
 		case errors.As(err, &apiErr) && apiErr.ShopSide():
-			// Ключи/сбой ЮKassa: карта пользователя ни при чём.
-			a.autoPayDefer(ctx, ap, now, autoPayRetrySoon, err.Error())
+			// Ключи, неверный запрос или сбой ЮKassa: карта пользователя ни при
+			// чём. Первую попытку повторяем через час, дальше раз в сутки —
+			// чтобы неустранимая проблема не молотила вечно каждый час.
+			delay := autoPayRetrySoon
+			if ap.LastError != "" {
+				delay = autoPayRetryDelay
+			}
+			a.autoPayDefer(ctx, ap, now, delay, err.Error())
 			return err.Error()
 		case errors.As(err, &apiErr):
 			// Осмысленный отказ (например, способ оплаты недействителен).
@@ -393,11 +436,7 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	if pay.Status != "succeeded" || !pay.Paid {
 		if pay.Status == "pending" || pay.Status == "waiting_for_capture" {
 			// Платёж ещё в процессе — финализирует вебхук или реконсилятор.
-			if a.store != nil {
-				_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
-					Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: ap.TelegramID, Months: months,
-				})
-			}
+			a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months)
 			a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, "ожидает подтверждения")
 			return ""
 		}
@@ -407,32 +446,62 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 
 	// Деньги уже списаны. Сначала фиксируем платёж как незавершённый: если
 	// продление в панели упадёт, его добьёт реконсилятор, и оплата не пропадёт.
-	pi := &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: ap.TelegramID, Months: months}
-	_ = a.store.AddPendingInvoice(ctx, pi)
+	pi := a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months)
+	// И сразу помечаем период оплаченным: повторно списывать за него нельзя,
+	// чем бы ни закончилось продление.
+	stamp := now.Format(time.RFC3339)
+	_ = a.store.MarkAutoPayCharged(ctx, ap.TelegramID, stamp, autoPayPeriod(exp), "", "")
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
 	_, expireAt, err := a.finalizePurchase(ctx, ap.TelegramID, months, model.PayMethodYooKassa, amount, pay.ID)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
-			// Гонку выиграл вебхук — подписка продлена им, состояние сбрасываем
-			// как после успеха, повторное сообщение пользователю не шлём.
-			_ = a.store.ResolvePending(ctx, pi.ID)
-			_ = a.store.UpdateAutoPayResult(ctx, ap.TelegramID, now.Format(time.RFC3339), "", 0, "")
+			// Гонку выиграл вебхук — подписка продлена им, повторное сообщение
+			// пользователю не шлём.
+			a.autoPayResolve(ctx, pi)
 			return ""
 		}
 		a.log.Warn("autopay: финализация", "tg_id", ap.TelegramID, "err", err)
-		// Списание состоялось, поэтому LastPayAt двигаем: иначе следующий тик
-		// попробует списать ещё раз. Подписку выдаст реконсилятор.
-		_ = a.store.UpdateAutoPayResult(ctx, ap.TelegramID, now.Format(time.RFC3339),
-			now.Add(autoPayRetryDelay).Format(time.RFC3339), 0, err.Error())
+		_ = a.store.MarkAutoPayCharged(ctx, ap.TelegramID, stamp, autoPayPeriod(exp),
+			now.Add(autoPayRetryDelay).Format(time.RFC3339), err.Error())
+		// Деньги списаны, а подписка не продлена — это ЧП, админ должен узнать
+		// сразу, не дожидаясь, пока реконсилятор сдастся.
+		alang := a.lang(a.cfg.AdminID)
+		a.notifyKB(ctx, a.cfg.AdminID,
+			i18n.T(alang, "ap.admin_stuck", a.userLabelByID(ctx, ap.TelegramID), amount, escapeName(err.Error())),
+			[][]models.InlineKeyboardButton{{btn(i18n.T(alang, "guard.btn_card"), "usr:view:"+strconv.FormatInt(ap.TelegramID, 10))}})
 		return ""
 	}
-	_ = a.store.ResolvePending(ctx, pi.ID)
-	_ = a.store.UpdateAutoPayResult(ctx, ap.TelegramID, now.Format(time.RFC3339), "", 0, "")
+	a.autoPayResolve(ctx, pi)
 	a.notifyKB(ctx, ap.TelegramID,
-		i18n.T(lang, "ap.charged", monthsWord(lang, months), value+curSuffix(currency), formatExpire(expireAt, lang)),
+		i18n.T(lang, "ap.charged", monthsWord(lang, months), value+curSuffix(curSymbol(currency)), formatExpire(expireAt, lang)),
 		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")}})
 	a.log.Info("autopay: подписка продлена", "tg_id", ap.TelegramID, "months", months, "expire", expireAt)
 	return ""
+}
+
+// autoPayEnqueue кладёт платёж в очередь незавершённых, если его там ещё нет
+// (повторная попытка возвращает тот же платёж по ключу идемпотентности — дубли
+// в очереди не нужны).
+func (a *App) autoPayEnqueue(ctx context.Context, extID string, tgID int64, months int) *model.PendingInvoice {
+	if a.store == nil || extID == "" {
+		return nil
+	}
+	if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+		return p
+	}
+	pi := &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: extID, TelegramID: tgID, Months: months}
+	if err := a.store.AddPendingInvoice(ctx, pi); err != nil {
+		a.log.Warn("autopay: очередь платежей", "ext_id", extID, "err", err)
+		return nil
+	}
+	return pi
+}
+
+// autoPayResolve закрывает запись очереди после успешного продления.
+func (a *App) autoPayResolve(ctx context.Context, pi *model.PendingInvoice) {
+	if a.store != nil && pi != nil {
+		_ = a.store.ResolvePending(ctx, pi.ID)
+	}
 }
 
 // autoPayDefer откладывает следующую попытку, не считая её неудачей

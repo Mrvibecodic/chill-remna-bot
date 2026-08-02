@@ -228,6 +228,17 @@ func (s *fakeStore) UpdateAutoPayResult(_ context.Context, id int64, lastPayAt, 
 	return nil
 }
 
+func (s *fakeStore) MarkAutoPayCharged(_ context.Context, id int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.LastPayAt = lastPayAt
+		ap.PaidPeriod = paidPeriod
+		ap.NextTryAt = nextTryAt
+		ap.Fails = 0
+		ap.LastError = lastError
+	}
+	return nil
+}
+
 func (s *fakeStore) ListAutoPay(context.Context) ([]model.AutoPay, error) {
 	var out []model.AutoPay
 	for _, ap := range s.autopays {

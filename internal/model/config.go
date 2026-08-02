@@ -108,6 +108,10 @@ type AutoPay struct {
 	Enabled    bool
 	CreatedAt  string
 	LastPayAt  string
+	// PaidPeriod — дата окончания подписки, за продление которой уже списали
+	// деньги. Защищает от повторного списания за тот же период, если продление
+	// в панели не удалось и срок подписки не сдвинулся.
+	PaidPeriod string
 	NextTryAt  string
 	Fails      int
 	LastError  string

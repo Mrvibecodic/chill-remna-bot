@@ -53,6 +53,7 @@ type Storage interface {
 	GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay, error)
 	SetAutoPayEnabled(ctx context.Context, telegramID int64, on bool) error
 	UpdateAutoPayResult(ctx context.Context, telegramID int64, lastPayAt, nextTryAt string, fails int, lastError string) error
+	MarkAutoPayCharged(ctx context.Context, telegramID int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error
 	ListAutoPay(ctx context.Context) ([]model.AutoPay, error)
 	DeleteAutoPay(ctx context.Context, telegramID int64) error
 	DeleteUser(ctx context.Context, telegramID int64) error
@@ -1267,14 +1268,14 @@ func (b *base) SetAutoPay(ctx context.Context, ap *model.AutoPay) error {
 	}
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"INSERT INTO autopay (telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, next_try_at, fails, last_error) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+") "+
+		"INSERT INTO autopay (telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET method = excluded.method, method_id = excluded.method_id, "+
 			"title = excluded.title, months = excluded.months, amount = excluded.amount, currency = excluded.currency, "+
-			"enabled = excluded.enabled, last_pay_at = excluded.last_pay_at, next_try_at = excluded.next_try_at, "+
-			"fails = excluded.fails, last_error = excluded.last_error",
+			"enabled = excluded.enabled, last_pay_at = excluded.last_pay_at, paid_period = excluded.paid_period, "+
+			"next_try_at = excluded.next_try_at, fails = excluded.fails, last_error = excluded.last_error",
 		ap.TelegramID, ap.Method, ap.MethodID, ap.Title, ap.Months, ap.Amount, ap.Currency,
-		boolToInt(ap.Enabled), ap.CreatedAt, ap.LastPayAt, ap.NextTryAt, ap.Fails, ap.LastError)
+		boolToInt(ap.Enabled), ap.CreatedAt, ap.LastPayAt, ap.PaidPeriod, ap.NextTryAt, ap.Fails, ap.LastError)
 	return err
 }
 
@@ -1282,10 +1283,10 @@ func (b *base) GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay
 	var ap model.AutoPay
 	var enabled int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, next_try_at, fails, last_error "+
+		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
 			"FROM autopay WHERE telegram_id = "+b.ph(1), telegramID).
 		Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
-			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.NextTryAt, &ap.Fails, &ap.LastError)
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1314,9 +1315,21 @@ func (b *base) UpdateAutoPayResult(ctx context.Context, telegramID int64, lastPa
 	return err
 }
 
+// MarkAutoPayCharged фиксирует состоявшееся списание: за какой период списали
+// (защита от повторной оплаты того же периода), когда и с каким исходом
+// продления. Счётчик неудач сбрасывается — деньги-то прошли.
+func (b *base) MarkAutoPayCharged(ctx context.Context, telegramID int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE autopay SET last_pay_at = "+b.ph(1)+", paid_period = "+b.ph(2)+", next_try_at = "+b.ph(3)+
+			", fails = 0, last_error = "+b.ph(4)+" WHERE telegram_id = "+b.ph(5),
+		lastPayAt, paidPeriod, nextTryAt, lastError, telegramID)
+	return err
+}
+
 func (b *base) ListAutoPay(ctx context.Context) ([]model.AutoPay, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, next_try_at, fails, last_error "+
+		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
 			"FROM autopay ORDER BY telegram_id")
 	if err != nil {
 		return nil, err
@@ -1327,7 +1340,7 @@ func (b *base) ListAutoPay(ctx context.Context) ([]model.AutoPay, error) {
 		var ap model.AutoPay
 		var enabled int
 		if err := rows.Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
-			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
 			return nil, err
 		}
 		ap.Enabled = enabled != 0

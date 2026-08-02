@@ -244,3 +244,49 @@ func TestAutoPay_ShopIssueDoesNotBlameUser(t *testing.T) {
 		t.Fatal("следующая попытка должна быть отложена")
 	}
 }
+
+// За один и тот же период деньги не списываются дважды, даже если продление в
+// панели не удалось и срок подписки не сдвинулся.
+func TestAutoPay_NoDoubleChargeForSamePeriod(t *testing.T) {
+	a, fs := autoPayApp(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	exp := now.Add(12 * time.Hour)
+
+	_ = fs.UpsertUser(ctx, 70)
+	_ = fs.SetSubExpiry(ctx, 70, exp.Format(time.RFC3339), "paid")
+	ap := &model.AutoPay{TelegramID: 70, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 1, Enabled: true}
+	_ = fs.SetAutoPay(ctx, ap)
+
+	if _, due := a.autoPayDue(ctx, ap, now); !due {
+		t.Fatal("первое списание за период должно быть разрешено")
+	}
+	// Списали, но продление не прошло: срок подписки прежний, а период оплачен.
+	_ = fs.MarkAutoPayCharged(ctx, 70, now.Format(time.RFC3339), autoPayPeriod(exp), "", "панель недоступна")
+	cur, _ := fs.GetAutoPay(ctx, 70)
+	if _, due := a.autoPayDue(ctx, cur, now.Add(48*time.Hour)); due {
+		t.Fatal("повторное списание за оплаченный период недопустимо")
+	}
+	// Подписка всё-таки продлилась — новый период снова можно оплачивать.
+	next := now.Add(30 * 24 * time.Hour)
+	_ = fs.SetSubExpiry(ctx, 70, next.Format(time.RFC3339), "paid")
+	if _, due := a.autoPayDue(ctx, cur, next.Add(-2*time.Hour)); !due {
+		t.Fatal("за новый период списание должно быть разрешено")
+	}
+}
+
+func TestCurrencyHelpers(t *testing.T) {
+	if curSymbol("RUB") != curRUB || curSymbol("") != curRUB {
+		t.Fatal("рубли должны печататься символом")
+	}
+	if curSymbol("kzt") != "KZT" {
+		t.Fatalf("прочие валюты — кодом, получено %q", curSymbol("kzt"))
+	}
+	// «₽» — три байта, но не код валюты: такой в ЮKassa слать нельзя.
+	if currencyCode("₽") || currencyCode("RU") || currencyCode("RU1") {
+		t.Fatal("некорректный код валюты не должен проходить проверку")
+	}
+	if !currencyCode("rub") {
+		t.Fatal("трёхбуквенный код должен проходить")
+	}
+}
