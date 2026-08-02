@@ -38,6 +38,22 @@ func (a *App) p2pConfig() model.P2PConfig {
 	return a.botCfg.P2P
 }
 
+// p2pOpenForAll сообщает, выдаются ли реквизиты перевода всем без ручного
+// одобрения админом (опция «включить всем» на экране настроек P2P).
+func (a *App) p2pOpenForAll() bool {
+	cfg := a.p2pConfig()
+	return cfg.Enabled && cfg.OpenForAll
+}
+
+// p2pAllowed сообщает, можно ли этому пользователю выдать реквизиты: либо
+// перевод открыт всем, либо админ одобрил конкретного пользователя.
+func (a *App) p2pAllowed(u *model.User) bool {
+	if a.p2pOpenForAll() {
+		return true
+	}
+	return u != nil && u.P2PApproved
+}
+
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 
@@ -183,7 +199,7 @@ func (a *App) startP2P(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
-	if u == nil || !u.P2PApproved {
+	if !a.p2pAllowed(u) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "p2p.need_approval"))
 		a.notifyAdminUserRequest(ctx, chatID)
 		return
@@ -350,13 +366,19 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if p2p.Rotate {
 		rot = i18n.T(lang, "admin.yes")
 	}
+	openAll := i18n.T(lang, "admin.no")
+	if p2p.OpenForAll {
+		openAll = i18n.T(lang, "admin.yes")
+	}
 	squad := p2p.SquadUUID
 	if squad == "" {
 		squad = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad)
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad) +
+		i18n.T(lang, "admin.p2p_open_block", openAll)
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, p2p.Enabled, "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
+		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
 		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -377,6 +399,14 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.P2P.Enabled = !a.botCfg.P2P.Enabled
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showP2PAdmin(ctx, chatID)
+	case "openall":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.P2P.OpenForAll = !a.botCfg.P2P.OpenForAll
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
@@ -706,6 +736,23 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showYooKassaAdmin(ctx, chatID)
+	case "yk_autodays":
+		ui.adminInput = ""
+		d, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.AutoPayDays = d
+			a.botCfg.NormalizeYooKassa()
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "inv_days":
+		ui.adminInput = ""
+		a.createInviteDays(ctx, chatID, text)
+	case "inv_uses":
+		ui.adminInput = ""
+		a.createInviteUses(ctx, chatID, text)
 	case "subdomain":
 		a.setSubdomain(ctx, chatID, text)
 	case "wh_addr":

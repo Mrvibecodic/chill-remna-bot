@@ -185,7 +185,7 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 // MiniCheckout buys/renews a period. Only the "balance" method completes
 // in-app (reuses finalizePurchase, the same provisioning core as the chat
 // flow); other methods return Redirect=true (handled in a later stage).
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string, web_ bool) web.MiniActionDTO {
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string, web_ bool, autopay bool) web.MiniActionDTO {
 	valid := false
 	for _, m := range model.PlanMonths {
 		if m == months {
@@ -203,7 +203,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 		return a.MiniP2P(ctx, tgID, months)
 	}
 	if method != model.PayMethodBalance {
-		payURL, invoice, err := a.miniPayURL(ctx, tgID, months, method, web_)
+		payURL, invoice, err := a.miniPayURL(ctx, tgID, months, method, web_, autopay)
 		if err != nil {
 			return web.MiniActionDTO{Error: err.Error()}
 		}

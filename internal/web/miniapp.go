@@ -32,7 +32,14 @@ type MiniProvider interface {
 	// MiniTrial activates the free trial (mirrors the chat trial flow).
 	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
 	// MiniCheckout performs an in-app purchase for the given period+method.
-	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool) MiniActionDTO
+	// autopay asks ЮKassa to remember the payment method so the bot can renew
+	// the subscription automatically.
+	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool, autopay bool) MiniActionDTO
+
+	// MiniAutoPay reports the user's automatic-renewal state.
+	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
+	// MiniSetAutoPay turns automatic renewal on/off for the user.
+	MiniSetAutoPay(ctx context.Context, tgID int64, on bool) MiniActionDTO
 
 	// MiniReferral returns the user's referral info (mirrors showReferral).
 	MiniReferral(ctx context.Context, tgID int64) MiniReferralDTO
@@ -118,6 +125,20 @@ type MiniActionDTO struct {
 	P2PCard   string `json:"p2p_card,omitempty"`
 	P2PAmount string `json:"p2p_amount,omitempty"`
 	P2PReqID  int64  `json:"p2p_req_id,omitempty"`
+}
+
+// MiniAutoPayDTO describes automatic renewal for the current user: whether the
+// shop offers it at all, whether it is on for this user, and what will be
+// charged. Days is how many days before expiry the charge happens.
+type MiniAutoPayDTO struct {
+	Available bool   `json:"available"`
+	On        bool   `json:"on"`
+	Months    int    `json:"months,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Days      int    `json:"days"`
+	// CanEnable is true when a saved payment method already exists, so the user
+	// can switch renewal back on without paying again.
+	CanEnable bool `json:"can_enable"`
 }
 
 type MiniMeDTO struct {
@@ -354,8 +375,9 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Months int    `json:"months"`
-		Method string `json:"method"`
+		Months  int    `json:"months"`
+		Method  string `json:"method"`
+		AutoPay bool   `json:"autopay"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -363,7 +385,41 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web, req.AutoPay))
+}
+
+// handleMiniAutoPay returns the user's automatic-renewal state.
+func (s *Server) handleMiniAutoPay(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniAutoPay(ctx, id))
+}
+
+// handleMiniSetAutoPay turns automatic renewal on/off for the user.
+func (s *Server) handleMiniSetAutoPay(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	body, err := readAllLimited(r, 4*1024)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		On bool `json:"on"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniSetAutoPay(ctx, id, req.On))
 }
 
 func (s *Server) handleMiniReferral(w http.ResponseWriter, r *http.Request) {

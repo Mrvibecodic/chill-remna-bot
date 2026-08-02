@@ -100,7 +100,14 @@ func (a *App) sendReminder(ctx context.Context, chatID int64, key string, daysLe
 		rows = append(rows, row)
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")})
-	a.notifyKB(ctx, chatID, i18n.T(lang, key, daysLeft), rows)
+	text := i18n.T(lang, key, daysLeft)
+	// Если у человека включено автопродление, напоминание «подписка кончается»
+	// без этой строки читается как «надо срочно платить руками».
+	if a.autoPayOn(ctx, chatID) {
+		text += "\n\n" + i18n.T(lang, "ap.remind_hint", a.autoPayDaysText(lang))
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")})
+	}
+	a.notifyKB(ctx, chatID, text, rows)
 }
 
 func daysUntil(exp, now time.Time) int {

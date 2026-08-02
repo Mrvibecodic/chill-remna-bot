@@ -30,7 +30,41 @@ func (a *App) ykClient() *yookassa.Client {
 	return yookassa.New(cfg.ShopID, cfg.SecretKey)
 }
 
+// startYooKassa — вход в оплату через ЮKassa. Если админ включил автоплатежи,
+// сперва показываем выбор: разовый платёж или платёж с автопродлением (с
+// объяснением, что и когда спишется и как это отключить).
 func (a *App) startYooKassa(ctx context.Context, chatID int64) {
+	if !a.autoPayAvailable() {
+		a.ykStart(ctx, chatID, false)
+		return
+	}
+	lang := a.lang(chatID)
+	months := a.getUI(chatID).buyMonths
+	if months == 0 {
+		months = model.PlanMonths[0]
+	}
+	pr := a.pricing()
+	value := pr.Fiat(model.PayMethodYooKassa, months)
+	if value == "" {
+		a.ykStart(ctx, chatID, false)
+		return
+	}
+	autoRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_pay_auto"), "ap:pay:1")}
+	onceRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_pay_once"), "ap:pay:0")}
+	rows := [][]models.InlineKeyboardButton{onceRow, autoRow}
+	if a.autoPayCfg().AutoPayDefault {
+		rows = [][]models.InlineKeyboardButton{autoRow, onceRow}
+	}
+	rows = append(rows, []models.InlineKeyboardButton{
+		btn(i18n.T(lang, "btn.back"), "menu:buy"), btn(i18n.T(lang, "btn.home"), "menu:home"),
+	})
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "ap.choose",
+		monthsWord(lang, months), value+curSuffix(pr.Currency), a.autoPayDaysText(lang)), rows)
+}
+
+// ykStart создаёт платёж в ЮKassa. save=true — просим ЮKassa сохранить способ
+// оплаты, чтобы потом продлевать подписку автоматически.
+func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	lang := a.lang(chatID)
 	months := a.getUI(chatID).buyMonths
 	if months == 0 {
@@ -42,6 +76,9 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 	if !cfg.Enabled || value == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
 		return
+	}
+	if save && !a.autoPayAvailable() {
+		save = false
 	}
 	client := a.ykClient()
 	if client == nil {
@@ -60,12 +97,16 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)
-	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc)
+	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency)), [][]models.InlineKeyboardButton{
+	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency))
+	if save {
+		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint", a.autoPayDaysText(lang))
+	}
+	a.sendKB(ctx, chatID, prompt, [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "yk.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "yk.btn_check"), "ykc:"+extID)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -120,6 +161,7 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
+	a.saveAutoPayFromPayment(ctx, payChat, months, pay)
 	a.sendSubActive(ctx, payChat, link, expireAt)
 }
 
@@ -142,13 +184,43 @@ func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {
 	if ret == "" {
 		ret = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, curRUB, a.formatFiatPrices(model.PayMethodYooKassa))
+	auto := i18n.T(lang, "admin.off")
+	if cfg.AutoPay {
+		auto = i18n.T(lang, "admin.on")
+	}
+	autoDefault := i18n.T(lang, "admin.no")
+	if cfg.AutoPayDefault {
+		autoDefault = i18n.T(lang, "admin.yes")
+	}
+	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, curRUB, a.formatFiatPrices(model.PayMethodYooKassa)) +
+		i18n.T(lang, "admin.yk_auto_block", auto, cfg.AutoPayDays, autoDefault, a.autoPayCount(ctx))
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, cfg.Enabled, "yk:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "yk:prices")},
 		{btn(i18n.T(lang, "admin.yk_btn_shop"), "yk:shop"), btn(i18n.T(lang, "admin.yk_btn_secret"), "yk:secret")},
 		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return")},
+		{btn(i18n.T(lang, "admin.yk_btn_auto"), "yk:auto"), btn(i18n.T(lang, "admin.yk_btn_autodays"), "yk:autodays")},
+		{btn(i18n.T(lang, "admin.yk_btn_autodefault"), "yk:autodef")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
+}
+
+// autoPayCount — сколько пользователей сейчас с включённым автопродлением
+// (для админского экрана).
+func (a *App) autoPayCount(ctx context.Context) int {
+	if a.store == nil {
+		return 0
+	}
+	list, err := a.store.ListAutoPay(ctx)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for i := range list {
+		if list[i].Enabled && list[i].MethodID != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
@@ -172,6 +244,26 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 	case "return":
 		a.getUI(chatID).adminInput = "yk_return"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_return"), "menu:yookassa")
+	case "auto":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.AutoPay = !a.botCfg.YooKassa.AutoPay
+			a.botCfg.NormalizeYooKassa()
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "autodef":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.AutoPayDefault = !a.botCfg.YooKassa.AutoPayDefault
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "autodays":
+		a.getUI(chatID).adminInput = "yk_autodays"
+		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_autodays"), "menu:yookassa")
 	case "cur":
 		a.getUI(chatID).adminInput = "yk_cur"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_currency"), "menu:yookassa")
@@ -189,7 +281,7 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 // ykCreatePayment creates a YooKassa payment + pending invoice and returns the
 // confirmation URL. Shared by the chat flow and the Mini App so the pending
 // ExtID/format stay identical.
-func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string) (payURL, extID string, err error) {
+func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string, save bool) (payURL, extID string, err error) {
 	client := a.ykClient()
 	if client == nil {
 		return "", "", fmt.Errorf("yookassa не настроена")
@@ -197,12 +289,12 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	pay, err := client.CreatePayment(ctx, value, currency, desc, returnURL, chatID, months)
+	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, save)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", "", err
 	}
-	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s", months, value, currency)
+	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
 	if a.store != nil {
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months})
 	}

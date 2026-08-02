@@ -91,6 +91,7 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		}
 		return false, fmt.Errorf("finalize yookassa %s: %w", n.Object.ID, err)
 	}
+	a.saveAutoPayFromPayment(ctx, chatID, months, pay)
 	a.sendSubActive(ctx, chatID, link, expireAt)
 	a.log.Info("yookassa webhook: payment finalized", "id", n.Object.ID, "chat_id", chatID, "months", months)
 	return true, nil

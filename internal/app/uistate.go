@@ -12,6 +12,9 @@ type uiState struct {
 	priceMonths int
 	linkUID     int64
 
+	// Мастер создания приглашения: срок жизни в днях (шаг 1 из 2).
+	inviteDays int
+
 	panelSyncDone bool
 
 	welcomeAwait       string

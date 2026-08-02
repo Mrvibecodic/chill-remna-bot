@@ -120,7 +120,104 @@ type fakeStore struct {
 	webUsers  map[string]*model.WebUser
 	paylogs   []model.PayLogEntry
 	wlIDs     map[int64]bool
+	invites   map[string]*model.Invite
+	autopays  map[int64]*model.AutoPay
 	seq       int64
+}
+
+func (s *fakeStore) CreateInvite(_ context.Context, inv *model.Invite) error {
+	if s.invites == nil {
+		s.invites = map[string]*model.Invite{}
+	}
+	cp := *inv
+	s.invites[inv.Code] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetInvite(_ context.Context, code string) (*model.Invite, error) {
+	if s.invites == nil || s.invites[code] == nil {
+		return nil, nil
+	}
+	cp := *s.invites[code]
+	return &cp, nil
+}
+
+func (s *fakeStore) ListInvites(context.Context) ([]model.Invite, error) {
+	var out []model.Invite
+	for _, inv := range s.invites {
+		out = append(out, *inv)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) UseInvite(_ context.Context, code string) (bool, error) {
+	inv := s.invites[code]
+	if inv == nil || !inv.Active(time.Now().UTC()) {
+		return false, nil
+	}
+	inv.Used++
+	return true, nil
+}
+
+func (s *fakeStore) RevokeInvite(_ context.Context, code string) error {
+	if inv := s.invites[code]; inv != nil {
+		inv.Revoked = true
+	}
+	return nil
+}
+
+func (s *fakeStore) DeleteInvite(_ context.Context, code string) error {
+	delete(s.invites, code)
+	return nil
+}
+
+func (s *fakeStore) SetAutoPay(_ context.Context, ap *model.AutoPay) error {
+	if s.autopays == nil {
+		s.autopays = map[int64]*model.AutoPay{}
+	}
+	cp := *ap
+	s.autopays[ap.TelegramID] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetAutoPay(_ context.Context, id int64) (*model.AutoPay, error) {
+	if s.autopays == nil || s.autopays[id] == nil {
+		return nil, nil
+	}
+	cp := *s.autopays[id]
+	return &cp, nil
+}
+
+func (s *fakeStore) SetAutoPayEnabled(_ context.Context, id int64, on bool) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.Enabled = on
+		ap.Fails = 0
+		ap.LastError = ""
+	}
+	return nil
+}
+
+func (s *fakeStore) UpdateAutoPayResult(_ context.Context, id int64, lastPayAt, nextTryAt string, fails int, lastError string) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.LastPayAt = lastPayAt
+		ap.NextTryAt = nextTryAt
+		ap.Fails = fails
+		ap.LastError = lastError
+	}
+	return nil
+}
+
+func (s *fakeStore) ListAutoPay(context.Context) ([]model.AutoPay, error) {
+	var out []model.AutoPay
+	for _, ap := range s.autopays {
+		out = append(out, *ap)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteAutoPay(_ context.Context, id int64) error {
+	delete(s.autopays, id)
+	return nil
 }
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }

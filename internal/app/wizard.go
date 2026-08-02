@@ -91,6 +91,8 @@ const (
 	cbAddSub    = "addsub"
 	cbDevices   = "dev"
 	cbRSImport  = "rsimp"
+	cbAutoPay   = "ap"
+	cbAccess    = "acc"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {

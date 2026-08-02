@@ -200,7 +200,7 @@ func cleanPGData(t *testing.T, dsn string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, tbl := range []string{"payments", "p2p_requests", "users"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}

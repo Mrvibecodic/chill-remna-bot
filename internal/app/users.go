@@ -38,18 +38,17 @@ func (a *App) denyAccess(ctx context.Context, chatID int64, isAdmin bool) bool {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return true
 	}
-	a.mu.Lock()
-	wl := a.botCfg != nil && a.botCfg.WhitelistMode
-	a.mu.Unlock()
-	if wl && a.store != nil {
-		u, _ := a.store.GetUser(ctx, chatID)
-		allowed := u != nil && u.Whitelisted
-		if !allowed {
-			if ok, _ := a.store.IsWhitelistID(ctx, chatID); ok {
-				allowed = true
-			}
+	// Режим публичности: «публично» пускает всех, «по приглашениям» и «белый
+	// список» — только тех, кому доступ уже выдан (приглашение выдаёт тот же
+	// флаг, поэтому смена режима никого не выкидывает).
+	switch a.accessMode() {
+	case model.AccessInvite:
+		if a.store != nil && !a.accessGranted(ctx, chatID) {
+			a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.need_invite"))
+			return true
 		}
-		if !allowed {
+	case model.AccessWhitelist:
+		if a.store != nil && !a.accessGranted(ctx, chatID) {
 			a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.not_whitelisted"))
 			return true
 		}
@@ -77,15 +76,9 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
 
-	a.mu.Lock()
-	wlMode := a.botCfg != nil && a.botCfg.WhitelistMode
-	a.mu.Unlock()
-	wlLabel := i18n.T(lang, "users.wl_off")
-	if wlMode {
-		wlLabel = i18n.T(lang, "users.wl_on")
-	}
+	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
-		{btn(wlLabel, "usr:wlmode")},
+		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
 	}
 	for _, u := range users {
@@ -305,12 +298,12 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		}
 		a.showUser(ctx, chatID, uid)
 	case "wlmode":
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.WhitelistMode = !a.botCfg.WhitelistMode
+		// Совместимость со старой кнопкой: тумблер «вайтлист вкл/выкл».
+		if a.accessMode() == model.AccessWhitelist {
+			a.setAccessMode(ctx, model.AccessPublic)
+		} else {
+			a.setAccessMode(ctx, model.AccessWhitelist)
 		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
 		a.showUsers(ctx, chatID, 0)
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
@@ -691,6 +684,16 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		return
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
+	// Автопродление показываем, если оно доступно в магазине или уже подключено
+	// у этого пользователя — выключить его должно быть можно всегда.
+	apOn := a.autoPayOn(ctx, chatID)
+	if a.autoPayAvailable() || apOn {
+		state := i18n.T(lang, "ap.state_off")
+		if apOn {
+			state = i18n.T(lang, "ap.state_on")
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_row", state), "ap:show")})
+	}
 	rows = append(rows, home)
 	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)

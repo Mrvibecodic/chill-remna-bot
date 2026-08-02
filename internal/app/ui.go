@@ -555,6 +555,12 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		}
 	case "mysubs":
 		a.showMySubs(ctx, chatID)
+	case "autopay":
+		a.showAutoPay(ctx, chatID)
+	case "access":
+		if isAdmin {
+			a.showAccess(ctx, chatID)
+		}
 	case "home":
 		a.showMenu(ctx, chatID, isAdmin, name)
 	case "register":

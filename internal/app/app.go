@@ -190,6 +190,8 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAddSub()
 		cfg.NormalizeMiniApp()
 		cfg.NormalizeCabinet()
+		cfg.NormalizeAccess()
+		cfg.NormalizeYooKassa()
 		a.botCfg = cfg
 		a.panel = remnawave.New(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
@@ -321,6 +323,19 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
 	a.rememberUser(ctx, chatID, username, firstName)
+	// Ссылка-приглашение обрабатывается ДО проверки режима публичности: иначе
+	// приглашённый упрётся в «нужно приглашение» и ссылка никогда не сработает.
+	if !isAdmin && strings.HasPrefix(text, "/start ") {
+		if code, isInv := strings.CutPrefix(strings.TrimSpace(strings.TrimPrefix(text, "/start ")), "inv_"); isInv && code != "" {
+			if msg, ok := a.redeemInvite(ctx, chatID, code); msg != "" {
+				a.msg.Delete(ctx, chatID, m.ID)
+				a.send(ctx, chatID, msg)
+				if !ok {
+					return
+				}
+			}
+		}
+	}
 	if a.denyAccess(ctx, chatID, isAdmin) {
 		return
 	}
@@ -916,6 +931,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onCBCheck(ctx, chatID, val)
 	case "usr":
 		a.onUsers(ctx, chatID, val, 0)
+	case "acc":
+		a.onAccess(ctx, chatID, val)
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}

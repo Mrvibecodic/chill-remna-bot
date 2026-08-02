@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 const (
@@ -24,6 +25,84 @@ const (
 	LangRU = "ru"
 	LangEN = "en"
 )
+
+// Режимы публичности бота.
+const (
+	// AccessPublic — вход свободный: любой, кто открыл бота, регистрируется.
+	AccessPublic = "public"
+	// AccessInvite — вход только по одноразовой ссылке-приглашению
+	// (t.me/<bot>?start=inv_<код>), которую генерит админ.
+	AccessInvite = "invite"
+	// AccessWhitelist — вход только тем, кого админ добавил в белый список.
+	AccessWhitelist = "whitelist"
+)
+
+// NormalizeAccess приводит режим публичности к валидному значению и держит
+// legacy-флаг WhitelistMode в синхроне с новым AccessMode:
+//   - конфиг старой версии (AccessMode пустой) читается по WhitelistMode;
+//   - дальше источник правды — AccessMode, а WhitelistMode переписывается,
+//     чтобы откат на старую версию бота не потерял вайтлист.
+func (c *BotConfig) NormalizeAccess() {
+	valid := c.AccessMode == AccessPublic || c.AccessMode == AccessInvite || c.AccessMode == AccessWhitelist
+	// Рассинхрон возможен только если конфиг писала старая версия бота (она
+	// знает лишь WhitelistMode) — тогда верим ей.
+	if !valid || c.WhitelistMode != (c.AccessMode == AccessWhitelist) {
+		if c.WhitelistMode {
+			c.AccessMode = AccessWhitelist
+		} else if !valid || c.AccessMode == AccessWhitelist {
+			c.AccessMode = AccessPublic
+		}
+	}
+	c.WhitelistMode = c.AccessMode == AccessWhitelist
+}
+
+// Invite — одноразовая (или многоразовая) ссылка-приглашение в бота.
+// Срок жизни и число регистраций задаёт админ при создании.
+type Invite struct {
+	Code      string
+	MaxUses   int
+	Used      int
+	ExpiresAt string
+	CreatedAt string
+	Revoked   bool
+	Note      string
+}
+
+// Active сообщает, можно ли ещё активировать приглашение на момент now
+// (RFC3339-время в UTC).
+func (i *Invite) Active(now time.Time) bool {
+	if i == nil || i.Revoked {
+		return false
+	}
+	if i.MaxUses > 0 && i.Used >= i.MaxUses {
+		return false
+	}
+	if i.ExpiresAt != "" {
+		exp, err := time.Parse(time.RFC3339, i.ExpiresAt)
+		if err == nil && !exp.After(now) {
+			return false
+		}
+	}
+	return true
+}
+
+// AutoPay — подключённое автосписание: сохранённый в ЮKassa способ оплаты,
+// которым бот сам продлевает подписку пользователя.
+type AutoPay struct {
+	TelegramID int64
+	Method     string
+	MethodID   string
+	Title      string
+	Months     int
+	Amount     string
+	Currency   string
+	Enabled    bool
+	CreatedAt  string
+	LastPayAt  string
+	NextTryAt  string
+	Fails      int
+	LastError  string
+}
 
 type PanelConfig struct {
 	Mode        string `json:"mode"`
@@ -50,9 +129,14 @@ type BotConfig struct {
 	Referral  ReferralConfig  `json:"referral"`
 	MoyNalog  MoyNalogConfig  `json:"moynalog"`
 
-	WhitelistMode bool          `json:"whitelist_mode"`
-	Pricing       Pricing       `json:"pricing"`
-	Welcome       WelcomeConfig `json:"welcome"`
+	// WhitelistMode — legacy-флаг «вайтлист включён». Оставлен ради обратной
+	// совместимости со старыми конфигами и старым UI; актуальное состояние
+	// хранится в AccessMode, NormalizeAccess синхронизирует их в обе стороны.
+	WhitelistMode bool `json:"whitelist_mode"`
+	// AccessMode — режим публичности бота: public / invite / whitelist.
+	AccessMode string        `json:"access_mode"`
+	Pricing    Pricing       `json:"pricing"`
+	Welcome    WelcomeConfig `json:"welcome"`
 
 	PremiumEmoji map[string]string `json:"premium_emoji"`
 
@@ -186,7 +270,32 @@ type YooKassaConfig struct {
 	ReturnURL string         `json:"return_url"`
 	Currency  string         `json:"currency"`
 	Prices    map[int]string `json:"prices"`
+	// AutoPay включает автопродление: при оплате бот просит ЮKassa сохранить
+	// способ оплаты, а потом сам списывает деньги перед окончанием подписки.
+	// Требует, чтобы в личном кабинете ЮKassa магазину были включены
+	// автоплатежи (рекуррентные платежи).
+	AutoPay bool `json:"autopay"`
+	// AutoPayDays — за сколько дней до конца подписки списывать (0 = в день
+	// окончания). Нормализуется в диапазон 0..14.
+	AutoPayDays int `json:"autopay_days"`
+	// AutoPayDefault — предлагать автопродление выбранным по умолчанию.
+	AutoPayDefault bool `json:"autopay_default"`
 }
+
+// NormalizeYooKassa приводит настройки автосписания к валидным значениям.
+func (c *BotConfig) NormalizeYooKassa() {
+	y := &c.YooKassa
+	if y.AutoPayDays < 0 {
+		y.AutoPayDays = 0
+	}
+	if y.AutoPayDays > 14 {
+		y.AutoPayDays = 14
+	}
+}
+
+// AutoPayMaxFails — после скольких неудачных попыток подряд автосписание
+// выключается само (пользователю приходит уведомление).
+const AutoPayMaxFails = 3
 
 type Payment struct {
 	ID         int64
@@ -215,13 +324,17 @@ type PendingInvoice struct {
 }
 
 type P2PConfig struct {
-	Enabled   bool           `json:"enabled"`
-	Cards     []string       `json:"cards"`
-	Rotate    bool           `json:"rotate"`
-	RotateIdx int            `json:"rotate_idx"`
-	Prices    map[int]string `json:"prices"`
-	Currency  string         `json:"currency"`
-	SquadUUID string         `json:"squad_uuid"`
+	Enabled bool `json:"enabled"`
+	// OpenForAll делает перевод обычным способом оплаты: реквизиты выдаются
+	// всем сразу, без ручного одобрения каждого пользователя админом.
+	// Скриншот и подтверждение платежа админом при этом остаются.
+	OpenForAll bool           `json:"open_for_all"`
+	Cards      []string       `json:"cards"`
+	Rotate     bool           `json:"rotate"`
+	RotateIdx  int            `json:"rotate_idx"`
+	Prices     map[int]string `json:"prices"`
+	Currency   string         `json:"currency"`
+	SquadUUID  string         `json:"squad_uuid"`
 }
 
 type User struct {
