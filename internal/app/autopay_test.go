@@ -19,7 +19,8 @@ func autoPayApp(t *testing.T) (*App, *fakeStore) {
 	return a, fs
 }
 
-// Успешный платёж с сохранённым способом оплаты включает автопродление.
+// Успешный платёж сохраняет способ оплаты, но НЕ включает списания: сперва
+// пользователю приходит предложение, и только его «да» включает автопродление.
 func TestAutoPay_SavedFromPayment(t *testing.T) {
 	a, fs := autoPayApp(t)
 	ctx := context.Background()
@@ -35,11 +36,48 @@ func TestAutoPay_SavedFromPayment(t *testing.T) {
 	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
 
 	ap, _ := fs.GetAutoPay(ctx, 42)
-	if ap == nil || !ap.Enabled || ap.MethodID != "pm_1" || ap.Months != 3 {
-		t.Fatalf("автопродление не сохранено: %+v", ap)
+	if ap == nil || ap.MethodID != "pm_1" || ap.Months != 3 {
+		t.Fatalf("способ оплаты не сохранён: %+v", ap)
 	}
+	if ap.Enabled || a.autoPayOn(ctx, 42) {
+		t.Fatal("до согласия пользователя автопродление должно быть выключено")
+	}
+
+	// Пользователь соглашается — списания включаются.
+	a.onAutoPayUser(ctx, 42, "on")
 	if !a.autoPayOn(ctx, 42) {
-		t.Fatal("autoPayOn должен быть true")
+		t.Fatal("после согласия автопродление должно быть включено")
+	}
+
+	// Повторная оплата уже подключённого пользователя согласие не сбрасывает.
+	pay.ID = "pay_1b"
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
+	if !a.autoPayOn(ctx, 42) {
+		t.Fatal("повторная оплата не должна выключать автопродление")
+	}
+}
+
+// Отказ от предложения оставляет автопродление выключенным.
+func TestAutoPay_DeclineOffer(t *testing.T) {
+	a, fs := autoPayApp(t)
+	ctx := context.Background()
+
+	pay := &yookassa.Payment{ID: "pay_d"}
+	pay.Metadata = map[string]string{"autopay": "1"}
+	pay.PaymentMethod.ID = "pm_d"
+	pay.PaymentMethod.Saved = true
+	a.saveAutoPayFromPayment(ctx, 49, 1, pay)
+
+	a.onAutoPayUser(ctx, 49, "no")
+	if a.autoPayOn(ctx, 49) {
+		t.Fatal("после отказа списаний быть не должно")
+	}
+	// Карта сохранена — можно включить позже одной кнопкой.
+	if ap, _ := fs.GetAutoPay(ctx, 49); ap == nil || ap.MethodID != "pm_d" {
+		t.Fatalf("сохранённый способ оплаты должен остаться: %+v", ap)
+	}
+	if !a.MiniAutoPay(ctx, 49).CanEnable {
+		t.Fatal("CanEnable должен быть true — карта сохранена")
 	}
 }
 
@@ -147,6 +185,7 @@ func TestAutoPay_DisablesAfterFails(t *testing.T) {
 func TestAutoPay_StateForMiniApp(t *testing.T) {
 	a, fs := autoPayApp(t)
 	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 48)
 	_ = fs.SetAutoPay(ctx, &model.AutoPay{TelegramID: 48, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 6, Title: "•••• 1111", Enabled: true})
 
 	dto := a.MiniAutoPay(ctx, 48)

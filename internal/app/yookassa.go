@@ -30,36 +30,12 @@ func (a *App) ykClient() *yookassa.Client {
 	return yookassa.New(cfg.ShopID, cfg.SecretKey)
 }
 
-// startYooKassa — вход в оплату через ЮKassa. Если админ включил автоплатежи,
-// сперва показываем выбор: разовый платёж или платёж с автопродлением (с
-// объяснением, что и когда спишется и как это отключить).
+// startYooKassa — вход в оплату через ЮKassa. Платёж всегда создаётся с
+// сохранением способа оплаты, когда админ включил автоплатежи (на форме ЮKassa
+// пользователь видит согласие на автоплатежи), но сами автосписания включаются
+// только после явного «да» в боте — предложение приходит после успешной оплаты.
 func (a *App) startYooKassa(ctx context.Context, chatID int64) {
-	if !a.autoPayAvailable() {
-		a.ykStart(ctx, chatID, false)
-		return
-	}
-	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
-	if months == 0 {
-		months = model.PlanMonths[0]
-	}
-	pr := a.pricing()
-	value := pr.Fiat(model.PayMethodYooKassa, months)
-	if value == "" {
-		a.ykStart(ctx, chatID, false)
-		return
-	}
-	autoRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_pay_auto"), "ap:pay:1")}
-	onceRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_pay_once"), "ap:pay:0")}
-	rows := [][]models.InlineKeyboardButton{onceRow, autoRow}
-	if a.autoPayCfg().AutoPayDefault {
-		rows = [][]models.InlineKeyboardButton{autoRow, onceRow}
-	}
-	rows = append(rows, []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.back"), "menu:buy"), btn(i18n.T(lang, "btn.home"), "menu:home"),
-	})
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "ap.choose",
-		monthsWord(lang, months), value+curSuffix(pr.Currency), a.autoPayDaysText(lang)), rows)
+	a.ykStart(ctx, chatID, a.autoPayAvailable())
 }
 
 // ykStart создаёт платёж в ЮKassa. save=true — просим ЮKassa сохранить способ
@@ -104,7 +80,7 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	}
 	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency))
 	if save {
-		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint", a.autoPayDaysText(lang))
+		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint")
 	}
 	a.sendKB(ctx, chatID, prompt, [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "yk.btn_pay"), URL: payURL}},
@@ -188,18 +164,13 @@ func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {
 	if cfg.AutoPay {
 		auto = i18n.T(lang, "admin.on")
 	}
-	autoDefault := i18n.T(lang, "admin.no")
-	if cfg.AutoPayDefault {
-		autoDefault = i18n.T(lang, "admin.yes")
-	}
 	text := i18n.T(lang, "admin.yk_title", status, shop, secret, ret, curRUB, a.formatFiatPrices(model.PayMethodYooKassa)) +
-		i18n.T(lang, "admin.yk_auto_block", auto, cfg.AutoPayDays, autoDefault, a.autoPayCount(ctx))
+		i18n.T(lang, "admin.yk_auto_block", auto, cfg.AutoPayDays, a.autoPayCount(ctx))
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, cfg.Enabled, "yk:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "yk:prices")},
 		{btn(i18n.T(lang, "admin.yk_btn_shop"), "yk:shop"), btn(i18n.T(lang, "admin.yk_btn_secret"), "yk:secret")},
 		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return")},
 		{btn(i18n.T(lang, "admin.yk_btn_auto"), "yk:auto"), btn(i18n.T(lang, "admin.yk_btn_autodays"), "yk:autodays")},
-		{btn(i18n.T(lang, "admin.yk_btn_autodefault"), "yk:autodef")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -249,14 +220,6 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 		if a.botCfg != nil {
 			a.botCfg.YooKassa.AutoPay = !a.botCfg.YooKassa.AutoPay
 			a.botCfg.NormalizeYooKassa()
-		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
-		a.showYooKassaAdmin(ctx, chatID)
-	case "autodef":
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.YooKassa.AutoPayDefault = !a.botCfg.YooKassa.AutoPayDefault
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)

@@ -13,7 +13,7 @@ import (
 // Stars, or a payment-page/redirect URL (openLink) for the others. It reuses
 // the SAME invoice-creation cores as the chat flow, so pending-invoice ExtID
 // formats are identical and the existing webhooks complete the payment.
-func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method string, web_ bool, autopay bool) (string, bool, error) {
+func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
 	switch method {
 	case model.PayMethodStars:
 		link, err := a.starsInvoiceLink(ctx, tgID, months)
@@ -35,7 +35,7 @@ func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method str
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
-		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, autopay && a.autoPayAvailable())
+		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable())
 		return url, false, err
 
 	case model.PayMethodCryptoBot:

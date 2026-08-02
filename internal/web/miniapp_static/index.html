@@ -493,10 +493,10 @@ function autoPayBlock(){
       '</div><button class="btn sec" style="margin-top:10px" onclick="setAutoPay(false,this)">Отключить автопродление</button></div>';
   }
   if(ap.can_enable){
-    return '<div class="card"><div><b>Автопродление выключено</b><div class="hint" style="margin-top:4px">Карта уже сохранена — можно включить обратно, и подписка будет продлеваться сама ('+esc(autoPayWhen())+').</div></div>'+
+    return '<div class="card"><div><b>Автопродление выключено</b><div class="hint" style="margin-top:4px">Карта уже сохранена в ЮKassa — включите, и подписка будет продлеваться сама ('+esc(autoPayWhen())+'). Отключить можно в любой момент, списаний после этого нет.</div></div>'+
       '<button class="btn sec" style="margin-top:10px" onclick="setAutoPay(true,this)">Включить автопродление</button></div>';
   }
-  return '<div class="card"><div><b>Автопродление</b><div class="hint" style="margin-top:4px">Можно не помнить про оплату: при оплате картой выберите «с автопродлением» — бот продлит подписку сам ('+esc(autoPayWhen())+'), а отключить можно одной кнопкой в любой момент.</div></div></div>';
+  return '<div class="card"><div><b>Автопродление</b><div class="hint" style="margin-top:4px">Можно не помнить про оплату: после оплаты картой бот предложит включить автопродление и дальше будет продлевать подписку сам ('+esc(autoPayWhen())+'). Отключается одной кнопкой в любой момент.</div></div></div>';
 }
 async function setAutoPay(on,el){
   haptic('tap');busy(el,true);
@@ -596,8 +596,7 @@ function buyPlan(months,label){
   methods.forEach(function(m){
     h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
     if(m==='yookassa'&&apOn){
-      h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\',this,true)">🔁 Карта с автопродлением</button>'+
-        '<div class="hint">С автопродлением карта сохранится в ЮKassa, и подписка будет продлеваться сама ('+esc(autoPayWhen())+'). Отключить — одной кнопкой на главном экране.</div>';
+      h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
   });
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
@@ -627,9 +626,9 @@ async function p2pUpload(reqID,el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   busy(el,false);
 }
-async function pay(months,method,el,autopay){
+async function pay(months,method,el){
   haptic('tap');busy(el,true);
-  try{const r=await post('/api/miniapp/checkout',{months:months,method:method,autopay:!!autopay});
+  try{const r=await post('/api/miniapp/checkout',{months:months,method:method});
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){

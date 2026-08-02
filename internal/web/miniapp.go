@@ -32,9 +32,7 @@ type MiniProvider interface {
 	// MiniTrial activates the free trial (mirrors the chat trial flow).
 	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
 	// MiniCheckout performs an in-app purchase for the given period+method.
-	// autopay asks ЮKassa to remember the payment method so the bot can renew
-	// the subscription automatically.
-	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool, autopay bool) MiniActionDTO
+	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool) MiniActionDTO
 
 	// MiniAutoPay reports the user's automatic-renewal state.
 	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
@@ -375,9 +373,8 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Months  int    `json:"months"`
-		Method  string `json:"method"`
-		AutoPay bool   `json:"autopay"`
+		Months int    `json:"months"`
+		Method string `json:"method"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -385,7 +382,7 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web, req.AutoPay))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web))
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.

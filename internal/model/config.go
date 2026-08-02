@@ -278,8 +278,6 @@ type YooKassaConfig struct {
 	// AutoPayDays — за сколько дней до конца подписки списывать (0 = в день
 	// окончания). Нормализуется в диапазон 0..14.
 	AutoPayDays int `json:"autopay_days"`
-	// AutoPayDefault — предлагать автопродление выбранным по умолчанию.
-	AutoPayDefault bool `json:"autopay_default"`
 }
 
 // NormalizeYooKassa приводит настройки автосписания к валидным значениям.

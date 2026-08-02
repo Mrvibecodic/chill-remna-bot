@@ -68,10 +68,12 @@ func (a *App) autoPayOn(ctx context.Context, chatID int64) bool {
 	return ap != nil && ap.Enabled && ap.MethodID != ""
 }
 
-// saveAutoPayFromPayment запоминает сохранённый способ оплаты после успешного
-// платежа, сделанного с автопродлением, и сообщает об этом пользователю.
-// Вызывается и из вебхука, и из ручной проверки платежа — повторный вызов
-// просто перезаписывает запись теми же данными.
+// saveAutoPayFromPayment запоминает сохранённый ЮKassa способ оплаты после
+// успешного платежа и ПРЕДЛАГАЕТ пользователю подключить автопродление.
+// Само по себе сохранение карты списаний не включает: запись создаётся
+// выключенной, деньги начнут списываться только после явного «Подключить».
+// Вызывается и из вебхука, и из ручной проверки платежа; повторный вызов не
+// перетирает уже принятое пользователем решение.
 func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months int, pay *yookassa.Payment) {
 	if a.store == nil || pay == nil || chatID == 0 {
 		return
@@ -83,6 +85,8 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		months = model.PlanMonths[0]
 	}
 	prev := a.getAutoPay(ctx, chatID)
+	// Уже подключено — просто обновляем карту и период, ничего не спрашиваем.
+	alreadyOn := prev != nil && prev.Enabled && prev.MethodID != ""
 	ap := &model.AutoPay{
 		TelegramID: chatID,
 		Method:     model.PayMethodYooKassa,
@@ -91,7 +95,7 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		Months:     months,
 		Amount:     pay.Amount.Value,
 		Currency:   pay.Amount.Currency,
-		Enabled:    true,
+		Enabled:    alreadyOn,
 		LastPayAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 	if prev != nil {
@@ -101,10 +105,21 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		a.log.Warn("autopay: сохранение способа оплаты", "tg_id", chatID, "err", err)
 		return
 	}
-	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "autopay_saved", "months=%d method=%s", months, ap.Title)
+	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "autopay_saved", "months=%d method=%s enabled=%v", months, ap.Title, alreadyOn)
 	lang := a.lang(chatID)
-	a.notifyKB(ctx, chatID, i18n.T(lang, "ap.enabled_notice", monthsWord(lang, months), a.autoPayDaysText(lang)),
-		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")}})
+	if alreadyOn {
+		return
+	}
+	if !a.autoPayAvailable() {
+		return
+	}
+	// Предложение подключить автопродление — после успешной оплаты, когда
+	// пользователь уже получил доступ и ничем не рискует.
+	a.notifyKB(ctx, chatID, i18n.T(lang, "ap.offer", monthsWord(lang, months), a.autoPayDaysText(lang)),
+		[][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "ap.btn_enable_now"), "ap:on")},
+			{btn(i18n.T(lang, "ap.btn_decline"), "ap:no")},
+		})
 }
 
 // autoPayDaysText — человеческая формулировка «когда спишем».
@@ -188,7 +203,23 @@ func (a *App) onAutoPayUser(ctx context.Context, chatID int64, val string) {
 			_ = a.store.SetAutoPayEnabled(ctx, chatID, true)
 		}
 		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "autopay_on", "включено пользователем")
-		a.showAutoPay(ctx, chatID)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription,
+			i18n.T(lang, "ap.turned_on", monthsWord(lang, ap.Months), a.autoPayDaysText(lang)),
+			[][]models.InlineKeyboardButton{
+				{btn(i18n.T(lang, "ap.btn_off"), "ap:off")},
+				{btn(i18n.T(lang, "btn.back"), "menu:mysubs"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+			})
+	case "no":
+		// Отказ от предложения: карта остаётся сохранённой в ЮKassa, но
+		// списаний нет — включить можно позже той же кнопкой.
+		if a.store != nil {
+			_ = a.store.SetAutoPayEnabled(ctx, chatID, false)
+		}
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "ap.declined"),
+			[][]models.InlineKeyboardButton{
+				{btn(i18n.T(lang, "ap.btn_on"), "ap:on")},
+				{btn(i18n.T(lang, "btn.home"), "menu:home")},
+			})
 	case "pay":
 		// Выбор на экране оплаты ЮKassa: с автопродлением или разовый платёж.
 		a.ykStart(ctx, chatID, arg == "1")
@@ -336,6 +367,7 @@ func (a *App) autoPayFail(ctx context.Context, ap *model.AutoPay, now time.Time,
 		a.payLog(ctx, model.PayMethodYooKassa, "", ap.TelegramID, "autopay_disabled", "%d неудач подряд: %s", fails, reason)
 		a.notifyKB(ctx, ap.TelegramID, i18n.T(lang, "ap.disabled_fail"),
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}})
+		a.notifyAutoPayFailAdmin(ctx, ap.TelegramID, fails, reason)
 		return
 	}
 	if a.store != nil {
@@ -347,6 +379,23 @@ func (a *App) autoPayFail(ctx context.Context, ap *model.AutoPay, now time.Time,
 			{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
 			{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")},
 		})
+	if fails == 1 {
+		// Админа дёргаем на первой неудаче и на итоговом отключении — иначе
+		// один «умерший» способ оплаты завалит его тремя сообщениями подряд.
+		a.notifyAutoPayFailAdmin(ctx, ap.TelegramID, fails, reason)
+	}
+}
+
+// notifyAutoPayFailAdmin сообщает админу о проблеме с автосписанием. Успешные
+// списания админу не шлём — они видны в истории платежей и в логе заказа.
+func (a *App) notifyAutoPayFailAdmin(ctx context.Context, uid int64, fails int, reason string) {
+	alang := a.lang(a.cfg.AdminID)
+	key := "ap.admin_fail"
+	if fails >= model.AutoPayMaxFails {
+		key = "ap.admin_disabled"
+	}
+	a.notifyKB(ctx, a.cfg.AdminID, i18n.T(alang, key, a.userLabelByID(ctx, uid), escapeName(reason)),
+		[][]models.InlineKeyboardButton{{btn(i18n.T(alang, "guard.btn_card"), "usr:view:"+strconv.FormatInt(uid, 10))}})
 }
 
 // SetAutoPayEnabled — вход для мини-аппа и веб-кабинета: пользователь включает
