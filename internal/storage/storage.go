@@ -1000,6 +1000,7 @@ func (b *base) CreateWebUser(ctx context.Context, u *model.WebUser) error {
 	if u.CreatedAt == "" {
 		u.CreatedAt = nowStr()
 	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, err := b.db.ExecContext(ctx,
 		"INSERT INTO web_users (tg_id, email, pass_hash, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+")",
 		u.TgID, u.Email, u.PassHash, u.CreatedAt)
