@@ -151,7 +151,13 @@ func (a *App) showRSPreview(ctx context.Context, chatID int64, d *rsimport.Data)
 		d.TotalUsers, len(d.Users), d.SkippedWeb, d.WithSub, d.WithBalance,
 		d.Referrals, len(d.Promos), len(d.PromoUses), len(d.Payments))
 	if len(d.Warnings) > 0 {
-		text += "\n\n⚠️ " + strings.Join(d.Warnings, "\n⚠️ ")
+		// Предупреждения содержат строки из ЧУЖОГО дампа (метки типов промокодов)
+		// — экранируем, экран уходит с ParseModeHTML.
+		esc := make([]string, len(d.Warnings))
+		for i, w := range d.Warnings {
+			esc[i] = escapeName(w)
+		}
+		text += "\n\n⚠️ " + strings.Join(esc, "\n⚠️ ")
 	}
 	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "rsimp.btn_apply"), "rsimp:apply")},

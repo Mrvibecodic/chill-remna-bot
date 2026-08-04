@@ -1513,6 +1513,14 @@ func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUs
 		}
 		return u2, nil
 	case genLegacy:
+		if gone {
+			// The legacy route JUST answered "gone" while the cached probe still
+			// says legacy (the panel was upgraded moments ago and the probe is
+			// inside its recheck window). Trusting the stale cache here would
+			// report "no such user" and let a renewal create a second account —
+			// fail loudly instead; the cache expires within minutes.
+			return nil, errPanelDialect
+		}
 		return nil, nil
 	}
 	if gone {

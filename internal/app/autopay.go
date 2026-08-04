@@ -386,6 +386,12 @@ func currencyCode(cur string) bool {
 // Возвращает непустую строку, если проблема на стороне магазина (её показываем
 // админу один раз за проход планировщика, а пользователя не трогаем).
 func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp time.Time) string {
+	// Проход по большой базе длится минуты: пользователь мог выключить
+	// автопродление после снятия снапшота ListAutoPay — перечитываем запись
+	// непосредственно перед списанием.
+	if cur := a.getAutoPay(ctx, ap.TelegramID); cur == nil || !cur.Enabled {
+		return ""
+	}
 	lang := a.lang(ap.TelegramID)
 	months := ap.Months
 	if months <= 0 {
