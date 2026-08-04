@@ -54,9 +54,10 @@ var en = map[string]string{
 		"Where to get it: Remnawave dashboard → create an API token (role API). " +
 		"A regular admin login/password won't work for the API.",
 
-	"step.cookie.ask": "🍪 Your panel is behind nginx with cookie protection.\n\n" +
-		"On the panel server open <code>/opt/remnawave/nginx.conf</code> and find this block:\n" +
+	"step.cookie.ask": "🍪 Your panel is behind the eGames installer's proxy with cookie protection.\n\n" +
+		"With <b>nginx</b>: on the panel server open <code>/opt/remnawave/nginx.conf</code> and find this block:\n" +
 		"<pre>map $http_cookie $auth_cookie {\n    default 0;\n    \"~*NAME=VALUE\" 1;\n}</pre>\n" +
+		"With <b>Caddy</b>: the panel's Caddyfile has a line like <code>not header Cookie *NAME=VALUE*</code>.\n\n" +
 		"NAME and VALUE are two random 8-letter strings (e.g. <code>XkPmtZQr=fNbWqLpA</code>). " +
 		"The same pair is in the installer URL: <code>https://YOUR-DOMAIN/auth/login?NAME=VALUE</code>.\n\n" +
 		"Send it here as <code>NAME=VALUE</code>.",
@@ -65,6 +66,8 @@ var en = map[string]string{
 	"step.apikey.yes":           "🔒 Yes, protected",
 	"step.apikey.no":            "🔓 No, open",
 	"step.apikey.ask":           "🔐 Enter the caddy-security X-API-Key (apikeys section in the portal).",
+	"step.apikey.from_env": "🔐 The X-API-Key comes from the <code>CADDY_AUTH_API_TOKEN</code> environment variable — no need to ask. " +
+		"To change it, edit that variable in <code>docker-compose.yml</code> and restart the bot.",
 
 	"step.verify.checking":  "⏳ Checking the panel connection…",
 	"step.verify.ok":        "✅ Panel is reachable! Users in panel: %d.\n\nSetup complete. Commands: /status, /update",
@@ -751,4 +754,27 @@ var en = map[string]string{
 	"rsimp.report_errs":   "⚠️ Write errors: %d — see the container logs.",
 	"rsimp.report_web":    "ℹ️ Web-only accounts without a Telegram ID skipped: %d. Their passwords use a different format, so those logins can only be created anew.",
 	"rsimp.report_hint":   "Nothing else to do: panel subscriptions stay in place, the bot links them to the user on their first visit.",
+
+	// Экран «Доступ к панели» (секреты прокси перед панелью).
+	"btn.panelauth": "🔐 Panel access",
+	"panelauth.title": "🔐 <b>Panel access</b>\n\n" +
+		"X-Api-Key («Caddy with security» addon): %s\n" +
+		"Cookie (eGames installer proxy): %s\n\n" +
+		"These are secrets of the proxy in front of the panel, not of the panel itself: the panel may be locked down after the bot was installed, and the key may be rotated in the portal. Change them here without rerunning the wizard. The panel's own API token lives in «Reconfigure».",
+	"panelauth.key_none":         "not set",
+	"panelauth.key_set":          "set (<code>%s</code>)",
+	"panelauth.key_env":          "from the <code>CADDY_AUTH_API_TOKEN</code> variable",
+	"panelauth.key_env_stale":    "from the <code>CADDY_AUTH_API_TOKEN</code> variable; an old key is still stored in the database — remove it, or it comes back into use once the variable is gone",
+	"panelauth.cookie_none":      "not set",
+	"panelauth.cookie_set":       "set (<code>%s</code>)",
+	"panelauth.btn_key":          "🔑 Caddy key",
+	"panelauth.btn_key_clear":    "🗑 Remove key",
+	"panelauth.btn_cookie":       "🍪 eGames cookie",
+	"panelauth.btn_cookie_clear": "🗑 Remove cookie",
+	"panelauth.btn_check":        "🔄 Check connection",
+	"panelauth.ask_key":          "🔐 Send the caddy-security X-Api-Key (apikeys section of the panel portal), or «-» to remove it.\n\nI'll check the panel connection right after saving.",
+	"panelauth.ask_cookie":       "🍪 Send the proxy cookie as <code>NAME=VALUE</code>, or «-» to remove it.\n\nThe same pair is in the installer URL: <code>https://YOUR-DOMAIN/auth/login?NAME=VALUE</code>.",
+	"panelauth.check_ok":         "✅ Panel is reachable! Users in panel: %d.",
+	"panelauth.check_fail":       "❌ Panel does not answer: %s",
+	"panelauth.save_fail":        "❌ Could not save: %s",
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -193,7 +194,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
 		a.botCfg = cfg
-		a.panel = remnawave.New(cfg.Panel)
+		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
 			if err := a.ctl.ConnectPanelNetwork(ctx); err != nil {
 				a.log.Warn("подключение к сети панели", "err", err)
@@ -202,6 +203,69 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		a.log.Info("конфигурация загружена, бот установлен", "db", a.store.Kind())
 	}
 	return nil
+}
+
+// newPanel собирает клиента панели из сохранённой конфигурации, наложив на неё
+// окружение: X-Api-Key аддона «Caddy with security» задаётся переменной
+// CADDY_AUTH_API_TOKEN (docs.rw → install/panel-security). Ключ живёт рядом с
+// прокси, а не в панели, поэтому env главнее того, что ввели в мастере, и
+// работает при любом типе установки — в том числе там, где мастер про ключ не
+// спрашивает (eGames, локальная панель за общим Caddy).
+func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
+	return remnawave.New(a.panelWithEnv(pc))
+}
+
+// panelWithEnv накладывает CADDY_AUTH_API_TOKEN на конфиг панели.
+func (a *App) panelWithEnv(pc model.PanelConfig) model.PanelConfig {
+	if a.cfg != nil && a.cfg.CaddyAuthToken != "" {
+		pc.APIKey = a.cfg.CaddyAuthToken
+	}
+	return pc
+}
+
+// caddyKeyFromEnv сообщает, что X-Api-Key уже пришёл из окружения — тогда
+// мастеру не о чем спрашивать.
+func (a *App) caddyKeyFromEnv() bool {
+	return a.cfg != nil && a.cfg.CaddyAuthToken != ""
+}
+
+// caddyKeyFor возвращает X-Api-Key для запроса не через клиента панели —
+// например, за app-config страницы подписки. Аддон «Caddy with security»
+// закрывает домен панели целиком, включая /api/sub, поэтому ключ нужен и там.
+// Но только для самой панели: адрес должен совпасть с ней и хостом, и схемой —
+// чужому домену секрет не отдаём, в открытый http не отправляем.
+//
+// panelBase вызывающий берёт через panelBaseURL(), а не читает a.botCfg сам:
+// конфиг подменяется на лету (мастер/переустановка), и без блокировки это гонка.
+func (a *App) caddyKeyFor(rawURL, panelBase string) string {
+	if !a.caddyKeyFromEnv() {
+		return ""
+	}
+	host, scheme := urlHostScheme(rawURL)
+	pHost, pScheme := urlHostScheme(panelBase)
+	if host == "" || host != pHost || scheme != pScheme {
+		return ""
+	}
+	return a.cfg.CaddyAuthToken
+}
+
+// panelBaseURL — базовый URL панели из текущего конфига, снятый под замком.
+// Вызывать только там, где a.mu не удерживается (мьютекс не рекурсивный).
+func (a *App) panelBaseURL() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return ""
+	}
+	return a.botCfg.Panel.BaseURL
+}
+
+func urlHostScheme(raw string) (host, scheme string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || u.Scheme == "" {
+		return "", ""
+	}
+	return strings.ToLower(u.Host), strings.ToLower(u.Scheme)
 }
 
 func (a *App) openOne(kind, dsn string) (storage.Storage, error) {
@@ -342,6 +406,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 
 	if strings.HasPrefix(text, "/") {
 		a.msg.Delete(ctx, chatID, m.ID)
+		// Команда уводит с экрана ввода — ожидание секрета доступа к панели
+		// снимаем здесь же: экран ввода команда затрёт, а состояние осталось бы
+		// взведённым, и следующий обычный текст молча стал бы ключом панели.
+		a.clearPanelInput(chatID)
 	}
 
 	if a.installed() && isHomeText(text) {
@@ -940,6 +1008,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 
 func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstName, username string) {
 	name := displayName(firstName, username)
+	a.clearPanelInput(chatID)
 	if isAdmin {
 		a.showMenu(ctx, chatID, true, name)
 		return

@@ -54,9 +54,10 @@ var ru = map[string]string{
 		"Где взять: дашборд Remnawave → создать API-token (роль API). " +
 		"Обычный логин/пароль администратора для API не подходит.",
 
-	"step.cookie.ask": "🍪 Ваша панель за nginx с защитой по куке.\n\n" +
-		"Откройте на сервере панели файл <code>/opt/remnawave/nginx.conf</code> и найдите блок:\n" +
+	"step.cookie.ask": "🍪 Ваша панель за прокси установщика eGames с защитой по куке.\n\n" +
+		"Если у вас <b>nginx</b> — откройте на сервере панели <code>/opt/remnawave/nginx.conf</code> и найдите блок:\n" +
 		"<pre>map $http_cookie $auth_cookie {\n    default 0;\n    \"~*ИМЯ=ЗНАЧЕНИЕ\" 1;\n}</pre>\n" +
+		"Если <b>Caddy</b> — в Caddyfile панели есть строка вида <code>not header Cookie *ИМЯ=ЗНАЧЕНИЕ*</code>.\n\n" +
 		"ИМЯ и ЗНАЧЕНИЕ — два случайных набора из 8 латинских букв (напр. <code>XkPmtZQr=fNbWqLpA</code>). " +
 		"Та же пара есть в ссылке установщика: <code>https://ВАШ-ДОМЕН/auth/login?ИМЯ=ЗНАЧЕНИЕ</code>.\n\n" +
 		"Пришлите её сюда в формате <code>ИМЯ=ЗНАЧЕНИЕ</code>.",
@@ -65,6 +66,8 @@ var ru = map[string]string{
 	"step.apikey.yes":           "🔒 Да, защищён",
 	"step.apikey.no":            "🔓 Нет, открыт",
 	"step.apikey.ask":           "🔐 Введите X-API-Key от caddy-security (раздел apikeys в портале).",
+	"step.apikey.from_env": "🔐 X-API-Key взят из переменной окружения <code>CADDY_AUTH_API_TOKEN</code> — спрашивать не буду. " +
+		"Чтобы сменить ключ, поправьте её в <code>docker-compose.yml</code> и перезапустите бота.",
 
 	"step.verify.checking":  "⏳ Проверяю связь с панелью…",
 	"step.verify.ok":        "✅ Панель на связи! Пользователей в панели: %d.\n\nУстановка завершена. Команды: /status, /update",
@@ -751,4 +754,27 @@ var ru = map[string]string{
 	"rsimp.report_errs":   "⚠️ Ошибок при записи: %d — подробности в логах контейнера.",
 	"rsimp.report_web":    "ℹ️ Пропущено веб-аккаунтов без Telegram ID: %d. Их пароли хранятся в другом формате, вход можно только создать заново.",
 	"rsimp.report_hint":   "Дальше ничего делать не нужно: подписки в панели остаются на месте, бот свяжет их с пользователем при первом заходе.",
+
+	// Экран «Доступ к панели» (секреты прокси перед панелью).
+	"btn.panelauth": "🔐 Доступ к панели",
+	"panelauth.title": "🔐 <b>Доступ к панели</b>\n\n" +
+		"X-Api-Key (аддон «Caddy with security»): %s\n" +
+		"Кука (прокси установщика eGames): %s\n\n" +
+		"Это секреты не самой панели, а прокси перед ней: панель может быть закрыта уже после установки бота, а ключ — смениться в портале. Здесь их можно поменять, не проходя мастер заново. Обычный API-token панели меняется в «Перенастроить».",
+	"panelauth.key_none":         "не задан",
+	"panelauth.key_set":          "задан (<code>%s</code>)",
+	"panelauth.key_env":          "из переменной <code>CADDY_AUTH_API_TOKEN</code>",
+	"panelauth.key_env_stale":    "из переменной <code>CADDY_AUTH_API_TOKEN</code>; в базе лежит старый ключ — уберите его, иначе он вернётся в работу, когда переменную снимут",
+	"panelauth.cookie_none":      "не задана",
+	"panelauth.cookie_set":       "задана (<code>%s</code>)",
+	"panelauth.btn_key":          "🔑 Ключ Caddy",
+	"panelauth.btn_key_clear":    "🗑 Убрать ключ",
+	"panelauth.btn_cookie":       "🍪 Кука eGames",
+	"panelauth.btn_cookie_clear": "🗑 Убрать куку",
+	"panelauth.btn_check":        "🔄 Проверить связь",
+	"panelauth.ask_key":          "🔐 Пришлите X-Api-Key от caddy-security (раздел apikeys в портале панели), либо «-» чтобы убрать.\n\nПосле сохранения сразу проверю связь с панелью.",
+	"panelauth.ask_cookie":       "🍪 Пришлите куку прокси в формате <code>ИМЯ=ЗНАЧЕНИЕ</code>, либо «-» чтобы убрать.\n\nТа же пара есть в ссылке установщика: <code>https://ВАШ-ДОМЕН/auth/login?ИМЯ=ЗНАЧЕНИЕ</code>.",
+	"panelauth.check_ok":         "✅ Панель на связи! Пользователей в панели: %d.",
+	"panelauth.check_fail":       "❌ Панель не отвечает: %s",
+	"panelauth.save_fail":        "❌ Не удалось сохранить: %s",
 }

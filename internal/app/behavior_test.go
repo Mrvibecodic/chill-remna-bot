@@ -102,6 +102,21 @@ func (f *fakeMsg) last() string {
 	}
 	return f.texts[len(f.texts)-1]
 }
+
+// lastLive — последнее НЕ удалённое сообщение: проверка «админ это увидит»,
+// а не «бот это отправил».
+func (f *fakeMsg) lastLive() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	best, out := 0, ""
+	for id, txt := range f.live {
+		if id > best {
+			best, out = id, txt
+		}
+	}
+	return out
+}
+
 func (f *fakeMsg) joined() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -805,7 +820,11 @@ func panelStub(users int) *httptest.Server {
 			_, _ = w.Write([]byte(`{"response":{"users":{"totalUsers":` + itoa(users) + `}}}`))
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		// Настоящая панель отвечает JSON — стаб не должен быть «добрее» её,
+		// иначе проверка Health «это панель, а не заглушка прокси» не
+		// проверяется ничем.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":{"isConnected":true}}`))
 	}))
 }
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -69,8 +70,117 @@ func New(cfg model.PanelConfig) *Client {
 		cookie: strings.TrimSpace(cfg.Cookie),
 		apiKey: strings.TrimSpace(cfg.APIKey),
 		local:  cfg.Mode == model.ModeLocal,
-		http:   &http.Client{Timeout: 15 * time.Second},
+		http: &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: followCanonicalOnly,
+		},
 	}
+}
+
+// maxRedirects — свой предел вместо стандартного: с собственным CheckRedirect
+// Go больше не считает переходы сам. Держим ровно как у него (десятый прыжок
+// обрывается), чтобы у стойки из нескольких прокси ничего не отвалилось.
+const maxRedirects = 10
+
+// followCanonicalOnly пропускает только канонизирующие редиректы фронта — те,
+// что не меняют путь: http→https от Caddy, www→apex, слэш в конце. Такие
+// адреса панели встречаются у живых установок, и ходить по ним надо.
+//
+// А вот аддон «Caddy with security» на запрос без X-Api-Key отвечает 302 на
+// страницу входа портала — другой путь (/r, /restricted). Идти туда нельзя:
+// портал вернёт 200 со страницей логина, и Health решит, что панель на связи.
+// Такой переход обрываем, и 3xx разбирает classifyHTTP.
+//
+// Всё сравнивается с исходным запросом via[0], а не с предыдущим прыжком:
+// заголовки Go на каждом прыжке копирует заново из первого запроса, так что
+// снятый один раз X-Api-Key сам собой вернётся на следующем.
+func followCanonicalOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return http.ErrUseLastResponse
+	}
+	orig := via[0]
+	if !sameEndpoint(req.URL.Path, orig.URL.Path) {
+		return http.ErrUseLastResponse
+	}
+	// 301/302/303 превращают любой метод в GET и теряют тело: PATCH «прошёл
+	// бы» как чтение списка, вернув 200. Небезопасные методы переигрываем
+	// только по 307/308, которые метод и тело сохраняют.
+	if m := orig.Method; m != http.MethodGet && m != http.MethodHead {
+		code := 0
+		if req.Response != nil {
+			code = req.Response.StatusCode
+		}
+		if code != http.StatusTemporaryRedirect && code != http.StatusPermanentRedirect {
+			return http.ErrUseLastResponse
+		}
+	}
+	// Понижение до открытого http не принимаем: Bearer панели Go снимает
+	// только при смене хоста, то есть токен ушёл бы открытым текстом.
+	if orig.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return http.ErrUseLastResponse
+	}
+	// Уход на чужой хост — не канонизация. Идти туда нельзя вдвойне: Go унёс бы
+	// следом X-Api-Key (чувствительными он считает только Authorization и
+	// Cookie), а любой ответ оттуда бот принял бы за ответ панели.
+	if !sameSite(req.URL.Host, orig.URL.Host) {
+		req.Header.Del("X-Api-Key")
+		return http.ErrUseLastResponse
+	}
+	return nil
+}
+
+// sameEndpoint — редирект ведёт на тот же эндпоинт панели, просто записанный
+// иначе: слэш в конце или снятый/добавленный префикс пути (фронт с
+// `handle_path /panel*` уводит /panel/api/... на /api/...).
+//
+// Обе стороны обязаны остаться путём API панели (/api/...) — иначе портал
+// caddy-security с кастомным маршрутом вроде /health совпал бы как «хвост»
+// /api/system/health, и бот принял бы форму входа за панель.
+func sameEndpoint(a, b string) bool {
+	a, b = strings.TrimRight(a, "/"), strings.TrimRight(b, "/")
+	if !isAPIPath(a) || !isAPIPath(b) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	long, short := a, b
+	if len(long) < len(short) {
+		long, short = short, long
+	}
+	// Отрезаемая часть должна быть целым сегментом, а не хвостом чужого слова:
+	// /xapi/... не считается вариантом /api/....
+	return strings.HasSuffix(long, short) && strings.HasPrefix(long[:len(long)-len(short)], "/")
+}
+
+// isAPIPath — путь ведёт в API панели. Все запросы клиента идут в /api/..., так
+// что и цель редиректа обязана туда же.
+func isAPIPath(p string) bool {
+	return p == "/api" || strings.HasPrefix(p, "/api/") || strings.Contains(p, "/api/")
+}
+
+// sameSite — тот же адрес или его www-псевдоним (www.panel.example ↔
+// panel.example). Шире не берём: панель на апексе иначе роднилась бы с любым
+// поддоменом — включая клиентские и чужие на общем суффиксе вроде duckdns.org.
+func sameSite(a, b string) bool {
+	a, b = normHost(a), normHost(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || a == "www."+b || b == "www."+a
+}
+
+// normHost приводит host[:port] к сравнимому виду: нижний регистр, без корневой
+// точки в конце имени (panel.example.com. == panel.example.com) и без порта.
+// Порт отбрасываем намеренно: смена порта на том же имени — это тот же сервер
+// оператора (фронт на :80 уводит на :8443), а не чужой хост.
+func normHost(hostport string) string {
+	s := strings.ToLower(strings.TrimSpace(hostport))
+	host, _, err := net.SplitHostPort(s)
+	if err != nil {
+		host = s
+	}
+	return strings.TrimSuffix(host, ".")
 }
 
 func (c *Client) setHeaders(req *http.Request) {
@@ -133,6 +243,21 @@ func (c *Client) Logs() []APIEvent {
 	return out
 }
 
+// ImportLogs переносит историю запросов из прежнего клиента: при смене секрета
+// доступа клиент пересобирается, а лог API — это то, ради чего админ туда и
+// смотрит, терять его на ровном месте нельзя.
+func (c *Client) ImportLogs(ev []APIEvent) {
+	if len(ev) == 0 {
+		return
+	}
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	c.logs = append(ev, c.logs...)
+	if len(c.logs) > apiLogCap {
+		c.logs = c.logs[len(c.logs)-apiLogCap:]
+	}
+}
+
 func (c *Client) ClearLogs() {
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
@@ -147,6 +272,14 @@ func (c *Client) Health(ctx context.Context) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return classifyHTTP(resp)
+	}
+	// 200 — ещё не значит «панель». Прокси установщика eGames в сборке
+	// «панель+нода» отдаёт неавторизованным запросам сайт-заглушку с кодом 200,
+	// и без этой проверки мастер отрапортовал бы об успехе. API панели отвечает
+	// только JSON.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if isHTMLPage(resp, string(body)) {
+		return notPanelErr(resp.StatusCode)
 	}
 	return nil
 }
@@ -1586,13 +1719,97 @@ func writeOK(code int) bool {
 	return false
 }
 
+// looksJSON отличает ответ API панели (всегда JSON) от HTML/текста, который
+// подсовывает реверс-прокси: страница входа портала, заглушка, «401
+// Unauthorized» плейн-текстом от caddy-security.
+func looksJSON(body string) bool {
+	s := strings.TrimSpace(body)
+	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
+}
+
+// looksHTML — тело ответа является веб-страницей: заглушка прокси или форма
+// входа портала. API панели HTML не отдаёт никогда.
+func looksHTML(body string) bool {
+	s := strings.ToLower(strings.TrimSpace(body))
+	s = strings.TrimPrefix(s, "\ufeff")
+	return strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<html") ||
+		(strings.HasPrefix(s, "<") && strings.Contains(s, "<html"))
+}
+
+// isHTMLPage — ответ отдан как веб-страница. Content-Type надёжнее тела:
+// заглушка может начинаться с комментария или пролога, а начало <html> —
+// оказаться за пределами прочитанного куска.
+func isHTMLPage(resp *http.Response, body string) bool {
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+		return true
+	}
+	return looksHTML(body)
+}
+
+// proxyGateErr — общая подсказка на случай, когда запрос не дошёл до панели:
+// его завернул реверс-прокси перед ней. Отдельная формулировка нужна потому,
+// что «проверьте API-token» тут уводит не туда — токен ни при чём.
+func proxyGateErr(status int, where string) error {
+	if where != "" {
+		where = " → " + where
+	}
+	return fmt.Errorf("запрос не дошёл до API панели (HTTP %d%s) — его увёл в сторону прокси перед ней. "+
+		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"если панель ничем не закрыта — проверьте адрес панели, по нему отвечает не она", status, where)
+}
+
+// notPanelErr — по адресу панели ответила веб-страница. Так выглядит и
+// сайт-заглушка сборки eGames «панель+нода» (200), и форма входа портала
+// caddy-security, и просто чужой сайт по опечатке в адресе.
+func notPanelErr(status int) error {
+	return fmt.Errorf("по адресу панели отвечает веб-страница, а не API (HTTP %d). "+
+		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"иначе проверьте адрес панели", status)
+}
+
+// httpsUpgrade — редирект просто переводит тот же адрес с http на https.
+// Клиент по нему не пошёл только потому, что метод небезопасный: 301/302/303
+// потеряли бы тело запроса.
+func httpsUpgrade(req *http.Request, location string) bool {
+	if req == nil || req.URL == nil || req.URL.Scheme != "http" || location == "" {
+		return false
+	}
+	u, err := req.URL.Parse(location)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	return sameSite(u.Host, req.URL.Host) || normHost(u.Host) == normHost(req.URL.Host)
+}
+
 func classifyHTTP(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	snippet := strings.TrimSpace(string(body))
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	switch {
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
+		// Редирект на /api бывает только от прокси: caddy-security уводит
+		// запрос без ключа на страницу входа портала. Но самый частый случай
+		// проще и к защите отношения не имеет — адрес панели записан как http,
+		// а прокси перекидывает на https; про него и говорим отдельно, иначе
+		// человек пойдёт искать несуществующий у него аддон.
+		loc := resp.Header.Get("Location")
+		if httpsUpgrade(resp.Request, loc) {
+			return fmt.Errorf("панель отвечает только по https (HTTP %d → %s): "+
+				"адрес панели записан через http. Исправьте его на https:// — "+
+				"«Система → Перенастроить» или /setup", resp.StatusCode, loc)
+		}
+		return proxyGateErr(resp.StatusCode, loc)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// caddy-security на неверный X-Api-Key отвечает плейн-текстом
+		// «401 Unauthorized», панель — JSON. По телу и различаем, кому
+		// адресовать претензию. Пустое тело не улика: так отвечает и панель с
+		// протухшим API-token — тогда оставляем прежнюю формулировку.
+		if snippet != "" && !looksJSON(snippet) {
+			return proxyGateErr(resp.StatusCode, "")
+		}
 		return fmt.Errorf("панель отклонила доступ (HTTP %d): проверьте API-token. %s", resp.StatusCode, snippet)
-	case http.StatusNotFound:
+	case resp.StatusCode == http.StatusNotFound:
 		return fmt.Errorf("эндпоинт не найден (HTTP 404): проверьте URL панели")
 	default:
 		return fmt.Errorf("панель вернула HTTP %d: %s", resp.StatusCode, snippet)

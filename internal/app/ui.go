@@ -339,16 +339,24 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 	if updOn {
 		updLabel = i18n.T(lang, "btn.upd_notify_on")
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
+	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
 		{btn(updLabel, "upd:toggle"), btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
 		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
 		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
-		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
-		homeRow(lang),
-	})
+	}
+	// Ключ/кука доступа к панели — только там, где панель вообще чем-то закрыта.
+	if a.panelAuthRelevant() {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth"),
+		})
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+		homeRow(lang))
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), rows)
 }
 
 func (a *App) squadDisplay(ctx context.Context) (string, string) {
@@ -512,6 +520,8 @@ func (a *App) registerUser(ctx context.Context, chatID int64, firstName, usernam
 
 func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, firstName, username string) {
 	name := displayName(firstName, username)
+	// Уход в меню отменяет ожидание секрета доступа к панели: см. clearPanelInput.
+	a.clearPanelInput(chatID)
 	switch val {
 	case "buy":
 		a.showPlans(ctx, chatID)
@@ -588,6 +598,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "subdomain":
 		if isAdmin {
 			a.showSubdomain(ctx, chatID)
+		}
+	case "panelauth":
+		if isAdmin {
+			a.showPanelAuth(ctx, chatID, "")
 		}
 	case "apilog":
 		if isAdmin {

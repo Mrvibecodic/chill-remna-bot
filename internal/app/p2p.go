@@ -848,6 +848,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setTributeField(ctx, chatID, field, text)
+	case "panel_apikey", "panel_cookie":
+		field := ui.adminInput
+		ui.adminInput = ""
+		a.setPanelSecret(ctx, chatID, field, text)
 	case "paylog":
 		ui.adminInput = ""
 		a.adminSendPayLog(ctx, chatID, text)

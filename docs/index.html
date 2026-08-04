@@ -356,6 +356,7 @@ docker compose up -d</code></pre></li>
     <tr><td><code>DATABASE_URL</code></td><td></td><td>—</td><td>DSN Postgres при ручном подключении</td></tr>
     <tr><td><code>SECRET_KEY</code></td><td></td><td>авто</td><td>ключ шифрования настроек (файл <code>/data/secret.key</code>)</td></tr>
     <tr><td><code>CUSTOM_STATIC_DIR</code></td><td></td><td><code>/custom</code></td><td>папка со своим дизайном мини-аппа/кабинета (оверлей поверх вшитой статики)</td></tr>
+    <tr><td><code>CADDY_AUTH_API_TOKEN</code></td><td></td><td>—</td><td>X-Api-Key аддона <a href="https://docs.rw/install/panel-security/" target="_blank" rel="noopener">«Caddy with security»</a>, если панель закрыта им: бот добавит заголовок ко всем запросам к панели. Без переменной ключ задаётся в мастере и в «Система → Доступ к панели»</td></tr>
     <tr><td><code>PANEL_CONTAINER</code></td><td></td><td><code>remnawave</code></td><td>имя контейнера панели (режим «Локально»)</td></tr>
     <tr><td><code>COMPOSE_HOST_DIR</code></td><td></td><td><code>/opt/remnachillbot</code></td><td>путь к папке бота на хосте</td></tr>
   </table></div>

@@ -31,6 +31,11 @@ type wizard struct {
 	step     step
 	cfg      model.BotConfig
 	reconfig bool
+
+	// note — пояснение к СЛЕДУЮЩЕМУ экрану мастера. Отдельным сообщением его
+	// слать нельзя: каждый шаг мастера удаляет предыдущий экран, и пояснение
+	// исчезло бы через мгновение после отправки.
+	note string
 }
 
 func (a *App) startWizard(ctx context.Context, chatID int64) {
@@ -81,6 +86,7 @@ const (
 	cbSquad     = "sq"
 	cbSection   = "sec"
 	cbSubdomain = "subd"
+	cbPanelAuth = "pauth"
 	cbAPILog    = "alog"
 	cbContacts  = "ctc"
 	cbTrial     = "trial"
@@ -254,6 +260,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbRSImport:
 		if isAdmin {
 			a.onRSImport(ctx, chatID, val)
+		}
+	case cbPanelAuth:
+		if isAdmin {
+			a.onPanelAuth(ctx, chatID, val)
 		}
 	case cbTerms:
 
@@ -443,15 +453,38 @@ func (a *App) gotoToken(ctx context.Context, chatID int64, w *wizard) {
 	a.send(ctx, chatID, i18n.T(w.cfg.Language, "step.token.ask"))
 }
 
+// withNote приклеивает отложенное пояснение к тексту экрана и гасит его, чтобы
+// оно не повторялось на следующих шагах.
+func (w *wizard) withNote(text string) string {
+	if w.note == "" {
+		return text
+	}
+	out := w.note + "\n\n" + text
+	w.note = ""
+	return out
+}
+
 func (a *App) afterToken(ctx context.Context, chatID int64, w *wizard) {
 	lang := w.cfg.Language
+	// Ключ Caddy задан переменной — говорим об этом на любом пути мастера, в том
+	// числе там, где вопроса про ключ нет вовсе (eGames, локальная панель):
+	// иначе человек не узнает, подхватил бот переменную или нет. Текст едет
+	// вместе со следующим экраном, а не отдельным сообщением.
+	if a.caddyKeyFromEnv() {
+		w.note = i18n.T(lang, "step.apikey.from_env")
+	}
 	if w.cfg.Panel.Mode == model.ModeRemote {
 		switch w.cfg.Panel.InstallType {
 		case model.InstallEGames:
 			w.step = stepCookie
-			a.send(ctx, chatID, i18n.T(lang, "step.cookie.ask"))
+			a.send(ctx, chatID, w.withNote(i18n.T(lang, "step.cookie.ask")))
 			return
 		case model.InstallDocs:
+			// Ключ уже пришёл из окружения — спрашивать нечего.
+			if a.caddyKeyFromEnv() {
+				a.verify(ctx, chatID, w)
+				return
+			}
 			w.step = stepAPIKeyAsk
 			a.sendKB(ctx, chatID, i18n.T(lang, "step.apikey.ask_protected"), [][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "step.apikey.yes"), "apiprot:yes"),
@@ -465,9 +498,17 @@ func (a *App) afterToken(ctx context.Context, chatID int64, w *wizard) {
 
 func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	lang := w.cfg.Language
-	a.send(ctx, chatID, i18n.T(lang, "step.verify.checking"))
+	a.send(ctx, chatID, w.withNote(i18n.T(lang, "step.verify.checking")))
 
-	client := remnawave.New(w.cfg.Panel)
+	// Пока ключ Caddy приходит из окружения, в БД ему делать нечего: переменная
+	// его всё равно перекрывает, а сохранённый — воскреснет в тот день, когда
+	// переменную уберут, и молча завернёт все запросы. Чистим на всех путях
+	// мастера, включая переустановку с уже введённым когда-то ключом.
+	if a.caddyKeyFromEnv() {
+		w.cfg.Panel.APIKey = ""
+	}
+
+	client := a.newPanel(w.cfg.Panel)
 	if err := client.Health(ctx); err != nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", err.Error()))
 		return
