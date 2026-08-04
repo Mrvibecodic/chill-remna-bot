@@ -36,6 +36,27 @@ func (a *App) payLog(ctx context.Context, method, extID string, telegramID int64
 	})
 }
 
+// payLogThrottled пишет запись не чаще раза в 10 минут на ключ. Применяется к
+// отказам НЕаутентифицированных вебхуков: сканер, долбящий /webhook/*, иначе
+// заливал бы payment_log тысячами одинаковых строк на 90 дней ретенции.
+func (a *App) payLogThrottled(ctx context.Context, key, method, extID string, telegramID int64, stage, format string, args ...any) {
+	const interval = 10 * time.Minute
+	now := time.Now()
+	a.thrMu.Lock()
+	if a.thrLast == nil {
+		a.thrLast = map[string]time.Time{}
+	}
+	last, seen := a.thrLast[key]
+	allow := !seen || now.Sub(last) >= interval
+	if allow {
+		a.thrLast[key] = now
+	}
+	a.thrMu.Unlock()
+	if allow {
+		a.payLog(ctx, method, extID, telegramID, stage, format, args...)
+	}
+}
+
 func (a *App) adminSendPayLog(ctx context.Context, chatID int64, query string) {
 	lang := a.lang(chatID)
 	query = strings.TrimSpace(query)
@@ -184,7 +205,7 @@ func payErrSummaryText(entries []model.PayLogEntry, total int64) string {
 			fmt.Fprintf(&sb, "…ещё %d сочетаний\n", len(keys)-i)
 			break
 		}
-		fmt.Fprintf(&sb, "%-10s %-20s %d\n", methodLabel(k.method), k.stage, cnt[k])
+		fmt.Fprintf(&sb, "%-10s %-20s %d\n", escapeName(methodLabel(k.method)), k.stage, cnt[k])
 	}
 	sb.WriteString("</pre>")
 	if int64(len(entries)) < total {
@@ -228,6 +249,7 @@ func buildPayErrorReport(entries []model.PayLogEntry, total int64, days int, gen
 	}
 	sb.WriteString("\n")
 	n := 0
+	written := 0
 	truncated := false
 	byMethod := map[string]int{}
 	for _, e := range entries {
@@ -237,6 +259,7 @@ func buildPayErrorReport(entries []model.PayLogEntry, total int64, days int, gen
 		n++
 		byMethod[e.Method]++
 		if sb.Len() < payErrFileMaxBytes {
+			written++
 			fmt.Fprintf(&sb, "%s [%s] ext=%s tg=%d %s: %s\n", e.CreatedAt, e.Method, e.ExtID, e.TelegramID, e.Stage, e.Detail)
 		} else if !truncated {
 			truncated = true
@@ -246,6 +269,8 @@ func buildPayErrorReport(entries []model.PayLogEntry, total int64, days int, gen
 	if n == 0 {
 		return "", 0
 	}
+	// В подпись идёт число строк, реально попавших в файл, а не отобранных.
+	n = written
 	sb.WriteString("\nпо способам оплаты:\n")
 	methods := make([]string, 0, len(byMethod))
 	for m := range byMethod {

@@ -94,13 +94,6 @@ func (a *App) reconLog(ctx context.Context, pi *model.PendingInvoice, stage, sta
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, stage, format, args...)
 }
 
-// reconForget убирает счёт из памяти дедупликации, когда он больше не висит.
-func (a *App) reconForget(extID string) {
-	a.reconMu.Lock()
-	delete(a.reconSeen, extID)
-	a.reconMu.Unlock()
-}
-
 func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 
 	if t, err := time.Parse(time.RFC3339, pi.CreatedAt); err == nil && time.Since(t) > reconcileGiveUp {

@@ -584,14 +584,36 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	// Paid renewal: A's traffic was just reset, so B's must follow.
 	a.syncAddSub(ctx, telegramID, true)
 	if a.store != nil {
-		if err := a.store.AddPayment(ctx, &model.Payment{
+		err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
-		}); err != nil {
+		})
+		// Запись платежа — барьер идемпотентности: по ней PaymentByExtID решает,
+		// финализировать ли повторно. Транзиентный сбой (database is locked,
+		// обрыв соединения) пробуем пережить повтором.
+		for i := 0; i < 2 && err != nil && !errors.Is(err, storage.ErrDuplicateExtID); i++ {
+			time.Sleep(200 * time.Millisecond)
+			err = a.store.AddPayment(ctx, &model.Payment{
+				TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
+			})
+		}
+		if err != nil {
 			if errors.Is(err, storage.ErrDuplicateExtID) && extID != "" {
 				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж с этим ext_id уже записан")
 				return "", "", err
 			}
-			a.log.Warn("add payment", "err", err)
+			// Панель уже продлила подписку, а барьер записать не удалось. Раньше
+			// это молча глоталось — и реконсилятор, не видя платежа, продлевал бы
+			// подписку СНОВА каждые две минуты до суточного предела. Гасим pending,
+			// чтобы остановить цикл, и зовём админа сверить платёж вручную.
+			a.payLog(ctx, method, extID, telegramID, "error", "подписка выдана, но платёж не записался (идемпотентность нарушена): %v", err)
+			a.log.Error("add payment failed after retries", "err", err, "ext", extID)
+			if extID != "" {
+				if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+					_ = a.store.ResolvePending(ctx, p.ID)
+				}
+			}
+			alang := a.lang(a.cfg.AdminID)
+			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.payment_unrecorded", methodLabel(method), extID, a.userLabelByID(ctx, telegramID), amount))
 		}
 		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
 	}

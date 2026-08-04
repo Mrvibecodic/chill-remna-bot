@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -83,7 +84,9 @@ func (a *App) hlCallbackURL() string {
 func hlNonce() string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "0"
+		// Фолбэк не должен быть константой: одинаковый order_id вернул бы
+		// СТАРЫЙ (возможно, уже оплаченный) счёт вместо нового.
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	return hex.EncodeToString(b[:])
 }
@@ -129,20 +132,22 @@ func parseHLData(raw string) (chatID int64, months int, kopecks int64) {
 }
 
 // parseHLOrderID — резервный путь восстановления получателя, если
-// additional_data пусто, а pending-записи уже нет.
-func parseHLOrderID(orderID string) (chatID int64, n int64) {
+// additional_data пусто, а pending-записи уже нет. topup=true означает, что
+// n — это копейки пополнения, а не месяцы подписки.
+func parseHLOrderID(orderID string) (chatID int64, n int64, topup bool) {
 	parts := strings.Split(orderID, "-")
-	// hl-<tg>-<n>-<nonce>, где отрицательный tg добавляет пустой элемент.
-	if len(parts) > 0 && parts[0] == "hl" || len(parts) > 0 && parts[0] == "hlt" {
-		rest := parts[1:]
-		if len(rest) >= 3 && rest[0] == "" {
-			// отрицательный telegram-id: «hl--100-1-abcd»
-			rest = append([]string{"-" + rest[1]}, rest[2:]...)
-		}
-		if len(rest) >= 2 {
-			chatID, _ = strconv.ParseInt(rest[0], 10, 64)
-			n, _ = strconv.ParseInt(rest[1], 10, 64)
-		}
+	if len(parts) == 0 || (parts[0] != "hl" && parts[0] != "hlt") {
+		return
+	}
+	topup = parts[0] == "hlt"
+	rest := parts[1:]
+	if len(rest) >= 3 && rest[0] == "" {
+		// отрицательный telegram-id: «hl--100-1-abcd»
+		rest = append([]string{"-" + rest[1]}, rest[2:]...)
+	}
+	if len(rest) >= 2 {
+		chatID, _ = strconv.ParseInt(rest[0], 10, 64)
+		n, _ = strconv.ParseInt(rest[1], 10, 64)
 	}
 	return
 }
@@ -159,17 +164,26 @@ func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amo
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	value := parseAmountRub(amount)
-	if value <= 0 {
+	// Строгий разбор: parseAmountRub на «1 000» вернул бы 1.0 и счёт ушёл бы
+	// на рубль при выдаче полной подписки. rubToKopecks такие цены отвергает.
+	valueK, okV := rubToKopecks(amount)
+	if !okV || valueK <= 0 {
+		a.payLog(ctx, model.PayMethodHeleket, "", chatID, "invoice_error", "%s: цена %q не разобрана — счёт не выставлен", purposeOrBuy(purpose), amount)
 		return "", "", errors.New(i18n.T(a.lang(chatID), "hl.no_price"))
 	}
 	n := int64(months)
 	if purpose == purposeTopUp {
 		n = kopecks
 	}
+	// Топ-ап всегда в рублях: баланс бота ведётся в копейках ₽, и ЮKassa-топап
+	// жёстко шлёт RUB. Валюта прайса применима только к покупке подписки.
+	currency := a.hlCurrency()
+	if purpose == purposeTopUp {
+		currency = "RUB"
+	}
 	inv, err := client.CreateInvoice(ctx, heleket.InvoiceRequest{
-		Amount:         fmt.Sprintf("%.2f", value),
-		Currency:       a.hlCurrency(),
+		Amount:         fmt.Sprintf("%d.%02d", valueK/100, valueK%100),
+		Currency:       currency,
 		OrderID:        hlOrderID(chatID, n, purpose),
 		ToCurrency:     strings.ToUpper(strings.TrimSpace(cfg.ToCurrency)),
 		Subtract:       cfg.SubtractOrDefault(),
@@ -258,8 +272,14 @@ func (a *App) onHLCheck(ctx context.Context, chatID int64, uuid string) {
 // hlPendingText объясняет пользователю, чего именно ждём.
 func (a *App) hlPendingText(ctx context.Context, lang string, inv *heleket.Invoice) string { //nolint:unparam // lang симметричен остальным экранам
 	switch inv.Status {
-	case heleket.StatusWrongAmount, heleket.StatusWrongAmountWaiting:
+	case heleket.StatusWrongAmount:
+		// Финальная недоплата: текст обещает уведомление админа — выполняем
+		// обещание и здесь, а не только в вебхуке (дедуп не даст задвоить).
+		a.hlNotifyAdmin(ctx, inv, "underpaid")
 		return i18n.T(lang, "hl.underpaid")
+	case heleket.StatusWrongAmountWaiting:
+		// Доплата ещё возможна — админа не дёргаем, текст без ложных обещаний.
+		return i18n.T(lang, "hl.underpaid_wait")
 	case heleket.StatusLocked:
 		a.hlNotifyAdmin(ctx, inv, "locked")
 		return i18n.T(lang, "hl.locked")
@@ -271,8 +291,21 @@ func (a *App) hlPendingText(ctx context.Context, lang string, inv *heleket.Invoi
 }
 
 // hlNotifyAdmin зовёт админа туда, где деньги пришли, но подписку выдавать
-// нельзя: недоплата и AML-заморозка разбираются вручную.
+// нельзя: недоплата и AML-заморозка разбираются вручную. Уведомление уходит
+// ОДИН раз на счёт и вид события: вебхук, ручная проверка и реконсилятор
+// пересекаются, а кнопкой «Проверить оплату» админа иначе можно заспамить.
 func (a *App) hlNotifyAdmin(ctx context.Context, inv *heleket.Invoice, kind string) {
+	key := inv.UUID + ":" + kind
+	a.thrMu.Lock()
+	if a.hlNotified == nil {
+		a.hlNotified = map[string]bool{}
+	}
+	dup := a.hlNotified[key]
+	a.hlNotified[key] = true
+	a.thrMu.Unlock()
+	if dup {
+		return
+	}
 	alang := a.lang(a.cfg.AdminID)
 	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "hl.admin_"+kind, inv.UUID, inv.Amount+" "+inv.Currency))
 }
@@ -310,9 +343,16 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		}
 	}
 	if chatID == 0 {
-		if id, n := parseHLOrderID(inv.OrderID); id != 0 {
+		if id, n, topup := parseHLOrderID(inv.OrderID); id != 0 {
 			chatID = id
-			if months == 0 && strings.HasPrefix(inv.OrderID, "hl-") {
+			if topup {
+				// Для «hlt-» n — копейки. Без этой ветки пополнение с потерянной
+				// pending-записью и пустым additional_data превратилось бы в
+				// подписку на срок по умолчанию.
+				if kopecks == 0 {
+					kopecks = n
+				}
+			} else if months == 0 {
 				months = int(n)
 			}
 		}
@@ -426,6 +466,28 @@ func (a *App) onHeleketAdmin(ctx context.Context, chatID int64, val string) {
 	}
 }
 
+// hlCryptoCode проверяет по списку услуг шлюза, что код — существующая
+// криптовалюта: официальная документация требует в to_currency только крипту,
+// и фиатный код валил бы КАЖДОЕ создание счёта. Если список недоступен
+// (ключи ещё не введены, сеть), даём сохранить — проверится кнопкой «Проверить
+// ключи» и первым же счётом.
+func (a *App) hlCryptoCode(ctx context.Context, code string) bool {
+	client := a.hlClient()
+	if client == nil {
+		return true
+	}
+	list, err := client.Services(ctx)
+	if err != nil || len(list) == 0 {
+		return true
+	}
+	for _, s := range list {
+		if strings.EqualFold(s.Currency, code) {
+			return true
+		}
+	}
+	return false
+}
+
 // hlProbe дёргает список услуг — так проверяются ключи, не выставляя счёт.
 // Неверный merchant, чужой или выплатной ключ отваливаются сразу.
 func (a *App) hlProbe(ctx context.Context, chatID int64) {
@@ -472,7 +534,14 @@ func (a *App) setHeleketField(ctx context.Context, chatID int64, field, text str
 		case "hl_key":
 			a.botCfg.Heleket.APIKey = text
 		case "hl_tocur":
-			a.botCfg.Heleket.ToCurrency = strings.ToUpper(text)
+			cur := strings.ToUpper(text)
+			if cur != "" && !a.hlCryptoCode(ctx, cur) {
+				a.mu.Unlock()
+				a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "hl.tocur_bad", cur),
+					[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:heleket")})
+				return
+			}
+			a.botCfg.Heleket.ToCurrency = cur
 		case "hl_subtract":
 			if n, err := strconv.Atoi(text); err == nil && n >= 0 && n <= 100 {
 				a.botCfg.Heleket.Subtract = &n

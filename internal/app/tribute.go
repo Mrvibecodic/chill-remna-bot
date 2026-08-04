@@ -70,7 +70,7 @@ type tributeWebhook struct {
 func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, body []byte) (bool, error) {
 	cfg := a.tributeCfg()
 	if !cfg.Enabled || cfg.APIKey == "" {
-		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "вебхук отброшен: Tribute выключен или не задан API-ключ")
+		a.payLogThrottled(ctx, "trb-webhook-off", model.PayMethodTribute, "", 0, "error", "вебхук отброшен: Tribute выключен или не задан API-ключ")
 		a.log.Warn("tribute webhook: ignored — tribute disabled or api key not set")
 		return true, nil
 	}
@@ -78,13 +78,13 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	mac.Write(body)
 	got, err := hex.DecodeString(strings.TrimSpace(signatureHex))
 	if err != nil || !hmac.Equal(got, mac.Sum(nil)) {
-		a.payLog(ctx, model.PayMethodTribute, "", 0, "sign_error", "подпись вебхука не сошлась (проверьте API-ключ Tribute)")
+		a.payLogThrottled(ctx, "trb-webhook-sign", model.PayMethodTribute, "", 0, "sign_error", "подпись вебхука не сошлась (проверьте API-ключ Tribute)")
 		a.log.Warn("tribute webhook: bad signature")
 		return false, fmt.Errorf("tribute webhook: invalid signature")
 	}
 	var wh tributeWebhook
 	if err := json.Unmarshal(body, &wh); err != nil {
-		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "тело вебхука не разобрано: %v", err)
+		a.payLogThrottled(ctx, "trb-webhook-json", model.PayMethodTribute, "", 0, "error", "тело вебхука не разобрано: %v", err)
 		return false, fmt.Errorf("tribute webhook: bad json: %w", err)
 	}
 	if wh.Name != "new_subscription" && wh.Name != "renewed_subscription" {

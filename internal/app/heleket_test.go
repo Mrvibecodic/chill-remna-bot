@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	sdk "github.com/heleket/go-sdk"
+
 	"remnabot/internal/config"
 	"remnabot/internal/heleket"
 	"remnabot/internal/i18n"
@@ -57,21 +59,23 @@ func TestHeleketOrderIDAndData(t *testing.T) {
 }
 
 func TestParseHLOrderIDFallback(t *testing.T) {
-	tg, n := parseHLOrderID("hl-777-3-abcd1234")
-	if tg != 777 || n != 3 {
-		t.Fatalf("покупка: tg=%d n=%d", tg, n)
+	tg, n, topup := parseHLOrderID("hl-777-3-abcd1234")
+	if tg != 777 || n != 3 || topup {
+		t.Fatalf("покупка: tg=%d n=%d topup=%v", tg, n, topup)
 	}
-	tg, n = parseHLOrderID("hlt-777-50000-abcd1234")
-	if tg != 777 || n != 50000 {
-		t.Fatalf("пополнение: tg=%d n=%d", tg, n)
+	// Для «hlt-» n — копейки, и это ОБЯЗАНО быть помечено: без флага пополнение
+	// с потерянной pending-записью превратилось бы в подписку.
+	tg, n, topup = parseHLOrderID("hlt-777-50000-abcd1234")
+	if tg != 777 || n != 50000 || !topup {
+		t.Fatalf("пополнение: tg=%d n=%d topup=%v", tg, n, topup)
 	}
 	// Отрицательный telegram-id даёт пустой элемент после split по «-».
-	tg, n = parseHLOrderID("hl--100500-1-abcd1234")
+	tg, n, _ = parseHLOrderID("hl--100500-1-abcd1234")
 	if tg != -100500 || n != 1 {
 		t.Fatalf("отрицательный tg: tg=%d n=%d", tg, n)
 	}
 	// Чужой order_id не должен разбираться в получателя.
-	if tg, _ := parseHLOrderID("order-42"); tg != 0 {
+	if tg, _, _ := parseHLOrderID("order-42"); tg != 0 {
 		t.Fatalf("чужой order_id разобран: tg=%d", tg)
 	}
 }
@@ -301,9 +305,17 @@ func TestHeleketWebhook_IntermediateKeepsPending(t *testing.T) {
 	}
 }
 
+// hlSignedBody подписывает тело вебхука ключом заглушки — как настоящий Heleket
+// (md5(base64(тело без sign)+ключ), поле sign добавляется последним).
+func hlSignedBody(payload string) []byte {
+	sign := sdk.Sign([]byte(payload), "pay-key")
+	return []byte(payload[:len(payload)-1] + `,"sign":"` + sign + `"}`)
+}
+
 // Регресс: у пополнения могла потеряться pending-запись (реконсилятор снимает
-// счета старше суток). Тогда получателя восстанавливаем из additional_data — и
-// это ОБЯЗАНО быть зачислением на баланс, а не подпиской на срок по умолчанию.
+// счета старше суток). Легитимный вебхук приходит с ВАЛИДНОЙ подписью, и
+// получателя восстанавливаем из additional_data — это ОБЯЗАНО быть зачислением
+// на баланс, а не подпиской на срок по умолчанию.
 func TestHeleketTopUpWithoutPendingCreditsBalance(t *testing.T) {
 	a := hlStub(t, `{"state":0,"result":{"uuid":"u-4","order_id":"hlt-555-50000-abcd","status":"paid","amount":"500.00","currency":"RUB","is_final":true,"additional_data":"tg=555&kp=50000"}}`)
 	fs := a.store.(*fakeStore)
@@ -312,11 +324,50 @@ func TestHeleketTopUpWithoutPendingCreditsBalance(t *testing.T) {
 	_ = fs.UpsertUser(ctx, u)
 	// pending-записи намеренно НЕТ.
 
-	if _, err := a.HandleHeleketWebhook(ctx, []byte(`{"type":"payment","uuid":"u-4","status":"paid"}`)); err != nil {
+	if _, err := a.HandleHeleketWebhook(ctx, hlSignedBody(`{"type":"payment","uuid":"u-4","status":"paid"}`)); err != nil {
 		t.Fatalf("вебхук: %v", err)
 	}
 	got, _ := fs.GetUser(ctx, u)
 	if got == nil || got.Balance != 50000 {
 		t.Fatalf("пополнение без pending должно зачислиться на баланс: %+v", got)
+	}
+}
+
+// А вот вебхук с БИТОЙ подписью по неизвестному счёту обязан отброситься без
+// обращения к API: иначе любой аноним получает усилитель запросов к шлюзу.
+func TestHeleketWebhook_BadSignUnknownInvoiceDropped(t *testing.T) {
+	apiCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalls++
+		_, _ = w.Write([]byte(`{"state":0,"result":{"uuid":"evil","status":"paid","additional_data":"tg=555&kp=50000"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	old := heleket.BaseURL
+	heleket.BaseURL = srv.URL
+	t.Cleanup(func() { heleket.BaseURL = old })
+
+	a := hlStub(t, ``) // свой сервер выше; заглушка hlStub не используется для API
+	heleket.BaseURL = srv.URL
+	fs := a.store.(*fakeStore)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 555)
+
+	handled, err := a.HandleHeleketWebhook(ctx, []byte(`{"type":"payment","uuid":"evil","status":"paid","sign":"00000000000000000000000000000000"}`))
+	if err != nil || !handled {
+		t.Fatalf("ожидался мягкий отказ: handled=%v err=%v", handled, err)
+	}
+	if apiCalls != 0 {
+		t.Fatalf("по битой подписи и неизвестному счёту ушло %d запросов к API", apiCalls)
+	}
+	if got, _ := fs.GetUser(ctx, 555); got == nil || got.Balance != 0 {
+		t.Fatalf("баланс не должен меняться: %+v", got)
+	}
+	// Повторный залп того же мусора не множит записи журнала (троттлинг).
+	before := len(fs.paylogs)
+	for i := 0; i < 5; i++ {
+		_, _ = a.HandleHeleketWebhook(ctx, []byte(`{"uuid":"evil2","status":"paid","sign":"00000000000000000000000000000000"}`))
+	}
+	if grown := len(fs.paylogs) - before; grown > 0 {
+		t.Fatalf("залп мусорных вебхуков добавил %d записей — троттлинг не работает", grown)
 	}
 }

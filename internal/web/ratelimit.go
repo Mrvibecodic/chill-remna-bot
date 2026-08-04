@@ -62,6 +62,14 @@ func clientIP(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		peer = host
 	}
+	// Заголовкам проксирования верим только когда TCP-пир — локальный реверс-
+	// прокси (loopback/private), то есть заголовок выставил наш nginx/caddy.
+	// Иначе любой прямой клиент подставляет произвольный «IP» и получает свой
+	// ключ лимитера на каждый запрос — лимит 15/5мин на auth-эндпоинтах
+	// кабинета обходится полностью.
+	if p := net.ParseIP(peer); p == nil || !(p.IsLoopback() || p.IsPrivate()) {
+		return peer
+	}
 	for _, h := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
 		v := r.Header.Get(h)
 		if v == "" {

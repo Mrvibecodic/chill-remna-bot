@@ -80,7 +80,11 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 		if returnURL == "" {
 			returnURL = "https://t.me"
 		}
-		url, _, err := a.plCreateTransaction(ctx, tgID, months, parseAmountRub(value), miniDesc(months), returnURL)
+		valueK, okV := rubToKopecks(value)
+		if !okV || valueK <= 0 {
+			return "", false, errors.New("оплата недоступна")
+		}
+		url, _, err := a.plCreateTransaction(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL)
 		return url, false, err
 
 	case model.PayMethodHeleket:

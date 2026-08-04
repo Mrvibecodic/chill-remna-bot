@@ -83,6 +83,12 @@ type App struct {
 	reconMu   sync.Mutex
 	reconSeen map[string]string
 
+	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
+	// (thrLast) и разовые уведомления админу по счёту Heleket (hlNotified).
+	thrMu      sync.Mutex
+	thrLast    map[string]time.Time
+	hlNotified map[string]bool
+
 	scrMu         sync.Mutex
 	screen        map[int64][]int
 	kbSet         map[int64]bool
@@ -561,6 +567,7 @@ func (a *App) handleTermsCmd(ctx context.Context, chatID int64) {
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
 	a.mu.Lock()
 	installed := a.installed()
 	panel := a.panel
@@ -570,7 +577,6 @@ func (a *App) handleStatus(ctx context.Context, chatID int64) {
 		mode = a.botCfg.Panel.Mode
 		methods = enabledMethods(a.botCfg)
 	}
-	lang := a.lang(chatID)
 	a.mu.Unlock()
 
 	isAdmin := chatID == a.cfg.AdminID
@@ -1061,6 +1067,11 @@ func (a *App) pricing() model.Pricing {
 }
 
 func (a *App) lang(chatID int64) string {
+	// Под мьютексом: карта a.wiz пишется из обработчика апдейтов, а lang()
+	// зовут и фоновые горутины (вебхуки, автоплатёж, напоминания) — без лока
+	// это concurrent map read/write, который роняет процесс мимо recover.
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if w, ok := a.wiz[chatID]; ok && w.cfg.Language != "" {
 		return w.cfg.Language
 	}

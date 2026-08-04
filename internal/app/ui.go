@@ -82,7 +82,9 @@ func (a *App) userLabelByID(ctx context.Context, id int64) string {
 		// Telegram username/name — show their email so they are identifiable.
 		if id < 0 {
 			if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
-				return "📧 " + wu.Email
+				// Эскейп обязателен: e-mail — свободный ввод при регистрации в
+				// кабинете и попадает в сообщения с ParseModeHTML.
+				return "📧 " + escapeName(wu.Email)
 			}
 		}
 		if u, _ := a.store.GetUser(ctx, id); u != nil {

@@ -29,7 +29,7 @@ type hlRawEvent struct {
 func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, error) {
 	client := a.hlClient()
 	if client == nil {
-		a.payLog(ctx, model.PayMethodHeleket, "", 0, "error", "клиент Heleket не настроен — вебхук нельзя проверить")
+		a.payLogThrottled(ctx, "hl-webhook-noclient", model.PayMethodHeleket, "", 0, "error", "клиент Heleket не настроен — вебхук нельзя проверить")
 		a.log.Error("heleket webhook: client not configured")
 		return true, nil
 	}
@@ -48,6 +48,24 @@ func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, erro
 			return false, fmt.Errorf("heleket webhook: bad json: %w", err)
 		}
 		uuid, orderID, status = raw.UUID, raw.OrderID, raw.Status
+		// Битая подпись терпима только для НАШИХ счетов (страховка от дрейфа
+		// сериализации): дальше решает ответ API. Для неизвестного uuid дальше
+		// не идём — иначе любой аноним POST-ом дёргает Info (усилитель запросов
+		// к шлюзу) и заливает журнал; запись о попытке троттлится.
+		known := false
+		if uuid != "" && a.store != nil {
+			if done, _ := a.store.PaymentByExtID(ctx, hlExtPrefix+uuid); done {
+				known = true
+			} else if p, _ := a.store.PendingByExtID(ctx, hlExtPrefix+uuid); p != nil {
+				known = true
+			}
+		}
+		if !known {
+			a.payLogThrottled(ctx, "hl-webhook-badsign", model.PayMethodHeleket, "", 0, "sign_mismatch",
+				"вебхук с неверной подписью по неизвестному счёту %q — отброшен", uuid)
+			a.log.Warn("heleket webhook: bad signature for unknown invoice", "uuid", uuid)
+			return true, nil
+		}
 		a.payLog(ctx, model.PayMethodHeleket, hlExtPrefix+uuid, 0, "sign_mismatch",
 			"подпись вебхука не сошлась (%v) — статус перепроверяется через API", verr)
 		a.log.Warn("heleket webhook: signature not verified", "uuid", uuid, "err", verr)
