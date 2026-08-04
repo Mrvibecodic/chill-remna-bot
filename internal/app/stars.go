@@ -73,6 +73,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID)
 	if err != nil {
+		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "finalize_error", "%v", err)
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", err.Error()))
 		return
 	}
@@ -168,6 +169,7 @@ func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, months int) (s
 	desc := i18n.T(lang, "stars.invoice_desc", months)
 	link, err := a.msg.CreateInvoiceLink(ctx, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)
 	if err != nil {
+		a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_error", "purchase months=%d stars=%d: %v", months, amount, err)
 		return "", err
 	}
 	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_link", "purchase months=%d stars=%d", months, amount)

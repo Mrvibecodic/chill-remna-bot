@@ -14,6 +14,26 @@ import (
 // the SAME invoice-creation cores as the chat flow, so pending-invoice ExtID
 // formats are identical and the existing webhooks complete the payment.
 func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
+	url, invoice, err := a.miniPayURLCore(ctx, tgID, months, method, web_)
+	if err != nil {
+		// Ядра создания счёта пишут свои invoice_error, но отказы «метод
+		// недоступен/неизвестен» терялись совсем, а источник платежа (чат,
+		// мини-апп, кабинет) не был виден нигде — без него разбор жалобы
+		// «не смог оплатить» упирается в догадки.
+		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s months=%d: %v", miniSource(web_), months, err)
+	}
+	return url, invoice, err
+}
+
+// miniSource — откуда пришла попытка оплаты, для журнала.
+func miniSource(web_ bool) string {
+	if web_ {
+		return "веб-кабинет"
+	}
+	return "мини-апп"
+}
+
+func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
 	switch method {
 	case model.PayMethodStars:
 		link, err := a.starsInvoiceLink(ctx, tgID, months)
@@ -221,13 +241,16 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		}
 	}
 	if !valid || (maxK > 0 && kopecks > maxK) {
+		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: "недопустимая сумма"}
 	}
 	if method != "yk" && method != "cb" && method != "hl" {
+		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: "способ пополнения недоступен"}
 	}
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method)
 	if err != nil {
+		a.payLog(ctx, method, "", tgID, "topup_error", "kopecks=%d: %v", kopecks, err)
 		return web.MiniActionDTO{Error: err.Error()}
 	}
 	return web.MiniActionDTO{OK: true, PayURL: payURL}

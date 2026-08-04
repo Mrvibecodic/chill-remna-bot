@@ -617,6 +617,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		kbRows = append(kbRows, nav)
 	}
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")})
+	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
 	kbRows = append(kbRows, back)
 	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
 }
@@ -648,6 +649,8 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "paylog.ask"), "menu:payments")
 	case "csv":
 		a.exportPayLogCSV(ctx, chatID)
+	case "err":
+		a.exportPayErrors(ctx, chatID)
 	}
 }
 

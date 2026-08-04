@@ -84,10 +84,12 @@ func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *mode
 func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.ykClient()
 	if client == nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент ЮKassa не настроен — счёт нельзя перепроверить")
 		return
 	}
 	pay, err := client.GetPayment(ctx, pi.ExtID)
 	if err != nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
 		return
 	}
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s paid=%v", pay.Status, pay.Paid)
@@ -107,6 +109,7 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.cbClient()
 	if client == nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент CryptoBot не настроен — счёт нельзя перепроверить")
 		return
 	}
 	idStr := strings.TrimPrefix(pi.ExtID, "cb:")
@@ -117,6 +120,7 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 	}
 	inv, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
 		return
 	}
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", inv.Status)
@@ -131,10 +135,12 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.plClient()
 	if client == nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент Platega не настроен — счёт нельзя перепроверить")
 		return
 	}
 	tx, err := client.GetTransaction(ctx, pi.ExtID)
 	if err != nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
 		return
 	}
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", tx.Status)
@@ -149,10 +155,12 @@ func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *mode
 func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.hlClient()
 	if client == nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент Heleket не настроен — счёт нельзя перепроверить")
 		return
 	}
 	inv, err := client.Info(ctx, strings.TrimPrefix(pi.ExtID, hlExtPrefix))
 	if err != nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
 		return
 	}
 	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", inv.Status)

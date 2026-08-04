@@ -29,6 +29,7 @@ type hlRawEvent struct {
 func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, error) {
 	client := a.hlClient()
 	if client == nil {
+		a.payLog(ctx, model.PayMethodHeleket, "", 0, "error", "клиент Heleket не настроен — вебхук нельзя проверить")
 		a.log.Error("heleket webhook: client not configured")
 		return true, nil
 	}
