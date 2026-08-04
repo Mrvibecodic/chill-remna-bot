@@ -456,6 +456,16 @@ docker compose up -d
 
 > Новый образ появляется в GHCR автоматически после каждого пуша в `main` (это делает CI).
 
+### Версии и релизы
+
+Начиная с **1.0.0** каждый релиз получает git-тег `vX.Y.Z`, [страницу релиза](https://github.com/Mrvibecodic/chill-remna-bot/releases) со списком изменений и версионный Docker-образ:
+
+- `ghcr.io/mrvibecodic/chill-remna-bot:latest` — всегда свежий релиз из `main` (канал stable);
+- `ghcr.io/mrvibecodic/chill-remna-bot:dev` — превью из ветки `dev`, как и раньше;
+- `ghcr.io/mrvibecodic/chill-remna-bot:v1.0.0` — конкретная версия.
+
+Чтобы зафиксироваться на версии, впишите её тег в `docker-compose.yml` вместо `:latest` — `docker compose pull` перестанет приносить обновления, пока тег не сменить. Возврат на канал — просто верните `:latest` (или `:dev`).
+
 ### Бэкап
 
 - **SQLite:** сохраните том `bot-data` целиком — там `bot.db` **и** `secret.key`.
