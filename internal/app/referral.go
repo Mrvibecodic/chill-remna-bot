@@ -182,7 +182,8 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 		return false, true
 	}
 	a.invalidateSubCache(ref)
-	a.syncAddSub(ctx, ref)
+	// Bonus days only extend the expiry — A's traffic is not reset, so B's isn't either.
+	a.syncAddSub(ctx, ref, false)
 	if a.store != nil {
 		_ = a.store.SetSubExpiry(ctx, ref, expireAt, "paid")
 	}

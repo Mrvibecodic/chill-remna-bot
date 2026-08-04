@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"remnabot/internal/model"
@@ -41,6 +45,11 @@ type Client struct {
 	hwidRetryBase time.Duration
 	hwidRetryMax  time.Duration
 
+	// gen caches which API dialect this panel speaks (see panelGen).
+	gen       atomic.Int32
+	probeMu   sync.Mutex
+	lastProbe time.Time
+
 	logMu sync.Mutex
 	logs  []APIEvent
 }
@@ -61,8 +70,117 @@ func New(cfg model.PanelConfig) *Client {
 		cookie: strings.TrimSpace(cfg.Cookie),
 		apiKey: strings.TrimSpace(cfg.APIKey),
 		local:  cfg.Mode == model.ModeLocal,
-		http:   &http.Client{Timeout: 15 * time.Second},
+		http: &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: followCanonicalOnly,
+		},
 	}
+}
+
+// maxRedirects — свой предел вместо стандартного: с собственным CheckRedirect
+// Go больше не считает переходы сам. Держим ровно как у него (десятый прыжок
+// обрывается), чтобы у стойки из нескольких прокси ничего не отвалилось.
+const maxRedirects = 10
+
+// followCanonicalOnly пропускает только канонизирующие редиректы фронта — те,
+// что не меняют путь: http→https от Caddy, www→apex, слэш в конце. Такие
+// адреса панели встречаются у живых установок, и ходить по ним надо.
+//
+// А вот аддон «Caddy with security» на запрос без X-Api-Key отвечает 302 на
+// страницу входа портала — другой путь (/r, /restricted). Идти туда нельзя:
+// портал вернёт 200 со страницей логина, и Health решит, что панель на связи.
+// Такой переход обрываем, и 3xx разбирает classifyHTTP.
+//
+// Всё сравнивается с исходным запросом via[0], а не с предыдущим прыжком:
+// заголовки Go на каждом прыжке копирует заново из первого запроса, так что
+// снятый один раз X-Api-Key сам собой вернётся на следующем.
+func followCanonicalOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return http.ErrUseLastResponse
+	}
+	orig := via[0]
+	if !sameEndpoint(req.URL.Path, orig.URL.Path) {
+		return http.ErrUseLastResponse
+	}
+	// 301/302/303 превращают любой метод в GET и теряют тело: PATCH «прошёл
+	// бы» как чтение списка, вернув 200. Небезопасные методы переигрываем
+	// только по 307/308, которые метод и тело сохраняют.
+	if m := orig.Method; m != http.MethodGet && m != http.MethodHead {
+		code := 0
+		if req.Response != nil {
+			code = req.Response.StatusCode
+		}
+		if code != http.StatusTemporaryRedirect && code != http.StatusPermanentRedirect {
+			return http.ErrUseLastResponse
+		}
+	}
+	// Понижение до открытого http не принимаем: Bearer панели Go снимает
+	// только при смене хоста, то есть токен ушёл бы открытым текстом.
+	if orig.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return http.ErrUseLastResponse
+	}
+	// Уход на чужой хост — не канонизация. Идти туда нельзя вдвойне: Go унёс бы
+	// следом X-Api-Key (чувствительными он считает только Authorization и
+	// Cookie), а любой ответ оттуда бот принял бы за ответ панели.
+	if !sameSite(req.URL.Host, orig.URL.Host) {
+		req.Header.Del("X-Api-Key")
+		return http.ErrUseLastResponse
+	}
+	return nil
+}
+
+// sameEndpoint — редирект ведёт на тот же эндпоинт панели, просто записанный
+// иначе: слэш в конце или снятый/добавленный префикс пути (фронт с
+// `handle_path /panel*` уводит /panel/api/... на /api/...).
+//
+// Обе стороны обязаны остаться путём API панели (/api/...) — иначе портал
+// caddy-security с кастомным маршрутом вроде /health совпал бы как «хвост»
+// /api/system/health, и бот принял бы форму входа за панель.
+func sameEndpoint(a, b string) bool {
+	a, b = strings.TrimRight(a, "/"), strings.TrimRight(b, "/")
+	if !isAPIPath(a) || !isAPIPath(b) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	long, short := a, b
+	if len(long) < len(short) {
+		long, short = short, long
+	}
+	// Отрезаемая часть должна быть целым сегментом, а не хвостом чужого слова:
+	// /xapi/... не считается вариантом /api/....
+	return strings.HasSuffix(long, short) && strings.HasPrefix(long[:len(long)-len(short)], "/")
+}
+
+// isAPIPath — путь ведёт в API панели. Все запросы клиента идут в /api/..., так
+// что и цель редиректа обязана туда же.
+func isAPIPath(p string) bool {
+	return p == "/api" || strings.HasPrefix(p, "/api/") || strings.Contains(p, "/api/")
+}
+
+// sameSite — тот же адрес или его www-псевдоним (www.panel.example ↔
+// panel.example). Шире не берём: панель на апексе иначе роднилась бы с любым
+// поддоменом — включая клиентские и чужие на общем суффиксе вроде duckdns.org.
+func sameSite(a, b string) bool {
+	a, b = normHost(a), normHost(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || a == "www."+b || b == "www."+a
+}
+
+// normHost приводит host[:port] к сравнимому виду: нижний регистр, без корневой
+// точки в конце имени (panel.example.com. == panel.example.com) и без порта.
+// Порт отбрасываем намеренно: смена порта на том же имени — это тот же сервер
+// оператора (фронт на :80 уводит на :8443), а не чужой хост.
+func normHost(hostport string) string {
+	s := strings.ToLower(strings.TrimSpace(hostport))
+	host, _, err := net.SplitHostPort(s)
+	if err != nil {
+		host = s
+	}
+	return strings.TrimSuffix(host, ".")
 }
 
 func (c *Client) setHeaders(req *http.Request) {
@@ -125,6 +243,21 @@ func (c *Client) Logs() []APIEvent {
 	return out
 }
 
+// ImportLogs переносит историю запросов из прежнего клиента: при смене секрета
+// доступа клиент пересобирается, а лог API — это то, ради чего админ туда и
+// смотрит, терять его на ровном месте нельзя.
+func (c *Client) ImportLogs(ev []APIEvent) {
+	if len(ev) == 0 {
+		return
+	}
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	c.logs = append(ev, c.logs...)
+	if len(c.logs) > apiLogCap {
+		c.logs = c.logs[len(c.logs)-apiLogCap:]
+	}
+}
+
 func (c *Client) ClearLogs() {
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
@@ -139,6 +272,14 @@ func (c *Client) Health(ctx context.Context) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return classifyHTTP(resp)
+	}
+	// 200 — ещё не значит «панель». Прокси установщика eGames в сборке
+	// «панель+нода» отдаёт неавторизованным запросам сайт-заглушку с кодом 200,
+	// и без этой проверки мастер отрапортовал бы об успехе. API панели отвечает
+	// только JSON.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if isHTMLPage(resp, string(body)) {
+		return notPanelErr(resp.StatusCode)
 	}
 	return nil
 }
@@ -165,8 +306,174 @@ func (c *Client) SystemStats(ctx context.Context) (int, error) {
 	return out.Response.Users.TotalUsers, nil
 }
 
+// Remnawave 3.0.0 removed the user uuid from the API entirely (users are keyed
+// by a numeric id) and dropped GET /api/users/by-telegram-id in favour of
+// GET /api/users/stream?telegramId=. This client speaks both dialects and works
+// out which one the panel in front of it uses, so one build keeps running
+// against 2.7.4+ and 3.x alike.
+type panelGen int32
+
+const (
+	genUnknown panelGen = iota
+	genLegacy           // before 3.0.0: user addressed by uuid
+	genV3               // 3.0.0+: user addressed by numeric id
+)
+
+// genRecheckEvery bounds how often an empty lookup may re-probe the panel, so a
+// panel upgraded under a running bot is picked up without a restart while an
+// unknown user doesn't double every request.
+const genRecheckEvery = 10 * time.Minute
+
+// UserRef identifies a panel user in whichever dialect the panel speaks. It is
+// opaque to callers: they carry it around (a background retry, a log line) and
+// hand it back to the client.
+type UserRef struct {
+	uuid string
+	id   int64
+}
+
+func (r UserRef) Empty() bool { return r.uuid == "" && r.id <= 0 }
+
+// Key is a stable string for dedup maps and log lines.
+func (r UserRef) Key() string {
+	if r.uuid != "" {
+		return r.uuid
+	}
+	if r.id > 0 {
+		return strconv.FormatInt(r.id, 10)
+	}
+	return ""
+}
+
+// path is the identifier as it goes into a URL path segment.
+func (r UserRef) path() string { return url.PathEscape(r.Key()) }
+
+// apply points a request body at this user the way the panel expects it.
+func (r UserRef) apply(body map[string]any) map[string]any {
+	if r.uuid != "" {
+		body["uuid"] = r.uuid
+	} else {
+		body["id"] = r.id
+	}
+	return body
+}
+
+// hwidBody is the /api/hwid/devices body naming this user.
+func (r UserRef) hwidBody() map[string]any {
+	if r.uuid != "" {
+		return map[string]any{"userUuid": r.uuid}
+	}
+	return map[string]any{"userId": r.id}
+}
+
+func (c *Client) generation() panelGen { return panelGen(c.gen.Load()) }
+
+func (c *Client) noteGen(g panelGen) {
+	if g != genUnknown {
+		c.gen.Store(int32(g))
+	}
+}
+
+// noteUser learns the dialect for free from any user payload that came back.
+func (c *Client) noteUser(u *panelUser) {
+	switch {
+	case u == nil:
+	case u.Uuid != "":
+		c.noteGen(genLegacy)
+	case u.ID > 0:
+		c.noteGen(genV3)
+	}
+}
+
+// probeGen asks the panel which dialect it speaks: /api/users/stream exists only
+// from 3.0.0 on. Deliberately careful — a wrong answer here sends every lookup
+// to a route the panel doesn't have:
+//   - 200 counts only when the body really is a stream envelope (a proxy or a
+//     catch-all answering 200 to anything proves nothing);
+//   - any other client-side refusal means a pre-3.0.0 panel. Not just 404: on
+//     2.x the request matches GET /api/users/:uuid, whose uuid validation
+//     answers 400;
+//   - auth errors, rate limiting, 5xx and transport failures decide nothing —
+//     the caller must treat that as "don't know", never as "no such user".
+//
+// Attempts are rate-limited by genRecheckEvery (including the fruitless ones),
+// so a flaky panel can't turn every lookup into two requests, and the HTTP call
+// is made outside the lock so concurrent lookups don't queue up behind it.
+func (c *Client) probeGen(ctx context.Context) panelGen {
+	c.probeMu.Lock()
+	if g := c.generation(); !c.lastProbe.IsZero() && time.Since(c.lastProbe) < genRecheckEvery {
+		c.probeMu.Unlock()
+		return g
+	}
+	c.lastProbe = time.Now()
+	c.probeMu.Unlock()
+
+	resp, err := c.do(ctx, http.MethodGet, "/api/users/stream?size=1", nil)
+	if err != nil {
+		return c.generation()
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return c.generation()
+		}
+		var env struct {
+			Response *struct {
+				Users *[]json.RawMessage `json:"users"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(body, &env) == nil && env.Response != nil && env.Response.Users != nil {
+			c.noteGen(genV3)
+		}
+	case undecidedStatus(resp.StatusCode):
+		// auth / rate limit / server trouble — proves nothing
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		c.noteGen(genLegacy)
+	}
+	return c.generation()
+}
+
+// undecidedStatus marks answers that say nothing about the panel's API version.
+func undecidedStatus(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusProxyAuthRequired,
+		http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return code >= 500
+}
+
+// resetGen forgets the cached dialect, so the next lookup probes again. Used
+// when a route that must exist in that dialect answers "no such route" — e.g.
+// the panel was rolled back from 3.x while the bot kept running.
+func (c *Client) resetGen() {
+	c.gen.Store(int32(genUnknown))
+	c.probeMu.Lock()
+	c.lastProbe = time.Time{}
+	c.probeMu.Unlock()
+}
+
+// routeGone recognises the framework's "no such route here" 404 — the shape a
+// panel answers with once an endpoint has been removed (3.0.0 dropped
+// by-telegram-id): a message like "Cannot GET /api/...". The panel's own
+// "no such user" 404 looks different (typed error, its own message), and a
+// body that says neither is treated as the ordinary not-found so a panel that
+// answers tersely keeps behaving exactly as before.
+func routeGone(body []byte) bool {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(body, &env) != nil {
+		return false
+	}
+	return strings.HasPrefix(env.Message, "Cannot ")
+}
+
 type panelUser struct {
 	Uuid            string `json:"uuid"`
+	ID              int64  `json:"id"`
 	ExpireAt        string `json:"expireAt"`
 	SubscriptionURL string `json:"subscriptionUrl"`
 	Tag             string `json:"tag"`
@@ -176,6 +483,35 @@ type panelUser struct {
 
 	TrafficLimitStrategy string `json:"trafficLimitStrategy"`
 	HwidDeviceLimit      int    `json:"hwidDeviceLimit"`
+
+	TrafficLimitBytes int64 `json:"trafficLimitBytes"`
+	// Used traffic moved into the nested userTraffic object in the panel
+	// contract; the flat field is still read as a fallback for older payloads.
+	UsedTrafficBytes int64 `json:"usedTrafficBytes"`
+	UserTraffic      struct {
+		UsedTrafficBytes int64 `json:"usedTrafficBytes"`
+	} `json:"userTraffic"`
+}
+
+// ref is how this user is addressed by this panel: uuid before 3.0.0, numeric
+// id from 3.0.0 on.
+func (u *panelUser) ref() UserRef {
+	if u == nil {
+		return UserRef{}
+	}
+	return UserRef{uuid: u.Uuid, id: u.ID}
+}
+
+// usedBytes returns the user's used traffic regardless of where the panel put
+// it in the payload (nested userTraffic, or the flat legacy field).
+func (u *panelUser) usedBytes() int64 {
+	if u == nil {
+		return 0
+	}
+	if u.UserTraffic.UsedTrafficBytes > 0 {
+		return u.UserTraffic.UsedTrafficBytes
+	}
+	return u.UsedTrafficBytes
 }
 
 type PanelUser struct {
@@ -187,14 +523,23 @@ type PanelUser struct {
 	Tag             string
 	Strategy        string
 	DeviceLimit     int
+	Status          string
+	TrafficLimit    int64
+	TrafficUsed     int64
+	// ID is the numeric identifier (panel 3.0.0+); UUID is the pre-3.0.0 one.
+	// Ref is whichever of them this panel actually understands.
+	ID  int64
+	Ref UserRef
 }
 
 func toPanelUser(u *panelUser) *PanelUser {
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return nil
 	}
 	return &PanelUser{
 		UUID:            u.Uuid,
+		ID:              u.ID,
+		Ref:             u.ref(),
 		Username:        u.Username,
 		TelegramID:      u.TelegramID,
 		ExpireAt:        u.ExpireAt,
@@ -202,6 +547,9 @@ func toPanelUser(u *panelUser) *PanelUser {
 		Tag:             u.Tag,
 		Strategy:        u.TrafficLimitStrategy,
 		DeviceLimit:     u.HwidDeviceLimit,
+		Status:          u.Status,
+		TrafficLimit:    u.TrafficLimitBytes,
+		TrafficUsed:     u.usedBytes(),
 	}
 }
 
@@ -216,95 +564,376 @@ func ownedByBot(u *panelUser, telegramID int64) bool {
 
 const BotTagAdd = "CHILLBOT_ADD"
 
-func addSubUsername(telegramID int64, suffix string) string {
-	if suffix == "" {
-		suffix = "_addsub"
+const DefaultAddSubSuffix = "_addsub"
+
+// addSubSuffixRe keeps the configured suffix inside what the panel accepts in a
+// username; anything else would make every derived name invalid, silently
+// disabling auto-discovery for everyone, so it falls back to the default.
+var addSubSuffixRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,20}$`)
+
+func normalizeAddSubSuffix(suffix string) string {
+	if !addSubSuffixRe.MatchString(suffix) {
+		return DefaultAddSubSuffix
 	}
-	return fmt.Sprintf("tg_%d%s", telegramID, suffix)
+	return suffix
+}
+
+// addSubUsername builds B's panel username from A's ACTUAL username, which is
+// exactly what the subscription middleware's auto-discovery looks up ("имя B =
+// полное имя A + суффикс"). For bot-created accounts A is tg_<id>, so the name
+// is unchanged; for accounts adopted from the panel (linked by telegramId, any
+// username) this is what makes the merge discoverable at all.
+func addSubUsername(mainUsername, suffix string) string {
+	return mainUsername + normalizeAddSubSuffix(suffix)
+}
+
+// legacyAddSubUsername is the name older bot builds always used, regardless of
+// A's real username. Still looked up, so an existing add-on user is recognised
+// as the bot's own instead of being treated as someone else's account.
+func legacyAddSubUsername(telegramID int64, suffix string) string {
+	return fmt.Sprintf("tg_%d%s", telegramID, normalizeAddSubSuffix(suffix))
+}
+
+// panelUsernameRe mirrors the panel's own rule for usernames (3-36 chars of
+// letters, digits, underscore and dash).
+var panelUsernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,36}$`)
+
+// addSubNames returns the name B should live under, followed by the legacy name
+// to fall back on (deduped). mainUsername may be empty when A is already gone —
+// then only the legacy name is known. A derived name the panel would refuse
+// (A's username is long enough that the suffix pushes it over 36 chars) falls
+// back to the short legacy name, so syncing keeps working instead of failing on
+// every call — the merge for that user then needs a manual binding.
+func addSubNames(mainUsername string, telegramID int64, suffix string) []string {
+	legacy := legacyAddSubUsername(telegramID, suffix)
+	if mainUsername == "" {
+		return []string{legacy}
+	}
+	want := addSubUsername(mainUsername, suffix)
+	if want == legacy || !panelUsernameRe.MatchString(want) {
+		return []string{legacy}
+	}
+	return []string{want, legacy}
+}
+
+// findAddSub returns the bot-owned add-on user B (nil when there is none) and
+// the username B should live under. A user sitting on the wanted name that is
+// NOT the bot's is an error; on the legacy name it is simply ignored, since
+// that name is only consulted for migration.
+func (c *Client) findAddSub(ctx context.Context, mainUsername string, telegramID int64, suffix string) (*PanelUser, string, error) {
+	names := addSubNames(mainUsername, telegramID, suffix)
+	want := names[0]
+	for i, name := range names {
+		u, err := c.FindByUsername(ctx, name)
+		if err != nil {
+			return nil, want, err
+		}
+		if u == nil || u.Ref.Empty() {
+			continue
+		}
+		if u.Tag != BotTagAdd {
+			if i == 0 {
+				return nil, want, fmt.Errorf("addsub: пользователь %s принадлежит не боту", name)
+			}
+			continue
+		}
+		return u, want, nil
+	}
+	return nil, want, nil
+}
+
+// expired reports whether an RFC3339 expiry is in the past. Unparsable values
+// are treated as not expired, so a panel quirk never silently skips a user.
+func expired(expireAt string) bool {
+	t, err := time.Parse(time.RFC3339, expireAt)
+	if err != nil {
+		return false
+	}
+	return !t.After(time.Now().UTC())
+}
+
+// AddSubOptions carries everything the bot decides about the add-on user B.
+type AddSubOptions struct {
+	// Suffix appended to A's username to build B's ("" = "_addsub").
+	Suffix string
+	// TrafficBytes is B's own traffic allowance; 0 = unlimited.
+	TrafficBytes int64
+	// InternalSquads are B's squads (B's servers are what gets merged in).
+	InternalSquads []string
+	// ResetTraffic zeroes B's counters. Must be set exactly when A's traffic
+	// was reset too (paid renewal), so both subscriptions stay in step.
+	ResetTraffic bool
+	// MigrateLegacyName recreates an add-on that still lives under the old
+	// tg_<id>+suffix name under the discoverable one. The panel has no rename,
+	// so this DELETES the old user — which would break a manual binding wired
+	// to its subscription URL in the middleware. Therefore it never runs on the
+	// automatic paths: only from the explicit admin "sync everyone" action.
+	MigrateLegacyName bool
+}
+
+// AddSubUpsert reports what an upsert actually did.
+type AddSubUpsert struct {
+	// Done is true when B was created or updated (false = the user was skipped:
+	// expired, no expiry, or an add-on itself — not an error).
+	Done bool
+	// Legacy carries the username of an add-on found under the old naming
+	// scheme. Outside migration it keeps being managed exactly as before and is
+	// only reported, so an admin can decide when to move it.
+	Legacy string
+	// Migrated is true when that legacy user was replaced by a correctly named
+	// one during this call.
+	Migrated bool
 }
 
 // UpsertAddSub creates/updates the add-on user B for telegramID. B inherits
 // expireAt, traffic-reset strategy and device limit from the main user A; only
 // squads and traffic are overridden. B carries NO telegramId and tag
 // CHILLBOT_ADD, so it never appears in by-telegram-id lookups.
-func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, suffix string, trafficBytes int64, internalSquads []string) error {
+func (c *Client) UpsertAddSub(ctx context.Context, telegramID int64, opt AddSubOptions) (AddSubUpsert, error) {
 	a, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return err
+		return AddSubUpsert{}, err
 	}
-	if a == nil || a.ExpireAt == "" {
-		return nil
+	main := toPanelUser(a)
+	if main == nil {
+		return AddSubUpsert{}, nil
+	}
+	if main.TelegramID == 0 {
+		main.TelegramID = telegramID
+	}
+	return c.UpsertAddSubForUser(ctx, *main, opt)
+}
+
+// UpsertAddSubForUser is UpsertAddSub for an already-fetched main user, so the
+// admin backfill can walk the panel's user list without re-reading each user.
+func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt AddSubOptions) (res AddSubUpsert, err error) {
+	if main.Ref.Empty() || main.ExpireAt == "" || expired(main.ExpireAt) {
+		return res, nil
+	}
+	// Never build an add-on of an add-on.
+	if main.Tag == BotTagAdd || strings.HasSuffix(main.Username, normalizeAddSubSuffix(opt.Suffix)) {
+		return res, nil
 	}
 	limits := UserLimits{
-		TrafficBytes:   trafficBytes,
-		DeviceLimit:    a.HwidDeviceLimit,
-		Strategy:       a.TrafficLimitStrategy,
-		InternalSquads: internalSquads,
+		TrafficBytes:   opt.TrafficBytes,
+		DeviceLimit:    main.DeviceLimit,
+		Strategy:       main.Strategy,
+		InternalSquads: opt.InternalSquads,
 	}
-	uname := addSubUsername(telegramID, suffix)
-	existing, err := c.FindByUsername(ctx, uname)
+	existing, want, err := c.findAddSub(ctx, main.Username, main.TelegramID, opt.Suffix)
 	if err != nil {
-		return err
+		return res, err
 	}
-	if existing != nil && existing.UUID != "" {
-		if existing.Tag != BotTagAdd {
-			return fmt.Errorf("addsub: пользователь %s принадлежит не боту", uname)
+	mainDisabled := strings.EqualFold(main.Status, StatusDisabled)
+
+	// An add-on still living under the legacy name can't be auto-discovered by
+	// the middleware. It is NOT touched by default: an admin may have wired its
+	// subscription URL into the middleware as a manual binding, and both
+	// deleting it and letting it go stale would break a merge that works today.
+	// So it keeps being managed exactly as before, and the move to the
+	// discoverable name happens only on the explicit admin action.
+	if existing != nil && existing.Username != want {
+		res.Legacy = existing.Username
+		if opt.MigrateLegacyName {
+			// New user first, old one only after it exists — a failure in
+			// between must never leave the subscriber without an add-on.
+			if err := c.createAddSub(ctx, want, main, limits, opt.TrafficBytes, mainDisabled); err != nil {
+				return res, err
+			}
+			res.Done = true
+			if err := c.deleteUser(ctx, existing.Ref); err != nil {
+				return res, err
+			}
+			res.Migrated = true
+			return res, nil
 		}
-		patch := map[string]any{"uuid": existing.UUID, "expireAt": a.ExpireAt}
-		applyLimits(patch, limits)
-		_, _, err = c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-		return err
 	}
+	// A previous migration may have created the new B and then failed to delete
+	// the old one. Once the new name resolves first, that leftover would never
+	// be looked at again, so the migrating pass probes the legacy name too.
+	if existing != nil && existing.Username == want && opt.MigrateLegacyName {
+		if legacy := legacyAddSubUsername(main.TelegramID, opt.Suffix); legacy != want {
+			if old, lerr := c.FindByUsername(ctx, legacy); lerr == nil && old != nil && old.Tag == BotTagAdd {
+				res.Legacy = old.Username
+				if err := c.deleteUser(ctx, old.Ref); err != nil {
+					return res, err
+				}
+				res.Migrated = true
+			}
+		}
+	}
+
+	if existing != nil {
+		patch := existing.Ref.apply(map[string]any{"expireAt": main.ExpireAt})
+		// Status is only touched when the two are out of step: mirroring A's
+		// block, or lifting a leftover block on B. Writing ACTIVE otherwise
+		// would un-limit a B whose traffic the panel had just capped.
+		switch {
+		case mainDisabled:
+			patch["status"] = StatusDisabled
+		case strings.EqualFold(existing.Status, StatusDisabled):
+			patch["status"] = "ACTIVE"
+		}
+		applyLimits(patch, limits)
+		// Unlike A, B's traffic allowance is fully bot-owned, so "unlimited"
+		// (0) must be written explicitly instead of being left as-is.
+		patch["trafficLimitBytes"] = opt.TrafficBytes
+		if _, _, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch); err != nil {
+			return res, err
+		}
+		res.Done = true
+		if opt.ResetTraffic {
+			return res, c.ResetTraffic(ctx, existing.Ref)
+		}
+		return res, nil
+	}
+
+	if err := c.createAddSub(ctx, want, main, limits, opt.TrafficBytes, mainDisabled); err != nil {
+		return res, err
+	}
+	res.Done = true
+	return res, nil
+}
+
+func (c *Client) createAddSub(ctx context.Context, username string, main PanelUser, limits UserLimits, trafficBytes int64, disabled bool) error {
 	body := map[string]any{
-		"username": uname,
-		"expireAt": a.ExpireAt,
+		"username": username,
+		"expireAt": main.ExpireAt,
 		"tag":      BotTagAdd,
 	}
+	if disabled {
+		body["status"] = StatusDisabled
+	}
 	applyLimits(body, limits)
-	_, _, err = c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	body["trafficLimitBytes"] = trafficBytes
+	_, _, err := c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 	return err
 }
 
-func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix string) error {
-	u, err := c.FindByUsername(ctx, addSubUsername(telegramID, suffix))
-	if err != nil || u == nil || u.UUID == "" {
-		return err
+// mainUsernameFor returns A's panel username, or "" when A is genuinely gone
+// (deleted). A lookup FAILURE is returned as an error and never degraded to "":
+// that would narrow the search to the legacy name and quietly skip a B living
+// under the derived one — leaving a blocked user served or an orphan behind.
+func (c *Client) mainUsernameFor(ctx context.Context, telegramID int64) (string, error) {
+	a, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return "", err
 	}
-	if u.Tag != BotTagAdd {
-		return nil
+	if a == nil {
+		return "", nil
 	}
-	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+u.UUID, nil)
+	return a.Username, nil
+}
+
+// findAddSubFor resolves B for a telegram id, going through A's username.
+func (c *Client) findAddSubFor(ctx context.Context, telegramID int64, suffix string) (*PanelUser, error) {
+	main, err := c.mainUsernameFor(ctx, telegramID)
+	if err != nil {
+		return nil, err
+	}
+	u, _, err := c.findAddSub(ctx, main, telegramID, suffix)
+	return u, err
+}
+
+func (c *Client) deleteUser(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+ref.path(), nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
 }
 
-func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix string, enable bool) error {
-	u, err := c.FindByUsername(ctx, addSubUsername(telegramID, suffix))
-	if err != nil || u == nil || u.UUID == "" {
+// DeleteAddSub removes the add-on user B. Call it BEFORE deleting A, so B can
+// still be resolved from A's username.
+func (c *Client) DeleteAddSub(ctx context.Context, telegramID int64, suffix string) error {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil || u == nil || u.Ref.Empty() {
 		return err
 	}
-	if u.Tag != BotTagAdd {
-		return nil
+	return c.deleteUser(ctx, u.Ref)
+}
+
+func (c *Client) SetAddSubEnabled(ctx context.Context, telegramID int64, suffix string, enable bool) error {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil || u == nil || u.Ref.Empty() {
+		return err
 	}
-	status := "DISABLED"
+	status := StatusDisabled
 	if enable {
 		status = "ACTIVE"
 	}
-	resp, err := c.do(ctx, http.MethodPatch, "/api/users", map[string]any{"uuid": u.UUID, "status": status})
+	resp, err := c.do(ctx, http.MethodPatch, "/api/users", u.Ref.apply(map[string]any{"status": status}))
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
+}
+
+// AddSubInfo is a read-only snapshot of the add-on subscription B, for the
+// user-facing screens. Limit 0 means unlimited.
+type AddSubInfo struct {
+	Ref       UserRef
+	Username  string
+	Status    string
+	Limit     int64
+	Used      int64
+	Exhausted bool
+}
+
+// AddSubStatus returns B's traffic/status snapshot. ok=false when the user has
+// no add-on subscription (or the panel can't be read) — callers then show
+// nothing, so the screen degrades gracefully.
+func (c *Client) AddSubStatus(ctx context.Context, telegramID int64, suffix string) (AddSubInfo, bool) {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil || u == nil || u.Ref.Empty() {
+		return AddSubInfo{}, false
+	}
+	info := AddSubInfo{
+		Ref:      u.Ref,
+		Username: u.Username,
+		Status:   u.Status,
+		Limit:    u.TrafficLimit,
+		Used:     u.TrafficUsed,
+	}
+	info.Exhausted = info.Limit > 0 && info.Used >= info.Limit
+	return info, true
+}
+
+// ResetAddSubDevices mirrors ResetDevicesByTelegramID onto the add-on user B:
+// the middleware forwards the client's HWID headers to B as well, so B's device
+// slots fill up with the same devices and must be freed by the same reset.
+// found=false when the user has no add-on subscription.
+func (c *Client) ResetAddSubDevices(ctx context.Context, telegramID int64, suffix string) (res DeviceResetResult, found bool, err error) {
+	u, err := c.findAddSubFor(ctx, telegramID, suffix)
+	if err != nil {
+		return DeviceResetResult{}, false, err
+	}
+	if u == nil || u.Ref.Empty() {
+		return DeviceResetResult{}, false, nil
+	}
+	res.Ref = u.Ref
+	pre := c.hwidCount(ctx, u.Ref)
+	if err := c.revokeUser(ctx, u.Ref); err != nil {
+		return res, true, err
+	}
+	res.KeysRotated = true
+	if derr := c.deleteAllHwidRetry(ctx, u.Ref, hwidSyncAttempts); derr != nil {
+		res.HwidErr = derr
+	} else {
+		res.HwidCleared = true
+		if pre > 0 {
+			res.Removed = pre
+		}
+	}
+	return res, true, nil
 }
 
 type UserLimits struct {
@@ -322,18 +951,15 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 	}
 	expire := nextExpire(existing, months)
 
-	if existing != nil && existing.Uuid != "" {
+	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := map[string]any{
-			"uuid":     existing.Uuid,
-			"expireAt": expire,
-		}
+		patch := existing.ref().apply(map[string]any{"expireAt": expire})
 		applyLimits(patch, limits)
 		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 		if err == nil {
-			_ = c.ResetTraffic(ctx, existing.Uuid)
+			_ = c.ResetTraffic(ctx, existing.ref())
 		}
 		return link, expireAt, err
 	}
@@ -361,11 +987,11 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 	}
 	expire := base.AddDate(0, 0, days).Format(time.RFC3339)
 
-	if existing != nil && existing.Uuid != "" {
+	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := map[string]any{"uuid": existing.Uuid, "expireAt": expire}
+		patch := existing.ref().apply(map[string]any{"expireAt": expire})
 		applyLimits(patch, limits)
 		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
@@ -555,13 +1181,13 @@ func (c *Client) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, nil
 }
 
-func (c *Client) ResetTraffic(ctx context.Context, uuid string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(uuid)+"/actions/reset-traffic", nil)
+func (c *Client) ResetTraffic(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+ref.path()+"/actions/reset-traffic", nil)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -572,19 +1198,14 @@ func (c *Client) DeleteByTelegramID(ctx context.Context, telegramID int64) (bool
 	if err != nil {
 		return false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return false, nil
 	}
 	if !ownedByBot(u, telegramID) {
 		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — удалять его запрещено", telegramID)
 	}
-	resp, err := c.do(ctx, http.MethodDelete, "/api/users/"+u.Uuid, nil)
-	if err != nil {
-		return false, fmt.Errorf("нет связи с панелью: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
-		return false, classifyHTTP(resp)
+	if err := c.deleteUser(ctx, u.ref()); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -594,7 +1215,7 @@ func (c *Client) setSubEnabled(ctx context.Context, telegramID int64, enable boo
 	if err != nil {
 		return false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return false, nil
 	}
 	if !ownedByBot(u, telegramID) {
@@ -604,13 +1225,13 @@ func (c *Client) setSubEnabled(ctx context.Context, telegramID int64, enable boo
 	if enable {
 		status = "ACTIVE"
 	}
-	body := map[string]any{"uuid": u.Uuid, "status": status}
+	body := u.ref().apply(map[string]any{"status": status})
 	resp, err := c.do(ctx, http.MethodPatch, "/api/users", body)
 	if err != nil {
 		return false, fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return false, classifyHTTP(resp)
 	}
 	return true, nil
@@ -627,11 +1248,11 @@ func (c *Client) EnableByTelegramID(ctx context.Context, telegramID int64) (bool
 // DeviceResetResult reports what ResetDevicesByTelegramID actually did on the
 // panel, so callers can warn on a partial result.
 type DeviceResetResult struct {
-	UUID        string // panel user uuid (set once found); lets the caller keep retrying delete-all
-	KeysRotated bool   // proxy credentials rotated (all connected devices dropped)
-	HwidCleared bool   // all HWID device registrations deleted (slots freed)
-	Removed     int    // HWID devices removed (best-effort, from the pre-count)
-	HwidErr     error  // delete-all still failing after the synchronous retries (keys were still rotated)
+	Ref         UserRef // panel user reference (set once found); lets the caller keep retrying delete-all
+	KeysRotated bool    // proxy credentials rotated (all connected devices dropped)
+	HwidCleared bool    // all HWID device registrations deleted (slots freed)
+	Removed     int     // HWID devices removed (best-effort, from the pre-count)
+	HwidErr     error   // delete-all still failing after the synchronous retries (keys were still rotated)
 }
 
 // ResetDevicesByTelegramID fully resets a user's devices: it rotates the proxy
@@ -649,19 +1270,19 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 	if err != nil {
 		return DeviceResetResult{}, false, err
 	}
-	if u == nil || u.Uuid == "" {
+	if u == nil || u.ref().Empty() {
 		return DeviceResetResult{}, false, nil
 	}
 	if !ownedByBot(u, telegramID) {
 		return DeviceResetResult{}, false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
 	}
-	res.UUID = u.Uuid
+	res.Ref = u.ref()
 
 	// Count devices first so we can report how many slots were freed (best-effort).
-	pre := c.hwidCount(ctx, u.Uuid)
+	pre := c.hwidCount(ctx, u.ref())
 
 	// 1) Rotate credentials — drops every connected device. Hard-fails the reset.
-	if err := c.revokeUser(ctx, u.Uuid); err != nil {
+	if err := c.revokeUser(ctx, u.ref()); err != nil {
 		return res, true, err
 	}
 	res.KeysRotated = true
@@ -669,7 +1290,7 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 	// 2) Delete all HWID registrations so the device-limit slots are freed.
 	//    Retried synchronously a few times; a persistent failure is handed back
 	//    via HwidErr for the caller to finish in the background (until success).
-	if derr := c.deleteAllHwidRetry(ctx, u.Uuid, hwidSyncAttempts); derr != nil {
+	if derr := c.deleteAllHwidRetry(ctx, u.ref(), hwidSyncAttempts); derr != nil {
 		res.HwidErr = derr
 	} else {
 		res.HwidCleared = true
@@ -684,7 +1305,7 @@ func (c *Client) ResetDevicesByTelegramID(ctx context.Context, telegramID int64)
 // maxAttempts > 0) maxAttempts have been made, backing off exponentially between
 // tries. maxAttempts <= 0 means "keep going until ctx is done". Returns the last
 // error seen (nil on success).
-func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempts int) error {
+func (c *Client) deleteAllHwidRetry(ctx context.Context, ref UserRef, maxAttempts int) error {
 	base := c.hwidRetryBase
 	if base <= 0 {
 		base = 500 * time.Millisecond
@@ -696,7 +1317,7 @@ func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempt
 	backoff := base
 	var last error
 	for attempt := 1; ; attempt++ {
-		if last = c.deleteAllHwid(ctx, uuid); last == nil {
+		if last = c.deleteAllHwid(ctx, ref); last == nil {
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -723,21 +1344,21 @@ func (c *Client) deleteAllHwidRetry(ctx context.Context, uuid string, maxAttempt
 // DeleteAllHwidUntil keeps retrying the HWID delete-all (with backoff) until it
 // succeeds or ctx is done. Used for the best-effort background cleanup after a
 // device reset whose synchronous delete-all attempts didn't get through.
-func (c *Client) DeleteAllHwidUntil(ctx context.Context, uuid string) error {
-	return c.deleteAllHwidRetry(ctx, uuid, 0)
+func (c *Client) DeleteAllHwidUntil(ctx context.Context, ref UserRef) error {
+	return c.deleteAllHwidRetry(ctx, ref, 0)
 }
 
 // revokeUser rotates the user's proxy credentials
 // (POST /api/users/{uuid}/actions/revoke with revokeOnlyPasswords=true), keeping
 // the same subscription URL so clients only need to refresh to reconnect.
-func (c *Client) revokeUser(ctx context.Context, uuid string) error {
+func (c *Client) revokeUser(ctx context.Context, ref UserRef) error {
 	body := map[string]any{"revokeOnlyPasswords": true}
-	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+url.PathEscape(uuid)+"/actions/revoke", body)
+	resp, err := c.do(ctx, http.MethodPost, "/api/users/"+ref.path()+"/actions/revoke", body)
 	if err != nil {
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -745,14 +1366,13 @@ func (c *Client) revokeUser(ctx context.Context, uuid string) error {
 
 // deleteAllHwid removes every HWID device registered to the user
 // (POST /api/hwid/devices/delete-all with {userUuid}).
-func (c *Client) deleteAllHwid(ctx context.Context, uuid string) error {
-	body := map[string]any{"userUuid": uuid}
-	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete-all", body)
+func (c *Client) deleteAllHwid(ctx context.Context, ref UserRef) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete-all", ref.hwidBody())
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -760,8 +1380,8 @@ func (c *Client) deleteAllHwid(ctx context.Context, uuid string) error {
 
 // hwidCount returns the number of HWID devices currently registered to the user,
 // or -1 when it can't be determined. Best-effort; never fails the caller.
-func (c *Client) hwidCount(ctx context.Context, uuid string) int {
-	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+url.PathEscape(uuid), nil)
+func (c *Client) hwidCount(ctx context.Context, ref UserRef) int {
+	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+ref.path(), nil)
 	if err != nil {
 		return -1
 	}
@@ -818,12 +1438,12 @@ type DeviceInfo struct {
 // is unknown to the panel or HWID data is unavailable.
 func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (DeviceInfo, bool) {
 	u, err := c.findByTelegram(ctx, telegramID)
-	if err != nil || u == nil || u.Uuid == "" {
+	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
 	info := DeviceInfo{Limit: u.HwidDeviceLimit, HasLimit: u.HwidDeviceLimit > 0}
 
-	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+url.PathEscape(u.Uuid), nil)
+	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+u.ref().path(), nil)
 	if err != nil {
 		return DeviceInfo{}, false
 	}
@@ -847,33 +1467,140 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	return info, true
 }
 
+// errPanelDialect is returned when the panel can't be asked which API version
+// it speaks. Callers must surface it: silently reporting "no such user" would
+// turn a temporary panel outage into "your subscription is gone", and a renewal
+// into creating a second account.
+var errPanelDialect = errors.New("не удалось определить версию API панели")
+
+// findByTelegram resolves a user by telegram id in whichever dialect the panel
+// speaks (see panelGen).
 func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
+	if c.generation() == genV3 {
+		u, gone, err := c.findByTelegramStream(ctx, telegramID)
+		if err != nil {
+			return nil, err
+		}
+		if !gone {
+			return u, nil
+		}
+		// The route that must exist on 3.x is gone: the panel was rolled back.
+		c.resetGen()
+	}
+	// Legacy route first while the dialect is unknown: on a pre-3.0.0 panel a
+	// found user answers the question by itself, at no extra cost.
+	u, gone, err := c.findByTelegramLegacy(ctx, telegramID)
 	if err != nil {
-		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+		return nil, err
+	}
+	if u != nil {
+		return u, nil
+	}
+	if !gone && c.generation() == genLegacy {
+		// Known pre-3.0.0 panel answering its own "no such user".
+		return nil, nil
+	}
+	// Either the route is gone (3.x), or the dialect isn't settled yet: ask
+	// once (the answer is cached) instead of guessing.
+	switch c.probeGen(ctx) {
+	case genV3:
+		u2, gone2, err2 := c.findByTelegramStream(ctx, telegramID)
+		if err2 != nil {
+			return nil, err2
+		}
+		if gone2 {
+			return nil, errPanelDialect
+		}
+		return u2, nil
+	case genLegacy:
+		if gone {
+			// The legacy route JUST answered "gone" while the cached probe still
+			// says legacy (the panel was upgraded moments ago and the probe is
+			// inside its recheck window). Trusting the stale cache here would
+			// report "no such user" and let a renewal create a second account —
+			// fail loudly instead; the cache expires within minutes.
+			return nil, errPanelDialect
+		}
+		return nil, nil
+	}
+	if gone {
+		// The old route is definitely gone and we could not find out what
+		// replaced it — reporting "no such user" here would look like a lost
+		// subscription and make a renewal create a second account.
+		return nil, errPanelDialect
+	}
+	return nil, nil
+}
+
+// findByTelegramStream is the 3.0.0+ lookup: GET /api/users/stream?telegramId=.
+// gone=true means the route itself is not there (wrong base URL, or a panel
+// older than 3.0.0).
+func (c *Client) findByTelegramStream(ctx context.Context, telegramID int64) (u *panelUser, gone bool, err error) {
+	path := "/api/users/stream?size=1&telegramId=" + strconv.FormatInt(telegramID, 10)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, true, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, classifyHTTP(resp)
+		return nil, false, classifyHTTP(resp)
+	}
+	var env struct {
+		Response struct {
+			Users []panelUser `json:"users"`
+		} `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, false, err
+	}
+	// Never trust the filter blindly: a panel (or anything in front of it) that
+	// ignores telegramId would otherwise hand out another subscriber's account.
+	for i := range env.Response.Users {
+		if env.Response.Users[i].TelegramID != telegramID {
+			continue
+		}
+		c.noteUser(&env.Response.Users[i])
+		return &env.Response.Users[i], false, nil
+	}
+	return nil, false, nil
+}
+
+// findByTelegramLegacy is the pre-3.0.0 lookup, removed by the panel in 3.0.0.
+// gone=true means the route itself no longer exists, as opposed to the panel
+// answering that it has no such user.
+func (c *Client) findByTelegramLegacy(ctx context.Context, telegramID int64) (u *panelUser, gone bool, err error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/users/by-telegram-id/"+strconv.FormatInt(telegramID, 10), nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, routeGone(body), nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, classifyHTTP(resp)
 	}
 	var env struct {
 		Response json.RawMessage `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var arr []panelUser
 	if json.Unmarshal(env.Response, &arr) == nil && len(arr) > 0 {
-		return &arr[0], nil
+		c.noteUser(&arr[0])
+		return &arr[0], false, nil
 	}
 	var one panelUser
-	if json.Unmarshal(env.Response, &one) == nil && one.Uuid != "" {
-		return &one, nil
+	if json.Unmarshal(env.Response, &one) == nil && !one.ref().Empty() {
+		c.noteUser(&one)
+		return &one, false, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 func (c *Client) FindByTelegramID(ctx context.Context, telegramID int64) (*PanelUser, error) {
@@ -888,8 +1615,10 @@ func (c *Client) FindByUsername(ctx context.Context, username string) (*PanelUse
 	return c.fetchOne(ctx, "/api/users/by-username/"+url.PathEscape(username))
 }
 
-func (c *Client) FindByUUID(ctx context.Context, uuid string) (*PanelUser, error) {
-	return c.fetchOne(ctx, "/api/users/"+url.PathEscape(uuid))
+// FindByRef looks a user up by whatever identifier this panel uses in paths:
+// the uuid before 3.0.0, the numeric id from 3.0.0 on.
+func (c *Client) FindByRef(ctx context.Context, ref string) (*PanelUser, error) {
+	return c.fetchOne(ctx, "/api/users/"+url.PathEscape(ref))
 }
 
 func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) {
@@ -910,6 +1639,7 @@ func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) 
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, fmt.Errorf("разбор ответа панели: %w", err)
 	}
+	c.noteUser(&env.Response)
 	return toPanelUser(&env.Response), nil
 }
 
@@ -933,6 +1663,7 @@ func (c *Client) ListUsersPage(ctx context.Context, start, size int) ([]PanelUse
 	}
 	out := make([]PanelUser, 0, len(env.Response.Users))
 	for i := range env.Response.Users {
+		c.noteUser(&env.Response.Users[i])
 		if pu := toPanelUser(&env.Response.Users[i]); pu != nil {
 			out = append(out, *pu)
 		}
@@ -940,8 +1671,8 @@ func (c *Client) ListUsersPage(ctx context.Context, start, size int) ([]PanelUse
 	return out, env.Response.Total, nil
 }
 
-func (c *Client) LinkTelegramID(ctx context.Context, uuid string, telegramID int64, setTag bool) error {
-	body := map[string]any{"uuid": uuid, "telegramId": telegramID}
+func (c *Client) LinkTelegramID(ctx context.Context, ref UserRef, telegramID int64, setTag bool) error {
+	body := ref.apply(map[string]any{"telegramId": telegramID})
 	if setTag {
 		body["tag"] = BotTag
 	}
@@ -950,7 +1681,7 @@ func (c *Client) LinkTelegramID(ctx context.Context, uuid string, telegramID int
 		return fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if !writeOK(resp.StatusCode) {
 		return classifyHTTP(resp)
 	}
 	return nil
@@ -971,6 +1702,7 @@ func (c *Client) upsertCall(ctx context.Context, method, path string, body any) 
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return "", "", err
 	}
+	c.noteUser(&env.Response)
 	return env.Response.SubscriptionURL, env.Response.ExpireAt, nil
 }
 
@@ -984,13 +1716,108 @@ func nextExpire(existing *panelUser, months int) string {
 	return base.AddDate(0, months, 0).Format(time.RFC3339)
 }
 
+// writeOK covers every success code a write may answer with across panel
+// generations: 3.0.0 turned several 200s into 201 (create) and 204/202
+// (delete and background work), so a fixed 200 check would break on it.
+func writeOK(code int) bool {
+	switch code {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return true
+	}
+	return false
+}
+
+// looksJSON отличает ответ API панели (всегда JSON) от HTML/текста, который
+// подсовывает реверс-прокси: страница входа портала, заглушка, «401
+// Unauthorized» плейн-текстом от caddy-security.
+func looksJSON(body string) bool {
+	s := strings.TrimSpace(body)
+	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
+}
+
+// looksHTML — тело ответа является веб-страницей: заглушка прокси или форма
+// входа портала. API панели HTML не отдаёт никогда.
+func looksHTML(body string) bool {
+	s := strings.ToLower(strings.TrimSpace(body))
+	s = strings.TrimPrefix(s, "\ufeff")
+	return strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<html") ||
+		(strings.HasPrefix(s, "<") && strings.Contains(s, "<html"))
+}
+
+// isHTMLPage — ответ отдан как веб-страница. Content-Type надёжнее тела:
+// заглушка может начинаться с комментария или пролога, а начало <html> —
+// оказаться за пределами прочитанного куска.
+func isHTMLPage(resp *http.Response, body string) bool {
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+		return true
+	}
+	return looksHTML(body)
+}
+
+// proxyGateErr — общая подсказка на случай, когда запрос не дошёл до панели:
+// его завернул реверс-прокси перед ней. Отдельная формулировка нужна потому,
+// что «проверьте API-token» тут уводит не туда — токен ни при чём.
+func proxyGateErr(status int, where string) error {
+	if where != "" {
+		where = " → " + where
+	}
+	return fmt.Errorf("запрос не дошёл до API панели (HTTP %d%s) — его увёл в сторону прокси перед ней. "+
+		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"если панель ничем не закрыта — проверьте адрес панели, по нему отвечает не она", status, where)
+}
+
+// notPanelErr — по адресу панели ответила веб-страница. Так выглядит и
+// сайт-заглушка сборки eGames «панель+нода» (200), и форма входа портала
+// caddy-security, и просто чужой сайт по опечатке в адресе.
+func notPanelErr(status int) error {
+	return fmt.Errorf("по адресу панели отвечает веб-страница, а не API (HTTP %d). "+
+		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"иначе проверьте адрес панели", status)
+}
+
+// httpsUpgrade — редирект просто переводит тот же адрес с http на https.
+// Клиент по нему не пошёл только потому, что метод небезопасный: 301/302/303
+// потеряли бы тело запроса.
+func httpsUpgrade(req *http.Request, location string) bool {
+	if req == nil || req.URL == nil || req.URL.Scheme != "http" || location == "" {
+		return false
+	}
+	u, err := req.URL.Parse(location)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	return sameSite(u.Host, req.URL.Host) || normHost(u.Host) == normHost(req.URL.Host)
+}
+
 func classifyHTTP(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	snippet := strings.TrimSpace(string(body))
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	switch {
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
+		// Редирект на /api бывает только от прокси: caddy-security уводит
+		// запрос без ключа на страницу входа портала. Но самый частый случай
+		// проще и к защите отношения не имеет — адрес панели записан как http,
+		// а прокси перекидывает на https; про него и говорим отдельно, иначе
+		// человек пойдёт искать несуществующий у него аддон.
+		loc := resp.Header.Get("Location")
+		if httpsUpgrade(resp.Request, loc) {
+			return fmt.Errorf("панель отвечает только по https (HTTP %d → %s): "+
+				"адрес панели записан через http. Исправьте его на https:// — "+
+				"«Система → Перенастроить» или /setup", resp.StatusCode, loc)
+		}
+		return proxyGateErr(resp.StatusCode, loc)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// caddy-security на неверный X-Api-Key отвечает плейн-текстом
+		// «401 Unauthorized», панель — JSON. По телу и различаем, кому
+		// адресовать претензию. Пустое тело не улика: так отвечает и панель с
+		// протухшим API-token — тогда оставляем прежнюю формулировку.
+		if snippet != "" && !looksJSON(snippet) {
+			return proxyGateErr(resp.StatusCode, "")
+		}
 		return fmt.Errorf("панель отклонила доступ (HTTP %d): проверьте API-token. %s", resp.StatusCode, snippet)
-	case http.StatusNotFound:
+	case resp.StatusCode == http.StatusNotFound:
 		return fmt.Errorf("эндпоинт не найден (HTTP 404): проверьте URL панели")
 	default:
 		return fmt.Errorf("панель вернула HTTP %d: %s", resp.StatusCode, snippet)

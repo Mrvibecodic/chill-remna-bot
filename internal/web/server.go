@@ -21,6 +21,8 @@ type Handlers interface {
 
 	HandlePlategaWebhook(ctx context.Context, body []byte) (handled bool, err error)
 
+	HandleHeleketWebhook(ctx context.Context, body []byte) (handled bool, err error)
+
 	HandleTributeWebhook(ctx context.Context, signatureHex string, body []byte) (handled bool, err error)
 }
 
@@ -49,6 +51,7 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /webhook/cryptobot", s.handleCryptoBot)
 	mux.HandleFunc("POST /webhook/remnawave", s.handleRemnawave)
 	mux.HandleFunc("POST /webhook/platega", s.handlePlatega)
+	mux.HandleFunc("POST /webhook/heleket", s.handleHeleket)
 	mux.HandleFunc("POST /webhook/tribute", s.handleTribute)
 
 	mux.HandleFunc("POST /api/miniapp/auth", s.handleMiniAuth)
@@ -64,6 +67,8 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /api/miniapp/topup", s.handleMiniTopUp)
 	mux.HandleFunc("GET /api/miniapp/connect", s.handleMiniConnect)
 	mux.HandleFunc("POST /api/miniapp/devices/reset", s.handleMiniResetDevices)
+	mux.HandleFunc("GET /api/miniapp/autopay", s.handleMiniAutoPay)
+	mux.HandleFunc("POST /api/miniapp/autopay", s.handleMiniSetAutoPay)
 	mux.HandleFunc("GET /miniapp/", s.handleMiniStatic)
 	mux.HandleFunc("GET /api/cabinet/config", s.handleCabinetConfig)
 	mux.HandleFunc("POST /api/cabinet/auth/telegram", s.handleCabinetTelegramAuth)

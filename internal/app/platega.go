@@ -83,7 +83,15 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	if returnURL == "" {
 		returnURL = "https://t.me"
 	}
-	amount := parseAmountRub(value)
+	// Строгий разбор цены: parseAmountRub на «1 000» дал бы счёт на 1 ₽ при
+	// выдаче полной подписки (та же грабля, что закрыта у Heleket).
+	valueK, okV := rubToKopecks(value)
+	if !okV || valueK <= 0 {
+		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "цена %q не разобрана — счёт не выставлен", value)
+		a.sendHome(ctx, chatID, i18n.T(lang, "pl.no_price"))
+		return
+	}
+	amount := float64(valueK) / 100
 	desc := i18n.T(lang, "pl.invoice_desc", months)
 	redirect, txID, err := a.plCreateTransaction(ctx, chatID, months, amount, desc, returnURL)
 	if err != nil {

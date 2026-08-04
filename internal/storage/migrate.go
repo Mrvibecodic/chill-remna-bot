@@ -51,7 +51,17 @@ func runMigrations(ctx context.Context, b *base, dialect string) error {
 			return err
 		}
 		if _, err := b.db.ExecContext(ctx, string(stmt)); err != nil {
-			return fmt.Errorf("миграция %s: %w", name, err)
+			// SQLite не умеет ADD COLUMN IF NOT EXISTS, а история dev-канала
+			// знает случай, когда колонку добавляли двумя редакциями миграций
+			// (0037 старой редакции уже содержал paid_period, 0038 добавляет её
+			// заново). «Дублирующаяся колонка» на ADD COLUMN означает, что цель
+			// миграции уже достигнута — фиксируем версию и едем дальше, иначе
+			// такие установки не поднимутся после обновления.
+			if dialect == "sqlite" && strings.Contains(err.Error(), "duplicate column name") {
+				fmt.Printf("миграция %s: колонка уже существует — пропущена как применённая\n", name)
+			} else {
+				return fmt.Errorf("миграция %s: %w", name, err)
+			}
 		}
 		if _, err := b.db.ExecContext(ctx,
 			"INSERT INTO schema_migrations (version) VALUES ("+b.ph(1)+")", version); err != nil {

@@ -290,6 +290,7 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 		_ = a.store.SetSubExpiry(ctx, chatID, expireAt, "trial")
 	}
 	a.invalidateSubCache(chatID)
-	a.syncAddSub(ctx, chatID)
+	// Триал не сбрасывает трафик основной подписки — значит и доп-подписке нельзя.
+	a.syncAddSub(ctx, chatID, false)
 	return link, expireAt, nil
 }

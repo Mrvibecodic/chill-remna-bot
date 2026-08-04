@@ -40,12 +40,12 @@ func (a *App) syncPanelAccount(ctx context.Context, chatID int64) bool {
 		return false
 	}
 	if pu.TelegramID == 0 {
-		if err := panel.LinkTelegramID(ctx, pu.UUID, chatID, false); err != nil {
-			a.log.Warn("panel sync: link telegramId", "tg_id", chatID, "uuid", pu.UUID, "err", err)
+		if err := panel.LinkTelegramID(ctx, pu.Ref, chatID, false); err != nil {
+			a.log.Warn("panel sync: link telegramId", "tg_id", chatID, "panel_ref", pu.Ref.Key(), "err", err)
 		}
 	}
 	a.markPanelLinked(ctx, chatID, pu.ExpireAt)
-	a.log.Info("panel sync: account linked", "tg_id", chatID, "panel_user", pu.Username, "uuid", pu.UUID)
+	a.log.Info("panel sync: account linked", "tg_id", chatID, "panel_user", pu.Username, "panel_ref", pu.Ref.Key())
 	return true
 }
 
@@ -53,8 +53,13 @@ func (a *App) findPanelAccount(ctx context.Context, panel *remnawave.Client, cha
 	if pu, err := panel.FindByTelegramID(ctx, chatID); err == nil && pu != nil {
 		return pu
 	}
-	if pu, err := panel.FindByUsername(ctx, fmt.Sprintf("tg_%d", chatID)); err == nil && pu != nil {
-		return pu
+	// tg_<id> — наша схема имён, rs_<id> — схема remnashop: после переезда
+	// аккаунты в панели остаются с его именами, и находить их по прямому
+	// запросу дешевле, чем сканировать весь список.
+	for _, prefix := range []string{"tg_", "rs_"} {
+		if pu, err := panel.FindByUsername(ctx, fmt.Sprintf("%s%d", prefix, chatID)); err == nil && pu != nil {
+			return pu
+		}
 	}
 	return a.scanPanelByID(ctx, panel, chatID)
 }
@@ -140,9 +145,28 @@ func (a *App) adminLinkPanel(ctx context.Context, adminChat, uid int64, input st
 	}
 	var pu *remnawave.PanelUser
 	var err error
-	if looksLikeUUID(input) {
-		pu, err = panel.FindByUUID(ctx, input)
-	} else {
+	// Panel 3.0.0 replaced the user uuid with a numeric id, so the admin may
+	// paste a username, a uuid or an id. Digits are ambiguous — a username of
+	// digits is legal too — so both are resolved and a genuine clash is
+	// reported instead of silently linking the wrong account.
+	switch {
+	case looksLikeUUID(input):
+		pu, err = panel.FindByRef(ctx, input)
+	case looksLikeUserID(input):
+		byID, idErr := panel.FindByRef(ctx, input)
+		byName, nameErr := panel.FindByUsername(ctx, input)
+		switch {
+		case byID != nil && byName != nil && byID.Username != byName.Username:
+			a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_ambiguous", byID.Username, byName.Username))
+			return
+		case byID != nil:
+			pu = byID
+		case byName != nil:
+			pu = byName
+		default:
+			err = firstErr(idErr, nameErr)
+		}
+	default:
 		pu, err = panel.FindByUsername(ctx, input)
 	}
 	if err != nil {
@@ -157,14 +181,38 @@ func (a *App) adminLinkPanel(ctx context.Context, adminChat, uid int64, input st
 		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_busy", pu.Username, pu.TelegramID))
 		return
 	}
-	if err := panel.LinkTelegramID(ctx, pu.UUID, uid, true); err != nil {
+	if err := panel.LinkTelegramID(ctx, pu.Ref, uid, true); err != nil {
 		a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_fail", err.Error()))
 		return
 	}
 	a.markPanelLinked(ctx, uid, pu.ExpireAt)
-	a.log.Info("panel sync: manual link", "tg_id", uid, "panel_user", pu.Username, "uuid", pu.UUID)
+	a.log.Info("panel sync: manual link", "tg_id", uid, "panel_user", pu.Username, "panel_ref", pu.Ref.Key())
 	a.notify(ctx, uid, i18n.T(a.lang(uid), "sync.linked", formatExpire(pu.ExpireAt, a.lang(uid))))
 	a.sendHome(ctx, adminChat, i18n.T(lang, "user.link_done", pu.Username, formatExpire(pu.ExpireAt, lang)))
+}
+
+// firstErr returns the first non-nil error, so a lookup that failed on both
+// paths still reports something to the admin.
+func firstErr(errs ...error) error {
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// looksLikeUserID matches the numeric user id used by panel 3.0.0+.
+func looksLikeUserID(s string) bool {
+	if s == "" || len(s) > 19 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func looksLikeUUID(s string) bool {

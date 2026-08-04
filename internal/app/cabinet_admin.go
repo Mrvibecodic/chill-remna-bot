@@ -131,7 +131,7 @@ func (a *App) notifyAdminWebRequest(ctx context.Context, userID int64, isEmail b
 		kind = i18n.T(lang, "cabinet.req_email")
 		if a.store != nil {
 			if wu, _ := a.store.GetWebUserByTgID(ctx, userID); wu != nil {
-				label = wu.Email
+				label = escapeName(wu.Email)
 			}
 		}
 	}

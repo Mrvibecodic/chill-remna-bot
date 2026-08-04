@@ -16,6 +16,14 @@ type Config struct {
 	// работает вшитый дизайн.
 	StaticDir string
 
+	// CaddyAuthToken — X-Api-Key аддона «Caddy with security» (docs.rw →
+	// install/panel-security). Панель за таким прокси требует этот заголовок
+	// вдобавок к своему Bearer-токену: без него Caddy не пускает запрос до
+	// панели. Ключ — свойство развёртывания, а не панели, поэтому задаётся
+	// переменной окружения CADDY_AUTH_API_TOKEN и имеет приоритет над тем, что
+	// когда-то ввели в мастере.
+	CaddyAuthToken string
+
 	DBKind      string
 	DatabaseURL string
 	SecretKey   string
@@ -28,9 +36,12 @@ type Config struct {
 
 func Load() (*Config, error) {
 	c := &Config{
-		BotToken:     strings.TrimSpace(os.Getenv("BOT_TOKEN")),
-		DataDir:      envOr("DATA_DIR", "/data"),
-		StaticDir:    envOr("CUSTOM_STATIC_DIR", "/custom"),
+		BotToken:  strings.TrimSpace(os.Getenv("BOT_TOKEN")),
+		DataDir:   envOr("DATA_DIR", "/data"),
+		StaticDir: envOr("CUSTOM_STATIC_DIR", "/custom"),
+
+		CaddyAuthToken: strings.TrimSpace(os.Getenv("CADDY_AUTH_API_TOKEN")),
+
 		DBKind:       strings.TrimSpace(os.Getenv("DB_KIND")),
 		DatabaseURL:  strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		SecretKey:    os.Getenv("SECRET_KEY"),

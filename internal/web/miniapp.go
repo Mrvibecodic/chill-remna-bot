@@ -34,6 +34,11 @@ type MiniProvider interface {
 	// MiniCheckout performs an in-app purchase for the given period+method.
 	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool) MiniActionDTO
 
+	// MiniAutoPay reports the user's automatic-renewal state.
+	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
+	// MiniSetAutoPay turns automatic renewal on/off for the user.
+	MiniSetAutoPay(ctx context.Context, tgID int64, on bool) MiniActionDTO
+
 	// MiniReferral returns the user's referral info (mirrors showReferral).
 	MiniReferral(ctx context.Context, tgID int64) MiniReferralDTO
 	// MiniPromo applies a promo code (mirrors the chat promo flow).
@@ -66,6 +71,10 @@ type MiniProvider interface {
 	CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filename string, data []byte) error
 	// MiniBlocked reports whether the user is blocked by an admin.
 	MiniBlocked(ctx context.Context, tgID int64) bool
+	// MiniAccessDenied reports whether the bot's publicity mode (invite-only /
+	// whitelist) keeps this user out — the Mini App and the cabinet must honour
+	// the same gate as the chat bot.
+	MiniAccessDenied(ctx context.Context, tgID int64) bool
 	// CabinetFlag returns a self-hosted country-flag SVG by ISO code.
 	CabinetFlag(code string) ([]byte, bool)
 }
@@ -120,6 +129,20 @@ type MiniActionDTO struct {
 	P2PReqID  int64  `json:"p2p_req_id,omitempty"`
 }
 
+// MiniAutoPayDTO describes automatic renewal for the current user: whether the
+// shop offers it at all, whether it is on for this user, and what will be
+// charged. Days is how many days before expiry the charge happens.
+type MiniAutoPayDTO struct {
+	Available bool   `json:"available"`
+	On        bool   `json:"on"`
+	Months    int    `json:"months,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Days      int    `json:"days"`
+	// CanEnable is true when a saved payment method already exists, so the user
+	// can switch renewal back on without paying again.
+	CanEnable bool `json:"can_enable"`
+}
+
 type MiniMeDTO struct {
 	TgID     int64  `json:"tg_id"`
 	Lang     string `json:"lang"`
@@ -150,6 +173,15 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+
+	// AddSub* describe the add-on ("доп-сервер") subscription that the
+	// subscription middleware merges into the same link. AddSubOK is false when
+	// the feature is off or the user has none — the front-end shows nothing then.
+	AddSubOK        bool  `json:"addsub_ok"`
+	AddSubUsed      int64 `json:"addsub_used,omitempty"`
+	AddSubLimit     int64 `json:"addsub_limit,omitempty"`
+	AddSubExhausted bool  `json:"addsub_exhausted,omitempty"`
+	AddSubOff       bool  `json:"addsub_off,omitempty"`
 }
 
 type MiniPlanDTO struct {
@@ -277,6 +309,10 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ заблокирован"})
 		return 0, false, false
 	}
+	if s.mini.MiniAccessDenied(r.Context(), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ к боту ограничен"})
+		return 0, false, false
+	}
 	return id, web, true
 }
 
@@ -355,6 +391,40 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web))
+}
+
+// handleMiniAutoPay returns the user's automatic-renewal state.
+func (s *Server) handleMiniAutoPay(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniAutoPay(ctx, id))
+}
+
+// handleMiniSetAutoPay turns automatic renewal on/off for the user.
+func (s *Server) handleMiniSetAutoPay(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	body, err := readAllLimited(r, 4*1024)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		On bool `json:"on"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniSetAutoPay(ctx, id, req.On))
 }
 
 func (s *Server) handleMiniReferral(w http.ResponseWriter, r *http.Request) {

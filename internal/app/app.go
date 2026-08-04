@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -24,6 +29,7 @@ import (
 	"remnabot/internal/model"
 	"remnabot/internal/moynalog"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/rsimport"
 	"remnabot/internal/storage"
 )
 
@@ -47,6 +53,7 @@ type messenger interface {
 	AnswerPreCheckout(ctx context.Context, id string, ok bool, errMsg string)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
+	Download(ctx context.Context, fileID string) ([]byte, error)
 }
 
 type App struct {
@@ -68,6 +75,20 @@ type App struct {
 	ui           map[int64]*uiState
 	updNoticeMsg map[int64]int
 
+	// reconSeen — последнее записанное в журнал состояние каждого висящего
+	// счёта. Реконсилятор опрашивает шлюзы раз в две минуты по каждому
+	// неоплаченному счёту, и запись результата КАЖДОГО прохода на нагруженном
+	// боте — главный генератор объёма журнала (сотни тысяч строк в сутки при
+	// пустом смысле: статус не менялся). Пишем только изменения.
+	reconMu   sync.Mutex
+	reconSeen map[string]string
+
+	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
+	// (thrLast) и разовые уведомления админу по счёту Heleket (hlNotified).
+	thrMu      sync.Mutex
+	thrLast    map[string]time.Time
+	hlNotified map[string]bool
+
 	scrMu         sync.Mutex
 	screen        map[int64][]int
 	kbSet         map[int64]bool
@@ -81,6 +102,10 @@ type App struct {
 	// user tapping "reset devices" repeatedly can't pile up goroutines.
 	hwidMu       sync.Mutex
 	hwidRetrying map[string]bool
+
+	// addSubSyncing guards the add-on backfill, so two admins can't walk the
+	// whole panel user list at the same time.
+	addSubSyncing atomic.Bool
 
 	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
 	// delivered twice concurrently (webhook redelivery vs reconciler vs manual
@@ -106,7 +131,26 @@ type App struct {
 
 	payLogPurgedAt time.Time
 
+	// rsMu защищает разобранные дампы remnashop: их кладёт фоновая горутина
+	// разбора, а читает обработчик кнопки «Импортировать».
+	rsMu   sync.Mutex
+	rsDump map[int64]*rsimport.Data
+
 	bgCtx context.Context
+
+	// runInline выполняет фоновые задачи синхронно — нужно тестам, чтобы
+	// проверять результат сразу после вызова обработчика.
+	runInline bool
+}
+
+// spawn выполняет длинную работу в фоне: апдейты Telegram обрабатываются одним
+// воркером, и синхронный импорт на тысячу пользователей заморозил бы бота.
+func (a *App) spawn(f func()) {
+	if a.runInline {
+		f()
+		return
+	}
+	go f()
 }
 
 type subCacheEntry struct {
@@ -161,8 +205,10 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAddSub()
 		cfg.NormalizeMiniApp()
 		cfg.NormalizeCabinet()
+		cfg.NormalizeAccess()
+		cfg.NormalizeYooKassa()
 		a.botCfg = cfg
-		a.panel = remnawave.New(cfg.Panel)
+		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
 			if err := a.ctl.ConnectPanelNetwork(ctx); err != nil {
 				a.log.Warn("подключение к сети панели", "err", err)
@@ -171,6 +217,69 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		a.log.Info("конфигурация загружена, бот установлен", "db", a.store.Kind())
 	}
 	return nil
+}
+
+// newPanel собирает клиента панели из сохранённой конфигурации, наложив на неё
+// окружение: X-Api-Key аддона «Caddy with security» задаётся переменной
+// CADDY_AUTH_API_TOKEN (docs.rw → install/panel-security). Ключ живёт рядом с
+// прокси, а не в панели, поэтому env главнее того, что ввели в мастере, и
+// работает при любом типе установки — в том числе там, где мастер про ключ не
+// спрашивает (eGames, локальная панель за общим Caddy).
+func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
+	return remnawave.New(a.panelWithEnv(pc))
+}
+
+// panelWithEnv накладывает CADDY_AUTH_API_TOKEN на конфиг панели.
+func (a *App) panelWithEnv(pc model.PanelConfig) model.PanelConfig {
+	if a.cfg != nil && a.cfg.CaddyAuthToken != "" {
+		pc.APIKey = a.cfg.CaddyAuthToken
+	}
+	return pc
+}
+
+// caddyKeyFromEnv сообщает, что X-Api-Key уже пришёл из окружения — тогда
+// мастеру не о чем спрашивать.
+func (a *App) caddyKeyFromEnv() bool {
+	return a.cfg != nil && a.cfg.CaddyAuthToken != ""
+}
+
+// caddyKeyFor возвращает X-Api-Key для запроса не через клиента панели —
+// например, за app-config страницы подписки. Аддон «Caddy with security»
+// закрывает домен панели целиком, включая /api/sub, поэтому ключ нужен и там.
+// Но только для самой панели: адрес должен совпасть с ней и хостом, и схемой —
+// чужому домену секрет не отдаём, в открытый http не отправляем.
+//
+// panelBase вызывающий берёт через panelBaseURL(), а не читает a.botCfg сам:
+// конфиг подменяется на лету (мастер/переустановка), и без блокировки это гонка.
+func (a *App) caddyKeyFor(rawURL, panelBase string) string {
+	if !a.caddyKeyFromEnv() {
+		return ""
+	}
+	host, scheme := urlHostScheme(rawURL)
+	pHost, pScheme := urlHostScheme(panelBase)
+	if host == "" || host != pHost || scheme != pScheme {
+		return ""
+	}
+	return a.cfg.CaddyAuthToken
+}
+
+// panelBaseURL — базовый URL панели из текущего конфига, снятый под замком.
+// Вызывать только там, где a.mu не удерживается (мьютекс не рекурсивный).
+func (a *App) panelBaseURL() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return ""
+	}
+	return a.botCfg.Panel.BaseURL
+}
+
+func urlHostScheme(raw string) (host, scheme string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || u.Scheme == "" {
+		return "", ""
+	}
+	return strings.ToLower(u.Host), strings.ToLower(u.Scheme)
 }
 
 func (a *App) openOne(kind, dsn string) (storage.Storage, error) {
@@ -272,6 +381,8 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 		a.handleMessage(ctx, update.Message)
 	case update.Message != nil && len(update.Message.Photo) > 0:
 		a.handlePhoto(ctx, update.Message)
+	case update.Message != nil && update.Message.Document != nil:
+		a.handleDocument(ctx, update.Message)
 	}
 }
 
@@ -290,12 +401,29 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	text := strings.TrimSpace(m.Text)
 	isAdmin := userID == a.cfg.AdminID
 	a.rememberUser(ctx, chatID, username, firstName)
+	// Ссылка-приглашение обрабатывается ДО проверки режима публичности: иначе
+	// приглашённый упрётся в «нужно приглашение» и ссылка никогда не сработает.
+	if !isAdmin && strings.HasPrefix(text, "/start ") {
+		if code, isInv := strings.CutPrefix(strings.TrimSpace(strings.TrimPrefix(text, "/start ")), "inv_"); isInv && code != "" {
+			if msg, ok := a.redeemInvite(ctx, chatID, code); msg != "" {
+				a.msg.Delete(ctx, chatID, m.ID)
+				a.send(ctx, chatID, msg)
+				if !ok {
+					return
+				}
+			}
+		}
+	}
 	if a.denyAccess(ctx, chatID, isAdmin) {
 		return
 	}
 
 	if strings.HasPrefix(text, "/") {
 		a.msg.Delete(ctx, chatID, m.ID)
+		// Команда уводит с экрана ввода — ожидание секрета доступа к панели
+		// снимаем здесь же: экран ввода команда затрёт, а состояние осталось бы
+		// взведённым, и следующий обычный текст молча стал бы ключом панели.
+		a.clearPanelInput(chatID)
 	}
 
 	if a.installed() && isHomeText(text) {
@@ -439,6 +567,7 @@ func (a *App) handleTermsCmd(ctx context.Context, chatID int64) {
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
 	a.mu.Lock()
 	installed := a.installed()
 	panel := a.panel
@@ -448,7 +577,6 @@ func (a *App) handleStatus(ctx context.Context, chatID int64) {
 		mode = a.botCfg.Panel.Mode
 		methods = enabledMethods(a.botCfg)
 	}
-	lang := a.lang(chatID)
 	a.mu.Unlock()
 
 	isAdmin := chatID == a.cfg.AdminID
@@ -885,6 +1013,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onCBCheck(ctx, chatID, val)
 	case "usr":
 		a.onUsers(ctx, chatID, val, 0)
+	case "acc":
+		a.onAccess(ctx, chatID, val)
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}
@@ -892,6 +1022,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 
 func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstName, username string) {
 	name := displayName(firstName, username)
+	a.clearPanelInput(chatID)
 	if isAdmin {
 		a.showMenu(ctx, chatID, true, name)
 		return
@@ -936,6 +1067,11 @@ func (a *App) pricing() model.Pricing {
 }
 
 func (a *App) lang(chatID int64) string {
+	// Под мьютексом: карта a.wiz пишется из обработчика апдейтов, а lang()
+	// зовут и фоновые горутины (вебхуки, автоплатёж, напоминания) — без лока
+	// это concurrent map read/write, который роняет процесс мимо recover.
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if w, ok := a.wiz[chatID]; ok && w.cfg.Language != "" {
 		return w.cfg.Language
 	}
@@ -1076,6 +1212,35 @@ func (m botMessenger) SendDocument(ctx context.Context, chatID int64, filename s
 	if err != nil {
 		m.log.Error("send document", "err", err)
 	}
+}
+
+// Download скачивает файл, присланный в чат. Telegram отдаёт боту файлы не
+// больше 20 МБ, поэтому читаем с запасом и обрываем всё, что больше.
+func (m botMessenger) Download(ctx context.Context, fileID string) ([]byte, error) {
+	f, err := m.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.b.FileDownloadLink(f), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("telegram отдал %s", resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDumpBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDumpBytes {
+		return nil, errors.New("файл слишком большой")
+	}
+	return data, nil
 }
 
 func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {

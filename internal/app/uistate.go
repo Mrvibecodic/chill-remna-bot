@@ -12,6 +12,9 @@ type uiState struct {
 	priceMonths int
 	linkUID     int64
 
+	// Мастер создания приглашения: срок жизни в днях (шаг 1 из 2).
+	inviteDays int
+
 	panelSyncDone bool
 
 	welcomeAwait       string
@@ -24,6 +27,9 @@ type uiState struct {
 
 	p2pSubmitMsgID int
 	p2pShotMsgID   int
+
+	// Мастер переезда с remnashop: ждём файл дампа.
+	awaitRSDump bool
 }
 
 func (a *App) getUI(chatID int64) *uiState {

@@ -38,18 +38,17 @@ func (a *App) denyAccess(ctx context.Context, chatID int64, isAdmin bool) bool {
 		a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.you_blocked"))
 		return true
 	}
-	a.mu.Lock()
-	wl := a.botCfg != nil && a.botCfg.WhitelistMode
-	a.mu.Unlock()
-	if wl && a.store != nil {
-		u, _ := a.store.GetUser(ctx, chatID)
-		allowed := u != nil && u.Whitelisted
-		if !allowed {
-			if ok, _ := a.store.IsWhitelistID(ctx, chatID); ok {
-				allowed = true
-			}
+	// Режим публичности: «публично» пускает всех, «по приглашениям» и «белый
+	// список» — только тех, кому доступ уже выдан (приглашение выдаёт тот же
+	// флаг, поэтому смена режима никого не выкидывает).
+	switch a.accessMode() {
+	case model.AccessInvite:
+		if a.store != nil && !a.accessGranted(ctx, chatID) {
+			a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.need_invite"))
+			return true
 		}
-		if !allowed {
+	case model.AccessWhitelist:
+		if a.store != nil && !a.accessGranted(ctx, chatID) {
 			a.send(ctx, chatID, i18n.T(a.lang(chatID), "user.not_whitelisted"))
 			return true
 		}
@@ -77,15 +76,9 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
 
-	a.mu.Lock()
-	wlMode := a.botCfg != nil && a.botCfg.WhitelistMode
-	a.mu.Unlock()
-	wlLabel := i18n.T(lang, "users.wl_off")
-	if wlMode {
-		wlLabel = i18n.T(lang, "users.wl_on")
-	}
+	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
-		{btn(wlLabel, "usr:wlmode")},
+		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
 	}
 	for _, u := range users {
@@ -305,13 +298,10 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		}
 		a.showUser(ctx, chatID, uid)
 	case "wlmode":
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.WhitelistMode = !a.botCfg.WhitelistMode
-		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
-		a.showUsers(ctx, chatID, 0)
+		// Старая кнопка «вайтлист вкл/выкл» из давних сообщений в чате: молча
+		// менять режим по ней нельзя (можно случайно закрыть или открыть бота),
+		// поэтому просто открываем экран доступа.
+		a.showAccess(ctx, chatID)
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
@@ -423,6 +413,9 @@ func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode strin
 			} else {
 				didSub = true
 			}
+			// Mirror of applyBlock: without this B stays DISABLED forever and
+			// the subscription merge silently stops for an unblocked user.
+			a.setAddSubEnabledPanel(ctx, uid, true)
 		}
 		a.invalidateSubCache(uid)
 	}
@@ -483,10 +476,12 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	panel := a.panel
 	a.mu.Unlock()
 	if deleteSub && panel != nil {
+		// B first: it is resolved through A's username, so deleting A first
+		// would leave an orphan add-on user in the panel.
+		a.removeAddSub(ctx, uid)
 		if _, err := panel.DeleteByTelegramID(ctx, uid); err != nil {
 			a.notify(ctx, adminChat, "⚠️ "+err.Error())
 		}
-		a.removeAddSub(ctx, uid)
 	}
 	a.invalidateSubCache(uid)
 	_ = a.store.DeletePaymentsByUser(ctx, uid)
@@ -622,6 +617,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		kbRows = append(kbRows, nav)
 	}
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")})
+	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
 	kbRows = append(kbRows, back)
 	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
 }
@@ -653,6 +649,11 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "paylog.ask"), "menu:payments")
 	case "csv":
 		a.exportPayLogCSV(ctx, chatID)
+	case "err":
+		a.showPayErrors(ctx, chatID, 7)
+	case "errf":
+		days, _ := strconv.Atoi(arg)
+		a.exportPayErrors(ctx, chatID, days)
 	}
 }
 
@@ -671,9 +672,14 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		}
 	}
 	if !ok {
-		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.none"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "btn.buy"), "menu:buy")}, home,
-		})
+		rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}}
+		// Автопродление можно было подключить и до того, как подписка кончилась:
+		// выключить его должно быть можно и с этого экрана.
+		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+			rows = append(rows, row)
+		}
+		rows = append(rows, home)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.none"), rows)
 		return
 	}
 	rows := [][]models.InlineKeyboardButton{}
@@ -681,14 +687,56 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "btn.support"), URL: sup}})
 	}
 	if status == remnawave.StatusDisabled {
+		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+			rows = append(rows, row)
+		}
 		rows = append(rows, home)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.blocked"), rows)
 		return
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
+	if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+		rows = append(rows, row)
+	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
+}
+
+// addSubLine renders the add-on subscription's state ("доп-сервер") under the
+// devices line. Without it the only signal a user gets when the add-on traffic
+// runs out is a stub entry inside the config. Returns "" when the feature is
+// off, the user has no add-on, or the panel can't be read — the screen then
+// looks exactly as before.
+func (a *App) addSubLine(ctx context.Context, chatID int64) string {
+	info, ok := a.addSubStatus(ctx, chatID)
+	if !ok {
+		return ""
+	}
+	lang := a.lang(chatID)
+	switch {
+	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
+		return "\n" + i18n.T(lang, "sub.addsub_off")
+	case info.Exhausted:
+		return "\n" + i18n.T(lang, "sub.addsub_out")
+	case info.Limit <= 0:
+		return "\n" + i18n.T(lang, "sub.addsub_unlim")
+	}
+	left := info.Limit - info.Used
+	if left < 0 {
+		left = 0
+	}
+	return "\n" + i18n.T(lang, "sub.addsub", formatGB(left), formatGB(info.Limit))
+}
+
+// formatGB renders a byte count as GB with one decimal (trailing ".0" dropped).
+func formatGB(b int64) string {
+	if b <= 0 {
+		return "0"
+	}
+	gb := float64(b) / (1024 * 1024 * 1024)
+	s := strconv.FormatFloat(gb, 'f', 1, 64)
+	return strings.TrimSuffix(s, ".0")
 }
 
 // devicesLine renders a read-only "connected[/allowed]" devices line for the

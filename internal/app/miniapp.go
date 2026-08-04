@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
 )
 
@@ -68,6 +70,9 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.Platega.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodPlatega)
 		}
+		if c.Heleket.Enabled {
+			dto.PayMethods = append(dto.PayMethods, model.PayMethodHeleket)
+		}
 		if c.Tribute.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodTribute)
 		}
@@ -105,6 +110,15 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.DevicesUsed = info.Used
 		dto.DeviceLimit = info.Limit
 		dto.HasLimit = info.HasLimit
+	}
+	// Same add-on state the chat screen shows, so the mini-app and the cabinet
+	// don't hide a доп-сервер that ran out of traffic.
+	if add, aok := a.addSubStatus(ctx, tgID); aok {
+		dto.AddSubOK = true
+		dto.AddSubUsed = add.Used
+		dto.AddSubLimit = add.Limit
+		dto.AddSubExhausted = add.Exhausted
+		dto.AddSubOff = strings.EqualFold(add.Status, remnawave.StatusDisabled)
 	}
 	return dto
 }

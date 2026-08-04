@@ -82,7 +82,9 @@ func (a *App) userLabelByID(ctx context.Context, id int64) string {
 		// Telegram username/name — show their email so they are identifiable.
 		if id < 0 {
 			if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
-				return "📧 " + wu.Email
+				// Эскейп обязателен: e-mail — свободный ввод при регистрации в
+				// кабинете и попадает в сообщения с ParseModeHTML.
+				return "📧 " + escapeName(wu.Email)
 			}
 		}
 		if u, _ := a.store.GetUser(ctx, id); u != nil {
@@ -273,7 +275,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
-	p2pOn, starsOn, ykOn, cbOn, plOn, trbOn := false, false, false, false, false, false
+	p2pOn, starsOn, ykOn, cbOn, plOn, hlOn, trbOn := false, false, false, false, false, false, false
 	strat := "MONTH"
 	addsubOn, addsubGB, addsubInt := false, 0, 0
 	if a.botCfg != nil {
@@ -282,6 +284,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		ykOn = a.botCfg.YooKassa.Enabled
 		cbOn = a.botCfg.CryptoBot.Enabled
 		plOn = a.botCfg.Platega.Enabled
+		hlOn = a.botCfg.Heleket.Enabled
 		trbOn = a.botCfg.Tribute.Enabled
 		strat = a.botCfg.Pricing.ResetStrategy()
 		addsubOn = a.botCfg.AddSub.Enabled
@@ -297,7 +300,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	}
 	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
-		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(trbOn),
+		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn),
 		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
 		internalCSV, externalName,
 	)
@@ -314,7 +317,8 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
 		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
-		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
+		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
+		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
 		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
 		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		homeRow(lang),
@@ -339,15 +343,24 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 	if updOn {
 		updLabel = i18n.T(lang, "btn.upd_notify_on")
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
+	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
 		{btn(updLabel, "upd:toggle"), btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
 		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
-		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
-		homeRow(lang),
-	})
+		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
+	}
+	// Ключ/кука доступа к панели — только там, где панель вообще чем-то закрыта.
+	if a.panelAuthRelevant() {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth"),
+		})
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+		homeRow(lang))
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), rows)
 }
 
 func (a *App) squadDisplay(ctx context.Context) (string, string) {
@@ -511,6 +524,8 @@ func (a *App) registerUser(ctx context.Context, chatID int64, firstName, usernam
 
 func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, firstName, username string) {
 	name := displayName(firstName, username)
+	// Уход в меню отменяет ожидание секрета доступа к панели: см. clearPanelInput.
+	a.clearPanelInput(chatID)
 	switch val {
 	case "buy":
 		a.showPlans(ctx, chatID)
@@ -544,6 +559,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.showPlategaAdmin(ctx, chatID)
 		}
+	case "heleket":
+		if isAdmin {
+			a.showHeleketAdmin(ctx, chatID)
+		}
 	case "tribute":
 		if isAdmin {
 			a.showTributeAdmin(ctx, chatID)
@@ -554,6 +573,12 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		}
 	case "mysubs":
 		a.showMySubs(ctx, chatID)
+	case "autopay":
+		a.showAutoPay(ctx, chatID)
+	case "access":
+		if isAdmin {
+			a.showAccess(ctx, chatID)
+		}
 	case "home":
 		a.showMenu(ctx, chatID, isAdmin, name)
 	case "register":
@@ -581,6 +606,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "subdomain":
 		if isAdmin {
 			a.showSubdomain(ctx, chatID)
+		}
+	case "panelauth":
+		if isAdmin {
+			a.showPanelAuth(ctx, chatID, "")
 		}
 	case "apilog":
 		if isAdmin {
@@ -651,6 +680,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "cabinet":
 		if isAdmin {
 			a.showCabinetAdmin(ctx, chatID)
+		}
+	case "rsimp":
+		if isAdmin {
+			a.showRSImport(ctx, chatID)
 		}
 	case "cabtoggle":
 		if isAdmin {

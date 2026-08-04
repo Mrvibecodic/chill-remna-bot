@@ -399,6 +399,22 @@ function devicesText(s){
   if(!s.devices_ok)return null;
   return s.has_limit? (s.devices_used+' / '+s.device_limit) : (''+s.devices_used);
 }
+function gbText(b){
+  var gb=(Number(b)||0)/1073741824;
+  var s=gb.toFixed(1);
+  return (s.slice(-2)==='.0'?s.slice(0,-2):s)+' ГБ';
+}
+// Add-on ("доп-сервер") state: its nodes are merged into the same subscription
+// link, so its traffic must be visible here too — otherwise running out shows up
+// only as a stub entry inside the client's server list.
+function addSubText(s){
+  if(!s.addsub_ok)return null;
+  if(s.addsub_off)return 'выкл';
+  if(s.addsub_exhausted)return 'исчерпан';
+  if(!s.addsub_limit)return 'безлимит';
+  var left=Number(s.addsub_limit)-Number(s.addsub_used||0);
+  return gbText(left>0?left:0);
+}
 
 /* ---- skeletons ---- */
 function skMain(){
@@ -417,6 +433,7 @@ function render(me,menu,sub,plans){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
+    var atext=addSubText(sub);
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
       '<div class="pl"><span class="brand">ДОСТУП · BOARDING</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
@@ -424,18 +441,22 @@ function render(me,menu,sub,plans){
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
         (dleft!==null?'<div class="c"><div class="k">ОСТАЛОСЬ</div><div class="v">'+dleft+' '+daysWord(dleft)+'</div></div>':'')+
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
+        (atext!==null?'<div class="c"><div class="k">ДОП-СЕРВЕР</div><div class="v">'+esc(atext)+'</div></div>':'')+
       '</div></div>';
     h+='<div class="acctgrp">'+ub+pass+'</div>';
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
+    h+=autoPayBlock();
     if(menu.can_renew)h+='<div class="hint center">Для продления выберите период ниже</div>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
     h+='<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div></div>';
     if(menu.trial_available&&!WEB)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
+    // Автопродление могло остаться включённым с прошлой подписки — дать выключить.
+    if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
   }
   if(plans.plans&&plans.plans.length){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
@@ -456,6 +477,36 @@ function render(me,menu,sub,plans){
   h+='<div class="btnrow">'+acts+'</div>';
   h+='</div>';
   view(h,null);
+}
+
+/* ---- автопродление (сохранённая карта ЮKassa) ---- */
+function autoPayWhen(){
+  var ap=STATE.ap||{};
+  if(!ap.days||ap.days<=0)return 'в день окончания подписки';
+  return 'за '+ap.days+' '+plural(ap.days,'день','дня','дней')+' до окончания подписки';
+}
+function autoPayBlock(){
+  var ap=STATE.ap||{};
+  if(!ap.available&&!ap.on)return '';
+  if(ap.on){
+    return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'+
+      '<div><b>Автопродление включено</b><div class="hint" style="margin-top:4px">Спишем '+esc(autoPayWhen())+
+      (ap.months?(' за '+monthsWord(ap.months)):'')+(ap.title?(' · '+esc(ap.title)):'')+'. Деньги списываются автоматически, ничего делать не нужно.</div></div>'+
+      '</div><button class="btn sec" style="margin-top:10px" onclick="setAutoPay(false,this)">Отключить автопродление</button></div>';
+  }
+  if(ap.can_enable){
+    return '<div class="card"><div><b>Автопродление выключено</b><div class="hint" style="margin-top:4px">Карта уже сохранена в ЮKassa — включите, и подписка будет продлеваться сама ('+esc(autoPayWhen())+'). Отключить можно в любой момент, списаний после этого нет.</div></div>'+
+      '<button class="btn sec" style="margin-top:10px" onclick="setAutoPay(true,this)">Включить автопродление</button></div>';
+  }
+  return '<div class="card"><div><b>Автопродление</b><div class="hint" style="margin-top:4px">Можно не помнить про оплату: после оплаты картой бот предложит включить автопродление и дальше будет продлевать подписку сам ('+esc(autoPayWhen())+'). Отключается одной кнопкой в любой момент.</div></div></div>';
+}
+async function setAutoPay(on,el){
+  haptic('tap');busy(el,true);
+  try{const r=await post('/api/miniapp/autopay',{on:!!on});
+    if(r.ok){haptic('ok');toast(on?'Автопродление включено':'Автопродление отключено — списаний больше не будет','ok');boot();return;}
+    haptic('err');toast(r.error||'Не удалось изменить автопродление','err');
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  busy(el,false);
 }
 
 async function doTrial(el){
@@ -517,7 +568,7 @@ function monthsWord(n){return n+' '+plural(n,'месяц','месяца','мес
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
 function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
-var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
+var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(months,label){
   haptic('tap');
   var methods=[];
@@ -543,8 +594,12 @@ function buyPlan(months,label){
     h+='</div>';
   }
   h+='<div class="sec-title">Способ оплаты</div>';
+  var apOn=STATE.ap&&STATE.ap.available;
   methods.forEach(function(m){
     h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
+    if(m==='yookassa'&&apOn){
+      h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
+    }
   });
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
@@ -645,7 +700,7 @@ async function topupOpen(){
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
-var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта'};
+var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',hl:'🪙 Криптовалюта (Heleket)'};
 function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
@@ -834,6 +889,7 @@ async function boot(){
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
+    try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';

@@ -91,11 +91,29 @@ func (a *App) cabinetNeedsApproval(isEmail bool) bool {
 // pending state, a denied account does NOT re-notify the admin.
 var errCabinetDenied = errors.New("доступ отклонён администратором")
 
+// errCabinetAccess возвращается, когда бот закрыт (вайтлист / по приглашениям),
+// а у этого аккаунта доступа нет.
+var errCabinetAccess = errors.New("доступ к боту ограничен — обратитесь к администратору")
+
 // CabinetGate enforces the "approve new web users" policy. It returns an error
 // (and notifies the admin once) when the account still needs approval, or a
 // permanent "denied" error when the admin already rejected the request.
 func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
-	if !a.cabinetNeedsApproval(isEmail) {
+	needApproval := a.cabinetNeedsApproval(isEmail)
+	if isEmail {
+		// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
+		// закрытом боте (приглашения/вайтлист) для него обязательна модерация
+		// кабинета: ранее одобренные (WebApproved) проходят как раньше,
+		// остальные попадают в обычную очередь на одобрение к админу.
+		if a.accessMode() != model.AccessPublic {
+			needApproval = true
+		}
+	} else if a.MiniAccessDenied(ctx, tgID) {
+		// Telegram-аккаунт: закрытый бот не пускает через веб тех, кого он не
+		// пускает в чат.
+		return errCabinetAccess
+	}
+	if !needApproval {
 		return nil
 	}
 	if a.store != nil {

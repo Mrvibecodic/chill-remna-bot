@@ -64,6 +64,7 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 	a.mu.Unlock()
 
 	if err := verifyCryptoBotSignature(signature, token, body); err != nil {
+		a.payLogThrottled(ctx, "cb-webhook-sign", model.PayMethodCryptoBot, "", 0, "sign_error", "%v", err)
 		return false, err
 	}
 

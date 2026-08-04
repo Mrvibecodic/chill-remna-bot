@@ -14,6 +14,26 @@ import (
 // the SAME invoice-creation cores as the chat flow, so pending-invoice ExtID
 // formats are identical and the existing webhooks complete the payment.
 func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
+	url, invoice, err := a.miniPayURLCore(ctx, tgID, months, method, web_)
+	if err != nil {
+		// Ядра создания счёта пишут свои invoice_error, но отказы «метод
+		// недоступен/неизвестен» терялись совсем, а источник платежа (чат,
+		// мини-апп, кабинет) не был виден нигде — без него разбор жалобы
+		// «не смог оплатить» упирается в догадки.
+		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s months=%d: %v", miniSource(web_), months, err)
+	}
+	return url, invoice, err
+}
+
+// miniSource — откуда пришла попытка оплаты, для журнала.
+func miniSource(web_ bool) string {
+	if web_ {
+		return "веб-кабинет"
+	}
+	return "мини-апп"
+}
+
+func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
 	switch method {
 	case model.PayMethodStars:
 		link, err := a.starsInvoiceLink(ctx, tgID, months)
@@ -30,12 +50,14 @@ func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method str
 		if returnURL == "" {
 			returnURL = "https://t.me"
 		}
+		// В прайсе валюта задаётся символом («₽» — тоже три байта), поэтому
+		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт 400.
 		currency := pr.Currency
-		if len(currency) != 3 {
+		if !currencyCode(currency) {
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
-		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc)
+		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable())
 		return url, false, err
 
 	case model.PayMethodCryptoBot:
@@ -58,7 +80,19 @@ func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method str
 		if returnURL == "" {
 			returnURL = "https://t.me"
 		}
-		url, _, err := a.plCreateTransaction(ctx, tgID, months, parseAmountRub(value), miniDesc(months), returnURL)
+		valueK, okV := rubToKopecks(value)
+		if !okV || valueK <= 0 {
+			return "", false, errors.New("оплата недоступна")
+		}
+		url, _, err := a.plCreateTransaction(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL)
+		return url, false, err
+
+	case model.PayMethodHeleket:
+		price := a.pricing().Base[months]
+		if !a.hlConfig().Enabled || price == "" {
+			return "", false, errors.New("оплата криптовалютой недоступна")
+		}
+		url, _, err := a.hlCreateInvoice(ctx, tgID, months, price, "", 0)
 		return url, false, err
 
 	case model.PayMethodTribute:
@@ -87,7 +121,7 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, months int) web.MiniActio
 	if err != nil {
 		return web.MiniActionDTO{Error: err.Error()}
 	}
-	if u == nil || !u.P2PApproved {
+	if !a.p2pAllowed(u) {
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: "Доступ к P2P ещё не подтверждён. Запрос отправлен администратору — откройте бота."}
 	}
@@ -103,7 +137,15 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, months int) web.MiniAc
 	}
 	_ = a.store.UpsertUser(ctx, tgID)
 	u, _ := a.store.GetUser(ctx, tgID)
-	if u == nil || !u.P2PApproved {
+	// «Перевод всем без одобрения» распространяется на Telegram-аккаунты.
+	// E-mail-аккаунт кабинета (отрицательный синтетический id) заводится без
+	// подтверждения почты, поэтому реквизиты по нему выдаём только после
+	// ручного одобрения — иначе карты вытягиваются регистрацией на любой ящик.
+	allowed := a.p2pAllowed(u)
+	if tgID < 0 {
+		allowed = u != nil && u.P2PApproved
+	}
+	if !allowed {
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: "Доступ к оплате переводом ещё не подтверждён администратором — запрос отправлен. Попробуйте позже."}
 	}
@@ -168,7 +210,7 @@ func (a *App) MiniPromo(ctx context.Context, tgID int64, code string) web.MiniPr
 }
 
 // MiniTopUpOptions returns the same preset amounts as the chat top-up screen,
-// plus the enabled top-up methods (YooKassa/CryptoBot).
+// plus the enabled top-up methods (YooKassa/CryptoBot/Heleket).
 func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOptionsDTO {
 	var dto web.MiniTopUpOptionsDTO
 	amts, _ := a.topUpAmounts()
@@ -182,6 +224,9 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 		}
 		if a.botCfg.CryptoBot.Enabled {
 			dto.Methods = append(dto.Methods, "cb")
+		}
+		if a.botCfg.Heleket.Enabled {
+			dto.Methods = append(dto.Methods, "hl")
 		}
 	}
 	a.mu.Unlock()
@@ -200,14 +245,41 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		}
 	}
 	if !valid || (maxK > 0 && kopecks > maxK) {
+		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: "недопустимая сумма"}
 	}
-	if method != "yk" && method != "cb" {
+	if method != "yk" && method != "cb" && method != "hl" {
+		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: "способ пополнения недоступен"}
 	}
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method)
 	if err != nil {
+		a.payLog(ctx, method, "", tgID, "topup_error", "kopecks=%d: %v", kopecks, err)
 		return web.MiniActionDTO{Error: err.Error()}
 	}
 	return web.MiniActionDTO{OK: true, PayURL: payURL}
+}
+
+// MiniAutoPay отдаёт состояние автопродления для мини-аппа и веб-кабинета.
+func (a *App) MiniAutoPay(ctx context.Context, tgID int64) web.MiniAutoPayDTO {
+	available, on, months, title := a.AutoPayState(ctx, tgID)
+	dto := web.MiniAutoPayDTO{
+		Available: available,
+		On:        on,
+		Months:    months,
+		Title:     title,
+		Days:      a.autoPayCfg().AutoPayDays,
+	}
+	if ap := a.getAutoPay(ctx, tgID); ap != nil && ap.MethodID != "" {
+		dto.CanEnable = available
+	}
+	return dto
+}
+
+// MiniSetAutoPay включает/выключает автопродление из мини-аппа или кабинета.
+func (a *App) MiniSetAutoPay(ctx context.Context, tgID int64, on bool) web.MiniActionDTO {
+	if err := a.SetAutoPayEnabled(ctx, tgID, on); err != nil {
+		return web.MiniActionDTO{Error: err.Error()}
+	}
+	return web.MiniActionDTO{OK: true}
 }

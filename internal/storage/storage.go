@@ -39,6 +39,23 @@ type Storage interface {
 	RemoveWhitelistID(ctx context.Context, telegramID int64) error
 	IsWhitelistID(ctx context.Context, telegramID int64) (bool, error)
 	ListWhitelistIDs(ctx context.Context) ([]int64, error)
+	WhitelistAllUsers(ctx context.Context) (int64, error)
+	CountWhitelisted(ctx context.Context) (int, error)
+
+	CreateInvite(ctx context.Context, inv *model.Invite) error
+	GetInvite(ctx context.Context, code string) (*model.Invite, error)
+	ListInvites(ctx context.Context) ([]model.Invite, error)
+	UseInvite(ctx context.Context, code string) (bool, error)
+	RevokeInvite(ctx context.Context, code string) error
+	DeleteInvite(ctx context.Context, code string) error
+
+	SetAutoPay(ctx context.Context, ap *model.AutoPay) error
+	GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay, error)
+	SetAutoPayEnabled(ctx context.Context, telegramID int64, on bool) error
+	UpdateAutoPayResult(ctx context.Context, telegramID int64, lastPayAt, nextTryAt string, fails int, lastError string) error
+	MarkAutoPayCharged(ctx context.Context, telegramID int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error
+	ListAutoPay(ctx context.Context) ([]model.AutoPay, error)
+	DeleteAutoPay(ctx context.Context, telegramID int64) error
 	DeleteUser(ctx context.Context, telegramID int64) error
 	AllUserIDs(ctx context.Context) ([]int64, error)
 
@@ -107,6 +124,11 @@ type Storage interface {
 	AddPayLog(ctx context.Context, e *model.PayLogEntry) error
 	PayLogs(ctx context.Context, extID string, telegramID int64, limit int) ([]model.PayLogEntry, error)
 	AllPayLogs(ctx context.Context, limit int) ([]model.PayLogEntry, error)
+	// PayLogsFiltered отбирает записи журнала НА СТОРОНЕ БД по этапам и времени
+	// и вторым значением отдаёт полное число подходящих записей. Именно полное
+	// число, а не длину среза: иначе на нагруженном боте выгрузка молча теряла
+	// бы всё, что не поместилось в лимит, и админ об этом не узнал бы.
+	PayLogsFiltered(ctx context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error)
 	PurgePayLogs(ctx context.Context, before string) error
 
 	Kind() string
@@ -301,6 +323,10 @@ func (b *base) SetBlocked(ctx context.Context, telegramID int64, blocked bool) e
 }
 
 func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
+	// Автосписание лежит в отдельной таблице: если не удалить его вместе с
+	// пользователем, планировщик продолжит списывать деньги за удалённого.
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
@@ -869,6 +895,55 @@ func (b *base) PayLogs(ctx context.Context, extID string, telegramID int64, limi
 	return out, rows.Err()
 }
 
+func (b *base) PayLogsFiltered(ctx context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error) {
+	if limit <= 0 {
+		limit = 20000
+	}
+	where, args := "", []any{}
+	if len(stages) > 0 {
+		ph := make([]string, 0, len(stages))
+		for _, st := range stages {
+			args = append(args, st)
+			ph = append(ph, b.ph(len(args)))
+		}
+		where = " WHERE stage IN (" + strings.Join(ph, ", ") + ")"
+	}
+	if since != "" {
+		args = append(args, since)
+		cond := "created_at >= " + b.ph(len(args))
+		if where == "" {
+			where = " WHERE " + cond
+		} else {
+			where += " AND " + cond
+		}
+	}
+
+	var total int64
+	// #nosec G202 -- where собран из b.ph плейсхолдеров, значения идут аргументами
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM payment_log"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, limit)
+	// #nosec G202 -- см. выше
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT id, ext_id, telegram_id, method, stage, detail, created_at FROM payment_log"+where+
+			" ORDER BY id DESC LIMIT "+b.ph(len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.PayLogEntry
+	for rows.Next() {
+		var e model.PayLogEntry
+		if err := rows.Scan(&e.ID, &e.ExtID, &e.TelegramID, &e.Method, &e.Stage, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	return out, total, rows.Err()
+}
+
 func (b *base) PurgePayLogs(ctx context.Context, before string) error {
 	_, err := b.db.ExecContext(ctx,
 		"DELETE FROM payment_log WHERE created_at < "+b.ph(1), before)
@@ -980,6 +1055,7 @@ func (b *base) CreateWebUser(ctx context.Context, u *model.WebUser) error {
 	if u.CreatedAt == "" {
 		u.CreatedAt = nowStr()
 	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, err := b.db.ExecContext(ctx,
 		"INSERT INTO web_users (tg_id, email, pass_hash, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+")",
 		u.TgID, u.Email, u.PassHash, u.CreatedAt)
@@ -1146,4 +1222,215 @@ func (b *base) ListWhitelistIDs(ctx context.Context) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Приглашения (режим публичности «по приглашениям»)
+// ---------------------------------------------------------------------------
+
+// CreateInvite сохраняет новое приглашение. Код должен быть уникальным.
+func (b *base) CreateInvite(ctx context.Context, inv *model.Invite) error {
+	if inv.CreatedAt == "" {
+		inv.CreatedAt = nowStr()
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO invites (code, max_uses, used, expires_at, created_at, revoked, note) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+")",
+		inv.Code, inv.MaxUses, inv.Used, inv.ExpiresAt, inv.CreatedAt, boolToInt(inv.Revoked), inv.Note)
+	return err
+}
+
+func (b *base) GetInvite(ctx context.Context, code string) (*model.Invite, error) {
+	var inv model.Invite
+	var revoked int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT code, max_uses, used, expires_at, created_at, revoked, note FROM invites WHERE code = "+b.ph(1), code).
+		Scan(&inv.Code, &inv.MaxUses, &inv.Used, &inv.ExpiresAt, &inv.CreatedAt, &revoked, &inv.Note)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	inv.Revoked = revoked != 0
+	return &inv, nil
+}
+
+func (b *base) ListInvites(ctx context.Context) ([]model.Invite, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT code, max_uses, used, expires_at, created_at, revoked, note FROM invites ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Invite
+	for rows.Next() {
+		var inv model.Invite
+		var revoked int
+		if err := rows.Scan(&inv.Code, &inv.MaxUses, &inv.Used, &inv.ExpiresAt, &inv.CreatedAt, &revoked, &inv.Note); err != nil {
+			return nil, err
+		}
+		inv.Revoked = revoked != 0
+		out = append(out, inv)
+	}
+	return out, rows.Err()
+}
+
+// UseInvite атомарно «тратит» одну активацию приглашения: увеличивает счётчик
+// только если приглашение не отозвано, не просрочено и лимит не исчерпан.
+// Возвращает false, если приглашение недействительно (или его нет).
+func (b *base) UseInvite(ctx context.Context, code string) (bool, error) {
+	res, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE invites SET used = used + 1 WHERE code = "+b.ph(1)+
+			" AND revoked = 0"+
+			" AND (max_uses <= 0 OR used < max_uses)"+
+			" AND (expires_at = '' OR expires_at > "+b.ph(2)+")",
+		code, nowStr())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (b *base) RevokeInvite(ctx context.Context, code string) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE invites SET revoked = 1 WHERE code = "+b.ph(1), code)
+	return err
+}
+
+func (b *base) DeleteInvite(ctx context.Context, code string) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, err := b.db.ExecContext(ctx, "DELETE FROM invites WHERE code = "+b.ph(1), code)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// Автосписание
+// ---------------------------------------------------------------------------
+
+// SetAutoPay создаёт или перезаписывает запись автосписания пользователя.
+func (b *base) SetAutoPay(ctx context.Context, ap *model.AutoPay) error {
+	if ap.CreatedAt == "" {
+		ap.CreatedAt = nowStr()
+	}
+	if ap.Method == "" {
+		ap.Method = model.PayMethodYooKassa
+	}
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"INSERT INTO autopay (telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+") "+
+			"ON CONFLICT (telegram_id) DO UPDATE SET method = excluded.method, method_id = excluded.method_id, "+
+			"title = excluded.title, months = excluded.months, amount = excluded.amount, currency = excluded.currency, "+
+			"enabled = excluded.enabled, last_pay_at = excluded.last_pay_at, paid_period = excluded.paid_period, "+
+			"next_try_at = excluded.next_try_at, fails = excluded.fails, last_error = excluded.last_error",
+		ap.TelegramID, ap.Method, ap.MethodID, ap.Title, ap.Months, ap.Amount, ap.Currency,
+		boolToInt(ap.Enabled), ap.CreatedAt, ap.LastPayAt, ap.PaidPeriod, ap.NextTryAt, ap.Fails, ap.LastError)
+	return err
+}
+
+func (b *base) GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay, error) {
+	var ap model.AutoPay
+	var enabled int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
+			"FROM autopay WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ap.Enabled = enabled != 0
+	return &ap, nil
+}
+
+func (b *base) SetAutoPayEnabled(ctx context.Context, telegramID int64, on bool) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE autopay SET enabled = "+b.ph(1)+", fails = 0, last_error = '', next_try_at = '' WHERE telegram_id = "+b.ph(2),
+		boolToInt(on), telegramID)
+	return err
+}
+
+// UpdateAutoPayResult записывает исход попытки списания.
+func (b *base) UpdateAutoPayResult(ctx context.Context, telegramID int64, lastPayAt, nextTryAt string, fails int, lastError string) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE autopay SET last_pay_at = "+b.ph(1)+", next_try_at = "+b.ph(2)+", fails = "+b.ph(3)+", last_error = "+b.ph(4)+
+			" WHERE telegram_id = "+b.ph(5),
+		lastPayAt, nextTryAt, fails, lastError, telegramID)
+	return err
+}
+
+// MarkAutoPayCharged фиксирует состоявшееся списание: за какой период списали
+// (защита от повторной оплаты того же периода), когда и с каким исходом
+// продления. Счётчик неудач сбрасывается — деньги-то прошли.
+func (b *base) MarkAutoPayCharged(ctx context.Context, telegramID int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE autopay SET last_pay_at = "+b.ph(1)+", paid_period = "+b.ph(2)+", next_try_at = "+b.ph(3)+
+			", fails = 0, last_error = "+b.ph(4)+" WHERE telegram_id = "+b.ph(5),
+		lastPayAt, paidPeriod, nextTryAt, lastError, telegramID)
+	return err
+}
+
+func (b *base) ListAutoPay(ctx context.Context) ([]model.AutoPay, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
+			"FROM autopay ORDER BY telegram_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.AutoPay
+	for rows.Next() {
+		var ap model.AutoPay
+		var enabled int
+		if err := rows.Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
+			return nil, err
+		}
+		ap.Enabled = enabled != 0
+		out = append(out, ap)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) DeleteAutoPay(ctx context.Context, telegramID int64) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, err := b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
+	return err
+}
+
+// WhitelistAllUsers выдаёт доступ всем уже зарегистрированным пользователям.
+// Нужно при закрытии ранее публичного бота: иначе смена режима мгновенно
+// отрезала бы действующих клиентов. Возвращает число затронутых строк.
+func (b *base) WhitelistAllUsers(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "UPDATE users SET whitelisted = 1 WHERE whitelisted = 0")
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
+}
+
+// CountWhitelisted — сколько пользователей уже имеют доступ (в т.ч. впущенные
+// по приглашению).
+func (b *base) CountWhitelisted(ctx context.Context) (int, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE whitelisted = 1").Scan(&n)
+	return n, err
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -212,13 +213,18 @@ func setConnectHeaders(req *http.Request, base string) {
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 }
 
-func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path string) (*appConfigV2, *appConfig, bool) {
+var errTooManyRedirects = errors.New("слишком много редиректов")
+
+func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path, panelBase string) (*appConfigV2, *appConfig, bool) {
 	full := base + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
 	if err != nil {
 		return nil, nil, false
 	}
 	setConnectHeaders(req, base)
+	if k := a.caddyKeyFor(full, panelBase); k != "" {
+		req.Header.Set("X-Api-Key", k)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		a.log.Warn("miniapp connect: app-config fetch error", "url", full, "err", err)
@@ -267,7 +273,25 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 	// requests. So prime a cookie jar by loading the user's sub page first, then
 	// fetch the asset with that cookie — exactly what a real browser does.
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Timeout: 4 * time.Second, Jar: jar}
+	panelBase := a.panelBaseURL()
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Jar:     jar,
+		// Этот клиент, в отличие от панельного, по редиректам ходит (страницы
+		// подписки их любят). Go при смене хоста снимает только Authorization и
+		// Cookie, а произвольные заголовки тащит дальше — X-Api-Key от Caddy так
+		// уехал бы на чужой домен. Снимаем его сами на каждом переходе, который
+		// уводит с панели.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errTooManyRedirects
+			}
+			if req.Header.Get("X-Api-Key") != "" && a.caddyKeyFor(req.URL.String(), panelBase) == "" {
+				req.Header.Del("X-Api-Key")
+			}
+			return nil
+		},
+	}
 	if subURL != "" {
 		if req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil); err == nil {
 			// Full browser *navigation* headers: the subscription middleware returns
@@ -280,6 +304,9 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 			req.Header.Set("Sec-Fetch-Site", "none")
 			req.Header.Set("Sec-Fetch-User", "?1")
 			req.Header.Set("Upgrade-Insecure-Requests", "1")
+			if k := a.caddyKeyFor(subURL, panelBase); k != "" {
+				req.Header.Set("X-Api-Key", k)
+			}
 			if resp, err := client.Do(req); err == nil {
 				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 				_ = resp.Body.Close()
@@ -288,7 +315,7 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 	}
 
 	for _, p := range appConfigPaths {
-		v2, std, ok := a.tryFetchParse(ctx, client, base, p)
+		v2, std, ok := a.tryFetchParse(ctx, client, base, p, panelBase)
 		if ok {
 			ne := &connectCacheEntry{base: base, v2: v2, std: std, fetchedAt: time.Now()}
 			a.connectMu.Lock()

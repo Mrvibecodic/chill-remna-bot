@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,6 +29,8 @@ type fakeMsg struct {
 	live     map[int]string
 	deleted  []int
 	invoices []string
+	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
+	downloads map[string][]byte
 }
 
 func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
@@ -70,6 +73,15 @@ func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, _ bool, _ strin
 func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, _ []byte, _ string) {
 	f.add("DOC:" + filename)
 }
+func (f *fakeMsg) Download(_ context.Context, fileID string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.downloads[fileID]
+	if !ok {
+		return nil, errors.New("нет такого файла")
+	}
+	return data, nil
+}
 func (f *fakeMsg) add(s string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -90,6 +102,21 @@ func (f *fakeMsg) last() string {
 	}
 	return f.texts[len(f.texts)-1]
 }
+
+// lastLive — последнее НЕ удалённое сообщение: проверка «админ это увидит»,
+// а не «бот это отправил».
+func (f *fakeMsg) lastLive() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	best, out := 0, ""
+	for id, txt := range f.live {
+		if id > best {
+			best, out = id, txt
+		}
+	}
+	return out
+}
+
 func (f *fakeMsg) joined() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -108,7 +135,136 @@ type fakeStore struct {
 	webUsers  map[string]*model.WebUser
 	paylogs   []model.PayLogEntry
 	wlIDs     map[int64]bool
+	invites   map[string]*model.Invite
+	autopays  map[int64]*model.AutoPay
 	seq       int64
+}
+
+func (s *fakeStore) WhitelistAllUsers(context.Context) (int64, error) {
+	var n int64
+	for _, u := range s.users {
+		if !u.Whitelisted {
+			u.Whitelisted = true
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) CountWhitelisted(context.Context) (int, error) {
+	n := 0
+	for _, u := range s.users {
+		if u.Whitelisted {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) CreateInvite(_ context.Context, inv *model.Invite) error {
+	if s.invites == nil {
+		s.invites = map[string]*model.Invite{}
+	}
+	cp := *inv
+	s.invites[inv.Code] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetInvite(_ context.Context, code string) (*model.Invite, error) {
+	if s.invites == nil || s.invites[code] == nil {
+		return nil, nil
+	}
+	cp := *s.invites[code]
+	return &cp, nil
+}
+
+func (s *fakeStore) ListInvites(context.Context) ([]model.Invite, error) {
+	var out []model.Invite
+	for _, inv := range s.invites {
+		out = append(out, *inv)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) UseInvite(_ context.Context, code string) (bool, error) {
+	inv := s.invites[code]
+	if inv == nil || !inv.Active(time.Now().UTC()) {
+		return false, nil
+	}
+	inv.Used++
+	return true, nil
+}
+
+func (s *fakeStore) RevokeInvite(_ context.Context, code string) error {
+	if inv := s.invites[code]; inv != nil {
+		inv.Revoked = true
+	}
+	return nil
+}
+
+func (s *fakeStore) DeleteInvite(_ context.Context, code string) error {
+	delete(s.invites, code)
+	return nil
+}
+
+func (s *fakeStore) SetAutoPay(_ context.Context, ap *model.AutoPay) error {
+	if s.autopays == nil {
+		s.autopays = map[int64]*model.AutoPay{}
+	}
+	cp := *ap
+	s.autopays[ap.TelegramID] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetAutoPay(_ context.Context, id int64) (*model.AutoPay, error) {
+	if s.autopays == nil || s.autopays[id] == nil {
+		return nil, nil
+	}
+	cp := *s.autopays[id]
+	return &cp, nil
+}
+
+func (s *fakeStore) SetAutoPayEnabled(_ context.Context, id int64, on bool) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.Enabled = on
+		ap.Fails = 0
+		ap.LastError = ""
+	}
+	return nil
+}
+
+func (s *fakeStore) UpdateAutoPayResult(_ context.Context, id int64, lastPayAt, nextTryAt string, fails int, lastError string) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.LastPayAt = lastPayAt
+		ap.NextTryAt = nextTryAt
+		ap.Fails = fails
+		ap.LastError = lastError
+	}
+	return nil
+}
+
+func (s *fakeStore) MarkAutoPayCharged(_ context.Context, id int64, lastPayAt, paidPeriod, nextTryAt, lastError string) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.LastPayAt = lastPayAt
+		ap.PaidPeriod = paidPeriod
+		ap.NextTryAt = nextTryAt
+		ap.Fails = 0
+		ap.LastError = lastError
+	}
+	return nil
+}
+
+func (s *fakeStore) ListAutoPay(context.Context) ([]model.AutoPay, error) {
+	var out []model.AutoPay
+	for _, ap := range s.autopays {
+		out = append(out, *ap)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteAutoPay(_ context.Context, id int64) error {
+	delete(s.autopays, id)
+	return nil
 }
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }
@@ -134,6 +290,29 @@ func (s *fakeStore) PayLogs(_ context.Context, extID string, telegramID int64, _
 func (s *fakeStore) AllPayLogs(_ context.Context, limit int) ([]model.PayLogEntry, error) {
 	out := append([]model.PayLogEntry(nil), s.paylogs...)
 	return out, nil
+}
+
+func (s *fakeStore) PayLogsFiltered(_ context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error) {
+	allow := map[string]bool{}
+	for _, st := range stages {
+		allow[st] = true
+	}
+	var matched []model.PayLogEntry
+	for i := len(s.paylogs) - 1; i >= 0; i-- { // новые первыми, как в БД
+		e := s.paylogs[i]
+		if len(allow) > 0 && !allow[e.Stage] {
+			continue
+		}
+		if since != "" && e.CreatedAt != "" && e.CreatedAt < since {
+			continue
+		}
+		matched = append(matched, e)
+	}
+	total := int64(len(matched))
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, total, nil
 }
 
 func (s *fakeStore) PurgePayLogs(_ context.Context, _ string) error { return nil }
@@ -664,7 +843,11 @@ func panelStub(users int) *httptest.Server {
 			_, _ = w.Write([]byte(`{"response":{"users":{"totalUsers":` + itoa(users) + `}}}`))
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		// Настоящая панель отвечает JSON — стаб не должен быть «добрее» её,
+		// иначе проверка Health «это панель, а не заглушка прокси» не
+		// проверяется ничем.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":{"isConnected":true}}`))
 	}))
 }
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }

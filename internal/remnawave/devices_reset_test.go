@@ -103,8 +103,8 @@ func TestResetDevices_Success(t *testing.T) {
 	if res.Removed != 2 {
 		t.Fatalf("removed=%d, want 2", res.Removed)
 	}
-	if res.UUID != "u-1" {
-		t.Fatalf("uuid=%q", res.UUID)
+	if res.Ref.Key() != "u-1" {
+		t.Fatalf("ref=%q", res.Ref.Key())
 	}
 	rev, del, _ := opt.counts()
 	if rev != 1 || del != 1 {
@@ -142,8 +142,8 @@ func TestResetDevices_HwidExhausted(t *testing.T) {
 	if res.HwidCleared || res.HwidErr == nil {
 		t.Fatalf("expected HwidErr and not-cleared, res=%+v", res)
 	}
-	if res.UUID != "u-1" {
-		t.Fatalf("uuid must be set for background retry, got %q", res.UUID)
+	if res.Ref.Key() != "u-1" {
+		t.Fatalf("ref must be set for background retry, got %q", res.Ref.Key())
 	}
 	if _, del, _ := opt.counts(); del != hwidSyncAttempts {
 		t.Fatalf("delete attempts=%d, want %d", del, hwidSyncAttempts)
@@ -193,7 +193,7 @@ func TestDeleteAllHwidUntil_CtxCancel(t *testing.T) {
 	c := fastResetClient(srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	if err := c.DeleteAllHwidUntil(ctx, "u-1"); err == nil {
+	if err := c.DeleteAllHwidUntil(ctx, UserRef{uuid: "u-1"}); err == nil {
 		t.Fatal("expected an error once ctx expires while delete-all keeps failing")
 	}
 }
@@ -202,10 +202,10 @@ func TestHwidCount(t *testing.T) {
 	srv := deviceServer(t, 3, 4) // total=4
 	defer srv.Close()
 	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
-	if n := c.hwidCount(context.Background(), "u-1"); n != 4 {
+	if n := c.hwidCount(context.Background(), UserRef{uuid: "u-1"}); n != 4 {
 		t.Fatalf("count=%d, want 4", n)
 	}
-	if n := c.hwidCount(context.Background(), "missing"); n != -1 {
+	if n := c.hwidCount(context.Background(), UserRef{uuid: "missing"}); n != -1 {
 		t.Fatalf("count for unknown path=%d, want -1", n)
 	}
 }
@@ -217,7 +217,7 @@ func TestHwidCount_DevicesFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
-	if n := c.hwidCount(context.Background(), "anything"); n != 3 {
+	if n := c.hwidCount(context.Background(), UserRef{uuid: "anything"}); n != 3 {
 		t.Fatalf("count=%d, want 3 (devices fallback)", n)
 	}
 }

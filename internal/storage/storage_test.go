@@ -11,6 +11,7 @@ import (
 	"remnabot/internal/model"
 
 	_ "remnabot/internal/storage/drivers"
+	"time"
 )
 
 func testCrypter(t *testing.T) *crypto.Crypter {
@@ -200,7 +201,9 @@ func cleanPGData(t *testing.T, dsn string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, tbl := range []string{"payments", "p2p_requests", "users"} {
+	// payment_log добавлен: без него прогоны на общей БД накапливали записи и
+	// тест журнала видел данные предыдущего запуска.
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}
@@ -436,6 +439,75 @@ func TestPaymentsLog(t *testing.T) {
 		paid, err := st.PaidPayments(ctx)
 		if err != nil || len(paid) != 1 || paid[0].Status != model.PaymentPaid {
 			t.Fatalf("PaidPayments: len=%d err=%v", len(paid), err)
+		}
+	})
+}
+
+// PayLogsFiltered отбирает НА СТОРОНЕ БД и отдаёт полное число подходящих
+// записей — без этого выгрузка на нагруженном боте молча теряла бы всё, что не
+// поместилось в лимит.
+func TestPayLogsFiltered(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		old := time.Now().UTC().AddDate(0, 0, -30).Format(time.RFC3339)
+		recent := time.Now().UTC().Format(time.RFC3339)
+
+		add := func(stage, created string, n int) {
+			for i := 0; i < n; i++ {
+				if err := st.AddPayLog(ctx, &model.PayLogEntry{
+					ExtID: "e", TelegramID: 1, Method: "heleket", Stage: stage,
+					Detail: "d", CreatedAt: created,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		add("invoice_created", recent, 40) // успешные — не должны попадать
+		add("invoice_error", recent, 7)
+		add("panel_error", old, 5) // старые — отсекаются окном
+
+		stages := []string{"invoice_error", "panel_error", "verify_error"}
+
+		// Без окна: 12 сбоев, успешные отброшены.
+		got, total, err := st.PayLogsFiltered(ctx, stages, "", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 12 || len(got) != 12 {
+			t.Fatalf("без окна: total=%d len=%d (ожидалось 12/12)", total, len(got))
+		}
+		for _, e := range got {
+			if e.Stage == "invoice_created" {
+				t.Fatal("в выборку сбоев попал успешный этап")
+			}
+		}
+
+		// Окно в 7 суток отсекает старые записи.
+		since := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+		got, total, err = st.PayLogsFiltered(ctx, stages, since, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 7 || len(got) != 7 {
+			t.Fatalf("окно 7 суток: total=%d len=%d (ожидалось 7/7)", total, len(got))
+		}
+
+		// Лимит режет срез, но НЕ общее число — иначе усечение не объявить.
+		got, total, err = st.PayLogsFiltered(ctx, stages, "", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 12 || len(got) != 3 {
+			t.Fatalf("лимит: total=%d len=%d (ожидалось 12/3)", total, len(got))
+		}
+
+		// Пустой список этапов — все записи.
+		_, total, err = st.PayLogsFiltered(ctx, nil, "", 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 52 {
+			t.Fatalf("без фильтра по этапам: total=%d (ожидалось 52)", total)
 		}
 	})
 }

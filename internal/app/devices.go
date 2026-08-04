@@ -8,6 +8,7 @@ import (
 
 	"remnabot/internal/assets"
 	"remnabot/internal/i18n"
+	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
 )
 
@@ -39,8 +40,12 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 		}
 		if res.HwidErr != nil {
 			a.log.Warn("reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", chatID, "err", res.HwidErr)
-			a.clearHwidInBackground(chatID, res.UUID)
+			a.clearHwidInBackground(chatID, res.Ref)
 		}
+		// The add-on subscription holds registrations for the same devices, so
+		// the reset must cover it too: otherwise the freed slots and the
+		// rotated keys only apply to half of what the client actually uses.
+		a.resetAddSubDevices(ctx, chatID)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.done"), [][]models.InlineKeyboardButton{
 			navBack(lang, "menu:mysubs"),
 		})
@@ -69,8 +74,9 @@ func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDT
 	}
 	if res.HwidErr != nil {
 		a.log.Warn("miniapp reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", tgID, "err", res.HwidErr)
-		a.clearHwidInBackground(tgID, res.UUID)
+		a.clearHwidInBackground(tgID, res.Ref)
 	}
+	a.resetAddSubDevices(ctx, tgID)
 	a.invalidateSubCache(tgID)
 	return web.MiniActionDTO{OK: true}
 }
@@ -79,30 +85,31 @@ func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDT
 // unreachable panel can't leave a goroutine spinning forever.
 const hwidBackgroundBudget = 15 * time.Minute
 
-// clearHwidInBackground keeps retrying the HWID delete-all for uuid after the
+// clearHwidInBackground keeps retrying the HWID delete-all for a user after the
 // synchronous attempts in ResetDevicesByTelegramID were exhausted, until it
-// succeeds or the budget runs out. Deduped per uuid so repeated resets don't
+// succeeds or the budget runs out. Deduped per user so repeated resets don't
 // stack goroutines. Best-effort: the reset itself already succeeded (keys were
 // rotated); this only frees the leftover device slots.
-func (a *App) clearHwidInBackground(tgID int64, uuid string) {
-	if uuid == "" {
+func (a *App) clearHwidInBackground(tgID int64, ref remnawave.UserRef) {
+	if ref.Empty() {
 		return
 	}
+	key := ref.Key()
 	a.hwidMu.Lock()
 	if a.hwidRetrying == nil {
 		a.hwidRetrying = map[string]bool{}
 	}
-	if a.hwidRetrying[uuid] {
+	if a.hwidRetrying[key] {
 		a.hwidMu.Unlock()
 		return
 	}
-	a.hwidRetrying[uuid] = true
+	a.hwidRetrying[key] = true
 	a.hwidMu.Unlock()
 
 	go func() {
 		defer func() {
 			a.hwidMu.Lock()
-			delete(a.hwidRetrying, uuid)
+			delete(a.hwidRetrying, key)
 			a.hwidMu.Unlock()
 			if r := recover(); r != nil {
 				a.log.Error("hwid background retry panicked", "tg", tgID, "err", r)
@@ -116,7 +123,7 @@ func (a *App) clearHwidInBackground(tgID int64, uuid string) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), hwidBackgroundBudget)
 		defer cancel()
-		if err := panel.DeleteAllHwidUntil(ctx, uuid); err != nil {
+		if err := panel.DeleteAllHwidUntil(ctx, ref); err != nil {
 			a.log.Warn("hwid delete-all gave up after background retries", "tg", tgID, "err", err)
 			return
 		}

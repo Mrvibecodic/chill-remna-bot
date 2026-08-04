@@ -21,14 +21,18 @@ type rwWebhookEvent struct {
 	Data  json.RawMessage `json:"data"`
 }
 
+// rwUserPayload is the subset of the panel's user object the bot needs. Panel
+// 3.0.0 dropped uuid and made the id numeric, so both identifier fields are
+// read as raw JSON: they are only informational here — everything the bot acts
+// on comes from telegramId/username, which both generations still send.
 type rwUserPayload struct {
-	UUID       string `json:"uuid"`
-	UserID     string `json:"userId"`
-	Username   string `json:"username"`
-	TelegramID int64  `json:"telegramId"`
-	ExpireAt   string `json:"expireAt"`
-	ExpireTime string `json:"expireTime"`
-	Status     string `json:"status"`
+	UUID       json.RawMessage `json:"uuid"`
+	UserID     json.RawMessage `json:"id"`
+	Username   string          `json:"username"`
+	TelegramID int64           `json:"telegramId"`
+	ExpireAt   string          `json:"expireAt"`
+	ExpireTime string          `json:"expireTime"`
+	Status     string          `json:"status"`
 }
 
 func verifyRemnawaveSignature(signatureHex, secret string, body []byte) error {

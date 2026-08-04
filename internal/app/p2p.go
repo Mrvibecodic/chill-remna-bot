@@ -38,6 +38,22 @@ func (a *App) p2pConfig() model.P2PConfig {
 	return a.botCfg.P2P
 }
 
+// p2pOpenForAll сообщает, выдаются ли реквизиты перевода всем без ручного
+// одобрения админом (опция «включить всем» на экране настроек P2P).
+func (a *App) p2pOpenForAll() bool {
+	cfg := a.p2pConfig()
+	return cfg.Enabled && cfg.OpenForAll
+}
+
+// p2pAllowed сообщает, можно ли этому пользователю выдать реквизиты: либо
+// перевод открыт всем, либо админ одобрил конкретного пользователя.
+func (a *App) p2pAllowed(u *model.User) bool {
+	if a.p2pOpenForAll() {
+		return true
+	}
+	return u != nil && u.P2PApproved
+}
+
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 
@@ -128,6 +144,10 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 		label := i18n.T(lang, "method.pl_btn", pr.Fiat(model.PayMethodPlatega, months)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
+	if a.hlConfig().Enabled && pr.Base[months] != "" {
+		label := i18n.T(lang, "method.hl_btn", pr.Base[months]+curSuffix(curRUB))
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
+	}
 	if a.tributeCfg().Enabled && a.tributeCfg().PayURL != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
 	}
@@ -167,6 +187,8 @@ func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
 		a.startCryptoBot(ctx, chatID)
 	case "pl":
 		a.startPlatega(ctx, chatID)
+	case "hl":
+		a.startHeleket(ctx, chatID)
 	case "trb":
 		a.startTribute(ctx, chatID)
 	}
@@ -183,7 +205,7 @@ func (a *App) startP2P(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
-	if u == nil || !u.P2PApproved {
+	if !a.p2pAllowed(u) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "p2p.need_approval"))
 		a.notifyAdminUserRequest(ctx, chatID)
 		return
@@ -350,13 +372,19 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if p2p.Rotate {
 		rot = i18n.T(lang, "admin.yes")
 	}
+	openAll := i18n.T(lang, "admin.no")
+	if p2p.OpenForAll {
+		openAll = i18n.T(lang, "admin.yes")
+	}
 	squad := p2p.SquadUUID
 	if squad == "" {
 		squad = i18n.T(lang, "admin.none")
 	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad)
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad) +
+		i18n.T(lang, "admin.p2p_open_block", openAll)
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, p2p.Enabled, "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
+		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
 		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -377,6 +405,14 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.P2P.Enabled = !a.botCfg.P2P.Enabled
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showP2PAdmin(ctx, chatID)
+	case "openall":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.P2P.OpenForAll = !a.botCfg.P2P.OpenForAll
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
@@ -545,16 +581,39 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
 	a.invalidateSubCache(telegramID)
-	a.syncAddSub(ctx, telegramID)
+	// Paid renewal: A's traffic was just reset, so B's must follow.
+	a.syncAddSub(ctx, telegramID, true)
 	if a.store != nil {
-		if err := a.store.AddPayment(ctx, &model.Payment{
+		err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
-		}); err != nil {
+		})
+		// Запись платежа — барьер идемпотентности: по ней PaymentByExtID решает,
+		// финализировать ли повторно. Транзиентный сбой (database is locked,
+		// обрыв соединения) пробуем пережить повтором.
+		for i := 0; i < 2 && err != nil && !errors.Is(err, storage.ErrDuplicateExtID); i++ {
+			time.Sleep(200 * time.Millisecond)
+			err = a.store.AddPayment(ctx, &model.Payment{
+				TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
+			})
+		}
+		if err != nil {
 			if errors.Is(err, storage.ErrDuplicateExtID) && extID != "" {
 				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж с этим ext_id уже записан")
 				return "", "", err
 			}
-			a.log.Warn("add payment", "err", err)
+			// Панель уже продлила подписку, а барьер записать не удалось. Раньше
+			// это молча глоталось — и реконсилятор, не видя платежа, продлевал бы
+			// подписку СНОВА каждые две минуты до суточного предела. Гасим pending,
+			// чтобы остановить цикл, и зовём админа сверить платёж вручную.
+			a.payLog(ctx, method, extID, telegramID, "error", "подписка выдана, но платёж не записался (идемпотентность нарушена): %v", err)
+			a.log.Error("add payment failed after retries", "err", err, "ext", extID)
+			if extID != "" {
+				if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+					_ = a.store.ResolvePending(ctx, p.ID)
+				}
+			}
+			alang := a.lang(a.cfg.AdminID)
+			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.payment_unrecorded", methodLabel(method), extID, a.userLabelByID(ctx, telegramID), amount))
 		}
 		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
 	}
@@ -705,6 +764,23 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showYooKassaAdmin(ctx, chatID)
+	case "yk_autodays":
+		ui.adminInput = ""
+		d, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.YooKassa.AutoPayDays = d
+			a.botCfg.NormalizeYooKassa()
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showYooKassaAdmin(ctx, chatID)
+	case "inv_days":
+		ui.adminInput = ""
+		a.createInviteDays(ctx, chatID, text)
+	case "inv_uses":
+		ui.adminInput = ""
+		a.createInviteUses(ctx, chatID, text)
 	case "subdomain":
 		a.setSubdomain(ctx, chatID, text)
 	case "wh_addr":
@@ -796,10 +872,18 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setPlategaField(ctx, chatID, field, text)
+	case "hl_merchant", "hl_key", "hl_tocur", "hl_subtract", "hl_lifetime", "hl_return":
+		field := ui.adminInput
+		ui.adminInput = ""
+		a.setHeleketField(ctx, chatID, field, text)
 	case "trb_key", "trb_url":
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setTributeField(ctx, chatID, field, text)
+	case "panel_apikey", "panel_cookie":
+		field := ui.adminInput
+		ui.adminInput = ""
+		a.setPanelSecret(ctx, chatID, field, text)
 	case "paylog":
 		ui.adminInput = ""
 		a.adminSendPayLog(ctx, chatID, text)

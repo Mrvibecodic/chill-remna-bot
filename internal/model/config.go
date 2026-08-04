@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 const (
@@ -25,6 +26,97 @@ const (
 	LangEN = "en"
 )
 
+// Режимы публичности бота.
+const (
+	// AccessPublic — вход свободный: любой, кто открыл бота, регистрируется.
+	AccessPublic = "public"
+	// AccessInvite — вход только по одноразовой ссылке-приглашению
+	// (t.me/<bot>?start=inv_<код>), которую генерит админ.
+	AccessInvite = "invite"
+	// AccessWhitelist — вход только тем, кого админ добавил в белый список.
+	AccessWhitelist = "whitelist"
+)
+
+// NormalizeAccess приводит режим публичности к валидному значению и держит
+// legacy-флаг WhitelistMode в синхроне с новым AccessMode.
+//
+// Legacy-флаг трактуется как «бот закрыт» (режим не публичный) — так откат на
+// старую версию бота, которая знает только WhitelistMode, оставляет бота
+// ЗАКРЫТЫМ, а не открывает его всем: приглашённые уже помечены whitelisted и
+// проходят и по старой логике. Рассинхрон значений возможен только если конфиг
+// писала старая версия — тогда верим её флагу.
+func (c *BotConfig) NormalizeAccess() {
+	valid := c.AccessMode == AccessPublic || c.AccessMode == AccessInvite || c.AccessMode == AccessWhitelist
+	closed := c.AccessMode == AccessWhitelist || c.AccessMode == AccessInvite
+	if !valid || c.WhitelistMode != closed {
+		switch {
+		case c.WhitelistMode && (!valid || c.AccessMode == AccessPublic):
+			c.AccessMode = AccessWhitelist
+		case !c.WhitelistMode:
+			c.AccessMode = AccessPublic
+		}
+	}
+	c.WhitelistMode = c.AccessMode != AccessPublic
+}
+
+// AccessClosed сообщает, ограничен ли вход в бота (любой режим кроме
+// публичного).
+func (c *BotConfig) AccessClosed() bool {
+	return c.AccessMode == AccessWhitelist || c.AccessMode == AccessInvite
+}
+
+// Invite — одноразовая (или многоразовая) ссылка-приглашение в бота.
+// Срок жизни и число регистраций задаёт админ при создании.
+type Invite struct {
+	Code      string
+	MaxUses   int
+	Used      int
+	ExpiresAt string
+	CreatedAt string
+	Revoked   bool
+	Note      string
+}
+
+// Active сообщает, можно ли ещё активировать приглашение на момент now
+// (RFC3339-время в UTC).
+func (i *Invite) Active(now time.Time) bool {
+	if i == nil || i.Revoked {
+		return false
+	}
+	if i.MaxUses > 0 && i.Used >= i.MaxUses {
+		return false
+	}
+	if i.ExpiresAt != "" {
+		exp, err := time.Parse(time.RFC3339, i.ExpiresAt)
+		if err == nil && !exp.After(now) {
+			return false
+		}
+	}
+	return true
+}
+
+// AutoPay — подключённое автосписание: сохранённый в ЮKassa способ оплаты,
+// которым бот сам продлевает подписку пользователя.
+type AutoPay struct {
+	TelegramID int64
+	Method     string
+	MethodID   string
+	Title      string
+	Months     int
+	Amount     string
+	Currency   string
+	Enabled    bool
+	CreatedAt  string
+	LastPayAt  string
+	// PaidPeriod — дата окончания подписки, за продление которой уже списали
+	// деньги. Защищает от повторного списания за тот же период, если продление
+	// в панели не удалось и срок подписки не сдвинулся.
+	PaidPeriod string
+	NextTryAt  string
+	Fails      int
+	LastError  string
+}
+
 type PanelConfig struct {
 	Mode        string `json:"mode"`
 	InstallType string `json:"install_type"`
@@ -44,15 +136,21 @@ type BotConfig struct {
 	YooKassa  YooKassaConfig  `json:"yookassa"`
 	CryptoBot CryptoBotConfig `json:"cryptobot"`
 	Platega   PlategaConfig   `json:"platega"`
+	Heleket   HeleketConfig   `json:"heleket"`
 	Tribute   TributeConfig   `json:"tribute"`
 	Webhook   WebhookConfig   `json:"webhook"`
 	Reminders RemindersConfig `json:"reminders"`
 	Referral  ReferralConfig  `json:"referral"`
 	MoyNalog  MoyNalogConfig  `json:"moynalog"`
 
-	WhitelistMode bool          `json:"whitelist_mode"`
-	Pricing       Pricing       `json:"pricing"`
-	Welcome       WelcomeConfig `json:"welcome"`
+	// WhitelistMode — legacy-флаг «вайтлист включён». Оставлен ради обратной
+	// совместимости со старыми конфигами и старым UI; актуальное состояние
+	// хранится в AccessMode, NormalizeAccess синхронизирует их в обе стороны.
+	WhitelistMode bool `json:"whitelist_mode"`
+	// AccessMode — режим публичности бота: public / invite / whitelist.
+	AccessMode string        `json:"access_mode"`
+	Pricing    Pricing       `json:"pricing"`
+	Welcome    WelcomeConfig `json:"welcome"`
 
 	PremiumEmoji map[string]string `json:"premium_emoji"`
 
@@ -165,6 +263,7 @@ const (
 	PayMethodYooKassa  = "yookassa"
 	PayMethodCryptoBot = "cryptobot"
 	PayMethodPlatega   = "platega"
+	PayMethodHeleket   = "heleket"
 	PayMethodTribute   = "tribute"
 	PayMethodBalance   = "balance"
 )
@@ -186,7 +285,30 @@ type YooKassaConfig struct {
 	ReturnURL string         `json:"return_url"`
 	Currency  string         `json:"currency"`
 	Prices    map[int]string `json:"prices"`
+	// AutoPay включает автопродление: при оплате бот просит ЮKassa сохранить
+	// способ оплаты, а потом сам списывает деньги перед окончанием подписки.
+	// Требует, чтобы в личном кабинете ЮKassa магазину были включены
+	// автоплатежи (рекуррентные платежи).
+	AutoPay bool `json:"autopay"`
+	// AutoPayDays — за сколько дней до конца подписки списывать (0 = в день
+	// окончания). Нормализуется в диапазон 0..14.
+	AutoPayDays int `json:"autopay_days"`
 }
+
+// NormalizeYooKassa приводит настройки автосписания к валидным значениям.
+func (c *BotConfig) NormalizeYooKassa() {
+	y := &c.YooKassa
+	if y.AutoPayDays < 0 {
+		y.AutoPayDays = 0
+	}
+	if y.AutoPayDays > 14 {
+		y.AutoPayDays = 14
+	}
+}
+
+// AutoPayMaxFails — после скольких неудачных попыток подряд автосписание
+// выключается само (пользователю приходит уведомление).
+const AutoPayMaxFails = 3
 
 type Payment struct {
 	ID         int64
@@ -215,13 +337,17 @@ type PendingInvoice struct {
 }
 
 type P2PConfig struct {
-	Enabled   bool           `json:"enabled"`
-	Cards     []string       `json:"cards"`
-	Rotate    bool           `json:"rotate"`
-	RotateIdx int            `json:"rotate_idx"`
-	Prices    map[int]string `json:"prices"`
-	Currency  string         `json:"currency"`
-	SquadUUID string         `json:"squad_uuid"`
+	Enabled bool `json:"enabled"`
+	// OpenForAll делает перевод обычным способом оплаты: реквизиты выдаются
+	// всем сразу, без ручного одобрения каждого пользователя админом.
+	// Скриншот и подтверждение платежа админом при этом остаются.
+	OpenForAll bool           `json:"open_for_all"`
+	Cards      []string       `json:"cards"`
+	Rotate     bool           `json:"rotate"`
+	RotateIdx  int            `json:"rotate_idx"`
+	Prices     map[int]string `json:"prices"`
+	Currency   string         `json:"currency"`
+	SquadUUID  string         `json:"squad_uuid"`
 }
 
 type User struct {
@@ -398,6 +524,58 @@ type PlategaConfig struct {
 	Secret     string `json:"secret"`
 	Method     int    `json:"method"`
 	ReturnURL  string `json:"return_url"`
+}
+
+// HeleketConfig — крипто-шлюз Heleket. Счёт выставляется в валюте прайса
+// (₽), клиент выбирает криптовалюту и сеть уже на странице оплаты.
+type HeleketConfig struct {
+	Enabled    bool   `json:"enabled"`
+	MerchantID string `json:"merchant_id"`
+	// APIKey — ПЛАТЁЖНЫЙ ключ мерчанта. У выплат в Heleket ключ отдельный,
+	// перепутанный не пройдёт ни в запросах, ни при проверке вебхука.
+	APIKey string `json:"api_key"`
+	// ToCurrency — криптовалюта, в которую Heleket конвертирует полученные
+	// средства (например USDT — защита от волатильности). Пусто — как настроено
+	// в личном кабинете мерчанта.
+	ToCurrency string `json:"to_currency"`
+	// Subtract — какой процент комиссии сети платит клиент (0..100). Указатель
+	// намеренно: у обычного int ноль неотличим от «не задано», и вариант
+	// «комиссию платит магазин» молча превратился бы в дефолт.
+	Subtract *int `json:"subtract"`
+	// Lifetime — срок жизни счёта в секундах (300..43200), 0 — дефолт 3600.
+	Lifetime  int    `json:"lifetime"`
+	ReturnURL string `json:"return_url"`
+}
+
+// Значения по умолчанию для Heleket.
+const (
+	HeleketDefaultSubtract = 100
+	HeleketDefaultLifetime = 3600
+	HeleketMinLifetime     = 300
+	HeleketMaxLifetime     = 43200
+)
+
+// SubtractOrDefault — процент комиссии, который платит клиент.
+func (c HeleketConfig) SubtractOrDefault() int {
+	if c.Subtract == nil {
+		return HeleketDefaultSubtract
+	}
+	v := *c.Subtract
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+// LifetimeOrDefault — срок жизни счёта в пределах, которые принимает Heleket.
+func (c HeleketConfig) LifetimeOrDefault() int {
+	if c.Lifetime < HeleketMinLifetime || c.Lifetime > HeleketMaxLifetime {
+		return HeleketDefaultLifetime
+	}
+	return c.Lifetime
 }
 
 type TributeConfig struct {

@@ -56,3 +56,29 @@ func TestParseEmojiMap(t *testing.T) {
 		t.Fatal("пара без '=' не должна попадать в карту")
 	}
 }
+
+func TestLoadCaddyAuthToken(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "tok")
+	t.Setenv("ADMIN_TELEGRAM_ID", "1")
+	t.Setenv("CADDY_AUTH_API_TOKEN", "  key-123  ")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CaddyAuthToken != "key-123" {
+		t.Fatalf("CaddyAuthToken = %q, ожидалось обрезанное значение", c.CaddyAuthToken)
+	}
+}
+
+func TestLoadCaddyAuthTokenUnset(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "tok")
+	t.Setenv("ADMIN_TELEGRAM_ID", "1")
+	t.Setenv("CADDY_AUTH_API_TOKEN", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CaddyAuthToken != "" {
+		t.Fatalf("CaddyAuthToken = %q, ожидалась пустая строка", c.CaddyAuthToken)
+	}
+}
