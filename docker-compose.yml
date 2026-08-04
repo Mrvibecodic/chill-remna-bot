@@ -2,7 +2,9 @@ name: remnachillbot
 
 services:
   bot:
-    image: ghcr.io/mrvibecodic/chill-remna-bot:latest
+    # :v1 — все релизы 1.x.y (без автопрыжка на 2.0.0). Другие варианты:
+    # :latest — всегда свежий релиз, :dev — превью, :v1.0.0 — жёсткий пин.
+    image: ghcr.io/mrvibecodic/chill-remna-bot:v1
     pull_policy: always
     container_name: remnabot
     restart: unless-stopped

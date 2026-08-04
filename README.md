@@ -460,6 +460,7 @@ docker compose up -d
 
 Начиная с **1.0.0** каждый релиз получает git-тег `vX.Y.Z`, [страницу релиза](https://github.com/Mrvibecodic/chill-remna-bot/releases) со списком изменений и версионный Docker-образ:
 
+- `ghcr.io/mrvibecodic/chill-remna-bot:v1` — все релизы **1.x.y** без автоперехода на будущий 2.0.0 (**дефолт в `docker-compose.yml`**);
 - `ghcr.io/mrvibecodic/chill-remna-bot:latest` — всегда свежий релиз из `main` (канал stable);
 - `ghcr.io/mrvibecodic/chill-remna-bot:dev` — превью из ветки `dev`, как и раньше;
 - `ghcr.io/mrvibecodic/chill-remna-bot:v1.0.0` — конкретная версия.
