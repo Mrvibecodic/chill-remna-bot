@@ -244,7 +244,7 @@ nav.toc .wrap{scrollbar-width:thin}
       <p>Собирается из ветки <code>dev</code>. Новые возможности появляются здесь раньше и после проверки попадают в stable.</p>
     </div>
   </div>
-  <div class="note">🏷 <b>Релизы.</b> Начиная с <b>1.0.0</b> каждый релиз получает git-тег <code>vX.Y.Z</code> и версионный образ <code>ghcr.io/mrvibecodic/chill-remna-bot:v1.0.0</code>. <code>:latest</code> всегда указывает на свежий релиз из <code>main</code>; чтобы зафиксироваться на конкретной версии, впишите её тег в <code>docker-compose.yml</code> вместо <code>:latest</code> — обновления остановятся, пока тег не сменить. Ветка <code>dev</code> и образ <code>:dev</code> живут как прежде.</div>
+  <div class="note">🏷 <b>Релизы.</b> Начиная с <b>1.0.0</b> каждый релиз получает git-тег <code>vX.Y.Z</code> и версионный образ <code>ghcr.io/mrvibecodic/chill-remna-bot:v1.0.0</code>. В <code>docker-compose.yml</code> по умолчанию стоит <code>:v1</code> — приходят все релизы <b>1.x.y</b>, автоматического перехода на будущий 2.0.0 не будет. <code>:latest</code> всегда указывает на свежий релиз из <code>main</code>; жёсткий пин конкретной версии — тег вида <code>:v1.0.0</code>. Ветка <code>dev</code> и образ <code>:dev</code> живут как прежде.</div>
   <div class="note">↻ Переключить канал можно без потери данных — состояние живёт в томе <code>bot-data</code>. После смены канала бот предложит обновиться на соответствующий образ.</div>
 </section>
 
