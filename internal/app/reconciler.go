@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"remnabot/internal/heleket"
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
 )
@@ -73,6 +74,8 @@ func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *mode
 		a.reconcileCryptoBot(ctx, st, pi)
 	case model.PayMethodPlatega:
 		a.reconcilePlatega(ctx, st, pi)
+	case model.PayMethodHeleket:
+		a.reconcileHeleket(ctx, st, pi)
 	default:
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
@@ -139,6 +142,34 @@ func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *mode
 	case strings.EqualFold(tx.Status, "CONFIRMED"):
 		a.reconcileFinalize(ctx, st, pi, fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency))
 	case strings.EqualFold(tx.Status, "CANCELED") || strings.EqualFold(tx.Status, "CHARGEBACKED"):
+		_ = st.ResolvePending(ctx, pi.ID)
+	}
+}
+
+func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
+	client := a.hlClient()
+	if client == nil {
+		return
+	}
+	inv, err := client.Info(ctx, strings.TrimPrefix(pi.ExtID, hlExtPrefix))
+	if err != nil {
+		return
+	}
+	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", inv.Status)
+	switch {
+	case heleket.Successful(inv.Status):
+		a.reconcileFinalize(ctx, st, pi, a.hlAmountLabel(inv))
+	case heleket.Final(inv.Status):
+		// Вебхук мог не дойти — ради этого реконсилятор и нужен, поэтому про
+		// недоплату и AML-заморозку админа зовём и отсюда.
+		switch inv.Status {
+		case heleket.StatusWrongAmount:
+			a.hlNotifyAdmin(ctx, inv, "underpaid")
+		case heleket.StatusLocked:
+			a.hlNotifyAdmin(ctx, inv, "locked")
+		}
+		// Промежуточные статусы (check, confirm_check, wrong_amount_waiting)
+		// счёт не гасят — оплата ещё может дойти.
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
 }

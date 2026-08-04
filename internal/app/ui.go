@@ -273,7 +273,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
-	p2pOn, starsOn, ykOn, cbOn, plOn, trbOn := false, false, false, false, false, false
+	p2pOn, starsOn, ykOn, cbOn, plOn, hlOn, trbOn := false, false, false, false, false, false, false
 	strat := "MONTH"
 	addsubOn, addsubGB, addsubInt := false, 0, 0
 	if a.botCfg != nil {
@@ -282,6 +282,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		ykOn = a.botCfg.YooKassa.Enabled
 		cbOn = a.botCfg.CryptoBot.Enabled
 		plOn = a.botCfg.Platega.Enabled
+		hlOn = a.botCfg.Heleket.Enabled
 		trbOn = a.botCfg.Tribute.Enabled
 		strat = a.botCfg.Pricing.ResetStrategy()
 		addsubOn = a.botCfg.AddSub.Enabled
@@ -297,7 +298,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	}
 	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
-		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(trbOn),
+		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn),
 		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
 		internalCSV, externalName,
 	)
@@ -314,7 +315,8 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
 		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
-		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
+		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
+		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
 		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
 		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		homeRow(lang),
@@ -554,6 +556,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "platega":
 		if isAdmin {
 			a.showPlategaAdmin(ctx, chatID)
+		}
+	case "heleket":
+		if isAdmin {
+			a.showHeleketAdmin(ctx, chatID)
 		}
 	case "tribute":
 		if isAdmin {

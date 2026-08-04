@@ -136,6 +136,7 @@ type BotConfig struct {
 	YooKassa  YooKassaConfig  `json:"yookassa"`
 	CryptoBot CryptoBotConfig `json:"cryptobot"`
 	Platega   PlategaConfig   `json:"platega"`
+	Heleket   HeleketConfig   `json:"heleket"`
 	Tribute   TributeConfig   `json:"tribute"`
 	Webhook   WebhookConfig   `json:"webhook"`
 	Reminders RemindersConfig `json:"reminders"`
@@ -262,6 +263,7 @@ const (
 	PayMethodYooKassa  = "yookassa"
 	PayMethodCryptoBot = "cryptobot"
 	PayMethodPlatega   = "platega"
+	PayMethodHeleket   = "heleket"
 	PayMethodTribute   = "tribute"
 	PayMethodBalance   = "balance"
 )
@@ -522,6 +524,58 @@ type PlategaConfig struct {
 	Secret     string `json:"secret"`
 	Method     int    `json:"method"`
 	ReturnURL  string `json:"return_url"`
+}
+
+// HeleketConfig — крипто-шлюз Heleket. Счёт выставляется в валюте прайса
+// (₽), клиент выбирает криптовалюту и сеть уже на странице оплаты.
+type HeleketConfig struct {
+	Enabled    bool   `json:"enabled"`
+	MerchantID string `json:"merchant_id"`
+	// APIKey — ПЛАТЁЖНЫЙ ключ мерчанта. У выплат в Heleket ключ отдельный,
+	// перепутанный не пройдёт ни в запросах, ни при проверке вебхука.
+	APIKey string `json:"api_key"`
+	// ToCurrency — криптовалюта, в которую Heleket конвертирует полученные
+	// средства (например USDT — защита от волатильности). Пусто — как настроено
+	// в личном кабинете мерчанта.
+	ToCurrency string `json:"to_currency"`
+	// Subtract — какой процент комиссии сети платит клиент (0..100). Указатель
+	// намеренно: у обычного int ноль неотличим от «не задано», и вариант
+	// «комиссию платит магазин» молча превратился бы в дефолт.
+	Subtract *int `json:"subtract"`
+	// Lifetime — срок жизни счёта в секундах (300..43200), 0 — дефолт 3600.
+	Lifetime  int    `json:"lifetime"`
+	ReturnURL string `json:"return_url"`
+}
+
+// Значения по умолчанию для Heleket.
+const (
+	HeleketDefaultSubtract = 100
+	HeleketDefaultLifetime = 3600
+	HeleketMinLifetime     = 300
+	HeleketMaxLifetime     = 43200
+)
+
+// SubtractOrDefault — процент комиссии, который платит клиент.
+func (c HeleketConfig) SubtractOrDefault() int {
+	if c.Subtract == nil {
+		return HeleketDefaultSubtract
+	}
+	v := *c.Subtract
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+// LifetimeOrDefault — срок жизни счёта в пределах, которые принимает Heleket.
+func (c HeleketConfig) LifetimeOrDefault() int {
+	if c.Lifetime < HeleketMinLifetime || c.Lifetime > HeleketMaxLifetime {
+		return HeleketDefaultLifetime
+	}
+	return c.Lifetime
 }
 
 type TributeConfig struct {

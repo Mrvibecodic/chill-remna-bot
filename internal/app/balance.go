@@ -217,6 +217,7 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 	a.mu.Lock()
 	ykOn := a.botCfg != nil && a.botCfg.YooKassa.Enabled
 	cbOn := a.botCfg != nil && a.botCfg.CryptoBot.Enabled
+	hlOn := a.botCfg != nil && a.botCfg.Heleket.Enabled
 	a.mu.Unlock()
 	var rows [][]models.InlineKeyboardButton
 	if ykOn {
@@ -224,6 +225,9 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 	}
 	if cbOn {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.cb_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:cb")})
+	}
+	if hlOn {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.hl_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:hl")})
 	}
 	if len(rows) == 0 {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.no_methods"), [][]models.InlineKeyboardButton{homeRow(lang)})
@@ -255,10 +259,15 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	checkCB := "ykc:" + checkExtID
 	payBtn := i18n.T(lang, "yk.btn_pay")
 	checkBtn := i18n.T(lang, "yk.btn_check")
-	if method == "cb" {
+	switch method {
+	case "cb":
 		checkCB = "cbc:" + checkExtID + ":0"
 		payBtn = i18n.T(lang, "cb.btn_pay")
 		checkBtn = i18n.T(lang, "cb.btn_check")
+	case "hl":
+		checkCB = "hlc:" + checkExtID
+		payBtn = i18n.T(lang, "hl.btn_pay")
+		checkBtn = i18n.T(lang, "hl.btn_check")
 	}
 	a.sendKB(ctx, chatID, i18n.T(lang, "topup.pay_prompt", rub), [][]models.InlineKeyboardButton{
 		{{Text: payBtn, URL: payURL}},
@@ -318,6 +327,15 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 			payURL = inv.BotInvoiceURL
 		}
 		return payURL, strconv.FormatInt(inv.InvoiceID, 10), nil
+	case "hl":
+		if a.hlClient() == nil {
+			return "", "", errors.New(i18n.T(lang, "hl.not_configured"))
+		}
+		payURL, uuid, e := a.hlCreateInvoice(ctx, chatID, 0, rub, purposeTopUp, k)
+		if e != nil {
+			return "", "", errors.New(i18n.T(lang, "hl.fail", e.Error()))
+		}
+		return payURL, uuid, nil
 	}
 	return "", "", errors.New(i18n.T(lang, "topup.no_methods"))
 }

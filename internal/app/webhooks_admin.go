@@ -81,7 +81,7 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 	if base != "" {
 		urls = "\n\n" + i18n.T(lang, "wh.urls",
 			base+"/webhook/yookassa", base+"/webhook/cryptobot",
-			base+"/webhook/platega", base+"/webhook/tribute")
+			base+"/webhook/platega", base+"/webhook/heleket", base+"/webhook/tribute")
 	}
 
 	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls

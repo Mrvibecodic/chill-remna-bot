@@ -70,6 +70,9 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.Platega.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodPlatega)
 		}
+		if c.Heleket.Enabled {
+			dto.PayMethods = append(dto.PayMethods, model.PayMethodHeleket)
+		}
 		if c.Tribute.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodTribute)
 		}

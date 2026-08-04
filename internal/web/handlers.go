@@ -109,6 +109,26 @@ func (s *Server) handlePlatega(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleHeleket(w http.ResponseWriter, r *http.Request) {
+	body, err := readAllLimited(r, 256*1024)
+	if err != nil {
+		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	handled, err := s.handlers.HandleHeleketWebhook(ctx, body)
+	if err != nil {
+		s.log.Error("heleket webhook", "err", err)
+		http.Error(w, "internal", http.StatusInternalServerError)
+		return
+	}
+	if !handled {
+		s.log.Info("heleket webhook ignored")
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleTribute(w http.ResponseWriter, r *http.Request) {
 	sig := r.Header.Get("trbt-signature")
 	body, err := readAllLimited(r, 256*1024)

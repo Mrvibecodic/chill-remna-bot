@@ -68,8 +68,10 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	if returnURL == "" {
 		returnURL = "https://t.me"
 	}
+	// См. currencyCode: проверка по длине пропускала символ «₽» (три байта),
+	// и ЮKassa отвечала 400 на такой код валюты.
 	currency := pr.Currency
-	if currency == "" || len(currency) != 3 {
+	if !currencyCode(currency) {
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)

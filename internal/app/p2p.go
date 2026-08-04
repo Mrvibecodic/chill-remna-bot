@@ -144,6 +144,10 @@ func (a *App) showMethods(ctx context.Context, chatID int64) {
 		label := i18n.T(lang, "method.pl_btn", pr.Fiat(model.PayMethodPlatega, months)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
+	if a.hlConfig().Enabled && pr.Base[months] != "" {
+		label := i18n.T(lang, "method.hl_btn", pr.Base[months]+curSuffix(curRUB))
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
+	}
 	if a.tributeCfg().Enabled && a.tributeCfg().PayURL != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
 	}
@@ -183,6 +187,8 @@ func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
 		a.startCryptoBot(ctx, chatID)
 	case "pl":
 		a.startPlatega(ctx, chatID)
+	case "hl":
+		a.startHeleket(ctx, chatID)
 	case "trb":
 		a.startTribute(ctx, chatID)
 	}
@@ -844,6 +850,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setPlategaField(ctx, chatID, field, text)
+	case "hl_merchant", "hl_key", "hl_tocur", "hl_subtract", "hl_lifetime", "hl_return":
+		field := ui.adminInput
+		ui.adminInput = ""
+		a.setHeleketField(ctx, chatID, field, text)
 	case "trb_key", "trb_url":
 		field := ui.adminInput
 		ui.adminInput = ""

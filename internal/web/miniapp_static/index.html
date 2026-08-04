@@ -568,7 +568,7 @@ function monthsWord(n){return n+' '+plural(n,'месяц','месяца','мес
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
 function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
-var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
+var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(months,label){
   haptic('tap');
   var methods=[];
@@ -700,7 +700,7 @@ async function topupOpen(){
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
-var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта'};
+var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',hl:'🪙 Криптовалюта (Heleket)'};
 function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+

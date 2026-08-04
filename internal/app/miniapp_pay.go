@@ -30,8 +30,10 @@ func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method str
 		if returnURL == "" {
 			returnURL = "https://t.me"
 		}
+		// В прайсе валюта задаётся символом («₽» — тоже три байта), поэтому
+		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт 400.
 		currency := pr.Currency
-		if len(currency) != 3 {
+		if !currencyCode(currency) {
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
@@ -59,6 +61,14 @@ func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method str
 			returnURL = "https://t.me"
 		}
 		url, _, err := a.plCreateTransaction(ctx, tgID, months, parseAmountRub(value), miniDesc(months), returnURL)
+		return url, false, err
+
+	case model.PayMethodHeleket:
+		price := a.pricing().Base[months]
+		if !a.hlConfig().Enabled || price == "" {
+			return "", false, errors.New("оплата криптовалютой недоступна")
+		}
+		url, _, err := a.hlCreateInvoice(ctx, tgID, months, price, "", 0)
 		return url, false, err
 
 	case model.PayMethodTribute:
@@ -176,7 +186,7 @@ func (a *App) MiniPromo(ctx context.Context, tgID int64, code string) web.MiniPr
 }
 
 // MiniTopUpOptions returns the same preset amounts as the chat top-up screen,
-// plus the enabled top-up methods (YooKassa/CryptoBot).
+// plus the enabled top-up methods (YooKassa/CryptoBot/Heleket).
 func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOptionsDTO {
 	var dto web.MiniTopUpOptionsDTO
 	amts, _ := a.topUpAmounts()
@@ -190,6 +200,9 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 		}
 		if a.botCfg.CryptoBot.Enabled {
 			dto.Methods = append(dto.Methods, "cb")
+		}
+		if a.botCfg.Heleket.Enabled {
+			dto.Methods = append(dto.Methods, "hl")
 		}
 	}
 	a.mu.Unlock()
@@ -210,7 +223,7 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 	if !valid || (maxK > 0 && kopecks > maxK) {
 		return web.MiniActionDTO{Error: "недопустимая сумма"}
 	}
-	if method != "yk" && method != "cb" {
+	if method != "yk" && method != "cb" && method != "hl" {
 		return web.MiniActionDTO{Error: "способ пополнения недоступен"}
 	}
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method)

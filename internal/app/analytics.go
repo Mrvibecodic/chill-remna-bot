@@ -19,6 +19,7 @@ var methodLabels = map[string]string{
 	"stars":     "Stars",
 	"cryptobot": "CryptoBot",
 	"platega":   "Platega",
+	"heleket":   "Heleket",
 	"tribute":   "Tribute",
 	"balance":   "Balance",
 }
