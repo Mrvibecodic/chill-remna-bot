@@ -124,6 +124,11 @@ type Storage interface {
 	AddPayLog(ctx context.Context, e *model.PayLogEntry) error
 	PayLogs(ctx context.Context, extID string, telegramID int64, limit int) ([]model.PayLogEntry, error)
 	AllPayLogs(ctx context.Context, limit int) ([]model.PayLogEntry, error)
+	// PayLogsFiltered отбирает записи журнала НА СТОРОНЕ БД по этапам и времени
+	// и вторым значением отдаёт полное число подходящих записей. Именно полное
+	// число, а не длину среза: иначе на нагруженном боте выгрузка молча теряла
+	// бы всё, что не поместилось в лимит, и админ об этом не узнал бы.
+	PayLogsFiltered(ctx context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error)
 	PurgePayLogs(ctx context.Context, before string) error
 
 	Kind() string
@@ -888,6 +893,55 @@ func (b *base) PayLogs(ctx context.Context, extID string, telegramID int64, limi
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func (b *base) PayLogsFiltered(ctx context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error) {
+	if limit <= 0 {
+		limit = 20000
+	}
+	where, args := "", []any{}
+	if len(stages) > 0 {
+		ph := make([]string, 0, len(stages))
+		for _, st := range stages {
+			args = append(args, st)
+			ph = append(ph, b.ph(len(args)))
+		}
+		where = " WHERE stage IN (" + strings.Join(ph, ", ") + ")"
+	}
+	if since != "" {
+		args = append(args, since)
+		cond := "created_at >= " + b.ph(len(args))
+		if where == "" {
+			where = " WHERE " + cond
+		} else {
+			where += " AND " + cond
+		}
+	}
+
+	var total int64
+	// #nosec G202 -- where собран из b.ph плейсхолдеров, значения идут аргументами
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM payment_log"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, limit)
+	// #nosec G202 -- см. выше
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT id, ext_id, telegram_id, method, stage, detail, created_at FROM payment_log"+where+
+			" ORDER BY id DESC LIMIT "+b.ph(len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.PayLogEntry
+	for rows.Next() {
+		var e model.PayLogEntry
+		if err := rows.Scan(&e.ID, &e.ExtID, &e.TelegramID, &e.Method, &e.Stage, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	return out, total, rows.Err()
 }
 
 func (b *base) PurgePayLogs(ctx context.Context, before string) error {

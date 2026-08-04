@@ -55,12 +55,17 @@ func TestExportPayErrorsFiltersAndCounts(t *testing.T) {
 	a.payLog(ctx, model.PayMethodTribute, "", 0, "sign_error", "подпись вебхука не сошлась")
 	a.payLog(ctx, model.PayMethodCryptoBot, "cb:1", 555, "webhook", "invoice_paid")
 
-	all, _ := fs.AllPayLogs(ctx, 100)
-	doc, n := buildPayErrorReport(all, "now")
+	// Отбор идёт на стороне БД: в выгрузку не должны попадать успешные этапы,
+	// а общее число берётся из запроса, а не из длины среза.
+	errs, total, _ := fs.PayLogsFiltered(ctx, payErrorStageList(), "", 100)
+	if total != 3 || len(errs) != 3 {
+		t.Fatalf("отбор сбоев: total=%d len=%d", total, len(errs))
+	}
+	doc, n := buildPayErrorReport(errs, total, 0, "now")
 	if n != 3 {
 		t.Fatalf("ожидалось 3 сбоя, получено %d:\n%s", n, doc)
 	}
-	a.exportPayErrors(ctx, 100)
+	a.exportPayErrors(ctx, 100, 0)
 	if !strings.Contains(fm.joined(), "DOC:payment_errors.log") {
 		t.Fatalf("файл со сбоями не отправлен админу:\n%s", fm.joined())
 	}
@@ -114,7 +119,13 @@ func TestMiniCheckoutFailureIsLogged(t *testing.T) {
 func TestPayLogScreenPlaceholders(t *testing.T) {
 	for _, lang := range []string{model.LangRU, model.LangEN} {
 		for key, got := range map[string]string{
-			"paylog.errors_caption": i18n.T(lang, "paylog.errors_caption", 7),
+			"paylog.errors_caption": i18n.T(lang, "paylog.errors_caption", 7, 42),
+			"paylog.errors_summary": i18n.T(lang, "paylog.errors_summary", 7, 42, "свод"),
+			"paylog.truncated":      i18n.T(lang, "paylog.truncated", 7, 42),
+			"paylog.limit_hit":      i18n.T(lang, "paylog.limit_hit", 2000),
+			"paylog.btn_win_1":      i18n.T(lang, "paylog.btn_win_1"),
+			"paylog.btn_win_7":      i18n.T(lang, "paylog.btn_win_7"),
+			"paylog.btn_win_all":    i18n.T(lang, "paylog.btn_win_all"),
 			"paylog.no_errors":      i18n.T(lang, "paylog.no_errors"),
 			"paylog.btn_errors":     i18n.T(lang, "paylog.btn_errors"),
 			"paylog.csv_caption":    i18n.T(lang, "paylog.csv_caption", 7),
@@ -123,5 +134,68 @@ func TestPayLogScreenPlaceholders(t *testing.T) {
 				t.Fatalf("битый шаблон %s (%s): %q", key, lang, got)
 			}
 		}
+	}
+}
+
+// Реконсилятор опрашивает каждый висящий счёт раз в две минуты. Если писать в
+// журнал каждый проход, один зависший счёт за сутки даёт 720 одинаковых строк.
+func TestReconcilerLogsOnlyStateChanges(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+	pi := &model.PendingInvoice{Method: model.PayMethodHeleket, ExtID: "hl:u-1", TelegramID: 555}
+
+	for i := 0; i < 5; i++ {
+		a.reconLog(ctx, pi, "reconcile", "check", "status=%s", "check")
+	}
+	if n := len(fs.paylogs); n != 1 {
+		t.Fatalf("пять проходов с одним статусом дали %d записей, ожидалась 1", n)
+	}
+
+	// Смена статуса обязана попасть в журнал.
+	a.reconLog(ctx, pi, "reconcile", "paid", "status=%s", "paid")
+	if n := len(fs.paylogs); n != 2 {
+		t.Fatalf("смена статуса не записана: %d записей", n)
+	}
+
+	// Ошибка опроса — тоже дедуплицируется, иначе падающий шлюз зальёт журнал.
+	for i := 0; i < 4; i++ {
+		a.reconLog(ctx, pi, "reconcile_error", "timeout", "%v", "timeout")
+	}
+	if n := len(fs.paylogs); n != 3 {
+		t.Fatalf("повторяющаяся ошибка записана %d раз", n-2)
+	}
+
+	// Закрытый счёт уходит из памяти дедупликации — утечки нет.
+	a.reconPrune(nil)
+	a.reconMu.Lock()
+	left := len(a.reconSeen)
+	a.reconMu.Unlock()
+	if left != 0 {
+		t.Fatalf("после закрытия счёта в памяти осталось %d записей", left)
+	}
+}
+
+// Усечение выгрузки должно быть ОБЪЯВЛЕНО: молча потерянные записи — худший
+// вариант, потому что админ считает, что видит всё.
+func TestPayErrorReportAnnouncesTruncation(t *testing.T) {
+	entries := make([]model.PayLogEntry, 3)
+	for i := range entries {
+		entries[i] = model.PayLogEntry{Method: "heleket", Stage: "invoice_error", Detail: "boom", CreatedAt: "2026-08-04T00:00:00Z"}
+	}
+	full, n := buildPayErrorReport(entries, 3, 7, "now")
+	if n != 3 || strings.Contains(full, "ВНИМАНИЕ") {
+		t.Fatalf("без усечения предупреждения быть не должно:\n%s", full)
+	}
+	if !strings.Contains(full, "последние 7 сут") {
+		t.Fatalf("в заголовке нет окна выборки:\n%s", full)
+	}
+
+	cut, _ := buildPayErrorReport(entries, 900, 0, "now")
+	if !strings.Contains(cut, "ВНИМАНИЕ") || !strings.Contains(cut, "900") {
+		t.Fatalf("усечение не объявлено:\n%s", cut)
+	}
+	if !strings.Contains(cut, "всё время") {
+		t.Fatalf("окно «всё время» не отражено:\n%s", cut)
 	}
 }

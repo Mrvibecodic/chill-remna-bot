@@ -292,6 +292,29 @@ func (s *fakeStore) AllPayLogs(_ context.Context, limit int) ([]model.PayLogEntr
 	return out, nil
 }
 
+func (s *fakeStore) PayLogsFiltered(_ context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error) {
+	allow := map[string]bool{}
+	for _, st := range stages {
+		allow[st] = true
+	}
+	var matched []model.PayLogEntry
+	for i := len(s.paylogs) - 1; i >= 0; i-- { // новые первыми, как в БД
+		e := s.paylogs[i]
+		if len(allow) > 0 && !allow[e.Stage] {
+			continue
+		}
+		if since != "" && e.CreatedAt != "" && e.CreatedAt < since {
+			continue
+		}
+		matched = append(matched, e)
+	}
+	total := int64(len(matched))
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, total, nil
+}
+
 func (s *fakeStore) PurgePayLogs(_ context.Context, _ string) error { return nil }
 func (s *fakeStore) LoadConfig(context.Context) (*model.BotConfig, bool, error) {
 	if s.cfg == nil {

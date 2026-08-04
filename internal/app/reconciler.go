@@ -53,6 +53,52 @@ func (a *App) reconcileOnce(ctx context.Context) {
 	for i := range list {
 		a.reconcileInvoice(ctx, st, &list[i])
 	}
+	a.reconPrune(list)
+}
+
+// reconPrune оставляет в памяти дедупликации только счета, которые всё ещё
+// висят. Чистим одним местом по итогу прохода, а не в каждой ветке закрытия
+// счёта: пропущенная ветка означала бы медленную утечку памяти.
+func (a *App) reconPrune(list []model.PendingInvoice) {
+	alive := make(map[string]struct{}, len(list))
+	for i := range list {
+		alive[list[i].ExtID] = struct{}{}
+	}
+	a.reconMu.Lock()
+	defer a.reconMu.Unlock()
+	for k := range a.reconSeen {
+		if _, ok := alive[k]; !ok {
+			delete(a.reconSeen, k)
+		}
+	}
+}
+
+// reconLog пишет в журнал результат прохода реконсилятора ТОЛЬКО если состояние
+// счёта изменилось с прошлого раза. Иначе один зависший счёт за сутки оставлял
+// 720 одинаковых строк, а сотня таких счетов — 72 тысячи.
+func (a *App) reconLog(ctx context.Context, pi *model.PendingInvoice, stage, state, format string, args ...any) {
+	a.reconMu.Lock()
+	if a.reconSeen == nil {
+		a.reconSeen = map[string]string{}
+	}
+	key := pi.ExtID
+	mark := stage + "=" + state
+	same := a.reconSeen[key] == mark
+	if !same {
+		a.reconSeen[key] = mark
+	}
+	a.reconMu.Unlock()
+	if same {
+		return
+	}
+	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, stage, format, args...)
+}
+
+// reconForget убирает счёт из памяти дедупликации, когда он больше не висит.
+func (a *App) reconForget(extID string) {
+	a.reconMu.Lock()
+	delete(a.reconSeen, extID)
+	a.reconMu.Unlock()
 }
 
 func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
@@ -84,15 +130,15 @@ func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *mode
 func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.ykClient()
 	if client == nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент ЮKassa не настроен — счёт нельзя перепроверить")
+		a.reconLog(ctx, pi, "reconcile_error", "no-client", "клиент ЮKassa не настроен — счёт нельзя перепроверить")
 		return
 	}
 	pay, err := client.GetPayment(ctx, pi.ExtID)
 	if err != nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
+		a.reconLog(ctx, pi, "reconcile_error", err.Error(), "%v", err)
 		return
 	}
-	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s paid=%v", pay.Status, pay.Paid)
+	a.reconLog(ctx, pi, "reconcile", pay.Status, "status=%s paid=%v", pay.Status, pay.Paid)
 	switch {
 	case pay.Status == "succeeded" && pay.Paid:
 		// Платёж мог быть сделан с сохранением карты: если вебхук не дошёл и
@@ -109,7 +155,7 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.cbClient()
 	if client == nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент CryptoBot не настроен — счёт нельзя перепроверить")
+		a.reconLog(ctx, pi, "reconcile_error", "no-client", "клиент CryptoBot не настроен — счёт нельзя перепроверить")
 		return
 	}
 	idStr := strings.TrimPrefix(pi.ExtID, "cb:")
@@ -120,10 +166,10 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 	}
 	inv, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
+		a.reconLog(ctx, pi, "reconcile_error", err.Error(), "%v", err)
 		return
 	}
-	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", inv.Status)
+	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch inv.Status {
 	case "paid":
 		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Months, inv.Amount+" "+inv.Asset))
@@ -135,15 +181,15 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.plClient()
 	if client == nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент Platega не настроен — счёт нельзя перепроверить")
+		a.reconLog(ctx, pi, "reconcile_error", "no-client", "клиент Platega не настроен — счёт нельзя перепроверить")
 		return
 	}
 	tx, err := client.GetTransaction(ctx, pi.ExtID)
 	if err != nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
+		a.reconLog(ctx, pi, "reconcile_error", err.Error(), "%v", err)
 		return
 	}
-	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", tx.Status)
+	a.reconLog(ctx, pi, "reconcile", tx.Status, "status=%s", tx.Status)
 	switch {
 	case strings.EqualFold(tx.Status, "CONFIRMED"):
 		a.reconcileFinalize(ctx, st, pi, fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency))
@@ -155,15 +201,15 @@ func (a *App) reconcilePlatega(ctx context.Context, st storage.Storage, pi *mode
 func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
 	client := a.hlClient()
 	if client == nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "клиент Heleket не настроен — счёт нельзя перепроверить")
+		a.reconLog(ctx, pi, "reconcile_error", "no-client", "клиент Heleket не настроен — счёт нельзя перепроверить")
 		return
 	}
 	inv, err := client.Info(ctx, strings.TrimPrefix(pi.ExtID, hlExtPrefix))
 	if err != nil {
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile_error", "%v", err)
+		a.reconLog(ctx, pi, "reconcile_error", err.Error(), "%v", err)
 		return
 	}
-	a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "reconcile", "status=%s", inv.Status)
+	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch {
 	case heleket.Successful(inv.Status):
 		a.reconcileFinalize(ctx, st, pi, a.hlAmountLabel(inv))

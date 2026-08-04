@@ -650,7 +650,10 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 	case "csv":
 		a.exportPayLogCSV(ctx, chatID)
 	case "err":
-		a.exportPayErrors(ctx, chatID)
+		a.showPayErrors(ctx, chatID, 7)
+	case "errf":
+		days, _ := strconv.Atoi(arg)
+		a.exportPayErrors(ctx, chatID, days)
 	}
 }
 
