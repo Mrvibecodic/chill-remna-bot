@@ -22,13 +22,29 @@ var BaseURL = "https://api.yookassa.ru/v3"
 type APIError struct {
 	Status      int
 	Description string
+	// Code — машиночитаемый код (invalid_request, forbidden, …), Parameter —
+	// имя поля, из-за которого запрос отбит, ID — идентификатор ошибки для
+	// обращения в поддержку ЮKassa. Без них диагностика по журналу — гадание.
+	Code      string
+	Parameter string
+	ID        string
 }
 
 func (e *APIError) Error() string {
-	if e.Description != "" {
-		return fmt.Sprintf("ЮKassa HTTP %d: %s", e.Status, e.Description)
+	s := fmt.Sprintf("ЮKassa HTTP %d", e.Status)
+	if e.Code != "" {
+		s += " " + e.Code
 	}
-	return fmt.Sprintf("ЮKassa вернула HTTP %d", e.Status)
+	if e.Description != "" {
+		s += ": " + e.Description
+	}
+	if e.Parameter != "" {
+		s += " (поле " + e.Parameter + ")"
+	}
+	if e.ID != "" {
+		s += " [id " + e.ID + "]"
+	}
+	return s
 }
 
 // Retriable сообщает, что запрос имеет смысл повторить тем же ключом
@@ -70,6 +86,12 @@ type Payment struct {
 		ConfirmationURL string `json:"confirmation_url"`
 	} `json:"confirmation"`
 	Metadata map[string]string `json:"metadata"`
+	// CancellationDetails — кто и почему отменил платёж (insufficient_funds,
+	// card_expired, …); без причины пользователю не объяснить, что чинить.
+	CancellationDetails struct {
+		Party  string `json:"party"`
+		Reason string `json:"reason"`
+	} `json:"cancellation_details"`
 	// PaymentMethod приходит в ответе, когда способ оплаты сохранён для
 	// автоплатежей: Saved=true и ID, которым потом можно списывать без
 	// участия пользователя.
@@ -133,9 +155,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, idemKey 
 	if resp.StatusCode != http.StatusOK {
 		var e struct {
 			Description string `json:"description"`
+			Code        string `json:"code"`
+			Parameter   string `json:"parameter"`
+			ID          string `json:"id"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&e)
-		return nil, &APIError{Status: resp.StatusCode, Description: e.Description}
+		return nil, &APIError{Status: resp.StatusCode, Description: e.Description, Code: e.Code, Parameter: e.Parameter, ID: e.ID}
 	}
 	var p Payment
 	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {

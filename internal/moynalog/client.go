@@ -7,11 +7,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+	// Гарантирует наличие базы часовых поясов даже в контейнере без tzdata:
+	// чек обязан уходить по московскому времени, а не по TZ контейнера (UTC),
+	// иначе ночные платежи конца месяца уезжают в предыдущий налоговый период.
+	_ "time/tzdata"
 )
 
 var BaseURL = "https://lknpd.nalog.ru/api/v1"
+
+// moscow — зона времени чека. ФНС ждёт местное время самозанятого; бот
+// ориентирован на РФ, поэтому Москва (при недоступной базе зон — UTC+3).
+var moscow = func() *time.Location {
+	if loc, err := time.LoadLocation("Europe/Moscow"); err == nil {
+		return loc
+	}
+	return time.FixedZone("MSK", 3*60*60)
+}()
 
 type Client struct {
 	http  *http.Client
@@ -20,6 +34,9 @@ type Client struct {
 
 	mu    sync.Mutex
 	token string
+	// authMu сериализует сам логин: без него все горутины фискализации после
+	// истечения токена устраивали бы залп параллельных парольных логинов.
+	authMu sync.Mutex
 }
 
 func New(login, pass string) *Client {
@@ -48,6 +65,8 @@ type authResponse struct {
 }
 
 func (c *Client) authenticate(ctx context.Context) error {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
 	body, _ := json.Marshal(authRequest{
 		Username:   c.login,
 		Password:   c.pass,
@@ -114,27 +133,54 @@ func (c *Client) CreateIncome(ctx context.Context, amount float64, name string) 
 			return "", err
 		}
 	}
-	id, status, err := c.createOnce(ctx, amount, name)
-	if err != nil {
-		return "", err
-	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		if err := c.authenticate(ctx); err != nil {
-			return "", err
+	// Сетевые сбои и 5xx ретраим: чек — юридическая обязанность, а одна
+	// оборванная попытка иначе терялась без следа.
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
 		}
-		id, status, err = c.createOnce(ctx, amount, name)
+		id, status, errBody, err := c.createOnce(ctx, amount, name)
 		if err != nil {
-			return "", err
+			lastErr = err
+			continue
+		}
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			if err := c.authenticate(ctx); err != nil {
+				return "", err
+			}
+			id, status, errBody, err = c.createOnce(ctx, amount, name)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+		}
+		switch {
+		case status == http.StatusOK || status == http.StatusCreated:
+			if id == "" {
+				// 200 без идентификатора чека — не успех: считать такой ответ
+				// зарегистрированным доходом нельзя.
+				return "", fmt.Errorf("moynalog income: ответ %d без идентификатора чека", status)
+			}
+			return id, nil
+		case status >= 500:
+			lastErr = fmt.Errorf("moynalog income: status %d: %s", status, errBody)
+			continue
+		default:
+			// 4xx ретраить бессмысленно; тело содержит код причины
+			// (validation.failed, превышение лимита и т.п.).
+			return "", fmt.Errorf("moynalog income: status %d: %s", status, errBody)
 		}
 	}
-	if status != http.StatusOK && status != http.StatusCreated {
-		return "", fmt.Errorf("moynalog income: status %d", status)
-	}
-	return id, nil
+	return "", lastErr
 }
 
-func (c *Client) createOnce(ctx context.Context, amount float64, name string) (string, int, error) {
-	now := time.Now().Format("2006-01-02T15:04:05-07:00")
+func (c *Client) createOnce(ctx context.Context, amount float64, name string) (id string, status int, errBody string, err error) {
+	now := time.Now().In(moscow).Format("2006-01-02T15:04:05-07:00")
 	body, _ := json.Marshal(incomeRequest{
 		OperationTime:                   now,
 		RequestTime:                     now,
@@ -146,7 +192,7 @@ func (c *Client) createOnce(ctx context.Context, amount float64, name string) (s
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, BaseURL+"/income", bytes.NewReader(body))
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	c.mu.Lock()
 	tok := c.token
@@ -155,17 +201,21 @@ func (c *Client) createOnce(ctx context.Context, amount float64, name string) (s
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "", resp.StatusCode, nil
+		return "", resp.StatusCode, "", nil
 	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	var ir incomeResponse
-	_ = json.NewDecoder(resp.Body).Decode(&ir)
-	id := ir.ApprovedReceiptUUID
+	_ = json.Unmarshal(raw, &ir)
+	id = ir.ApprovedReceiptUUID
 	if id == "" {
 		id = ir.ID
 	}
-	return id, resp.StatusCode, nil
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		errBody = strings.TrimSpace(string(raw))
+	}
+	return id, resp.StatusCode, errBody, nil
 }

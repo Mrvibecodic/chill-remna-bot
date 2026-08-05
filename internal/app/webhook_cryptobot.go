@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
+	"remnabot/internal/web"
 )
 
 type cryptoBotUpdate struct {
@@ -65,7 +68,10 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 
 	if err := verifyCryptoBotSignature(signature, token, body); err != nil {
 		a.payLogThrottled(ctx, "cb-webhook-sign", model.PayMethodCryptoBot, "", 0, "sign_error", "%v", err)
-		return false, err
+		// 401, а не 500: на 5xx CryptoBot ретраит доставку 3 дня и после этого
+		// АВТОМАТИЧЕСКИ отключает вебхуки приложению — чужой мусор и запросы с
+		// неверным ключом ретраить незачем.
+		return false, fmt.Errorf("cryptobot webhook: %w: %w", web.ErrUnauthorized, err)
 	}
 
 	var up cryptoBotUpdate
@@ -76,6 +82,14 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 		a.log.Info("cryptobot webhook: skipping update_type", "type", up.UpdateType)
 		return false, nil
 	}
+	// Защита от воспроизведения по рекомендации доки: request_date сильно из
+	// прошлого не принимаем. Деньги при этом не теряются — оплату старше окна
+	// добирает реконсилятор по pending-записи, а повторную выдачу и так
+	// блокирует идемпотентность по ExtID.
+	if t, err := time.Parse(time.RFC3339, up.RequestDate); err == nil && time.Since(t) > 24*time.Hour {
+		a.payLog(ctx, model.PayMethodCryptoBot, "", 0, "error", "апдейт отброшен: request_date старше суток (%s)", up.RequestDate)
+		return true, nil
+	}
 	if up.Payload.Status != "paid" {
 		a.log.Info("cryptobot webhook: invoice not paid yet", "id", up.Payload.InvoiceID, "status", up.Payload.Status)
 		return false, nil
@@ -84,19 +98,20 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 	extID := "cb:" + strconv.FormatInt(up.Payload.InvoiceID, 10)
 	hintTG, hintMo, _ := parseCryptoBotPayload(up.Payload.Payload)
 	_ = hintMo
-	a.payLog(ctx, model.PayMethodCryptoBot, extID, hintTG, "webhook", "invoice_paid status=%s amount=%s", up.Payload.Status,
-		cbAmount(up.Payload.Asset, up.Payload.Amount, up.Payload.PaidAsset, up.Payload.PaidAmount, up.Payload.Fiat))
+	rawAmount := cbAmount(up.Payload.Asset, up.Payload.Amount, up.Payload.PaidAsset, up.Payload.PaidAmount, up.Payload.Fiat)
+	a.payLog(ctx, model.PayMethodCryptoBot, extID, hintTG, "webhook", "invoice_paid status=%s amount=%s", up.Payload.Status, rawAmount)
+	var pending *model.PendingInvoice
 	if a.store != nil {
 		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
 			a.payLog(ctx, model.PayMethodCryptoBot, extID, hintTG, "duplicate", "уже финализирован, вебхук пропущен")
 			return true, nil
 		}
-		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil && p.Purpose == "topup" {
-			amount := cbAmount(up.Payload.Asset, up.Payload.Amount, up.Payload.PaidAsset, up.Payload.PaidAmount, up.Payload.Fiat)
-			if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodCryptoBot, amount, extID); err != nil {
+		pending, _ = a.store.PendingByExtID(ctx, extID)
+		if pending != nil && pending.Purpose == "topup" {
+			if err := a.finalizeTopUp(ctx, pending.TelegramID, pending.Kopecks, model.PayMethodCryptoBot, rawAmount, extID); err != nil {
 				return false, fmt.Errorf("topup cryptobot %d: %w", up.Payload.InvoiceID, err)
 			}
-			_ = a.store.ResolvePending(ctx, p.ID)
+			_ = a.store.ResolvePending(ctx, pending.ID)
 			return true, nil
 		}
 	}
@@ -107,8 +122,26 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 		a.log.Error("cryptobot webhook: bad payload", "raw", up.Payload.Payload, "err", err)
 		return true, nil
 	}
+	// Своя pending-запись доверенней, чем payload из тела вебхука: если запись
+	// есть, получателя и срок берём из неё.
+	if pending != nil && pending.TelegramID != 0 {
+		if pending.TelegramID != chatID || pending.Months != months {
+			a.payLog(ctx, model.PayMethodCryptoBot, extID, pending.TelegramID, "warning",
+				"payload вебхука (%d:%d) расходится с pending-записью (%d:%d) — верим записи",
+				chatID, months, pending.TelegramID, pending.Months)
+		}
+		chatID, months = pending.TelegramID, pending.Months
+	}
+	if months <= 0 {
+		// Payload вида «tg:0» — это пополнение, но pending-записи о нём уже нет
+		// (БД откатили или запись сняли). Молча гасить нельзя: деньги приняты.
+		a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "error", "оплаченное пополнение без pending-записи (сумма %s) — зачислите вручную", rawAmount)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "cb.admin_lost_topup", extID, rawAmount, a.userLabelByID(ctx, chatID)))
+		return true, nil
+	}
 
-	amount := a.cryptoAmount(months, cbAmount(up.Payload.Asset, up.Payload.Amount, up.Payload.PaidAsset, up.Payload.PaidAmount, up.Payload.Fiat))
+	amount := a.cryptoAmount(months, rawAmount)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
@@ -133,7 +166,9 @@ func parseCryptoBotPayload(raw string) (int64, int, error) {
 		return 0, 0, fmt.Errorf("bad telegram_id: %w", err)
 	}
 	months, err := strconv.Atoi(mos)
-	if err != nil || months <= 0 {
+	if err != nil || months < 0 {
+		// months == 0 — легальное значение: так помечаются счета на пополнение
+		// баланса («tg:0»), вызывающий разбирает этот случай сам.
 		return 0, 0, fmt.Errorf("bad months: %s", mos)
 	}
 	return chatID, months, nil

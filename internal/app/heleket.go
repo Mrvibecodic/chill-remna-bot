@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -232,7 +233,7 @@ func (a *App) startHeleket(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.fail", err.Error()))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curRUB)), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "hl.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "hl.btn_check"), "hlc:"+uuid)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -284,7 +285,7 @@ func (a *App) hlPendingText(ctx context.Context, lang string, inv *heleket.Invoi
 		a.hlNotifyAdmin(ctx, inv, "locked")
 		return i18n.T(lang, "hl.locked")
 	}
-	if heleket.Final(inv.Status) {
+	if inv.IsFinal || heleket.Final(inv.Status) {
 		return i18n.T(lang, "hl.failed")
 	}
 	return i18n.T(lang, "hl.pending")
@@ -296,18 +297,32 @@ func (a *App) hlPendingText(ctx context.Context, lang string, inv *heleket.Invoi
 // пересекаются, а кнопкой «Проверить оплату» админа иначе можно заспамить.
 func (a *App) hlNotifyAdmin(ctx context.Context, inv *heleket.Invoice, kind string) {
 	key := inv.UUID + ":" + kind
+	now := time.Now()
 	a.thrMu.Lock()
 	if a.hlNotified == nil {
-		a.hlNotified = map[string]bool{}
+		a.hlNotified = map[string]time.Time{}
 	}
-	dup := a.hlNotified[key]
-	a.hlNotified[key] = true
+	// Карта копится всю жизнь процесса — подрезаем записи старше недели, чтобы
+	// долгоживущий бот не тёк памятью (счёт живёт максимум 12 часов).
+	for k, t := range a.hlNotified {
+		if now.Sub(t) > 7*24*time.Hour {
+			delete(a.hlNotified, k)
+		}
+	}
+	_, dup := a.hlNotified[key]
+	a.hlNotified[key] = now
 	a.thrMu.Unlock()
 	if dup {
 		return
 	}
+	// В сумме показываем фактически заплаченное (hlAmountLabel), а сумму счёта
+	// — рядом: при недоплате админ разбирается именно по этим двум числам.
+	label := a.hlAmountLabel(inv)
+	if inv.Amount != "" {
+		label += " / " + inv.Amount + " " + inv.Currency
+	}
 	alang := a.lang(a.cfg.AdminID)
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "hl.admin_"+kind, inv.UUID, inv.Amount+" "+inv.Currency))
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "hl.admin_"+kind, inv.UUID, label))
 }
 
 // finalizeHeleket выдаёт подписку либо зачисляет баланс по подтверждённому
@@ -382,12 +397,23 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		a.log.Error("heleket finalize", "err", err, "uuid", inv.UUID)
 		return
 	}
+	// Снимаем pending-запись сразу: иначе реконсилятор ещё до двух минут
+	// гоняет лишние запросы /payment/info по уже выданной покупке.
+	if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+		_ = a.store.ResolvePending(ctx, p.ID)
+	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
 }
 
-// hlAmountLabel — что показать в журнале и уведомлениях: сколько заплатил
-// клиент в крипте, а если шлюз этого не вернул — сумму счёта.
+// hlAmountLabel — что показать в журнале и уведомлениях: ФАКТИЧЕСКИ
+// заплаченная клиентом сумма (payment_amount), а не «сколько должен»
+// (payer_amount — ожидаемая сумма счёта). Разница критична при wrong_amount:
+// админ разбирает недоплату именно по фактической сумме. Фолбэки — ожидаемая
+// сумма и сумма счёта.
 func (a *App) hlAmountLabel(inv *heleket.Invoice) string {
+	if paid := strings.TrimSpace(inv.PaymentAmount); paid != "" && paid != "0" && paid != "0.00" && inv.PayerCurrency != "" {
+		return paid + " " + inv.PayerCurrency
+	}
 	if inv.PayerAmount != "" && inv.PayerCurrency != "" {
 		return inv.PayerAmount + " " + inv.PayerCurrency
 	}
@@ -524,8 +550,39 @@ func (a *App) hlProbe(ctx context.Context, chatID int64) {
 		[][]models.InlineKeyboardButton{navBack(lang, "menu:heleket")})
 }
 
+// hlValidReturnURL — требование Heleket к url_return/url_success: строка
+// 6..255 символов и настоящий http(s)-URL. Кривое значение валило бы каждое
+// создание счёта с 422.
+func hlValidReturnURL(s string) bool {
+	if len(s) < 6 || len(s) > 255 {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 func (a *App) setHeleketField(ctx context.Context, chatID int64, field, text string) {
 	text = strings.TrimSpace(text)
+	// Валидация — строго ДО a.mu.Lock(): hlCryptoCode ходит в hlClient →
+	// hlConfig, которые сами берут a.mu; повторный Lock здесь навсегда вешал
+	// конфиг всего бота (pricing, реконсилятор, вебхуки) до рестарта.
+	switch field {
+	case "hl_tocur":
+		text = strings.ToUpper(text)
+		if text != "" && !a.hlCryptoCode(ctx, text) {
+			lang := a.lang(chatID)
+			a.sendPayKB(ctx, chatID, i18n.T(lang, "hl.tocur_bad", text),
+				[][]models.InlineKeyboardButton{navBack(lang, "menu:heleket")})
+			return
+		}
+	case "hl_return":
+		if text != "" && !hlValidReturnURL(text) {
+			lang := a.lang(chatID)
+			a.sendPayKB(ctx, chatID, i18n.T(lang, "hl.return_bad"),
+				[][]models.InlineKeyboardButton{navBack(lang, "menu:heleket")})
+			return
+		}
+	}
 	a.mu.Lock()
 	if a.botCfg != nil {
 		switch field {
@@ -534,14 +591,7 @@ func (a *App) setHeleketField(ctx context.Context, chatID int64, field, text str
 		case "hl_key":
 			a.botCfg.Heleket.APIKey = text
 		case "hl_tocur":
-			cur := strings.ToUpper(text)
-			if cur != "" && !a.hlCryptoCode(ctx, cur) {
-				a.mu.Unlock()
-				a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "hl.tocur_bad", cur),
-					[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:heleket")})
-				return
-			}
-			a.botCfg.Heleket.ToCurrency = cur
+			a.botCfg.Heleket.ToCurrency = text
 		case "hl_subtract":
 			if n, err := strconv.Atoi(text); err == nil && n >= 0 && n <= 100 {
 				a.botCfg.Heleket.Subtract = &n

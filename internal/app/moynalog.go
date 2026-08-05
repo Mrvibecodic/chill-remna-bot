@@ -68,6 +68,29 @@ func parseAmountRub(s string) float64 {
 	return v
 }
 
+// parseAmountRubOnly возвращает сумму из строки платежа и признак, что валюта
+// действительно рублёвая (₽/RUB/RUR или не указана). Tribute присылает и
+// EUR/USD, у Stars валюта «⭐» — считать такие числа рублями нельзя ни в
+// проценте рефереру, ни в выручке.
+func parseAmountRubOnly(s string) (float64, bool) {
+	f := strings.Fields(strings.TrimSpace(s))
+	if len(f) == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(strings.ReplaceAll(f[0], ",", "."), 64)
+	if err != nil {
+		return 0, false
+	}
+	if len(f) == 1 {
+		return v, true
+	}
+	switch strings.ToUpper(f[1]) {
+	case "₽", "RUB", "RUR":
+		return v, true
+	}
+	return v, false
+}
+
 func (a *App) showMoyNalogAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	cfg := a.moynalogCfg()

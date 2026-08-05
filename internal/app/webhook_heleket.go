@@ -110,7 +110,7 @@ func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, erro
 
 	// Промежуточные статусы pending НЕ гасят: переход check → paid легален, и
 	// снятие счёта здесь потеряло бы последующую оплату.
-	if heleket.Final(inv.Status) && a.store != nil {
+	if (inv.IsFinal || heleket.Final(inv.Status)) && a.store != nil {
 		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
 			_ = a.store.ResolvePending(ctx, p.ID)
 		}

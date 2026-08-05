@@ -30,6 +30,17 @@ func (a *App) ykClient() *yookassa.Client {
 	return yookassa.New(cfg.ShopID, cfg.SecretKey)
 }
 
+// ykValue нормализует цену из прайса для amount.value ЮKassa: строгий разбор
+// через rubToKopecks («199,50» → «199.50»), мусор вроде «1 000 ₽» отбивается,
+// а не уезжает в API с гарантированным 400 у пользователя на форме.
+func ykValue(raw string) (string, bool) {
+	k, ok := rubToKopecks(raw)
+	if !ok || k <= 0 {
+		return "", false
+	}
+	return kopecksToRub(k), true
+}
+
 // startYooKassa — вход в оплату через ЮKassa. Платёж всегда создаётся с
 // сохранением способа оплаты, когда админ включил автоплатежи (на форме ЮKassa
 // пользователь видит согласие на автоплатежи), но сами автосписания включаются
@@ -48,8 +59,11 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	}
 	cfg := a.ykConfig()
 	pr := a.pricing()
-	value := pr.Fiat(model.PayMethodYooKassa, months)
-	if !cfg.Enabled || value == "" {
+	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
+	if !cfg.Enabled || !okPrice {
+		if !okPrice && pr.Fiat(model.PayMethodYooKassa, months) != "" {
+			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "error", "цена за %d мес. задана некорректно (%q) — счёт не создать", months, pr.Fiat(model.PayMethodYooKassa, months))
+		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
 		return
 	}
@@ -110,7 +124,9 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		return
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, payID, chatID, "manual_check", "status=%s paid=%v", pay.Status, pay.Paid)
-	if pay.Status != "succeeded" {
+	// Условия выдачи те же, что у вебхука: succeeded И paid. Ручная кнопка не
+	// должна быть мягче автоматики.
+	if pay.Status != "succeeded" || !pay.Paid {
 		a.sendKB(ctx, chatID, i18n.T(lang, "yk.pending"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "yk.btn_check"), "ykc:"+payID)},
 			{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -126,12 +142,13 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		}
 	}
 	payChat, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
-	if payChat == 0 {
-		payChat = chatID
-	}
 	months, _ := strconv.Atoi(pay.Metadata["months"])
-	if months == 0 {
-		months = model.PlanMonths[0]
+	if payChat == 0 || months == 0 {
+		// Как и в вебхуке: без metadata получатель и срок неизвестны — не
+		// угадываем (нажавшему кнопку и сроку «по умолчанию» выдавать нельзя).
+		a.payLog(ctx, model.PayMethodYooKassa, payID, chatID, "error", "в metadata платежа нет telegram_id/months — получатель неизвестен")
+		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", "metadata"))
+		return
 	}
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
 	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID)

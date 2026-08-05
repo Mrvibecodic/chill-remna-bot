@@ -49,7 +49,13 @@ func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 	byMethod := map[string]int{}
 	payers := map[int64]bool{}
 	for _, p := range pays {
-		amt := parseAmountRub(p.Amount)
+		// В рублёвую выручку идут только рублёвые платежи: EUR/USD (Tribute) и
+		// «⭐» (Stars) складывать с рублями нельзя. Счётчик способов оплаты ниже
+		// учитывает их как раньше.
+		amt, isRub := parseAmountRubOnly(p.Amount)
+		if !isRub {
+			amt = 0
+		}
 		revAll += amt
 		byMethod[p.Method]++
 		payers[p.TelegramID] = true

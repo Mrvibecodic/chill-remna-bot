@@ -10,6 +10,11 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// ErrUnauthorized — вебхук не прошёл проверку подписи. Обработчик отдаёт на
+// него 401, а не 500: платёжки (в частности Tribute) сутки повторяют доставку
+// при 5xx, а ретраить заведомо чужой запрос незачем.
+var ErrUnauthorized = errors.New("webhook: unauthorized")
+
 type Handlers interface {
 	Healthy(ctx context.Context) error
 
@@ -19,7 +24,7 @@ type Handlers interface {
 
 	HandleRemnawaveWebhook(ctx context.Context, signatureHex string, body []byte) (handled bool, err error)
 
-	HandlePlategaWebhook(ctx context.Context, body []byte) (handled bool, err error)
+	HandlePlategaWebhook(ctx context.Context, merchantID, secret string, body []byte) (handled bool, err error)
 
 	HandleHeleketWebhook(ctx context.Context, body []byte) (handled bool, err error)
 

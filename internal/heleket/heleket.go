@@ -56,6 +56,10 @@ type InvoiceRequest struct {
 }
 
 // Invoice — счёт в терминах бота.
+//
+// Внимание к семантике сумм по офф-доке: PayerAmount — сколько клиент ДОЛЖЕН
+// заплатить (ожидаемая сумма с учётом комиссии), PaymentAmount — сколько он
+// фактически заплатил (у неоплаченного счёта — "0.00" или пусто).
 type Invoice struct {
 	UUID           string
 	OrderID        string
@@ -65,6 +69,7 @@ type Invoice struct {
 	Currency       string
 	PayerAmount    string
 	PayerCurrency  string
+	PaymentAmount  string
 	AdditionalData string
 	IsFinal        bool
 }
@@ -210,8 +215,11 @@ func convert(inv *sdk.Invoice) *Invoice {
 	if inv.AdditionalData != nil {
 		out.AdditionalData = *inv.AdditionalData
 	}
-	if out.PayerAmount == "" && inv.PaymentAmount != nil {
-		out.PayerAmount = *inv.PaymentAmount
+	if inv.PaymentAmount != nil {
+		out.PaymentAmount = *inv.PaymentAmount
+	}
+	if out.PayerAmount == "" {
+		out.PayerAmount = out.PaymentAmount
 	}
 	return out
 }

@@ -32,7 +32,7 @@ func (a *App) plClient() *platega.Client {
 
 func (a *App) plMethod() int {
 	m := a.plConfig().Method
-	if m == platega.MethodCards {
+	if m == platega.MethodCards || m == platega.MethodCardsLegacy {
 		return platega.MethodCards
 	}
 	return platega.MethodSBP
@@ -184,7 +184,7 @@ func (a *App) showPlategaAdmin(ctx context.Context, chatID int64) {
 		ret = i18n.T(lang, "admin.none")
 	}
 	method := i18n.T(lang, "pl.method_sbp")
-	if cfg.Method == platega.MethodCards {
+	if cfg.Method == platega.MethodCards || cfg.Method == platega.MethodCardsLegacy {
 		method = i18n.T(lang, "pl.method_cards")
 	}
 	text := i18n.T(lang, "pl.title", status, merchant, secret, ret, method)
@@ -210,7 +210,7 @@ func (a *App) onPlategaAdmin(ctx context.Context, chatID int64, val string) {
 	case "method":
 		a.mu.Lock()
 		if a.botCfg != nil {
-			if a.botCfg.Platega.Method == platega.MethodCards {
+			if a.botCfg.Platega.Method == platega.MethodCards || a.botCfg.Platega.Method == platega.MethodCardsLegacy {
 				a.botCfg.Platega.Method = platega.MethodSBP
 			} else {
 				a.botCfg.Platega.Method = platega.MethodCards

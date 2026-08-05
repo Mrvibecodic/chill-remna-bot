@@ -34,6 +34,11 @@ func miniSource(web_ bool) string {
 }
 
 func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
+	// Тот же гейт условий, что и в чате (showPlans): покупка из мини-аппа и
+	// веб-кабинета не должна обходить обязательное согласие с условиями.
+	if _, need := a.termsRequired(ctx, tgID); need {
+		return "", false, errors.New("сначала примите условия использования в боте — откройте бота и нажмите «Купить»")
+	}
 	switch method {
 	case model.PayMethodStars:
 		link, err := a.starsInvoiceLink(ctx, tgID, months)
@@ -42,8 +47,8 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 	case model.PayMethodYooKassa:
 		cfg := a.ykConfig()
 		pr := a.pricing()
-		value := pr.Fiat(model.PayMethodYooKassa, months)
-		if !cfg.Enabled || value == "" {
+		value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
+		if !cfg.Enabled || !okPrice {
 			return "", false, errors.New("оплата картой недоступна")
 		}
 		returnURL := cfg.ReturnURL

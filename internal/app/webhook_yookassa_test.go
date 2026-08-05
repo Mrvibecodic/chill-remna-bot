@@ -39,7 +39,7 @@ func installedYK() *App {
 func TestYooKassaWebhook_SkipUnknownEvent(t *testing.T) {
 	a := &App{log: slog.Default()}
 	body, _ := json.Marshal(map[string]any{
-		"event":  "payment.canceled",
+		"event":  "refund.succeeded",
 		"object": map[string]any{"id": "pay_x", "paid": false},
 	})
 	handled, err := a.HandleYooKassaWebhook(context.Background(), body)
@@ -47,7 +47,24 @@ func TestYooKassaWebhook_SkipUnknownEvent(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if handled {
-		t.Errorf("ожидалось handled=false для canceled")
+		t.Errorf("ожидалось handled=false для неизвестного события")
+	}
+}
+
+// TestYooKassaWebhook_CanceledHandled — payment.canceled обрабатывается (снятие
+// pending, запись в журнал), но ничего не выдаёт.
+func TestYooKassaWebhook_CanceledHandled(t *testing.T) {
+	a := &App{log: slog.Default()}
+	body, _ := json.Marshal(map[string]any{
+		"event":  "payment.canceled",
+		"object": map[string]any{"id": "pay_x", "paid": false},
+	})
+	handled, err := a.HandleYooKassaWebhook(context.Background(), body)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !handled {
+		t.Errorf("ожидалось handled=true для canceled")
 	}
 }
 
