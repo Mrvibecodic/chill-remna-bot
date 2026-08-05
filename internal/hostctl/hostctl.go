@@ -199,7 +199,10 @@ func (c *Controller) runComposeDetached(ctx context.Context, script string) erro
 }
 
 func (c *Controller) SelfUpdate(ctx context.Context) error {
-	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s pull && docker compose -p %s up -d", c.project, c.project))
+	// Тянем ТОЛЬКО сервис bot: общий pull падает целиком, если Docker Hub
+	// отдаёт 429 на посторонний образ (postgres), и «Обновить» молча не
+	// срабатывает. Остальные образы уже есть локально — up -d их не тянет.
+	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s pull bot && docker compose -p %s up -d", c.project, c.project))
 }
 
 // SetImageChannel rewrites the tag of the bot service image in the compose file
