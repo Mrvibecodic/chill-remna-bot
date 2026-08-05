@@ -183,26 +183,48 @@ func (c *Controller) addPostgresToCompose() error {
 	return os.WriteFile(c.composeFile, out, 0o600)
 }
 
-func (c *Controller) runComposeDetached(ctx context.Context, script string) error {
-	args := []string{
-		"run", "-d", "--rm",
+func (c *Controller) runCompose(ctx context.Context, detached bool, script string) error {
+	args := []string{"run", "--rm"}
+	if detached {
+		args = append(args, "-d")
+	}
+	args = append(args,
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
-		"-v", c.hostDir + ":/p",
+		"-v", c.hostDir+":/p",
 		"-w", "/p",
 		"docker:cli",
 		"sh", "-c", script,
-	}
+	)
 	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("compose detached: %w: %s", err, out)
+		return fmt.Errorf("compose: %w: %s", err, tailStr(string(out), 400))
 	}
 	return nil
 }
 
+func (c *Controller) runComposeDetached(ctx context.Context, script string) error {
+	return c.runCompose(ctx, true, script)
+}
+
+// tailStr — хвост строки: у docker pull содержательная часть ошибки в конце.
+func tailStr(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
+}
+
 func (c *Controller) SelfUpdate(ctx context.Context) error {
-	// Тянем ТОЛЬКО сервис bot: общий pull падает целиком, если Docker Hub
-	// отдаёт 429 на посторонний образ (postgres), и «Обновить» молча не
-	// срабатывает. Остальные образы уже есть локально — up -d их не тянет.
-	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s pull bot && docker compose -p %s up -d", c.project, c.project))
+	// Два шага вместо одного «pull && up -d» в отвязанном контейнере:
+	//  1) pull ТОЛЬКО сервиса bot — синхронно, чтобы причина сбоя (например,
+	//     429 Too Many Requests от Docker Hub) дошла до админа текстом, а не
+	//     превратилась в пустое «рестарт не произошёл». Общий pull к тому же
+	//     падал целиком из-за постороннего postgres.
+	//  2) up -d — отвязанно: пересоздание контейнера убивает самого бота.
+	if err := c.runCompose(ctx, false, fmt.Sprintf("docker compose -p %s pull bot", c.project)); err != nil {
+		return err
+	}
+	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s up -d", c.project))
 }
 
 // SetImageChannel rewrites the tag of the bot service image in the compose file

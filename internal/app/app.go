@@ -698,6 +698,20 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	}
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)), 0o600)
+	// pull теперь синхронный (чтобы причина сбоя дошла до админа), поэтому весь
+	// процесс — в горутине: скачивание образа не должно блокировать обработку
+	// апдейтов единственным воркером.
+	go a.runSelfUpdate(chatID, startMsgID, marker)
+}
+
+func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.log.Error("паника в самообновлении", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	ctx, cancel := context.WithTimeout(a.bgContext(), 10*time.Minute)
+	defer cancel()
 	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
 		_ = os.Remove(marker)
 		a.updateFailMsg(ctx, chatID, startMsgID, err)
