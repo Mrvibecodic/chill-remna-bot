@@ -37,6 +37,9 @@ func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.a
 func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, _ [][]models.InlineKeyboardButton) int {
 	return f.add(text)
 }
+func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
+	return f.add(text)
+}
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
 func (f *fakeMsg) EditText(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
 	return false
@@ -134,6 +137,7 @@ type fakeStore struct {
 	promoUses map[string]bool
 	webUsers  map[string]*model.WebUser
 	paylogs   []model.PayLogEntry
+	torrents  []model.TorrentReport
 	wlIDs     map[int64]bool
 	invites   map[string]*model.Invite
 	autopays  map[int64]*model.AutoPay
@@ -316,6 +320,69 @@ func (s *fakeStore) PayLogsFiltered(_ context.Context, stages []string, since st
 }
 
 func (s *fakeStore) PurgePayLogs(_ context.Context, _ string) error { return nil }
+
+func (s *fakeStore) AddTorrentReport(_ context.Context, r *model.TorrentReport) error {
+	if r.ID == 0 {
+		s.seq++
+		r.ID = s.seq
+	}
+	if r.CreatedAt == "" {
+		r.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	s.torrents = append(s.torrents, *r)
+	return nil
+}
+
+func (s *fakeStore) TorrentReports(_ context.Context, limit, offset int) ([]model.TorrentReport, int, error) {
+	var all []model.TorrentReport
+	for i := len(s.torrents) - 1; i >= 0; i-- { // новые первыми, как в БД
+		all = append(all, s.torrents[i])
+	}
+	total := len(all)
+	if offset >= len(all) {
+		return nil, total, nil
+	}
+	all = all[offset:]
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, total, nil
+}
+
+func (s *fakeStore) CountTorrentReports(_ context.Context, telegramID int64, username, since string) (int, error) {
+	n := 0
+	for _, r := range s.torrents {
+		if since != "" && r.CreatedAt < since {
+			continue
+		}
+		if (telegramID != 0 && r.TelegramID == telegramID) ||
+			(telegramID == 0 && username != "" && r.Username == username) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) DueTorrentUnblocks(_ context.Context, now string) ([]model.TorrentReport, error) {
+	var out []model.TorrentReport
+	for _, r := range s.torrents {
+		if !r.UnblockNotified && r.TelegramID != 0 && r.WillUnblockAt != "" && r.WillUnblockAt <= now {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) MarkTorrentUnblockNotified(_ context.Context, id int64) error {
+	for i := range s.torrents {
+		if s.torrents[i].ID == id {
+			s.torrents[i].UnblockNotified = true
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) PurgeTorrentReports(_ context.Context, _ string) error { return nil }
 func (s *fakeStore) LoadConfig(context.Context) (*model.BotConfig, bool, error) {
 	if s.cfg == nil {
 		return nil, false, nil

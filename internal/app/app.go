@@ -36,6 +36,9 @@ import (
 type messenger interface {
 	Send(ctx context.Context, chatID int64, text string) int
 	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int
+	// SendEnt отправляет текст с телеграмными entities (форматирование 1-в-1,
+	// без ParseMode) — для сообщений, набранных админом в клиенте Telegram.
+	SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int
 	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
 
 	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
@@ -90,6 +93,7 @@ type App struct {
 	thrLast    map[string]time.Time
 	hlNotified map[string]time.Time
 	torSeen    map[int64]time.Time
+	torUnbSeen map[int64]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -537,6 +541,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	ui := a.getUI(chatID)
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
+		return
+	}
+	if ui.torAwait {
+		a.setTorrentUnblockText(ctx, chatID, m)
 		return
 	}
 	if ui.welcomeAwait == "img" {
@@ -1197,6 +1205,33 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 			return 0
 		}
 		m.log.Warn("send message: HTML rejected, sent as plain text", "chat_id", chatID)
+	}
+	return msg.ID
+}
+
+func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities}
+	if len(rows) > 0 {
+		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	}
+	var msg *models.Message
+	err := m.sendWithRetry(ctx, func() (e error) {
+		msg, e = m.b.SendMessage(ctx, params)
+		return e
+	})
+	if err != nil {
+		// Кривые entities (например, после ручной правки конфига) не должны
+		// глушить уведомление — повторяем без форматирования.
+		params.Entities = nil
+		err = m.sendWithRetry(ctx, func() (e error) {
+			msg, e = m.b.SendMessage(ctx, params)
+			return e
+		})
+		if err != nil {
+			m.log.Error("send message with entities", "err", err)
+			return 0
+		}
+		m.log.Warn("send message: entities rejected, sent as plain text", "chat_id", chatID)
 	}
 	return msg.ID
 }

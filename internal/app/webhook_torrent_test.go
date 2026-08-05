@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/model"
 )
@@ -147,6 +150,134 @@ func TestTorrentToggle_Callback(t *testing.T) {
 	a.handleCallback(ctx, cb(500, "wh:tadm"))
 	if a.botCfg.Torrent.NotifyAdmin {
 		t.Fatalf("не-админ не должен переключать тумблер: %+v", a.botCfg.Torrent)
+	}
+}
+
+// Отчёт пишется в журнал, повторные нарушения нумеруются в отчёте админу.
+func TestTorrentWebhook_JournalAndRepeat(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+
+	_, _ = a.HandleRemnawaveWebhook(ctx, "", []byte(torrentBody))
+	if len(fs.torrents) != 1 {
+		t.Fatalf("ожидалась 1 запись в журнале, есть %d", len(fs.torrents))
+	}
+	r := fs.torrents[0]
+	if r.TelegramID != 42 || r.IP != "203.0.113.7" || r.BlockSeconds != 3600 ||
+		r.Node != "node-1 (NL)" || r.WillUnblockAt != "2026-03-07T17:02:48Z" || r.UnblockNotified {
+		t.Fatalf("запись журнала кривая: %+v", r)
+	}
+	if countContains(fm.texts, "1-е за 30 дней") != 1 {
+		t.Fatalf("первый отчёт должен быть «1-е за 30 дней»: %v", fm.texts)
+	}
+
+	_, _ = a.HandleRemnawaveWebhook(ctx, "", []byte(torrentBody))
+	if len(fs.torrents) != 2 {
+		t.Fatalf("ожидались 2 записи, есть %d", len(fs.torrents))
+	}
+	if countContains(fm.texts, "2-е за 30 дней") != 1 {
+		t.Fatalf("повтор должен быть «2-е за 30 дней»: %v", fm.texts)
+	}
+}
+
+// Запись без telegramId помечается «уведомлять некого» и не попадает в очередь
+// разблокировок.
+func TestTorrentWebhook_JournalNoTgID(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+	body := strings.Replace(torrentBody, `"telegramId": 42, `, "", 1)
+
+	_, _ = a.HandleRemnawaveWebhook(ctx, "", []byte(body))
+	if len(fs.torrents) != 1 || !fs.torrents[0].UnblockNotified || fs.torrents[0].Username != "tg_42" {
+		t.Fatalf("запись кривая: %+v", fs.torrents)
+	}
+	due, _ := fs.DueTorrentUnblocks(ctx, "9999-01-01T00:00:00Z")
+	if len(due) != 0 {
+		t.Fatalf("без telegramId в очереди разблокировок пусто: %v", due)
+	}
+}
+
+// Когда срок вышел — юзеру уходит «блокировка снята», запись помечается,
+// повторный проход ничего не шлёт.
+func TestTorrentUnblock_Notify(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	_ = fs.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 42, WillUnblockAt: past})
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("ожидалось одно «блокировка снята»: %v", fm.texts)
+	}
+	if !fs.torrents[0].UnblockNotified {
+		t.Fatalf("запись не помечена отправленной: %+v", fs.torrents[0])
+	}
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("повторный проход не должен слать снова: %v", fm.texts)
+	}
+}
+
+// Просроченные записи (бот долго стоял) помечаются молча, при выключенном
+// тумблере юзера сообщение не шлётся.
+func TestTorrentUnblock_StaleAndToggle(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+
+	stale := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
+	_ = fs.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 42, WillUnblockAt: stale})
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 0 || !fs.torrents[0].UnblockNotified {
+		t.Fatalf("просроченная запись: молча пометить, не слать: %v %+v", fm.texts, fs.torrents[0])
+	}
+
+	a.botCfg = &model.BotConfig{Torrent: model.TorrentConfig{NotifyAdmin: true, NotifyUser: false, Init: true}}
+	past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	_ = fs.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 43, WillUnblockAt: past})
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 0 || !fs.torrents[1].UnblockNotified {
+		t.Fatalf("при выключенном тумблере: молча пометить, не слать: %v", fm.texts)
+	}
+}
+
+// Кастомный текст разблокировки: сохранение через настоящий ввод админа
+// (с entities), тест-отправка админу, сброс на стандартный.
+func TestTorrentUnblock_CustomTextEditor(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+
+	a.handleCallback(ctx, cb(100, "torj:edit"))
+	if !a.getUI(100).torAwait {
+		t.Fatalf("после torj:edit должен ждать ввод")
+	}
+	m := msgText(100, "Свобода! Качайте что угодно, кроме торрентов")
+	m.Entities = []models.MessageEntity{{Type: "bold", Offset: 0, Length: 8}}
+	a.handleMessage(ctx, m)
+	if a.getUI(100).torAwait || a.botCfg.Torrent.UnblockText != m.Text || len(a.botCfg.Torrent.UnblockEntities) == 0 {
+		t.Fatalf("текст не сохранился: %+v", a.botCfg.Torrent)
+	}
+
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "torj:test"))
+	if len(fm.texts) == 0 || fm.texts[0] != m.Text {
+		t.Fatalf("тест-отправка должна прислать кастомный текст 1-в-1: %v", fm.texts)
+	}
+
+	a.handleCallback(ctx, cb(100, "torj:reset"))
+	if a.botCfg.Torrent.UnblockText != "" {
+		t.Fatalf("сброс не сработал: %+v", a.botCfg.Torrent)
+	}
+	fm.texts = nil
+	a.sendTorrentUnblock(ctx, 42)
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("после сброса должен уходить стандартный текст: %v", fm.texts)
 	}
 }
 

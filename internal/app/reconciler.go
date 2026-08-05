@@ -43,6 +43,7 @@ func (a *App) reconcileOnce(ctx context.Context) {
 	if time.Since(a.payLogPurgedAt) > 24*time.Hour {
 		a.payLogPurgedAt = time.Now()
 		_ = st.PurgePayLogs(ctx, time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339))
+		_ = st.PurgeTorrentReports(ctx, time.Now().UTC().Add(-torrentRetention).Format(time.RFC3339))
 	}
 	cutoff := time.Now().UTC().Add(-reconcileGrace).Format(time.RFC3339)
 	list, err := st.ListUnresolvedPending(ctx, cutoff, reconcileBatch)

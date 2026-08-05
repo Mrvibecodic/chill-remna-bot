@@ -102,6 +102,7 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "wh.btn_base"), "wh:base"), btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
 		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "wh:tadm"),
 			btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "wh:tusr")},
+		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }

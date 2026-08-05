@@ -131,6 +131,18 @@ type Storage interface {
 	PayLogsFiltered(ctx context.Context, stages []string, since string, limit int) ([]model.PayLogEntry, int64, error)
 	PurgePayLogs(ctx context.Context, before string) error
 
+	AddTorrentReport(ctx context.Context, r *model.TorrentReport) error
+	// TorrentReports — страница журнала (новые сверху) + общее число записей.
+	TorrentReports(ctx context.Context, limit, offset int) ([]model.TorrentReport, int, error)
+	// CountTorrentReports — число отчётов по пользователю (по telegram_id, а
+	// для аккаунтов без Telegram — по username панели) начиная с since.
+	CountTorrentReports(ctx context.Context, telegramID int64, username, since string) (int, error)
+	// DueTorrentUnblocks — записи, по которым пора уведомить о снятии
+	// блокировки: срок вышел, уведомление не отправлено, есть telegram_id.
+	DueTorrentUnblocks(ctx context.Context, now string) ([]model.TorrentReport, error)
+	MarkTorrentUnblockNotified(ctx context.Context, id int64) error
+	PurgeTorrentReports(ctx context.Context, before string) error
+
 	Kind() string
 	Close() error
 }
@@ -847,6 +859,103 @@ func (b *base) AddPayLog(ctx context.Context, e *model.PayLogEntry) error {
 		"INSERT INTO payment_log (id, ext_id, telegram_id, method, stage, detail, created_at) "+
 			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+")",
 		e.ID, e.ExtID, e.TelegramID, e.Method, e.Stage, e.Detail, e.CreatedAt)
+	return err
+}
+
+const torrentReportCols = "id, telegram_id, username, node, ip, protocol, inbound, source, destination, block_seconds, will_unblock_at, unblock_notified, created_at"
+
+func (b *base) scanTorrentReport(rows *sql.Rows) (model.TorrentReport, error) {
+	var r model.TorrentReport
+	var notified int
+	err := rows.Scan(&r.ID, &r.TelegramID, &r.Username, &r.Node, &r.IP, &r.Protocol, &r.Inbound,
+		&r.Source, &r.Destination, &r.BlockSeconds, &r.WillUnblockAt, &notified, &r.CreatedAt)
+	r.UnblockNotified = notified != 0
+	return r, err
+}
+
+func (b *base) AddTorrentReport(ctx context.Context, r *model.TorrentReport) error {
+	if r.ID == 0 {
+		r.ID = time.Now().UnixNano()
+	}
+	if r.CreatedAt == "" {
+		r.CreatedAt = nowStr()
+	}
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO torrent_reports ("+torrentReportCols+") VALUES ("+
+			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+
+			b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+")",
+		r.ID, r.TelegramID, r.Username, r.Node, r.IP, r.Protocol, r.Inbound,
+		r.Source, r.Destination, r.BlockSeconds, r.WillUnblockAt, boolToInt(r.UnblockNotified), r.CreatedAt)
+	return err
+}
+
+func (b *base) TorrentReports(ctx context.Context, limit, offset int) ([]model.TorrentReport, int, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM torrent_reports").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+torrentReportCols+" FROM torrent_reports ORDER BY id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
+		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.TorrentReport
+	for rows.Next() {
+		r, err := b.scanTorrentReport(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
+
+func (b *base) CountTorrentReports(ctx context.Context, telegramID int64, username, since string) (int, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM torrent_reports WHERE created_at >= "+b.ph(1)+
+			" AND (("+b.ph(2)+" <> 0 AND telegram_id = "+b.ph(3)+") OR ("+b.ph(4)+" = 0 AND username <> '' AND username = "+b.ph(5)+"))",
+		since, telegramID, telegramID, telegramID, username).Scan(&n)
+	return n, err
+}
+
+func (b *base) DueTorrentUnblocks(ctx context.Context, now string) ([]model.TorrentReport, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+torrentReportCols+" FROM torrent_reports "+
+			"WHERE unblock_notified = 0 AND telegram_id <> 0 AND will_unblock_at <> '' AND will_unblock_at <= "+b.ph(1)+
+			" ORDER BY id ASC LIMIT 500", now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.TorrentReport
+	for rows.Next() {
+		r, err := b.scanTorrentReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) MarkTorrentUnblockNotified(ctx context.Context, id int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE torrent_reports SET unblock_notified = 1 WHERE id = "+b.ph(1), id)
+	return err
+}
+
+func (b *base) PurgeTorrentReports(ctx context.Context, before string) error {
+	_, err := b.db.ExecContext(ctx,
+		"DELETE FROM torrent_reports WHERE created_at < "+b.ph(1), before)
 	return err
 }
 

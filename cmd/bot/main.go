@@ -58,7 +58,7 @@ func main() {
 	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	var botErr, webErr error
 
 	go func() {
@@ -88,6 +88,10 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunUpdateChecker(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.RunTorrentUnblocker(ctx)
 	}()
 	wg.Wait()
 
