@@ -55,16 +55,31 @@ func tributePeriodToMonths(period string) int {
 	}
 }
 
+// tributeWebhook — часть полезной нагрузки вебхука Tribute, которая нам нужна.
+// Получателя ищем по telegram_user_id; устаревшее user_id (и пришедший ему на
+// смену trb_user_id вида «T-31326»/«W-31326») не читаем — привязка у нас идёт
+// по Telegram ID.
 type tributeWebhook struct {
 	Name    string `json:"name"`
 	Payload struct {
-		SubscriptionID int       `json:"subscription_id"`
-		Period         string    `json:"period"`
-		Amount         int       `json:"amount"`
+		SubscriptionID int    `json:"subscription_id"`
+		Period         string `json:"period"`
+		// Price — сколько заплатил клиент, Amount — сколько осталось после
+		// комиссии Tribute. Обе суммы в минимальных единицах валюты.
+		Price          int64     `json:"price"`
+		Amount         int64     `json:"amount"`
 		Currency       string    `json:"currency"`
 		TelegramUserID int64     `json:"telegram_user_id"`
 		ExpiresAt      time.Time `json:"expires_at"`
 	} `json:"payload"`
+}
+
+// tributeAmount печатает сумму так же, как остальные способы оплаты. Tribute
+// присылает её в минимальных единицах валюты (700 eur — это 7.00 EUR), а
+// строка платежа потом разбирается обратно в числа: из неё считаются процент
+// рефереру, выручка в статистике и чек «Мой налог».
+func tributeAmount(minor int64, cur string) string {
+	return fmt.Sprintf("%.2f %s", float64(minor)/100, curSymbol(cur))
 }
 
 func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, body []byte) (bool, error) {
@@ -99,14 +114,18 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	}
 	months := tributePeriodToMonths(wh.Payload.Period)
 	extID := fmt.Sprintf("trb_%d_%d", wh.Payload.SubscriptionID, wh.Payload.ExpiresAt.Unix())
-	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%d %s", wh.Name, wh.Payload.Period, wh.Payload.Amount, wh.Payload.Currency)
+	paid := wh.Payload.Price
+	if paid == 0 {
+		paid = wh.Payload.Amount
+	}
+	amount := tributeAmount(paid, wh.Payload.Currency)
+	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s", wh.Name, wh.Payload.Period, amount)
 	if a.store != nil {
 		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
 			a.payLog(ctx, model.PayMethodTribute, extID, chatID, "duplicate", "уже финализирован, вебхук пропущен")
 			return true, nil
 		}
 	}
-	amount := fmt.Sprintf("%d %s", wh.Payload.Amount, wh.Payload.Currency)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "finalize_error", "%v", err)
