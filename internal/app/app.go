@@ -84,10 +84,12 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast) и разовые уведомления админу по счёту Heleket (hlNotified).
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
+	// паузу между торрент-предупреждениями пользователю (torSeen).
 	thrMu      sync.Mutex
 	thrLast    map[string]time.Time
 	hlNotified map[string]time.Time
+	torSeen    map[int64]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -200,6 +202,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 	if ok && cfg.Installed {
 		cfg.NormalizePricing()
 		cfg.NormalizeReminders()
+		cfg.NormalizeTorrent()
 		cfg.NormalizeReferral()
 		cfg.NormalizeUpdateCheck()
 		cfg.NormalizeAddSub()

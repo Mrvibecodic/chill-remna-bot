@@ -139,6 +139,7 @@ type BotConfig struct {
 	Heleket   HeleketConfig   `json:"heleket"`
 	Tribute   TributeConfig   `json:"tribute"`
 	Webhook   WebhookConfig   `json:"webhook"`
+	Torrent   TorrentConfig   `json:"torrent"`
 	Reminders RemindersConfig `json:"reminders"`
 	Referral  ReferralConfig  `json:"referral"`
 	MoyNalog  MoyNalogConfig  `json:"moynalog"`
@@ -398,6 +399,26 @@ type WebhookConfig struct {
 	RemnawaveSecret string `json:"remnawave_secret"`
 	Domain          string `json:"domain"`
 	TLS             bool   `json:"tls"`
+}
+
+// TorrentConfig — реакция бота на отчёты торрент-блокера панели
+// (вебхук torrent_blocker.report плагина ноды).
+type TorrentConfig struct {
+	NotifyAdmin bool `json:"notify_admin"`
+	NotifyUser  bool `json:"notify_user"`
+	Init        bool `json:"init"`
+}
+
+// NormalizeTorrent включает оба уведомления по умолчанию для конфигов,
+// созданных до появления настройки.
+func (c *BotConfig) NormalizeTorrent() {
+	t := &c.Torrent
+	if t.Init {
+		return
+	}
+	t.NotifyAdmin = true
+	t.NotifyUser = true
+	t.Init = true
 }
 
 type CryptoBotConfig struct {

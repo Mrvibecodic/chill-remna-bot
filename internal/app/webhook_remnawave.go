@@ -87,6 +87,9 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	case ev.Event == "user.limited" || ev.Event == "user.bandwidth_usage_threshold_reached":
 		a.pushTrafficLimited(ctx, u)
 		return true, nil
+	case ev.Event == "torrent_blocker.report":
+		a.pushTorrentReport(ctx, ev.Data)
+		return true, nil
 	default:
 		a.log.Info("remnawave webhook: event ignored", "event", ev.Event, "tg_id", u.TelegramID)
 		return true, nil
