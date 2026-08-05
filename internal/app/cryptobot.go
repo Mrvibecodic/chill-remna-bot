@@ -25,7 +25,7 @@ func (a *App) cbConfig() model.CryptoBotConfig {
 
 func (a *App) cryptoAmount(months int, fallback string) string {
 	if p := a.pricing().Base[months]; p != "" {
-		return p + curSuffix(curRUB)
+		return p + curSuffix(curSymbol(a.hlCurrency()))
 	}
 	return fallback
 }
@@ -75,7 +75,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curRUB)), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "cb.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+strconv.FormatInt(invoiceID, 10)+":"+strconv.Itoa(months))},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -207,12 +207,16 @@ func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, pri
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	inv, err := client.CreateInvoice(ctx, price, cfg.Asset, chatID, months)
+	// Валюта счёта — из прайса (hlCurrency валидирует код и по умолчанию даёт
+	// RUB), а не жёстко рубли: прайс в USD не должен превращаться в счёт на то
+	// же число в рублях.
+	fiat := a.hlCurrency()
+	inv, err := client.CreateInvoice(ctx, price, fiat, cfg.Asset, chatID, months)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", 0, err
 	}
-	a.payLog(ctx, model.PayMethodCryptoBot, "cb:"+strconv.FormatInt(inv.InvoiceID, 10), chatID, "invoice_created", "purchase months=%d price=%s RUB assets=%s", months, price, cfg.Asset)
+	a.payLog(ctx, model.PayMethodCryptoBot, "cb:"+strconv.FormatInt(inv.InvoiceID, 10), chatID, "invoice_created", "purchase months=%d price=%s %s assets=%s", months, price, fiat, cfg.Asset)
 	if a.store != nil {
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months})
 	}

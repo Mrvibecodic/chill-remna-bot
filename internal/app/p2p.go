@@ -620,7 +620,9 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	a.payLog(ctx, method, extID, telegramID, "done", "подписка выдана, ссылка отправляется")
 	a.grantReferralBonus(ctx, telegramID)
 	a.creditReferralPercent(ctx, telegramID, amount)
-	if method != "balance" && method != model.PayMethodStars && method != model.PayMethodTribute {
+	// Чек «Мой налог» — только по платежам ЮKassa: крипта и P2P в чек
+	// самозанятого не идут, а оплата с баланса учтена при пополнении.
+	if method == model.PayMethodYooKassa {
 		a.fiscalize(parseAmountRub(amount), fmt.Sprintf("Подписка %d мес.", months))
 	}
 	return link, expireAt, nil
@@ -688,7 +690,13 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		mo := ui.priceMonths
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		v, _ := strconv.Atoi(strings.TrimSpace(text))
+		// Строгий разбор: раньше «100 ⭐» молча превращалось в 0 и стирало цену.
+		v, err := strconv.Atoi(strings.TrimSpace(text))
+		if err != nil || v < 0 {
+			a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "stars.bad_price", text),
+				[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:stars")})
+			return
+		}
 		a.setStarPrice(mo, v)
 		_ = a.saveBotConfig(ctx)
 		a.showStarsAdmin(ctx, chatID)

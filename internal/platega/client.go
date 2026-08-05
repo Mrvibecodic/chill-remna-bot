@@ -14,8 +14,13 @@ import (
 var BaseURL = "https://app.platega.io"
 
 const (
-	MethodSBP   = 2
-	MethodCards = 10
+	MethodSBP = 2
+	// MethodCards — карточный эквайринг. В актуальном enum Platega это 11;
+	// прежний код 10 (CardsRUB) объявлен устаревшим и в enum отсутствует.
+	MethodCards = 11
+	// MethodCardsLegacy — старое значение из конфигов, сохранённых до перехода
+	// на 11. При чтении конфига трактуется как MethodCards.
+	MethodCardsLegacy = 10
 )
 
 type Client struct {

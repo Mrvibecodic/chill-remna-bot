@@ -398,14 +398,14 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 		months = model.PlanMonths[0]
 	}
 	pr := a.pricing()
-	value := pr.Fiat(model.PayMethodYooKassa, months)
+	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
 	currency := strings.ToUpper(pr.Currency)
 	if !currencyCode(currency) {
 		currency = "RUB"
 	}
 	client := a.ykClient()
-	if value == "" || client == nil {
-		reason := "нет цены для периода " + strconv.Itoa(months) + " мес."
+	if !okPrice || client == nil {
+		reason := "нет цены (или цена некорректна) для периода " + strconv.Itoa(months) + " мес."
 		if client == nil {
 			reason = "ЮKassa не настроена"
 		}
@@ -446,11 +446,20 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	if pay.Status != "succeeded" || !pay.Paid {
 		if pay.Status == "pending" || pay.Status == "waiting_for_capture" {
 			// Платёж ещё в процессе — финализирует вебхук или реконсилятор.
+			// Повтор через час, НЕ через сутки: окно идемпотентности ЮKassa —
+			// 24 часа, и суточная отсрочка уводила бы повтор с тем же ключом за
+			// его границу — ЮKassa обработала бы запрос как НОВЫЙ платёж
+			// (двойное списание). Часовые повторы тем же ключом просто
+			// возвращают текущее состояние того же платежа.
 			a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months)
-			a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, "ожидает подтверждения")
+			a.autoPayDefer(ctx, ap, now, autoPayRetrySoon, "ожидает подтверждения")
 			return ""
 		}
-		a.autoPayFail(ctx, ap, now, "платёж не прошёл: "+pay.Status)
+		reason := "платёж не прошёл: " + pay.Status
+		if r := pay.CancellationDetails.Reason; r != "" {
+			reason += " (" + r + ")"
+		}
+		a.autoPayFail(ctx, ap, now, reason)
 		return ""
 	}
 

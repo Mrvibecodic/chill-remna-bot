@@ -35,6 +35,23 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 	if n.Object.ID != "" {
 		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "webhook", "event=%s status=%s", n.Event, n.Object.Status)
 	}
+	if n.Event == "payment.canceled" && n.Object.ID != "" {
+		// Платёж отменён: выдача не нужна, но pending-запись надо снять, иначе
+		// реконсилятор сутки опрашивает мёртвый счёт. Причину пишем в журнал.
+		if a.store != nil {
+			if p, _ := a.store.PendingByExtID(ctx, n.Object.ID); p != nil {
+				_ = a.store.ResolvePending(ctx, p.ID)
+			}
+		}
+		reason := ""
+		if client := a.ykClient(); client != nil {
+			if pay, err := client.GetPayment(ctx, n.Object.ID); err == nil {
+				reason = pay.CancellationDetails.Reason
+			}
+		}
+		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "canceled", "платёж отменён (причина: %s)", reason)
+		return true, nil
+	}
 	if n.Event != "payment.succeeded" {
 		a.log.Info("yookassa webhook: skipping event", "event", n.Event, "id", n.Object.ID)
 		return false, nil

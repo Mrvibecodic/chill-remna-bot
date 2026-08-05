@@ -11,6 +11,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/storage"
 )
 
 func (a *App) starsConfig() model.StarsConfig {
@@ -73,11 +74,32 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID)
 	if err != nil {
+		if errors.Is(err, storage.ErrDuplicateExtID) {
+			// Telegram доставил апдейт повторно (рестарт до сдвига offset и
+			// т.п.) — подписка уже выдана первой доставкой, пугать пользователя
+			// «не удалось активировать» нельзя.
+			a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "duplicate", "повторная доставка successful_payment — уже финализирован")
+			return
+		}
 		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "finalize_error", "%v", err)
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", err.Error()))
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// handleRefundedPayment — Telegram сообщил о возврате звёзд плательщику.
+// Доступ автоматически не отзываем (возврат мог сделать сам админ по
+// договорённости) — фиксируем в журнале и зовём админа.
+func (a *App) handleRefundedPayment(ctx context.Context, m *models.Message) {
+	rp := m.RefundedPayment
+	if rp == nil {
+		return
+	}
+	chatID := m.Chat.ID
+	a.payLog(ctx, model.PayMethodStars, rp.TelegramPaymentChargeID, chatID, "refunded", "возврат %d %s, payload=%s", rp.TotalAmount, rp.Currency, rp.InvoicePayload)
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "stars.admin_refunded", rp.TelegramPaymentChargeID, rp.TotalAmount, a.userLabelByID(ctx, chatID)))
 }
 
 func (a *App) showStarsAdmin(ctx context.Context, chatID int64) {

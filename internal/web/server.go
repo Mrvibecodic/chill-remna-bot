@@ -24,7 +24,7 @@ type Handlers interface {
 
 	HandleRemnawaveWebhook(ctx context.Context, signatureHex string, body []byte) (handled bool, err error)
 
-	HandlePlategaWebhook(ctx context.Context, body []byte) (handled bool, err error)
+	HandlePlategaWebhook(ctx context.Context, merchantID, secret string, body []byte) (handled bool, err error)
 
 	HandleHeleketWebhook(ctx context.Context, body []byte) (handled bool, err error)
 

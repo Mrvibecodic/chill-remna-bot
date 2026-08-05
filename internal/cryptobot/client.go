@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -65,6 +67,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Тело содержит имя ошибки (UNAUTHORIZED, PARAM_* и т.п.) — без него
+		// «HTTP 400» в журнале не даёт понять, что чинить.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if len(b) > 0 {
+			return fmt.Errorf("CryptoBot HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		}
 		return fmt.Errorf("CryptoBot HTTP %d", resp.StatusCode)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -73,15 +81,20 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	return nil
 }
 
-func (c *Client) CreateInvoice(ctx context.Context, amountRUB, acceptedAssets string, telegramID int64, months int) (*Invoice, error) {
+// CreateInvoice выставляет фиатный счёт. fiat — код валюты счёта (RUB, USD,
+// EUR…); пустое значение означает RUB.
+func (c *Client) CreateInvoice(ctx context.Context, amount, fiat, acceptedAssets string, telegramID int64, months int) (*Invoice, error) {
 	if acceptedAssets == "" {
 		acceptedAssets = "USDT"
+	}
+	if fiat == "" {
+		fiat = "RUB"
 	}
 
 	body := map[string]any{
 		"currency_type":   "fiat",
-		"fiat":            "RUB",
-		"amount":          amountRUB,
+		"fiat":            fiat,
+		"amount":          amount,
 		"accepted_assets": acceptedAssets,
 		"description":     fmt.Sprintf("VPN subscription %d mo", months),
 		"payload":         fmt.Sprintf("%d:%d", telegramID, months),

@@ -165,7 +165,7 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch inv.Status {
 	case "paid":
-		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Months, inv.Amount+" "+inv.Asset))
+		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)))
 	case "expired":
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
@@ -206,7 +206,7 @@ func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *mode
 	switch {
 	case heleket.Successful(inv.Status):
 		a.reconcileFinalize(ctx, st, pi, a.hlAmountLabel(inv))
-	case heleket.Final(inv.Status):
+	case inv.IsFinal || heleket.Final(inv.Status):
 		// Вебхук мог не дойти — ради этого реконсилятор и нужен, поэтому про
 		// недоплату и AML-заморозку админа зовём и отсюда.
 		switch inv.Status {

@@ -58,6 +58,11 @@ func (s *Server) handleCryptoBot(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	handled, err := s.handlers.HandleCryptoBotWebhook(ctx, sig, body)
+	if errors.Is(err, ErrUnauthorized) {
+		s.log.Warn("cryptobot webhook", "err", err)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if err != nil {
 		s.log.Error("cryptobot webhook", "err", err)
 		http.Error(w, "internal", http.StatusInternalServerError)
@@ -91,6 +96,8 @@ func (s *Server) handleRemnawave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlatega(w http.ResponseWriter, r *http.Request) {
+	merchantID := r.Header.Get("X-MerchantId")
+	secret := r.Header.Get("X-Secret")
 	body, err := readAllLimited(r, 256*1024)
 	if err != nil {
 		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
@@ -98,7 +105,12 @@ func (s *Server) handlePlatega(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	handled, err := s.handlers.HandlePlategaWebhook(ctx, body)
+	handled, err := s.handlers.HandlePlategaWebhook(ctx, merchantID, secret, body)
+	if errors.Is(err, ErrUnauthorized) {
+		s.log.Warn("platega webhook", "err", err)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if err != nil {
 		s.log.Error("platega webhook", "err", err)
 		http.Error(w, "internal", http.StatusInternalServerError)

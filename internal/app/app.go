@@ -87,7 +87,7 @@ type App struct {
 	// (thrLast) и разовые уведомления админу по счёту Heleket (hlNotified).
 	thrMu      sync.Mutex
 	thrLast    map[string]time.Time
-	hlNotified map[string]bool
+	hlNotified map[string]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -376,7 +376,21 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	case update.PreCheckoutQuery != nil:
 		a.handlePreCheckout(ctx, update.PreCheckoutQuery)
 	case update.Message != nil && update.Message.SuccessfulPayment != nil:
-		a.handleSuccessfulPayment(ctx, update.Message)
+		// Финализация ходит в панель (до трёх HTTP-вызовов по 15 секунд) и при
+		// одном воркере библиотеки блокировала бы очередь апдейтов — а на
+		// pre_checkout_query Telegram требует ответ за 10 секунд. Уводим в
+		// горутину: внутри finalizePurchase свои замки и идемпотентность.
+		msg := update.Message
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					a.log.Error("паника в финализации оплаты Stars", "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
+			a.handleSuccessfulPayment(a.bgContext(), msg)
+		}()
+	case update.Message != nil && update.Message.RefundedPayment != nil:
+		a.handleRefundedPayment(ctx, update.Message)
 	case update.Message != nil && update.Message.Text != "":
 		a.handleMessage(ctx, update.Message)
 	case update.Message != nil && len(update.Message.Photo) > 0:

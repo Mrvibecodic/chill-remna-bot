@@ -43,11 +43,27 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 }
 
 func tributePeriodToMonths(period string) int {
-	p := strings.ToLower(period)
+	p := strings.ToLower(strings.TrimSpace(period))
+	// Сначала точные значения официального enum Tribute (trial, onetime,
+	// weekly, monthly, quarterly, halfyearly, yearly): подстрочный разбор
+	// отдавал halfyearly ветке "year" и выдавал 12 месяцев вместо 6.
+	switch p {
+	case "yearly", "annual":
+		return 12
+	case "halfyearly":
+		return 6
+	case "quarterly":
+		return 3
+	case "monthly", "weekly", "trial", "onetime":
+		return 1
+	}
+	// Фолбэк для нестандартных строк — «half» строго до «year».
 	switch {
+	case strings.Contains(p, "half"):
+		return 6
 	case strings.Contains(p, "year") || strings.Contains(p, "annual") || strings.Contains(p, "12"):
 		return 12
-	case strings.Contains(p, "6") || strings.Contains(p, "half"):
+	case strings.Contains(p, "6"):
 		return 6
 	case strings.Contains(p, "3") || strings.Contains(p, "quart"):
 		return 3
@@ -112,10 +128,13 @@ func tributeAmount(minor int64, cur string) string {
 
 func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, body []byte) (bool, error) {
 	cfg := a.tributeCfg()
-	if !cfg.Enabled || cfg.APIKey == "" {
-		a.payLogThrottled(ctx, "trb-webhook-off", model.PayMethodTribute, "", 0, "error", "вебхук отброшен: Tribute выключен или не задан API-ключ")
-		a.log.Warn("tribute webhook: ignored — tribute disabled or api key not set")
-		return true, nil
+	if cfg.APIKey == "" {
+		// Без ключа подпись не проверить. Отвечаем 401, а не 200: Tribute будет
+		// ретраить доставку до суток, и настоящая оплата не потеряется, если
+		// админ успеет вписать ключ.
+		a.payLogThrottled(ctx, "trb-webhook-off", model.PayMethodTribute, "", 0, "error", "вебхук отброшен: не задан API-ключ Tribute — оплату нельзя верифицировать")
+		a.log.Warn("tribute webhook: ignored — api key not set")
+		return false, fmt.Errorf("tribute webhook: %w", web.ErrUnauthorized)
 	}
 	mac := hmac.New(sha256.New, []byte(cfg.APIKey))
 	mac.Write(body)
@@ -157,12 +176,21 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 		return true, nil
 	}
 	months := tributePeriodToMonths(wh.Payload.Period)
-	extID := fmt.Sprintf("trb_%d_%d", wh.Payload.SubscriptionID, wh.Payload.ExpiresAt.Unix())
+	// В ключе дедупликации обязателен telegram_user_id: subscription_id — это
+	// идентификатор тарифа автора, общий для всех подписчиков, и двое купивших
+	// один тариф в одну секунду иначе получили бы одинаковый ext_id (второму —
+	// «duplicate» без подписки при принятых деньгах).
+	extID := fmt.Sprintf("trb_%d_%d_%d", chatID, wh.Payload.SubscriptionID, wh.Payload.ExpiresAt.Unix())
 	paid := wh.Payload.Price
 	if paid == 0 {
 		paid = wh.Payload.Amount
 	}
 	amount := tributeAmount(paid, wh.Payload.Currency)
+	if !cfg.Enabled {
+		// Тумблер выключен, но деньги уже приняты Tribute — оплату обрабатываем,
+		// а факт отмечаем: терять её с ответом 200 нельзя.
+		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "warning", "Tribute выключен в админке, но оплата пришла — обрабатываем")
+	}
 	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s%s", wh.Name, wh.Payload.Period, amount, wh.who())
 	if a.store != nil {
 		if done, _ := a.store.PaymentByExtID(ctx, extID); done {

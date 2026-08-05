@@ -312,7 +312,8 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		if client == nil {
 			return "", "", errors.New(i18n.T(lang, "cb.not_configured"))
 		}
-		inv, e := client.CreateInvoice(ctx, rub, a.cbConfig().Asset, chatID, 0)
+		// Баланс ведётся в рублях, поэтому счёт на пополнение всегда в RUB.
+		inv, e := client.CreateInvoice(ctx, rub, "RUB", a.cbConfig().Asset, chatID, 0)
 		if e != nil {
 			a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "topup kopecks=%d: %v", k, e)
 			return "", "", errors.New(i18n.T(lang, "cb.fail", e.Error()))
@@ -359,7 +360,10 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 		return err
 	}
 	a.payLog(ctx, method, extID, chatID, "topup_credited", "kopecks=%d amount=%s", kopecks, amount)
-	a.fiscalize(float64(kopecks)/100, "Пополнение баланса")
+	// Чек «Мой налог» — только по платежам ЮKassa.
+	if method == model.PayMethodYooKassa {
+		a.fiscalize(float64(kopecks)/100, "Пополнение баланса")
+	}
 	lang := a.lang(chatID)
 	a.notifyKB(ctx, chatID, i18n.T(lang, "topup.done", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))),
 		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}})

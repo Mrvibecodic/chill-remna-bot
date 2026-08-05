@@ -144,7 +144,15 @@ func (a *App) creditReferralPercent(ctx context.Context, telegramID int64, amoun
 	if u == nil || u.ReferredBy == 0 {
 		return
 	}
-	kopecks := int64(parseAmountRub(amount)*100 + 0.5)
+	// Баланс рефералки ведётся в рублях: валютные платежи (EUR/USD у Tribute,
+	// «⭐» у Stars) в рублёвый процент не конвертируем — иначе 10.00 EUR
+	// зачислялись бы как процент от 10 рублей.
+	rub, isRub := parseAmountRubOnly(amount)
+	if !isRub {
+		a.log.Info("referral percent skipped: non-RUB payment", "tg_id", telegramID, "amount", amount)
+		return
+	}
+	kopecks := int64(rub*100 + 0.5)
 	earn := kopecks * int64(cfg.Percent) / 100
 	if earn <= 0 {
 		return

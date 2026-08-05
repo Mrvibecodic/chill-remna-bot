@@ -1418,7 +1418,7 @@ func TestYooKassaFlow(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"pay_42","status":"pending","confirmation":{"confirmation_url":"https://yoo/p/42"}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":"pay_42","status":"succeeded","amount":{"value":"150.00","currency":"RUB"},"metadata":{"months":"1","telegram_id":"555"}}`))
+		_, _ = w.Write([]byte(`{"id":"pay_42","status":"succeeded","paid":true,"amount":{"value":"150.00","currency":"RUB"},"metadata":{"months":"1","telegram_id":"555"}}`))
 	}))
 	defer yk.Close()
 	oldBase := yookassa.BaseURL
