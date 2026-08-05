@@ -14,6 +14,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/web"
 )
 
 func (a *App) tributeCfg() model.TributeConfig {
@@ -66,12 +67,39 @@ type tributeWebhook struct {
 		Period         string `json:"period"`
 		// Price — сколько заплатил клиент, Amount — сколько осталось после
 		// комиссии Tribute. Обе суммы в минимальных единицах валюты.
-		Price          int64     `json:"price"`
-		Amount         int64     `json:"amount"`
-		Currency       string    `json:"currency"`
-		TelegramUserID int64     `json:"telegram_user_id"`
-		ExpiresAt      time.Time `json:"expires_at"`
+		Price    int64  `json:"price"`
+		Amount   int64  `json:"amount"`
+		Currency string `json:"currency"`
+		// Type — regular/gift/trial. У gift и trial оплата нулевая, а их
+		// продление Tribute присылает уже как regular.
+		Type string `json:"type"`
+		// TrbUserID — ID пользователя в Tribute («T-31326» — вход через
+		// Telegram, «W-31326» — через почту). Пишем его в журнал, чтобы платёж
+		// нашёлся в кабинете Tribute; для выдачи подписки он не нужен.
+		TrbUserID        string    `json:"trb_user_id"`
+		TelegramUserID   int64     `json:"telegram_user_id"`
+		TelegramUsername string    `json:"telegram_username"`
+		ExpiresAt        time.Time `json:"expires_at"`
 	} `json:"payload"`
+}
+
+// who — приписка к журналу, по которой платёж сопоставляется с кабинетом
+// Tribute, даже если Telegram ID не пришёл.
+func (wh tributeWebhook) who() string {
+	parts := make([]string, 0, 3)
+	if wh.Payload.TrbUserID != "" {
+		parts = append(parts, "trb="+wh.Payload.TrbUserID)
+	}
+	if wh.Payload.TelegramUsername != "" {
+		parts = append(parts, "@"+wh.Payload.TelegramUsername)
+	}
+	if wh.Payload.Type != "" {
+		parts = append(parts, "тип="+wh.Payload.Type)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // tributeAmount печатает сумму так же, как остальные способы оплаты. Tribute
@@ -95,20 +123,36 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	if err != nil || !hmac.Equal(got, mac.Sum(nil)) {
 		a.payLogThrottled(ctx, "trb-webhook-sign", model.PayMethodTribute, "", 0, "sign_error", "подпись вебхука не сошлась (проверьте API-ключ Tribute)")
 		a.log.Warn("tribute webhook: bad signature")
-		return false, fmt.Errorf("tribute webhook: invalid signature")
+		// web отдаёт на это 401: с 500 Tribute сутки долбил бы ретраями чужой
+		// мусор и запросы с неверным ключом.
+		return false, fmt.Errorf("tribute webhook: %w", web.ErrUnauthorized)
 	}
 	var wh tributeWebhook
 	if err := json.Unmarshal(body, &wh); err != nil {
 		a.payLogThrottled(ctx, "trb-webhook-json", model.PayMethodTribute, "", 0, "error", "тело вебхука не разобрано: %v", err)
 		return false, fmt.Errorf("tribute webhook: bad json: %w", err)
 	}
-	if wh.Name != "new_subscription" && wh.Name != "renewed_subscription" {
+	chatID := wh.Payload.TelegramUserID
+	switch wh.Name {
+	case "new_subscription", "renewed_subscription":
+	case "":
+		// Кнопка «Тест» в кабинете Tribute шлёт событие без имени. Отмечаем его
+		// в журнале: это единственное подтверждение, что адрес и ключ сошлись.
+		a.payLog(ctx, model.PayMethodTribute, "", 0, "test", "тестовый вебхук принят, подпись верна")
+		return true, nil
+	case "cancelled_subscription":
+		// Доступ не трогаем: в Tribute отмена выключает автопродление, а
+		// оплаченный период дорабатывает до expires_at.
+		a.payLog(ctx, model.PayMethodTribute, "", chatID, "cancelled",
+			"подписка отменена в Tribute: продления не будет, оплаченный период до %s%s",
+			wh.Payload.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), wh.who())
+		return true, nil
+	default:
 		a.log.Info("tribute webhook: ignored", "event", wh.Name)
 		return true, nil
 	}
-	chatID := wh.Payload.TelegramUserID
 	if chatID == 0 {
-		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "в вебхуке нет telegram_user_id — получатель неизвестен (событие %s)", wh.Name)
+		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "в вебхуке нет telegram_user_id — получатель неизвестен (событие %s)%s", wh.Name, wh.who())
 		a.log.Warn("tribute webhook: no telegram_user_id")
 		return true, nil
 	}
@@ -119,7 +163,7 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 		paid = wh.Payload.Amount
 	}
 	amount := tributeAmount(paid, wh.Payload.Currency)
-	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s", wh.Name, wh.Payload.Period, amount)
+	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s%s", wh.Name, wh.Payload.Period, amount, wh.who())
 	if a.store != nil {
 		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
 			a.payLog(ctx, model.PayMethodTribute, extID, chatID, "duplicate", "уже финализирован, вебхук пропущен")

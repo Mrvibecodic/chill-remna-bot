@@ -10,6 +10,11 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// ErrUnauthorized — вебхук не прошёл проверку подписи. Обработчик отдаёт на
+// него 401, а не 500: платёжки (в частности Tribute) сутки повторяют доставку
+// при 5xx, а ретраить заведомо чужой запрос незачем.
+var ErrUnauthorized = errors.New("webhook: unauthorized")
+
 type Handlers interface {
 	Healthy(ctx context.Context) error
 

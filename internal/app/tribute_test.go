@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 
 	"remnabot/internal/model"
+	"remnabot/internal/web"
 )
 
 func TestTributeAmount(t *testing.T) {
@@ -35,32 +37,76 @@ func TestTributeAmount(t *testing.T) {
 	}
 }
 
-// Вебхук без панели дальше finalize не уходит, но до этого момента сумма уже
-// посчитана — проверяем, что подпись сходится и событие принято.
-func TestTributeWebhook_BadSignature(t *testing.T) {
-	a := &App{log: slog.Default(), botCfg: &model.BotConfig{
+func tributeApp() *App {
+	return &App{log: slog.Default(), botCfg: &model.BotConfig{
 		Installed: true, Language: "ru",
 		Tribute: model.TributeConfig{Enabled: true, APIKey: "key"},
 	}}
+}
+
+func tributeSigned(t *testing.T, a *App, payload map[string]any) (bool, error) {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte("key"))
+	mac.Write(body)
+	return a.HandleTributeWebhook(context.Background(), hex.EncodeToString(mac.Sum(nil)), body)
+}
+
+// Кривая подпись должна давать 401, а не 500: на 5xx Tribute сутки повторяет
+// доставку, а чужой запрос ретраить незачем.
+func TestTributeWebhook_BadSignatureUnauthorized(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"name": "new_subscription"})
-	if handled, err := a.HandleTributeWebhook(context.Background(), "deadbeef", body); err == nil || handled {
-		t.Errorf("ожидался отказ по подписи, получено handled=%v err=%v", handled, err)
+	handled, err := tributeApp().HandleTributeWebhook(context.Background(), "deadbeef", body)
+	if handled {
+		t.Errorf("ожидалось handled=false")
+	}
+	if !errors.Is(err, web.ErrUnauthorized) {
+		t.Errorf("ожидалась web.ErrUnauthorized, получено %v", err)
+	}
+}
+
+// Кнопка «Тест» в кабинете Tribute шлёт событие без имени.
+func TestTributeWebhook_TestEvent(t *testing.T) {
+	handled, err := tributeSigned(t, tributeApp(), map[string]any{"name": ""})
+	if err != nil || !handled {
+		t.Errorf("тестовый вебхук должен приниматься, получено handled=%v err=%v", handled, err)
+	}
+}
+
+// Отмена в Tribute выключает автопродление, но оплаченный период дорабатывает:
+// доступ не трогаем, событие только фиксируем.
+func TestTributeWebhook_Cancelled(t *testing.T) {
+	handled, err := tributeSigned(t, tributeApp(), map[string]any{
+		"name": "cancelled_subscription",
+		"payload": map[string]any{
+			"telegram_user_id": 777, "price": 1000, "currency": "rub",
+			"trb_user_id": "T-31326", "telegram_username": "durov", "type": "regular",
+			"expires_at": "2026-09-01T00:00:00Z",
+		},
+	})
+	if err != nil || !handled {
+		t.Errorf("ожидалось handled=true без ошибки, получено handled=%v err=%v", handled, err)
 	}
 }
 
 func TestTributeWebhook_IgnoresOtherEvents(t *testing.T) {
-	a := &App{log: slog.Default(), botCfg: &model.BotConfig{
-		Installed: true, Language: "ru",
-		Tribute: model.TributeConfig{Enabled: true, APIKey: "key"},
-	}}
-	body, _ := json.Marshal(map[string]any{
-		"name":    "cancelled_subscription",
-		"payload": map[string]any{"telegram_user_id": 777, "price": 1000, "currency": "rub"},
+	handled, err := tributeSigned(t, tributeApp(), map[string]any{
+		"name":    "new_donation",
+		"payload": map[string]any{"telegram_user_id": 777, "amount": 1000, "currency": "rub"},
 	})
-	mac := hmac.New(sha256.New, []byte("key"))
-	mac.Write(body)
-	handled, err := a.HandleTributeWebhook(context.Background(), hex.EncodeToString(mac.Sum(nil)), body)
 	if err != nil || !handled {
 		t.Errorf("ожидалось handled=true без ошибки, получено handled=%v err=%v", handled, err)
+	}
+}
+
+func TestTributeWho(t *testing.T) {
+	var wh tributeWebhook
+	if got := wh.who(); got != "" {
+		t.Errorf("пустая нагрузка не должна давать приписку, получено %q", got)
+	}
+	wh.Payload.TrbUserID = "W-15408"
+	wh.Payload.Type = "trial"
+	if want := " (trb=W-15408, тип=trial)"; wh.who() != want {
+		t.Errorf("who() = %q, ожидалось %q", wh.who(), want)
 	}
 }

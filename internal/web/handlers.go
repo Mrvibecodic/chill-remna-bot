@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -139,6 +140,11 @@ func (s *Server) handleTribute(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	handled, err := s.handlers.HandleTributeWebhook(ctx, sig, body)
+	if errors.Is(err, ErrUnauthorized) {
+		s.log.Warn("tribute webhook", "err", err)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if err != nil {
 		s.log.Error("tribute webhook", "err", err)
 		http.Error(w, "internal", http.StatusInternalServerError)
