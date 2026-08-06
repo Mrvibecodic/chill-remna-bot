@@ -17,8 +17,21 @@ import (
 )
 
 type rwWebhookEvent struct {
+	Scope string          `json:"scope"`
 	Event string          `json:"event"`
 	Data  json.RawMessage `json:"data"`
+	// Meta держим сырым: типизированный разбор ронял бы весь конверт (а с ним
+	// и все прочие события) на любом неожиданном типе поля.
+	Meta json.RawMessage `json:"meta"`
+}
+
+// meta приходит рядом с data, а не внутри неё (см. RemnawaveWebhookUserEvents).
+// Expiration — интервал в ЧАСАХ со знаком: отрицательный = столько часов до
+// истечения, положительный = столько часов после. Задаётся на панели в
+// EXPIRATION_NOTIFICATIONS (диапазон -744..744).
+type rwWebhookMeta struct {
+	Expiration             *int `json:"expiration"`
+	NotConnectedAfterHours *int `json:"notConnectedAfterHours"`
 }
 
 // rwUserPayload is the subset of the panel's user object the bot needs. Panel
@@ -58,7 +71,7 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	a.mu.Lock()
 	secret := ""
 	if a.botCfg != nil {
-		secret = a.botCfg.Webhook.RemnawaveSecret
+		secret = strings.TrimSpace(a.botCfg.Webhook.RemnawaveSecret)
 	}
 	a.mu.Unlock()
 	if err := verifyRemnawaveSignature(signature, secret, body); err != nil {
@@ -77,9 +90,24 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	_ = json.Unmarshal(ev.Data, &u)
 
 	switch {
+	case ev.Event == "user.expiration":
+		// Панель с 2.8.20: одно событие вместо user.expires_in_*/user.expired_*_ago,
+		// конкретный интервал лежит в meta.expiration.
+		hours := 0
+		var meta rwWebhookMeta
+		if len(ev.Meta) > 0 && json.Unmarshal(ev.Meta, &meta) == nil && meta.Expiration != nil {
+			hours = *meta.Expiration
+		}
+		if hours > 0 {
+			// Подписка истекла hours часов назад — напоминание продлить.
+			a.pushExpired(ctx, u)
+			return true, nil
+		}
+		a.pushExpiryWarning(ctx, u, ev.Event, -hours)
+		return true, nil
 	case strings.HasPrefix(ev.Event, "user.expires_in"):
-
-		a.pushExpiryWarning(ctx, u, ev.Event)
+		// Панели 2.7.0–2.8.19.
+		a.pushExpiryWarning(ctx, u, ev.Event, expiresInHours(ev.Event))
 		return true, nil
 	case ev.Event == "user.expired":
 		a.pushExpired(ctx, u)
@@ -96,14 +124,17 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	}
 }
 
-func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event string) {
+func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event string, hours int) {
 	if u.TelegramID == 0 {
 		return
 	}
 	lang := a.lang(u.TelegramID)
 	text := i18n.T(lang, "rw.warn_expiring")
-	if h := expiresInHours(event); h > 0 {
-		text = i18n.T(lang, "rw.warn_expiring_hours", h)
+	switch {
+	case hours >= 48 && hours%24 == 0:
+		text = i18n.T(lang, "rw.warn_expiring_days", hours/24)
+	case hours > 0:
+		text = i18n.T(lang, "rw.warn_expiring_hours", hours)
 	}
 	a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
