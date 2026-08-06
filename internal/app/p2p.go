@@ -1079,6 +1079,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.priceMonths = 0
 		_ = a.saveBotConfig(ctx)
 		a.showPlanSquads(ctx, chatID, mo)
+	case "torrent_strike":
+		a.setTorrentStrikeLimit(ctx, chatID, text)
 	case "trial_q_hwid":
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
 		a.setTrialHWID(n)

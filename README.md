@@ -103,6 +103,7 @@
    На панели **3.x** у токенов есть скоупы. При обновлении панели они мигрируют сами, но если создаёте токен заново — боту нужны:
    `users:` list, stream, by-username, create, update, delete, reset-traffic, revoke-subscription; `hwid-user-devices:` list-by-user, delete-all; `internal-squads:list`, `external-squads:list`, `hosts:list`, `system:stats`.
    Без `users:stream` бот не сможет найти пользователя по Telegram ID.
+   Если пользуетесь торрент-блокером, добавьте ещё `node-plugins:` list, get, update, executor — без них кнопки «Снять блокировку IP» и «В исключения блокера» ответят 403.
 
 ---
 

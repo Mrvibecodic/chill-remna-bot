@@ -141,6 +141,14 @@ type Storage interface {
 	// блокировки: срок вышел, уведомление не отправлено, есть telegram_id.
 	DueTorrentUnblocks(ctx context.Context, now string) ([]model.TorrentReport, error)
 	MarkTorrentUnblockNotified(ctx context.Context, id int64) error
+	// PendingTorrentUnblocksByIP — ещё не отработанные записи по адресу:
+	// нужны, когда админ снимает блокировку раньше срока вручную.
+	PendingTorrentUnblocksByIP(ctx context.Context, ip string) ([]model.TorrentReport, error)
+	// SetTorrentStrike/TorrentStrikeAt — момент последней автоблокировки по
+	// торрентам. С него начинается новый отсчёт нарушений: иначе вернувшего
+	// доступ пользователя выключало бы снова до конца окна повторов.
+	SetTorrentStrike(ctx context.Context, telegramID int64, at string) error
+	TorrentStrikeAt(ctx context.Context, telegramID int64) (string, error)
 	PurgeTorrentReports(ctx context.Context, before string) error
 
 	Kind() string
@@ -947,10 +955,50 @@ func (b *base) DueTorrentUnblocks(ctx context.Context, now string) ([]model.Torr
 	return out, rows.Err()
 }
 
+func (b *base) PendingTorrentUnblocksByIP(ctx context.Context, ip string) ([]model.TorrentReport, error) {
+	if strings.TrimSpace(ip) == "" {
+		return nil, nil
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+torrentReportCols+" FROM torrent_reports "+
+			"WHERE unblock_notified = 0 AND ip = "+b.ph(1)+" ORDER BY id ASC LIMIT 500", ip)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.TorrentReport
+	for rows.Next() {
+		r, err := b.scanTorrentReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (b *base) MarkTorrentUnblockNotified(ctx context.Context, id int64) error {
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE torrent_reports SET unblock_notified = 1 WHERE id = "+b.ph(1), id)
 	return err
+}
+
+func (b *base) SetTorrentStrike(ctx context.Context, telegramID int64, at string) error {
+	_, err := b.db.ExecContext(ctx,
+		"INSERT INTO torrent_strikes (tg_id, struck_at) VALUES ("+b.ph(1)+", "+b.ph(2)+") "+
+			"ON CONFLICT (tg_id) DO UPDATE SET struck_at = excluded.struck_at",
+		telegramID, at)
+	return err
+}
+
+func (b *base) TorrentStrikeAt(ctx context.Context, telegramID int64) (string, error) {
+	var at string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT struck_at FROM torrent_strikes WHERE tg_id = "+b.ph(1), telegramID).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return at, err
 }
 
 func (b *base) PurgeTorrentReports(ctx context.Context, before string) error {

@@ -122,6 +122,13 @@ func (a *App) onTorrentAdmin(ctx context.Context, chatID int64, val string) {
 	case "page":
 		page, _ := strconv.Atoi(arg)
 		a.showTorrentLog(ctx, chatID, page)
+	case "unb":
+		a.torrentUnblockIP(ctx, chatID, arg)
+	case "ign":
+		a.torrentIgnoreUser(ctx, chatID, arg)
+	case "strike":
+		a.getUI(chatID).adminInput = "torrent_strike"
+		a.askInput(ctx, chatID, i18n.T(lang, "toru.ask_strike"), "menu:webhooks")
 	case "text":
 		a.showTorrentUnblockAdmin(ctx, chatID)
 	case "edit":
@@ -160,4 +167,22 @@ func (a *App) setTorrentUnblockText(ctx context.Context, chatID int64, m *models
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 	a.showTorrentUnblockAdmin(ctx, chatID)
+}
+
+// setTorrentStrikeLimit сохраняет порог автоблокировки: 0 (и любой мусор) —
+// политика выключена.
+func (a *App) setTorrentStrikeLimit(ctx context.Context, chatID int64, text string) {
+	n, _ := strconv.Atoi(strings.TrimSpace(text))
+	if n < 0 {
+		n = 0
+	}
+	a.getUI(chatID).adminInput = ""
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.NormalizeTorrent()
+		a.botCfg.Torrent.StrikeLimit = n
+	}
+	a.mu.Unlock()
+	_ = a.saveBotConfig(ctx)
+	a.showWebhooksAdmin(ctx, chatID)
 }

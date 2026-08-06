@@ -412,6 +412,10 @@ type TorrentConfig struct {
 	UnblockText     string          `json:"unblock_text"`
 	UnblockEntities json.RawMessage `json:"unblock_entities"`
 	Init            bool            `json:"init"`
+	// StrikeLimit — сколько нарушений за 30 дней автоматически отключают
+	// подписку. 0 — политика выключена (значение по умолчанию: отключать
+	// платящего человека без ведома владельца бот сам не должен).
+	StrikeLimit int `json:"strike_limit"`
 }
 
 // NormalizeTorrent включает оба уведомления по умолчанию для конфигов,

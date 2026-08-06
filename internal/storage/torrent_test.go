@@ -79,3 +79,52 @@ func TestTorrentReports_Roundtrip(t *testing.T) {
 		}
 	})
 }
+
+// Выборка по адресу и отметка автоблокировки — реальный SQL на обеих СУБД.
+func TestTorrentUnblocksByIPAndStrikes(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		open := &model.TorrentReport{TelegramID: 42, IP: "203.0.113.7",
+			WillUnblockAt: now.Add(time.Hour).Format(time.RFC3339)}
+		closed := &model.TorrentReport{TelegramID: 42, IP: "203.0.113.7",
+			WillUnblockAt: now.Add(time.Hour).Format(time.RFC3339), UnblockNotified: true}
+		other := &model.TorrentReport{TelegramID: 43, IP: "198.51.100.9",
+			WillUnblockAt: now.Add(time.Hour).Format(time.RFC3339)}
+		for _, r := range []*model.TorrentReport{open, closed, other} {
+			if err := st.AddTorrentReport(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		got, err := st.PendingTorrentUnblocksByIP(ctx, "203.0.113.7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].ID != open.ID {
+			t.Fatalf("ожидалась одна открытая запись по адресу, получено %+v", got)
+		}
+		if empty, err := st.PendingTorrentUnblocksByIP(ctx, ""); err != nil || len(empty) != 0 {
+			t.Fatalf("пустой адрес не должен ничего выбирать: %+v err=%v", empty, err)
+		}
+
+		if at, err := st.TorrentStrikeAt(ctx, 42); err != nil || at != "" {
+			t.Fatalf("без отметки ожидалась пустая строка: %q err=%v", at, err)
+		}
+		first := now.Format(time.RFC3339)
+		if err := st.SetTorrentStrike(ctx, 42, first); err != nil {
+			t.Fatal(err)
+		}
+		second := now.Add(time.Hour).Format(time.RFC3339)
+		if err := st.SetTorrentStrike(ctx, 42, second); err != nil {
+			t.Fatalf("повторная отметка должна перезаписывать: %v", err)
+		}
+		if at, _ := st.TorrentStrikeAt(ctx, 42); at != second {
+			t.Fatalf("отметка не обновилась: %q", at)
+		}
+		if at, _ := st.TorrentStrikeAt(ctx, 43); at != "" {
+			t.Fatalf("чужая отметка: %q", at)
+		}
+	})
+}

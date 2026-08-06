@@ -103,6 +103,7 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "wh:tadm"),
 			btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "wh:tusr")},
 		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
+		{btn(i18n.T(lang, "wh.btn_tor_strike", strikeLabel(lang, tc.StrikeLimit)), "torj:strike")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -270,4 +271,12 @@ func (a *App) cleanupBotPortMsg(ctx context.Context) {
 	if chatID != 0 {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "wh.port_applied", a.webhookListenPortNum()))
 	}
+}
+
+// strikeLabel — подпись порога автоблокировки на кнопке: число или «выкл».
+func strikeLabel(lang string, n int) string {
+	if n <= 0 {
+		return i18n.T(lang, "wh.tor_strike_off")
+	}
+	return strconv.Itoa(n)
 }

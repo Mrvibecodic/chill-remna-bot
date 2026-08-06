@@ -31,10 +31,43 @@ type fakeMsg struct {
 	invoices []string
 	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
 	downloads map[string][]byte
+	// cbData — callback_data всех кнопок, ушедших с сообщениями.
+	cbData []string
+}
+
+// allCallbackData возвращает callback_data всех отправленных кнопок.
+func (f *fakeMsg) allCallbackData() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.cbData))
+	copy(out, f.cbData)
+	return out
+}
+
+func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, row := range rows {
+		for _, b := range row {
+			if b.CallbackData != "" {
+				f.cbData = append(f.cbData, b.CallbackData)
+			}
+		}
+	}
+}
+
+func hasCB(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
-func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, _ [][]models.InlineKeyboardButton) int {
+func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
+	f.recordKB(rows)
 	return f.add(text)
 }
 func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
@@ -138,6 +171,7 @@ type fakeStore struct {
 	webUsers  map[string]*model.WebUser
 	paylogs   []model.PayLogEntry
 	torrents  []model.TorrentReport
+	strikes   map[int64]string
 	wlIDs     map[int64]bool
 	invites   map[string]*model.Invite
 	autopays  map[int64]*model.AutoPay
@@ -373,6 +407,16 @@ func (s *fakeStore) DueTorrentUnblocks(_ context.Context, now string) ([]model.T
 	return out, nil
 }
 
+func (s *fakeStore) PendingTorrentUnblocksByIP(_ context.Context, ip string) ([]model.TorrentReport, error) {
+	var out []model.TorrentReport
+	for _, r := range s.torrents {
+		if !r.UnblockNotified && r.IP == ip {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeStore) MarkTorrentUnblockNotified(_ context.Context, id int64) error {
 	for i := range s.torrents {
 		if s.torrents[i].ID == id {
@@ -380,6 +424,18 @@ func (s *fakeStore) MarkTorrentUnblockNotified(_ context.Context, id int64) erro
 		}
 	}
 	return nil
+}
+
+func (s *fakeStore) SetTorrentStrike(_ context.Context, telegramID int64, at string) error {
+	if s.strikes == nil {
+		s.strikes = map[int64]string{}
+	}
+	s.strikes[telegramID] = at
+	return nil
+}
+
+func (s *fakeStore) TorrentStrikeAt(_ context.Context, telegramID int64) (string, error) {
+	return s.strikes[telegramID], nil
 }
 
 func (s *fakeStore) PurgeTorrentReports(_ context.Context, _ string) error { return nil }
