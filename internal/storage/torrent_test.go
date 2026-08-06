@@ -128,3 +128,75 @@ func TestTorrentUnblocksByIPAndStrikes(t *testing.T) {
 		}
 	})
 }
+
+// Журнал по одному нарушителю: реальный SQL, обе СУБД, пагинация.
+func TestUserTorrentReports(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for i := 0; i < 3; i++ {
+			if err := st.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 42, Username: "u42", IP: "203.0.113.7"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 43, Username: "u43"}); err != nil {
+			t.Fatal(err)
+		}
+		// Аккаунт без Telegram — отбирается по username панели.
+		if err := st.AddTorrentReport(ctx, &model.TorrentReport{Username: "noTg"}); err != nil {
+			t.Fatal(err)
+		}
+
+		got, total, err := st.UserTorrentReports(ctx, 42, "", 2, 0)
+		if err != nil || total != 3 || len(got) != 2 {
+			t.Fatalf("total=%d got=%d err=%v", total, len(got), err)
+		}
+		if got[0].ID < got[1].ID {
+			t.Fatalf("новые записи должны идти первыми: %d, %d", got[0].ID, got[1].ID)
+		}
+		if page2, _, _ := st.UserTorrentReports(ctx, 42, "", 2, 2); len(page2) != 1 {
+			t.Fatalf("вторая страница: %d", len(page2))
+		}
+		if _, total, _ := st.UserTorrentReports(ctx, 0, "noTg", 10, 0); total != 1 {
+			t.Fatalf("отбор по username панели: total=%d", total)
+		}
+		if _, total, _ := st.UserTorrentReports(ctx, 999, "", 10, 0); total != 0 {
+			t.Fatalf("у постороннего не должно быть записей: %d", total)
+		}
+	})
+}
+
+// Регрессия: telegram_id живого аккаунта больше 2^31. Сравнение плейсхолдера
+// с литералом в SQL заставляло Postgres выводить для параметра int4, и запрос
+// падал с ошибкой кодирования — то есть счётчик нарушений и журнал по
+// пользователю на Postgres не работали вовсе.
+func TestTorrentReports_BigTelegramID(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const big = int64(7123456789) // > 2^31
+
+		if err := st.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: big, Username: "big", IP: "203.0.113.7"}); err != nil {
+			t.Fatal(err)
+		}
+		n, err := st.CountTorrentReports(ctx, big, "", "")
+		if err != nil || n != 1 {
+			t.Fatalf("счётчик за всё время: n=%d err=%v", n, err)
+		}
+		since := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+		if n, err := st.CountTorrentReports(ctx, big, "", since); err != nil || n != 1 {
+			t.Fatalf("счётчик за окно: n=%d err=%v", n, err)
+		}
+		reps, total, err := st.UserTorrentReports(ctx, big, "", 10, 0)
+		if err != nil || total != 1 || len(reps) != 1 {
+			t.Fatalf("журнал по пользователю: total=%d got=%d err=%v", total, len(reps), err)
+		}
+		if err := st.SetTorrentStrike(ctx, big, since); err != nil {
+			t.Fatalf("отметка автоблокировки: %v", err)
+		}
+		if at, err := st.TorrentStrikeAt(ctx, big); err != nil || at != since {
+			t.Fatalf("отметка не прочиталась: %q err=%v", at, err)
+		}
+		if all, err := st.CountTorrentReportsAll(ctx, ""); err != nil || all < 1 {
+			t.Fatalf("общий счётчик: %d err=%v", all, err)
+		}
+	})
+}

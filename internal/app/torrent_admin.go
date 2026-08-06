@@ -16,6 +16,73 @@ import (
 
 const torrentLogPageSize = 10
 
+// showTorrentAdmin — раздел «Торренты» внутри «Пользователей»: это управление
+// нарушителями, а не транспортом, поэтому в «Вебхуках» ему делать нечего —
+// там остались только адрес, порт, домен и секрет.
+func (a *App) showTorrentAdmin(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	tc := a.torrentCfg()
+
+	total, last30 := 0, 0
+	if a.store != nil {
+		total, _ = a.store.CountTorrentReportsAll(ctx, "")
+		last30, _ = a.store.CountTorrentReportsAll(ctx,
+			time.Now().UTC().Add(-torrentRepeatWindow).Format(time.RFC3339))
+	}
+	mark := func(b bool) string {
+		if b {
+			return "✅"
+		}
+		return "⬜"
+	}
+	rows := [][]models.InlineKeyboardButton{
+		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "torj:tadm"),
+			btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "torj:tusr")},
+		{btn(i18n.T(lang, "wh.btn_tor_strike", strikeLabel(lang, tc.StrikeLimit)), "torj:strike")},
+		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
+		{btn(i18n.T(lang, "btn.back"), "menu:users"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+	}
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "torj.home", total, last30), rows)
+}
+
+// showUserTorrents — нарушения одного человека: из карточки пользователя.
+func (a *App) showUserTorrents(ctx context.Context, chatID, uid int64, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	id := strconv.FormatInt(uid, 10)
+	reports, total, err := a.store.UserTorrentReports(ctx, uid, "", torrentLogPageSize, page*torrentLogPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	back := []models.InlineKeyboardButton{
+		btn(i18n.T(lang, "btn.back"), "usr:view:"+id), btn(i18n.T(lang, "btn.home"), "menu:home"),
+	}
+	if total == 0 {
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "torj.user_empty"),
+			[][]models.InlineKeyboardButton{back})
+		return
+	}
+	pages := (total + torrentLogPageSize - 1) / torrentLogPageSize
+
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "torj.user_title", a.userLabelByID(ctx, uid), total))
+	for _, r := range reports {
+		sb.WriteString("\n\n" + torrentLogLine(ctx, a, &r, 0, lang))
+	}
+	var rows [][]models.InlineKeyboardButton
+	if nav := paginationRow("torj:up:"+id+":", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+	rows = append(rows, back)
+	a.sendUsrKB(ctx, chatID, sb.String(), rows)
+}
+
 // showTorrentLog — журнал торрент-блокера: прошлые отчёты с пагинацией и
 // счётчиком повторов «×N за 30 дней» по каждому нарушителю.
 func (a *App) showTorrentLog(ctx context.Context, chatID int64, page int) {
@@ -32,8 +99,8 @@ func (a *App) showTorrentLog(ctx context.Context, chatID int64, page int) {
 		return
 	}
 	if total == 0 {
-		a.sendSysKB(ctx, chatID, i18n.T(lang, "torj.empty"),
-			[][]models.InlineKeyboardButton{navBack(lang, "menu:webhooks")})
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "torj.empty"),
+			[][]models.InlineKeyboardButton{navBack(lang, "torj:home")})
 		return
 	}
 	pages := (total + torrentLogPageSize - 1) / torrentLogPageSize
@@ -59,8 +126,8 @@ func (a *App) showTorrentLog(ctx context.Context, chatID int64, page int) {
 	if nav := paginationRow("torj:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, navBack(lang, "menu:webhooks"))
-	a.sendSysKB(ctx, chatID, sb.String(), rows)
+	rows = append(rows, navBack(lang, "torj:home"))
+	a.sendUsrKB(ctx, chatID, sb.String(), rows)
 }
 
 // torrentLogLine — одна строка журнала: дата · кто ×N · IP · нода · срок.
@@ -109,8 +176,8 @@ func (a *App) showTorrentUnblockAdmin(ctx context.Context, chatID int64) {
 	if custom {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "toru.btn_reset"), "torj:reset")})
 	}
-	rows = append(rows, navBack(lang, "menu:webhooks"))
-	a.sendSysKB(ctx, chatID, i18n.T(lang, "toru.title", src, current), rows)
+	rows = append(rows, navBack(lang, "torj:home"))
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "toru.title", src, current), rows)
 }
 
 func (a *App) onTorrentAdmin(ctx context.Context, chatID int64, val string) {
@@ -126,9 +193,27 @@ func (a *App) onTorrentAdmin(ctx context.Context, chatID int64, val string) {
 		a.torrentUnblockIP(ctx, chatID, arg)
 	case "ign":
 		a.torrentIgnoreUser(ctx, chatID, arg)
+	case "home":
+		a.showTorrentAdmin(ctx, chatID)
+	case "tadm":
+		a.toggleTorrentNotify(true)
+		_ = a.saveBotConfig(ctx)
+		a.showTorrentAdmin(ctx, chatID)
+	case "tusr":
+		a.toggleTorrentNotify(false)
+		_ = a.saveBotConfig(ctx)
+		a.showTorrentAdmin(ctx, chatID)
+	case "u":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.showUserTorrents(ctx, chatID, uid, 0)
+	case "up":
+		idStr, pageStr, _ := strings.Cut(arg, ":")
+		uid, _ := strconv.ParseInt(idStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		a.showUserTorrents(ctx, chatID, uid, page)
 	case "strike":
 		a.getUI(chatID).adminInput = "torrent_strike"
-		a.askInput(ctx, chatID, i18n.T(lang, "toru.ask_strike"), "menu:webhooks")
+		a.askInput(ctx, chatID, i18n.T(lang, "toru.ask_strike"), "torj:home")
 	case "text":
 		a.showTorrentUnblockAdmin(ctx, chatID)
 	case "edit":
@@ -184,5 +269,5 @@ func (a *App) setTorrentStrikeLimit(ctx context.Context, chatID int64, text stri
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.showWebhooksAdmin(ctx, chatID)
+	a.showTorrentAdmin(ctx, chatID)
 }

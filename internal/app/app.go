@@ -1054,6 +1054,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onUsers(ctx, chatID, val, 0)
 	case "acc":
 		a.onAccess(ctx, chatID, val)
+	case cbTorrent:
+		a.onTorrentAdmin(ctx, chatID, val)
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}

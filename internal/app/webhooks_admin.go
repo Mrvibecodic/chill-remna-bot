@@ -85,25 +85,14 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 	}
 
 	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
-		"\n\n" + i18n.T(lang, "wh.torrent_line")
+		"\n\n" + i18n.T(lang, "wh.torrent_line") + "\n" + i18n.T(lang, "wh.torrent_moved")
 
-	tc := a.torrentCfg()
-	mark := func(b bool) string {
-		if b {
-			return "✅"
-		}
-		return "⬜"
-	}
 	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "wh.btn_guide"), "wh:guide")},
 		{btn(i18n.T(lang, "wh.btn_public"), "wh:public"), btn(i18n.T(lang, "wh.btn_domain"), "wh:domain")},
 		{btn(i18n.T(lang, "wh.btn_apply"), "wh:apply")},
 		{btn(i18n.T(lang, "wh.btn_port"), "wh:addr")},
 		{btn(i18n.T(lang, "wh.btn_base"), "wh:base"), btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
-		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "wh:tadm"),
-			btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "wh:tusr")},
-		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
-		{btn(i18n.T(lang, "wh.btn_tor_strike", strikeLabel(lang, tc.StrikeLimit)), "torj:strike")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -151,14 +140,6 @@ func (a *App) onWebhooksAdmin(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(lang, "wh.ask_addr"), "menu:webhooks")
 	case "apply":
 		a.applyWebhookServer(ctx, chatID)
-	case "tadm":
-		a.toggleTorrentNotify(true)
-		_ = a.saveBotConfig(ctx)
-		a.showWebhooksAdmin(ctx, chatID)
-	case "tusr":
-		a.toggleTorrentNotify(false)
-		_ = a.saveBotConfig(ctx)
-		a.showWebhooksAdmin(ctx, chatID)
 	}
 }
 

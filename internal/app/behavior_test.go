@@ -80,10 +80,12 @@ func (f *fakeMsg) EditText(_ context.Context, _ int64, _ int, _ string, _ [][]mo
 func (f *fakeMsg) EditCaption(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
 	return false
 }
-func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, _ [][]models.InlineKeyboardButton) int {
+func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows [][]models.InlineKeyboardButton) int {
+	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, _, caption string, _ [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, _, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+	f.recordKB(rows)
 	return f.add(caption), ""
 }
 func (f *fakeMsg) SendBanner(_ context.Context, _ int64, _ models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) int {
@@ -424,6 +426,36 @@ func (s *fakeStore) MarkTorrentUnblockNotified(_ context.Context, id int64) erro
 		}
 	}
 	return nil
+}
+
+func (s *fakeStore) CountTorrentReportsAll(_ context.Context, since string) (int, error) {
+	n := 0
+	for _, r := range s.torrents {
+		if since == "" || r.CreatedAt >= since {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) UserTorrentReports(_ context.Context, telegramID int64, username string, limit, offset int) ([]model.TorrentReport, int, error) {
+	var all []model.TorrentReport
+	for i := len(s.torrents) - 1; i >= 0; i-- { // новые первыми, как в БД
+		r := s.torrents[i]
+		if (telegramID != 0 && r.TelegramID == telegramID) ||
+			(telegramID == 0 && username != "" && r.Username == username) {
+			all = append(all, r)
+		}
+	}
+	total := len(all)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 func (s *fakeStore) SetTorrentStrike(_ context.Context, telegramID int64, at string) error {

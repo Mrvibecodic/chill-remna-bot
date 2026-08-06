@@ -134,9 +134,15 @@ type Storage interface {
 	AddTorrentReport(ctx context.Context, r *model.TorrentReport) error
 	// TorrentReports — страница журнала (новые сверху) + общее число записей.
 	TorrentReports(ctx context.Context, limit, offset int) ([]model.TorrentReport, int, error)
+	// UserTorrentReports — страница журнала по одному нарушителю (новые сверху)
+	// + общее число его отчётов. Идентичность та же, что у счётчика: telegram_id,
+	// а у безтелеграмных аккаунтов — username панели.
+	UserTorrentReports(ctx context.Context, telegramID int64, username string, limit, offset int) ([]model.TorrentReport, int, error)
 	// CountTorrentReports — число отчётов по пользователю (по telegram_id, а
 	// для аккаунтов без Telegram — по username панели) начиная с since.
 	CountTorrentReports(ctx context.Context, telegramID int64, username, since string) (int, error)
+	// CountTorrentReportsAll — число отчётов по всем; пустой since = за всё время.
+	CountTorrentReportsAll(ctx context.Context, since string) (int, error)
 	// DueTorrentUnblocks — записи, по которым пора уведомить о снятии
 	// блокировки: срок вышел, уведомление не отправлено, есть telegram_id.
 	DueTorrentUnblocks(ctx context.Context, now string) ([]model.TorrentReport, error)
@@ -926,12 +932,73 @@ func (b *base) TorrentReports(ctx context.Context, limit, offset int) ([]model.T
 	return out, total, rows.Err()
 }
 
+// torrentWho — отбор «этот нарушитель» для счётчика и журнала. Ветка выбирается
+// в Go, а не условием в SQL: сравнение плейсхолдера с литералом («$2 <> 0»)
+// заставляло Postgres выводить для параметра тип int4, и любой telegram_id
+// больше 2^31 (то есть почти любой живой) ронял запрос с ошибкой кодирования.
+// Заодно простой предикат по одной колонке нормально ложится на индекс.
+func (b *base) torrentWho(telegramID int64, username string, from int) (string, []any) {
+	if telegramID != 0 {
+		return "telegram_id = " + b.ph(from), []any{telegramID}
+	}
+	return "username <> '' AND username = " + b.ph(from), []any{username}
+}
+
+func (b *base) UserTorrentReports(ctx context.Context, telegramID int64, username string, limit, offset int) ([]model.TorrentReport, int, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	who, args := b.torrentWho(telegramID, username, 1)
+	where := " FROM torrent_reports WHERE " + who
+	var total int
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(*)"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+torrentReportCols+where+" ORDER BY id DESC LIMIT "+b.ph(len(args)+1)+" OFFSET "+b.ph(len(args)+2),
+		append(append([]any{}, args...), limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.TorrentReport
+	for rows.Next() {
+		r, err := b.scanTorrentReport(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
+
+// CountTorrentReports — число отчётов по нарушителю. Пустой since означает «за
+// всё время»: даты пишутся в RFC3339, а лексикографически любая строка >= "".
 func (b *base) CountTorrentReports(ctx context.Context, telegramID int64, username, since string) (int, error) {
+	who, args := b.torrentWho(telegramID, username, 1)
+	q := "SELECT COUNT(*) FROM torrent_reports WHERE " + who
+	if since != "" {
+		q += " AND created_at >= " + b.ph(len(args)+1)
+		args = append(args, since)
+	}
 	var n int
-	err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM torrent_reports WHERE created_at >= "+b.ph(1)+
-			" AND (("+b.ph(2)+" <> 0 AND telegram_id = "+b.ph(3)+") OR ("+b.ph(4)+" = 0 AND username <> '' AND username = "+b.ph(5)+"))",
-		since, telegramID, telegramID, telegramID, username).Scan(&n)
+	err := b.db.QueryRowContext(ctx, q, args...).Scan(&n)
+	return n, err
+}
+
+// CountTorrentReportsAll — число отчётов по всем сразу; пустой since = за всё время.
+func (b *base) CountTorrentReportsAll(ctx context.Context, since string) (int, error) {
+	q := "SELECT COUNT(*) FROM torrent_reports"
+	var args []any
+	if since != "" {
+		q += " WHERE created_at >= " + b.ph(1)
+		args = append(args, since)
+	}
+	var n int
+	err := b.db.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n, err
 }
 

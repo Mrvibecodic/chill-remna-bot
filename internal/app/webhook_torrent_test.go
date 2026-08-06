@@ -133,28 +133,28 @@ func TestTorrentWebhook_NoTelegramID(t *testing.T) {
 	}
 }
 
-// Тумблеры переключаются с экрана «Вебхуки» через настоящий callback-роутер.
+// Тумблеры переключаются с экрана «Торренты» через настоящий callback-роутер.
 func TestTorrentToggle_Callback(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	ctx := context.Background()
 	a.botCfg = &model.BotConfig{Installed: true}
 	a.botCfg.NormalizeTorrent()
 
-	a.handleCallback(ctx, cb(100, "wh:tusr"))
+	a.handleCallback(ctx, cb(100, "torj:tusr"))
 	if a.botCfg.Torrent.NotifyUser || !a.botCfg.Torrent.NotifyAdmin {
-		t.Fatalf("wh:tusr должен выключить только юзера: %+v", a.botCfg.Torrent)
+		t.Fatalf("torj:tusr должен выключить только юзера: %+v", a.botCfg.Torrent)
 	}
-	a.handleCallback(ctx, cb(100, "wh:tadm"))
+	a.handleCallback(ctx, cb(100, "torj:tadm"))
 	if a.botCfg.Torrent.NotifyAdmin {
-		t.Fatalf("wh:tadm должен выключить админа: %+v", a.botCfg.Torrent)
+		t.Fatalf("torj:tadm должен выключить админа: %+v", a.botCfg.Torrent)
 	}
-	a.handleCallback(ctx, cb(100, "wh:tusr"))
+	a.handleCallback(ctx, cb(100, "torj:tusr"))
 	if !a.botCfg.Torrent.NotifyUser {
-		t.Fatalf("повторный wh:tusr должен включить юзера обратно: %+v", a.botCfg.Torrent)
+		t.Fatalf("повторный torj:tusr должен включить юзера обратно: %+v", a.botCfg.Torrent)
 	}
 
 	// Не-админу тумблер недоступен.
-	a.handleCallback(ctx, cb(500, "wh:tadm"))
+	a.handleCallback(ctx, cb(500, "torj:tadm"))
 	if a.botCfg.Torrent.NotifyAdmin {
 		t.Fatalf("не-админ не должен переключать тумблер: %+v", a.botCfg.Torrent)
 	}
@@ -769,3 +769,79 @@ func TestTorrentUnblock_SilentAfterStrike(t *testing.T) {
 }
 
 func ctxBG() context.Context { return context.Background() }
+
+// Раздел «Торренты» живёт в «Пользователях», а не в «Вебхуках»: на экране
+// вебхуков остаётся только транспорт и подсказка, куда всё переехало.
+func TestTorrentSection_LivesUnderUsers(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	ctx := context.Background()
+
+	a.handleCallback(ctx, cb(100, "menu:users"))
+	if !hasCB(fm.allCallbackData(), "torj:home") {
+		t.Fatalf("на экране пользователей нет входа в раздел: %v", fm.allCallbackData())
+	}
+
+	fm.cbData, fm.texts = nil, nil
+	a.handleCallback(ctx, cb(100, "menu:webhooks"))
+	for _, d := range fm.allCallbackData() {
+		if strings.HasPrefix(d, "torj:") {
+			t.Fatalf("настройки торрентов остались в вебхуках: %q", d)
+		}
+	}
+	if countContains(fm.texts, "Пользователи") != 1 {
+		t.Fatalf("нет подсказки, куда переехали настройки: %v", fm.texts)
+	}
+
+	fm.cbData, fm.texts = nil, nil
+	a.handleCallback(ctx, cb(100, "torj:home"))
+	for _, want := range []string{"torj:tadm", "torj:tusr", "torj:strike", "torj:log", "torj:text", "menu:users"} {
+		if !hasCB(fm.allCallbackData(), want) {
+			t.Fatalf("в разделе нет кнопки %q: %v", want, fm.allCallbackData())
+		}
+	}
+}
+
+// В карточке нарушителя есть строка и кнопка с его историей; у чистого
+// пользователя карточка не меняется.
+func TestUserCard_TorrentsOnlyWhenViolations(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 42)
+	_ = fs.UpsertUser(ctx, 77)
+
+	a.handleCallback(ctx, cb(100, "usr:view:77"))
+	if countContains(fm.texts, "Нарушений торрент-блокера") != 0 {
+		t.Fatalf("у чистого пользователя строки быть не должно: %v", fm.texts)
+	}
+	if hasCB(fm.allCallbackData(), "torj:u:77") {
+		t.Fatalf("у чистого пользователя кнопки быть не должно")
+	}
+
+	_, _ = a.HandleRemnawaveWebhook(ctx, "", []byte(torrentBody))
+	fm.cbData, fm.texts = nil, nil
+
+	a.handleCallback(ctx, cb(100, "usr:view:42"))
+	if countContains(fm.texts, "Нарушений торрент-блокера") != 1 {
+		t.Fatalf("нет строки о нарушениях: %v", fm.texts)
+	}
+	if !hasCB(fm.allCallbackData(), "torj:u:42") {
+		t.Fatalf("нет кнопки истории: %v", fm.allCallbackData())
+	}
+
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "torj:u:42"))
+	if countContains(fm.texts, "Нарушения") != 1 {
+		t.Fatalf("история не открылась: %v", fm.texts)
+	}
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "torj:u:77"))
+	if countContains(fm.texts, "отчётов торрент-блокера нет") != 1 {
+		t.Fatalf("для чистого пользователя ожидался пустой экран: %v", fm.texts)
+	}
+}
