@@ -139,14 +139,17 @@ func (c *Client) TorrentIgnoreUser(ctx context.Context, userID int64) (changed i
 		// улетели бы ignoreLists.ip и весь остальной список исключений.
 		lists, ok := tb["ignoreLists"].(map[string]any)
 		if !ok {
-			if _, exists := tb["ignoreLists"]; exists {
+			// null равнозначен отсутствию ключа и заменяется безопасно; а вот
+			// значение другого типа не «чиним» подстановкой пустого объекта —
+			// так молча улетели бы ignoreLists.ip и весь список исключений.
+			if v, exists := tb["ignoreLists"]; exists && v != nil {
 				return changed, false, fmt.Errorf("конфиг плагина %q: ignoreLists не объект — правьте на панели вручную", p.Name)
 			}
 			lists = map[string]any{}
 		}
 		ids, ok := lists["userId"].([]any)
 		if !ok {
-			if _, exists := lists["userId"]; exists {
+			if v, exists := lists["userId"]; exists && v != nil {
 				return changed, false, fmt.Errorf("конфиг плагина %q: ignoreLists.userId не список — правьте на панели вручную", p.Name)
 			}
 		}

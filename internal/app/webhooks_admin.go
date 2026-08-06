@@ -121,6 +121,11 @@ func (a *App) onWebhooksAdmin(ctx context.Context, chatID int64, val string) {
 	case "base":
 		a.getUI(chatID).adminInput = "wh_base"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.wh_ask_base"), "menu:webhooks")
+	case "tadm", "tusr":
+		// Кнопки переехали в «Пользователи → Торренты», но у админа в чате
+		// могли остаться старые сообщения: молчаливый no-op выглядел бы как
+		// сломанный тумблер.
+		a.showTorrentAdmin(ctx, chatID)
 	case "secret":
 		a.getUI(chatID).adminInput = "wh_secret"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.wh_ask_secret"), "menu:webhooks")

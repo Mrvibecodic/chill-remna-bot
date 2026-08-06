@@ -95,8 +95,14 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 		// конкретный интервал лежит в meta.expiration.
 		hours := 0
 		var meta rwWebhookMeta
-		if len(ev.Meta) > 0 && json.Unmarshal(ev.Meta, &meta) == nil && meta.Expiration != nil {
-			hours = *meta.Expiration
+		if len(ev.Meta) > 0 {
+			if err := json.Unmarshal(ev.Meta, &meta); err != nil {
+				// Интервал не прочитан — событие всё равно обрабатываем, но
+				// текст будет без числа: молчать хуже.
+				a.log.Warn("remnawave webhook: meta не разобрана", "event", ev.Event, "err", err)
+			} else if meta.Expiration != nil {
+				hours = *meta.Expiration
+			}
 		}
 		if hours > 0 {
 			// Подписка истекла hours часов назад — напоминание продлить.
@@ -119,7 +125,7 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 		a.pushTorrentReport(ctx, ev.Data)
 		return true, nil
 	default:
-		a.log.Info("remnawave webhook: event ignored", "event", ev.Event, "tg_id", u.TelegramID)
+		a.log.Info("remnawave webhook: event ignored", "scope", ev.Scope, "event", ev.Event, "tg_id", u.TelegramID)
 		return true, nil
 	}
 }

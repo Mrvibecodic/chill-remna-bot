@@ -12,6 +12,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 // torrentUserCooldown — минимальная пауза между сообщениями одному
@@ -109,7 +110,7 @@ func (a *App) pushTorrentReport(ctx context.Context, data json.RawMessage) {
 		a.log.Info("торрент-блокер: отчёт без блокировки, нарушением не считаем", "tg_id", r.User.TelegramID)
 		if tc.NotifyAdmin {
 			a.torrentNotifyAdmin(ctx, &r, "", a.torrentRepeatCount(ctx, &model.TorrentReport{
-				TelegramID: r.User.TelegramID, Username: strings.TrimSpace(r.User.Username),
+				TelegramID: r.User.TelegramID, Username: torrentWhoName(&r),
 			}))
 		}
 		return
@@ -125,6 +126,47 @@ func (a *App) pushTorrentReport(ctx context.Context, data json.RawMessage) {
 		a.torrentNotifyUser(ctx, &r, rep.WillUnblockAt)
 	}
 	a.torrentApplyStrikes(ctx, &r, tc.StrikeLimit)
+}
+
+// torrentStrikeGrace — минимальная пауза между автоблокировками одного
+// пользователя. Отключение подписки доезжает до нод не мгновенно, а панель
+// продолжает слать отчёты по уже открытым соединениям: без паузы порог
+// добирался бы повторно за минуты.
+const torrentStrikeGrace = time.Hour
+
+// lockStrike/unlockStrike сериализуют политику по пользователю в пределах
+// процесса: одновременные отчёты не должны читать счётчик до записи отметки.
+func (a *App) lockStrike(uid int64) bool {
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	if a.torStrikeBusy == nil {
+		a.torStrikeBusy = map[int64]bool{}
+	}
+	if a.torStrikeBusy[uid] {
+		return false
+	}
+	a.torStrikeBusy[uid] = true
+	return true
+}
+
+func (a *App) unlockStrike(uid int64) {
+	a.thrMu.Lock()
+	delete(a.torStrikeBusy, uid)
+	a.thrMu.Unlock()
+}
+
+// strikeFailDue — не чаще одной жалобы админу на пользователя за окно.
+func (a *App) strikeFailDue(uid int64) bool {
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	if last, ok := a.torStrikeFail[uid]; ok && time.Since(last) < torrentStrikeGrace {
+		return false
+	}
+	if a.torStrikeFail == nil {
+		a.torStrikeFail = map[int64]time.Time{}
+	}
+	a.torStrikeFail[uid] = time.Now()
+	return true
 }
 
 // torrentApplyStrikes отключает подписку, когда нарушений набралось не меньше
@@ -161,30 +203,70 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	if panel == nil {
 		return
 	}
+	// Панель шлёт отдельный отчёт на каждую заблокированную пару (IP, нода), и
+	// у человека с несколькими устройствами они прилетают одновременно, каждый
+	// в своей горутине. Без этой блокировки два отчёта успевали прочитать
+	// счётчик до записи отметки и отключали подписку дважды.
+	if !a.lockStrike(uid) {
+		return
+	}
+	defer a.unlockStrike(uid)
+
+	// Дальше идут последствия, а не обслуживание HTTP-запроса: у вебхука
+	// дедлайн 15 с, и на медленной панели он истекал ровно между обращением к
+	// ней и записью отметки — политика молча разъезжалась. Отвязываем.
+	bg := context.WithoutCancel(ctx)
 
 	since := time.Now().UTC().Add(-torrentRepeatWindow).Format(time.RFC3339)
-	last, err := st.TorrentStrikeAt(ctx, uid)
+	last, err := st.TorrentStrikeAt(bg, uid)
 	if err != nil {
 		a.log.Warn("торрент-блокер: чтение отметки автоблокировки", "err", err)
 		return
 	}
+	var lastAt time.Time
 	if last != "" {
-		// Секунда сверху: отметка и отчёты пишутся с точностью до секунды, а
-		// сравнение в счётчике нестрогое — без сдвига отчёт, вызвавший страйк,
-		// попал бы и в следующее окно.
 		t, perr := time.Parse(time.RFC3339, last)
 		if perr != nil {
-			// Отметка есть, но нечитаема. Откат к 30-дневному окну вернул бы
-			// ровно то поведение, от которого отметка и защищает (отключать
-			// снова и снова), поэтому считаем окно с текущего момента.
+			// Отметка есть, но нечитаема. Чинимся сами: пишем текущий момент,
+			// чтобы отсчёт пошёл с него, а не откатывался к 30 дням (это
+			// вернуло бы поведение «отключать снова и снова»).
 			a.log.Warn("торрент-блокер: нечитаемая отметка автоблокировки", "tg_id", uid, "value", last)
+			_ = st.SetTorrentStrike(bg, uid, time.Now().UTC().Format(time.RFC3339))
 			return
 		}
-		if next := t.Add(time.Second).UTC().Format(time.RFC3339); next > since {
+		if t.After(time.Now()) {
+			// Часы сервера съехали назад или значение правили руками: без этой
+			// проверки политика молча спала бы, пока время не догонит отметку.
+			a.log.Warn("торрент-блокер: отметка автоблокировки из будущего", "tg_id", uid, "value", last)
+			t = time.Now()
+			_ = st.SetTorrentStrike(bg, uid, t.UTC().Format(time.RFC3339))
+		}
+		lastAt = t
+	}
+	// Страховка в памяти на случай, если запись отметки в БД не удалась:
+	// в пределах процесса повтор всё равно не пройдёт.
+	a.thrMu.Lock()
+	if mem, ok := a.torStrikeSeen[uid]; ok && mem.After(lastAt) {
+		lastAt = mem
+	}
+	a.thrMu.Unlock()
+
+	if !lastAt.IsZero() {
+		// Отключение доезжает до нод не мгновенно, и панель продолжает слать
+		// отчёты по уже открытым соединениям. Эти отчёты не только не считаются
+		// сразу — они целиком выпадают из следующего окна, иначе накопленный за
+		// паузу хвост отключал бы подписку с первого же нарушения после того,
+		// как админ вернул доступ.
+		// Короткое замыкание: пока пауза идёт, окно ниже всё равно уехало бы в
+		// будущее и счётчик вернул ноль — просто не ходим лишний раз в БД.
+		if time.Since(lastAt) < torrentStrikeGrace {
+			return
+		}
+		if next := lastAt.Add(torrentStrikeGrace).UTC().Format(time.RFC3339); next > since {
 			since = next
 		}
 	}
-	count, err := st.CountTorrentReports(ctx, uid, r.User.Username, since)
+	count, err := st.CountTorrentReports(bg, uid, torrentWhoName(r), since)
 	if err != nil {
 		a.log.Warn("торрент-блокер: счётчик для автоблокировки", "err", err)
 		return
@@ -196,28 +278,40 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	alang := a.lang(a.cfg.AdminID)
 	// found=false означает «на панели такого пользователя нет» — подписка НЕ
 	// отключена, и рапортовать об отключении нельзя.
-	found, err := panel.DisableByTelegramID(ctx, uid)
+	found, err := panel.DisableByTelegramID(bg, uid)
 	if err != nil || !found {
 		a.log.Warn("торрент-блокер: автоблокировка не удалась", "tg_id", uid, "found", found, "err", err)
-		reason := i18n.T(alang, "rw.torrent_strike_notfound")
-		if err != nil {
-			reason = escapeErr(err)
+		// Неудача повторится на каждом следующем отчёте (нет прав, нет
+		// пользователя), а их у активного нарушителя десятки в час — админу
+		// хватит одного сообщения за окно.
+		if a.strikeFailDue(uid) {
+			reason := i18n.T(alang, "rw.torrent_strike_notfound")
+			if err != nil {
+				reason = escapeErr(err)
+			}
+			a.notify(bg, a.cfg.AdminID, i18n.T(alang, "rw.torrent_strike_fail",
+				a.userLabelByID(bg, uid), reason))
 		}
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "rw.torrent_strike_fail",
-			a.userLabelByID(ctx, uid), reason))
 		return
 	}
-	// Отметка ставится только после успеха: сорванная сетью попытка не должна
-	// глушить политику до конца окна.
-	if err := st.SetTorrentStrike(ctx, uid, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		a.log.Warn("торрент-блокер: сохранение отметки автоблокировки", "err", err)
+	// Отметка ставится только после успеха: сорванная попытка не должна
+	// сдвигать окно и глушить сообщения о снятии блокировки. Память
+	// проставляется первой — она не может отказать.
+	a.thrMu.Lock()
+	if a.torStrikeSeen == nil {
+		a.torStrikeSeen = map[int64]time.Time{}
 	}
-	a.setAddSubEnabledPanel(ctx, uid, false)
+	a.torStrikeSeen[uid] = time.Now()
+	a.thrMu.Unlock()
+	if err := st.SetTorrentStrike(bg, uid, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		a.log.Error("торрент-блокер: отметка автоблокировки не сохранена — после рестарта отсчёт пойдёт с 30 дней", "tg_id", uid, "err", err)
+	}
+	a.setAddSubEnabledPanel(bg, uid, false)
 	a.invalidateSubCache(uid)
 	a.log.Info("торрент-блокер: подписка отключена автоматически", "tg_id", uid, "count", count)
 
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "rw.torrent_strike_admin",
-		a.userLabelByID(ctx, uid), count, limit))
+	a.notify(bg, a.cfg.AdminID, i18n.T(alang, "rw.torrent_strike_admin",
+		a.userLabelByID(bg, uid), count, limit))
 	// Отключение подписки пользователь обязан узнать независимо от тумблера
 	// «предупреждать о торрентах»: иначе доступ пропадёт молча.
 	ulang := a.lang(uid)
@@ -225,7 +319,7 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	if sup := a.supportURL(); sup != "" {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(ulang, "btn.support"), URL: sup}})
 	}
-	a.notifyKB(ctx, uid, i18n.T(ulang, "rw.torrent_strike_user", count), rows)
+	a.notifyKB(bg, uid, i18n.T(ulang, "rw.torrent_strike_user", count), rows)
 }
 
 // torrentPanelUserID — числовой id пользователя ПАНЕЛИ из отчёта (именно им
@@ -239,6 +333,17 @@ func torrentPanelUserID(r *rwTorrentReport) string {
 		return v
 	}
 	return ""
+}
+
+// torrentWhoName — под каким именем нарушитель попадает в журнал. У аккаунтов
+// без Telegram считать не по чему, кроме username панели; если и его нет —
+// подставляем id пользователя панели. Счётчик повторов обязан использовать
+// ровно эту же строку, иначе покажет «1-е нарушение» тому, у кого их десяток.
+func torrentWhoName(r *rwTorrentReport) string {
+	if u := strings.TrimSpace(r.User.Username); u != "" {
+		return u
+	}
+	return strings.TrimSpace(r.Report.ActionReport.UserID)
 }
 
 // torrentNodeLabel — подпись ноды для журнала и отчёта: «имя (страна)».
@@ -275,7 +380,7 @@ func (a *App) storeTorrentReport(ctx context.Context, r *rwTorrentReport) *model
 
 	rep := &model.TorrentReport{
 		TelegramID:    r.User.TelegramID,
-		Username:      strings.TrimSpace(r.User.Username),
+		Username:      torrentWhoName(r),
 		Node:          torrentNodeLabel(r),
 		IP:            strings.TrimSpace(act.IP),
 		Protocol:      strings.TrimSpace(r.Report.XrayReport.Protocol),
@@ -286,9 +391,6 @@ func (a *App) storeTorrentReport(ctx context.Context, r *rwTorrentReport) *model
 		WillUnblockAt: will,
 		// Уведомлять о разблокировке некого — сразу помечено отправленным.
 		UnblockNotified: r.User.TelegramID == 0 || will == "",
-	}
-	if rep.Username == "" {
-		rep.Username = strings.TrimSpace(act.UserID)
 	}
 	a.mu.Lock()
 	st := a.store
@@ -440,6 +542,7 @@ func (a *App) torrentUnblockOnce(ctx context.Context) {
 	if len(due) == 0 {
 		return
 	}
+	a.pruneStrikeMaps()
 	notifyUser := a.torrentCfg().NotifyUser
 	notified := map[int64]bool{}
 	for _, r := range due {
@@ -455,21 +558,27 @@ func (a *App) torrentUnblockOnce(ctx context.Context) {
 			continue
 		}
 		// Та же пауза, что у предупреждений: несколько блокировок с разных
-		// устройств не должны родить пачку «снята» подряд.
+		// устройств не должны родить пачку «снята» подряд. Проверяется до
+		// похода в панель, чтобы не спрашивать её впустую.
 		a.thrMu.Lock()
 		if last, ok := a.torUnbSeen[r.TelegramID]; ok && time.Since(last) < torrentUserCooldown {
 			a.thrMu.Unlock()
 			continue
 		}
+		a.thrMu.Unlock()
+
+		// Срок блокировки IP истёк, но подписки может уже не быть — тогда
+		// «доступ снова работает» было бы враньём.
+		if a.subDisabled(ctx, r.TelegramID) {
+			continue
+		}
+		a.thrMu.Lock()
 		if a.torUnbSeen == nil {
 			a.torUnbSeen = map[int64]time.Time{}
 		}
 		a.torUnbSeen[r.TelegramID] = time.Now()
 		a.thrMu.Unlock()
 
-		if a.struckAfter(ctx, r.TelegramID, r.CreatedAt) {
-			continue
-		}
 		notified[r.TelegramID] = true
 		a.sendTorrentUnblock(ctx, r.TelegramID)
 	}
@@ -527,19 +636,40 @@ func orDash(s string) string {
 	return s
 }
 
-// struckAfter сообщает, была ли по этому нарушению (или позже) автоблокировка
-// подписки. Тогда «блокировка снята» слать нельзя: срок блокировки IP истёк, а
-// подписки у человека всё равно нет — сообщение было бы враньём.
-func (a *App) struckAfter(ctx context.Context, tgID int64, createdAt string) bool {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
-	if st == nil || tgID == 0 {
+// subDisabled — выключена ли подписка человека прямо сейчас. Спрашиваем панель,
+// а не отметку страйка: отметка отвечает на другой вопрос («когда началось
+// текущее окно отсчёта») и врала в обе стороны — молчала про отчёты, пришедшие
+// в паузу после срабатывания, и глушила сообщения после самолечения отметки.
+// Панель же знает и про ручное отключение админом.
+//
+// Вызывается последней, уже после всех дешёвых отсечек, поэтому запросов
+// получается не больше одного на человека за период троттлинга.
+func (a *App) subDisabled(ctx context.Context, tgID int64) bool {
+	if tgID == 0 {
 		return false
 	}
-	at, err := st.TorrentStrikeAt(ctx, tgID)
-	if err != nil || at == "" {
+	panel := a.panelClient()
+	if panel == nil {
 		return false
 	}
-	return at >= createdAt
+	_, _, st, ok := panel.SubscriptionFull(ctx, tgID)
+	return ok && st == remnawave.StatusDisabled
+}
+
+// pruneStrikeMaps чистит служебные карты: они нужны только на время паузы
+// после срабатывания, а росли бы по числу нарушителей без конца.
+func (a *App) pruneStrikeMaps() {
+	cutoff := 2 * torrentStrikeGrace
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	for uid, t := range a.torStrikeSeen {
+		if time.Since(t) > cutoff {
+			delete(a.torStrikeSeen, uid)
+		}
+	}
+	for uid, t := range a.torStrikeFail {
+		if time.Since(t) > cutoff {
+			delete(a.torStrikeFail, uid)
+		}
+	}
 }

@@ -338,9 +338,16 @@ func newTorrentPanelStub(t *testing.T) *torrentPanelStub {
 		_, _ = w.Write([]byte(`{"response":{"total":1,"nodePlugins":[{"uuid":"p-1","name":"main",` +
 			`"pluginConfig":{"torrentBlocker":{"enabled":true,"blockDuration":3600}}}]}}`))
 	})
+	// Статус подписки стаб держит честно: бот спрашивает его перед тем, как
+	// сказать человеку «блокировка снята».
 	mux.HandleFunc("/api/users/by-telegram-id/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"response":[{"uuid":"u-1","username":"tg_42","telegramId":42,"status":"ACTIVE"}]}`))
+		status := "ACTIVE"
+		if s.disabledTG {
+			status = "DISABLED"
+		}
+		_, _ = w.Write([]byte(`{"response":[{"uuid":"u-1","username":"tg_42","telegramId":42,` +
+			`"subscriptionUrl":"https://example.com/s","expireAt":"2099-01-01T00:00:00.000Z","status":"` + status + `"}]}`))
 	})
 	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -505,7 +512,7 @@ func TestTorrentStrikes_Cooldown(t *testing.T) {
 	}
 }
 
-// Порог задаётся админом с экрана «Вебхуки» и сохраняется в конфиг.
+// Порог задаётся админом с экрана «Пользователи → Торренты» и сохраняется в конфиг.
 func TestTorrentStrikes_AdminSetsLimit(t *testing.T) {
 	a, _, fs := newTestApp(t)
 	a.store = fs
@@ -608,18 +615,19 @@ func TestTorrentStrikes_CountRestartsAfterStrike(t *testing.T) {
 		t.Fatalf("на пороге подписка должна быть отключена")
 	}
 
-	// Админ вернул доступ, бот перезапустили (вся память сброшена). Отметку
-	// страйка сдвигаем в прошлое: в бою между срабатыванием и следующим
-	// отчётом проходят минуты, а в тесте всё укладывается в одну секунду.
+	// Админ вернул доступ, бот перезапустили (вся память сброшена). Время
+	// сдвигаем в прошлое: в бою между срабатыванием и следующей волной отчётов
+	// проходят часы, а в тесте всё укладывается в одну секунду. Отметка старше
+	// torrentStrikeGrace — пауза после страйка уже истекла.
 	stub.disabledTG = false
 	a.thrMu.Lock()
-	a.torSeen, a.torUnbSeen = nil, nil
+	a.torSeen, a.torUnbSeen, a.torStrikeSeen = nil, nil, nil
 	a.thrMu.Unlock()
 	now := time.Now().UTC()
 	for i := range fs.torrents {
-		fs.torrents[i].CreatedAt = now.Add(-60 * time.Second).Format(time.RFC3339)
+		fs.torrents[i].CreatedAt = now.Add(-3 * time.Hour).Format(time.RFC3339)
 	}
-	fs.strikes[42] = now.Add(-30 * time.Second).Format(time.RFC3339)
+	fs.strikes[42] = now.Add(-2 * time.Hour).Format(time.RFC3339)
 
 	rwDeliver(t, a, torrentBody)
 	if stub.disabledTG {
@@ -843,5 +851,216 @@ func TestUserCard_TorrentsOnlyWhenViolations(t *testing.T) {
 	a.handleCallback(ctx, cb(100, "torj:u:77"))
 	if countContains(fm.texts, "отчётов торрент-блокера нет") != 1 {
 		t.Fatalf("для чистого пользователя ожидался пустой экран: %v", fm.texts)
+	}
+}
+
+// Сразу после срабатывания политика молчит: отключение доезжает до нод не
+// мгновенно, и отчёты этих минут не должны дать второй страйк подряд.
+func TestTorrentStrikes_GraceAfterStrike(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	a.botCfg.Torrent.StrikeLimit = 1
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+
+	rwDeliver(t, a, torrentBody)
+	if !stub.disabledTG {
+		t.Fatalf("первое срабатывание должно отключить подписку")
+	}
+	stub.disabledTG = false
+	fm.texts = nil
+
+	for i := 0; i < 5; i++ {
+		rwDeliver(t, a, torrentBody)
+	}
+	if stub.disabledTG {
+		t.Fatalf("повторное отключение внутри паузы")
+	}
+	if countContains(fm.texts, "Подписка приостановлена") != 0 {
+		t.Fatalf("повторные сообщения пользователю внутри паузы: %v", fm.texts)
+	}
+}
+
+// Панель не приняла отключение: отметка страйка должна вернуться к прежней,
+// иначе окно сдвинулось бы без единого отключения. Жалоба админу — одна.
+func TestTorrentStrikes_FailureRollsBackMarkAndThrottles(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	a.botCfg.Torrent.StrikeLimit = 1
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":[]}`)) // пользователя на панели нет
+	}))
+	defer srv.Close()
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+
+	for i := 0; i < 4; i++ {
+		rwDeliver(t, a, torrentBody)
+	}
+	if at, _ := fs.TorrentStrikeAt(ctxBG(), 42); at != "" {
+		t.Fatalf("отметка не откатилась после неудачи: %q", at)
+	}
+	if n := countContains(fm.texts, "Автоблокировка не сработала"); n != 1 {
+		t.Fatalf("админу должна уйти одна жалоба, ушло %d: %v", n, fm.texts)
+	}
+}
+
+// Отчёт с blocked=false у аккаунта без Telegram считается по username панели —
+// иначе админ увидит «1-е нарушение» у человека с длинной историей.
+func TestTorrentWebhook_NotBlockedCountsByPanelName(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	body := strings.Replace(torrentBody, `"telegramId": 42, `, "", 1)
+
+	rwDeliver(t, a, body)
+	rwDeliver(t, a, body)
+	fm.texts = nil
+	rwDeliver(t, a, strings.Replace(body, `"blocked": true`, `"blocked": false`, 1))
+
+	// Сам отчёт-не-нарушение в журнал не идёт, поэтому счётчик показывает две
+	// прошлые записи — но именно их, а не «1-е».
+	if countContains(fm.texts, "2-е за 30 дней") != 1 {
+		t.Fatalf("счётчик должен видеть прошлые нарушения: %v", fm.texts)
+	}
+}
+
+// Старые кнопки с экрана вебхуков уводят на новый экран, а не молчат.
+func TestTorrentSection_OldWebhookButtonsRedirect(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+
+	for _, old := range []string{"wh:tadm", "wh:tusr"} {
+		fm.cbData, fm.texts = nil, nil
+		a.handleCallback(context.Background(), cb(100, old))
+		if !hasCB(fm.allCallbackData(), "torj:strike") {
+			t.Fatalf("%s не привёл на экран торрентов: %v", old, fm.allCallbackData())
+		}
+	}
+}
+
+// Отчёты, пришедшие в паузу после срабатывания, выпадают из следующего окна:
+// иначе накопленный хвост отключал бы подписку с первого же нарушения после
+// того, как админ вернул доступ.
+func TestTorrentStrikes_GraceTailDoesNotCount(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	a.botCfg.Torrent.StrikeLimit = 2
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+
+	rwDeliver(t, a, torrentBody)
+	rwDeliver(t, a, torrentBody)
+	if !stub.disabledTG {
+		t.Fatalf("подписка должна быть отключена")
+	}
+	// Хвост отчётов внутри паузы: подписку они не трогают.
+	for i := 0; i < 3; i++ {
+		rwDeliver(t, a, torrentBody)
+	}
+
+	// Прошли сутки: пауза давно истекла, бот перезапущен, админ вернул доступ.
+	// Хвостовые отчёты датируем ВНУТРИ часовой паузы после срабатывания — они
+	// должны выпасть из нового окна. Со сдвигом «отметка + секунда» они бы в
+	// него попали, и одного свежего нарушения хватило бы на отключение.
+	now := time.Now().UTC()
+	struck := now.Add(-24 * time.Hour)
+	stub.disabledTG = false
+	a.thrMu.Lock()
+	a.torSeen, a.torUnbSeen, a.torStrikeSeen = nil, nil, nil
+	a.thrMu.Unlock()
+	for i := range fs.torrents {
+		fs.torrents[i].CreatedAt = struck.Add(5 * time.Minute).Format(time.RFC3339)
+	}
+	fs.strikes[42] = struck.Format(time.RFC3339)
+
+	rwDeliver(t, a, torrentBody)
+	if stub.disabledTG {
+		t.Fatalf("одного нарушения при пороге 2 мало — хвост паузы считаться не должен")
+	}
+	rwDeliver(t, a, torrentBody)
+	if !stub.disabledTG {
+		t.Fatalf("двух новых нарушений достаточно")
+	}
+}
+
+// Отметка страйка из будущего (часы сервера съехали) не должна навсегда
+// усыплять политику.
+func TestTorrentStrikes_FutureMarkSelfHeals(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	a.botCfg.Torrent.StrikeLimit = 1
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+	fs.strikes = map[int64]string{42: time.Now().UTC().Add(72 * time.Hour).Format(time.RFC3339)}
+
+	rwDeliver(t, a, torrentBody)
+	if at, _ := fs.TorrentStrikeAt(ctxBG(), 42); at == "" || at > time.Now().UTC().Add(time.Minute).Format(time.RFC3339) {
+		t.Fatalf("отметка не выправлена: %q", at)
+	}
+}
+
+// Нечитаемая отметка больше не глушит сообщения о снятии блокировки: статус
+// подписки бот спрашивает у панели, а не выводит из отметки.
+func TestTorrentUnblock_BrokenStrikeMarkDoesNotSilence(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+
+	rwDeliver(t, a, torrentBody)
+	fs.strikes = map[int64]string{42: "не-дата"}
+	fm.texts = nil
+	for i := range fs.torrents {
+		fs.torrents[i].WillUnblockAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	}
+	a.torrentUnblockOnce(ctxBG())
+
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("подписка активна — сообщение должно уйти: %v", fm.texts)
+	}
+}
+
+// Отчёт, пришедший в паузу после срабатывания, не мешает сообщению о снятии:
+// подписка к тому моменту может быть уже возвращена админом.
+func TestTorrentUnblock_TailReportAfterStrike(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+	a.botCfg.Torrent.StrikeLimit = 1
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+
+	rwDeliver(t, a, torrentBody) // срабатывание, подписка отключена
+	rwDeliver(t, a, torrentBody) // хвост внутри паузы
+	stub.disabledTG = false      // админ вернул доступ
+	fm.texts = nil
+	a.thrMu.Lock()
+	a.torUnbSeen = nil
+	a.thrMu.Unlock()
+	for i := range fs.torrents {
+		fs.torrents[i].WillUnblockAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	}
+	a.torrentUnblockOnce(ctxBG())
+
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("доступ вернули — сообщение должно уйти ровно один раз: %v", fm.texts)
 	}
 }

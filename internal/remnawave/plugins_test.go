@@ -204,3 +204,34 @@ func TestTorrentIgnoreUser_RefusesOnUnexpectedShape(t *testing.T) {
 		})
 	}
 }
+
+// null в конфиге равнозначен отсутствию ключа: отказываться от правки из-за
+// него нельзя — конфиг валиден, а кнопка «в исключения» переставала работать.
+func TestTorrentIgnoreUser_NullListsAreFilled(t *testing.T) {
+	for _, cfg := range []string{
+		`{"torrentBlocker":{"enabled":true,"ignoreLists":null}}`,
+		`{"torrentBlocker":{"enabled":true,"ignoreLists":{"userId":null,"ip":["10.0.0.1"]}}}`,
+	} {
+		var patched []byte
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api/node-plugins", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPatch {
+				patched, _ = io.ReadAll(r.Body)
+				_, _ = w.Write([]byte(`{"response":{"uuid":"p-1","name":"main","viewPosition":1}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"response":{"total":1,"nodePlugins":[{"uuid":"p-1","name":"main","pluginConfig":` + cfg + `}]}}`))
+		})
+		srv := httptest.NewServer(mux)
+
+		changed, _, err := pluginClient(srv).TorrentIgnoreUser(context.Background(), 42)
+		srv.Close()
+		if err != nil || changed != 1 {
+			t.Fatalf("cfg=%s: changed=%d err=%v", cfg, changed, err)
+		}
+		if !strings.Contains(string(patched), `"userId":[42]`) {
+			t.Fatalf("cfg=%s: исключение не добавлено: %s", cfg, patched)
+		}
+	}
+}

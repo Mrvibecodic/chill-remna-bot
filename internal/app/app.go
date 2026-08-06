@@ -89,11 +89,14 @@ type App struct {
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
 	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
 	// паузу между торрент-предупреждениями пользователю (torSeen).
-	thrMu      sync.Mutex
-	thrLast    map[string]time.Time
-	hlNotified map[string]time.Time
-	torSeen    map[int64]time.Time
-	torUnbSeen map[int64]time.Time
+	thrMu         sync.Mutex
+	thrLast       map[string]time.Time
+	hlNotified    map[string]time.Time
+	torSeen       map[int64]time.Time
+	torUnbSeen    map[int64]time.Time
+	torStrikeBusy map[int64]bool
+	torStrikeSeen map[int64]time.Time
+	torStrikeFail map[int64]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int

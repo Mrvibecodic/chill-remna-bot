@@ -75,7 +75,7 @@ func (a *App) closeTorrentBlocks(ctx context.Context, ip string) {
 		if !notifyUser || r.TelegramID == 0 || done[r.TelegramID] {
 			continue
 		}
-		if a.struckAfter(ctx, r.TelegramID, r.CreatedAt) {
+		if a.subDisabled(ctx, r.TelegramID) {
 			continue
 		}
 		done[r.TelegramID] = true
@@ -105,6 +105,11 @@ func (a *App) torrentIgnoreUser(ctx context.Context, chatID int64, arg string) {
 	}
 	changed, already, err := panel.TorrentIgnoreUser(ctx, uid)
 	switch {
+	case err != nil && changed > 0:
+		// Часть конфигов уже изменена — молчать об этом нельзя, иначе админ
+		// решит, что не применилось ничего.
+		a.log.Warn("торрент-блокер: исключение применено частично", "user_id", uid, "configs", changed, "err", err)
+		a.notify(ctx, chatID, i18n.T(lang, "torj.ign_partial", changed, escapeErr(err)))
 	case err != nil:
 		a.log.Warn("торрент-блокер: исключение пользователя", "user_id", uid, "err", err)
 		a.notify(ctx, chatID, i18n.T(lang, "torj.ign_fail", escapeErr(err)))
