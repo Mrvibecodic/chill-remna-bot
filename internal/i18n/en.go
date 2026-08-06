@@ -559,6 +559,7 @@ var en = map[string]string{
 	"rw.torrent_not_blocked":     "not applied",
 	"torj.title":                 "🚫 <b>Torrent blocker log</b> — total reports: %d",
 	"torj.empty":                 "🚫 <b>Torrent blocker log</b>\n\nEmpty so far: the panel has not sent any reports. Make sure the torrent-blocker plugin is enabled on the nodes and the panel webhook includes the torrent_blocker scope.",
+	"torj.no_secret":             "⚠️ The panel webhook secret is not set (System → Webhooks → Secret). Without it torrent-blocker reports are dropped: a forged request could send people fake block notices and flood the log.",
 	"toru.title":                 "✏️ <b>Unblock message</b>\n\nSource: %s\n\nThe user currently receives:\n\n%s",
 	"toru.src_default":           "default text",
 	"toru.src_custom":            "admin text",

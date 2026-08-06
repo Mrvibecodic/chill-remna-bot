@@ -42,7 +42,13 @@ func (a *App) showTorrentAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
 		{btn(i18n.T(lang, "btn.back"), "menu:users"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
-	a.sendUsrKB(ctx, chatID, i18n.T(lang, "torj.home", total, last30), rows)
+	text := i18n.T(lang, "torj.home", total, last30)
+	// Без секрета отчёты панели отбрасываются (см. pushTorrentReport): иначе
+	// админ видел бы замерший журнал и молчащие тумблеры без единого намёка.
+	if a.rwSecret() == "" {
+		text += "\n\n" + i18n.T(lang, "torj.no_secret")
+	}
+	a.sendUsrKB(ctx, chatID, text, rows)
 }
 
 // showUserTorrents — нарушения одного человека: из карточки пользователя.

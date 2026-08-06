@@ -92,18 +92,22 @@ func (a *App) toggleTorrentNotify(admin bool) {
 	}
 }
 
+// rwSecret — секрет вебхука панели (пустой = подпись не проверяется).
+func (a *App) rwSecret() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.botCfg.Webhook.RemnawaveSecret)
+}
+
 func (a *App) pushTorrentReport(ctx context.Context, data json.RawMessage) {
 	// Без секрета подпись вебхука не проверяется, а этот обработчик пишет строки
 	// в БД и шлёт сообщения на telegramId ИЗ ТЕЛА ЗАПРОСА — то есть кто угодно,
 	// зная адрес бота, рассылал бы «ваш IP заблокирован» произвольным людям и
 	// раздувал журнал. Остальные события панели ничего такого не делают.
-	a.mu.Lock()
-	secret := ""
-	if a.botCfg != nil {
-		secret = strings.TrimSpace(a.botCfg.Webhook.RemnawaveSecret)
-	}
-	a.mu.Unlock()
-	if secret == "" {
+	if a.rwSecret() == "" {
 		a.log.Warn("торрент-блокер: отчёт отброшен — не задан секрет вебхука панели")
 		return
 	}
@@ -214,15 +218,11 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	}
 	a.mu.Lock()
 	st := a.store
-	secret := ""
-	if a.botCfg != nil {
-		secret = strings.TrimSpace(a.botCfg.Webhook.RemnawaveSecret)
-	}
 	a.mu.Unlock()
 	if st == nil {
 		return
 	}
-	if secret == "" {
+	if a.rwSecret() == "" {
 		a.log.Warn("торрент-блокер: автоблокировка пропущена — не задан секрет вебхука", "tg_id", uid)
 		return
 	}
@@ -239,9 +239,6 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	}
 	defer a.unlockStrike(uid)
 
-	// Дальше идут последствия, а не обслуживание HTTP-запроса: у вебхука
-	// дедлайн 15 с, и на медленной панели он истекал ровно между обращением к
-	// ней и записью отметки — политика молча разъезжалась. Отвязываем.
 	// Дальше идут последствия, а не обслуживание HTTP-запроса: у вебхука
 	// дедлайн 15 с, и он истекал ровно между обращением к панели и записью
 	// отметки — политика молча разъезжалась. Отвязываемся от него, но свой
@@ -651,6 +648,9 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 				send = false
 			}
 		}
+		// reserved — пауза занята именно этой итерацией: только тогда её можно
+		// откатить, если пометка в БД не удалась.
+		reserved := false
 		if send {
 			// Пауза резервируется ДО похода в панель: проверка и установка по
 			// разные стороны сетевого вызова давали дубль, когда админ жал
@@ -663,6 +663,7 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 					a.torUnbSeen = map[int64]time.Time{}
 				}
 				a.torUnbSeen[r.TelegramID] = time.Now()
+				reserved = true
 			}
 			a.thrMu.Unlock()
 		}
@@ -686,6 +687,14 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 		// вечно. Решение уже принято выше.
 		if err := st.MarkTorrentUnblockNotified(ctx, r.ID); err != nil {
 			a.log.Warn("торрент-блокер: пометка разблокировки", "err", err)
+			// Пауза возвращается: запись осталась в очереди, и на следующем
+			// тике решение примут заново — иначе сбой БД съедал бы обещанное
+			// «блокировка снята» насовсем (пауза занята, а пометка уже прошла).
+			if reserved {
+				a.thrMu.Lock()
+				delete(a.torUnbSeen, r.TelegramID)
+				a.thrMu.Unlock()
+			}
 			continue
 		}
 		if send {
@@ -785,6 +794,19 @@ func (a *App) pruneStrikeMaps() {
 	for uid, t := range a.torStrikeFail {
 		if time.Since(t) > cutoff {
 			delete(a.torStrikeFail, uid)
+		}
+	}
+	// Карты пауз сообщений устаревают ещё быстрее (10 минут) и точно так же
+	// росли бы по числу нарушителей без конца.
+	seenCutoff := 2 * torrentUserCooldown
+	for uid, t := range a.torSeen {
+		if time.Since(t) > seenCutoff {
+			delete(a.torSeen, uid)
+		}
+	}
+	for uid, t := range a.torUnbSeen {
+		if time.Since(t) > seenCutoff {
+			delete(a.torUnbSeen, uid)
 		}
 	}
 }

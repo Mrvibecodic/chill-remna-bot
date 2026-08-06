@@ -1237,3 +1237,46 @@ func TestTorrentUserLog_Pagination(t *testing.T) {
 		t.Fatalf("нет возврата на первую страницу: %v", fm.allCallbackData())
 	}
 }
+
+// Сбой пометки в БД не должен съедать обещанное «блокировка снята»: пауза
+// откатывается, и следующий тик доставляет сообщение.
+func TestTorrentUnblock_MarkFailureKeepsPromise(t *testing.T) {
+	a, fm, fs := torrentApp(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	_ = fs.AddTorrentReport(ctx, &model.TorrentReport{TelegramID: 42, WillUnblockAt: past})
+	fs.failMark = 1
+
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 0 || fs.torrents[0].UnblockNotified {
+		t.Fatalf("при сбое пометки слать и помечать нельзя: %v %+v", fm.texts, fs.torrents[0])
+	}
+
+	a.torrentUnblockOnce(ctx)
+	if countContains(fm.texts, "Блокировка снята") != 1 || !fs.torrents[0].UnblockNotified {
+		t.Fatalf("после восстановления БД сообщение должно дойти: %v %+v", fm.texts, fs.torrents[0])
+	}
+}
+
+// Экран «Торренты» предупреждает, что без секрета вебхука отчёты
+// отбрасываются, и убирает предупреждение после настройки секрета.
+func TestTorrentAdmin_SecretHint(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	ctx := context.Background()
+	a.botCfg = &model.BotConfig{Installed: true}
+	a.botCfg.NormalizeTorrent()
+
+	a.handleCallback(ctx, cb(100, "torj:home"))
+	if countContains(fm.texts, "Не задан секрет вебхука") != 1 {
+		t.Fatalf("без секрета должна быть подсказка: %v", fm.texts)
+	}
+
+	a.botCfg.Webhook.RemnawaveSecret = "s"
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "torj:home"))
+	if countContains(fm.texts, "Не задан секрет вебхука") != 0 {
+		t.Fatalf("с секретом подсказки быть не должно: %v", fm.texts)
+	}
+}

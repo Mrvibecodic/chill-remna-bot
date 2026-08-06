@@ -173,11 +173,13 @@ type fakeStore struct {
 	webUsers  map[string]*model.WebUser
 	paylogs   []model.PayLogEntry
 	torrents  []model.TorrentReport
-	strikes   map[int64]string
-	wlIDs     map[int64]bool
-	invites   map[string]*model.Invite
-	autopays  map[int64]*model.AutoPay
-	seq       int64
+	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
+	failMark int
+	strikes  map[int64]string
+	wlIDs    map[int64]bool
+	invites  map[string]*model.Invite
+	autopays map[int64]*model.AutoPay
+	seq      int64
 }
 
 func (s *fakeStore) WhitelistAllUsers(context.Context) (int64, error) {
@@ -427,6 +429,10 @@ func (s *fakeStore) PendingTorrentUnblocksByIP(_ context.Context, ip string) ([]
 }
 
 func (s *fakeStore) MarkTorrentUnblockNotified(_ context.Context, id int64) error {
+	if s.failMark > 0 {
+		s.failMark--
+		return errors.New("хранилище недоступно")
+	}
 	for i := range s.torrents {
 		if s.torrents[i].ID == id {
 			s.torrents[i].UnblockNotified = true
