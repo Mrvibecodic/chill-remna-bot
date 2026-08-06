@@ -365,6 +365,13 @@ func (s *fakeStore) AddTorrentReport(_ context.Context, r *model.TorrentReport) 
 	if r.CreatedAt == "" {
 		r.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
+	// Хранилище вставляет с ON CONFLICT (id) DO NOTHING — фейк обязан вести
+	// себя так же, иначе идемпотентность журнала ничем не проверяется.
+	for _, ex := range s.torrents {
+		if ex.ID == r.ID {
+			return nil
+		}
+	}
 	s.torrents = append(s.torrents, *r)
 	return nil
 }

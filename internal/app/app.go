@@ -1010,7 +1010,11 @@ func btn(text, data string) models.InlineKeyboardButton {
 }
 
 func (a *App) askInput(ctx context.Context, chatID int64, text, back string) {
-	a.getUI(chatID).inputBack = back
+	ui := a.getUI(chatID)
+	// torAwait перехватывает текст РАНЬШЕ adminInput (см. handleMessage), и
+	// незакрытое ожидание текста съедало бы ответ на этот вопрос.
+	ui.torAwait = false
+	ui.inputBack = back
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.cancel"), "inp:cancel")},
@@ -1021,6 +1025,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui := a.getUI(chatID)
 	back := ui.inputBack
 	ui.adminInput = ""
+	ui.torAwait = false
 	ui.priceMonths = 0
 	ui.linkUID = 0
 	ui.inputBack = ""

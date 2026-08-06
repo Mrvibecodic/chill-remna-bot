@@ -894,10 +894,14 @@ func (b *base) AddTorrentReport(ctx context.Context, r *model.TorrentReport) err
 	if r.CreatedAt == "" {
 		r.CreatedAt = nowStr()
 	}
+	// ON CONFLICT DO NOTHING: панель переотправляет вебхук, если не дождалась
+	// 200, а по журналу считаются страйки — дубликаты ускоряли бы отключение
+	// подписки. Идемпотентный id вычисляет вызывающий (см. torrentReportID).
 	_, err := b.db.ExecContext(ctx,
 		"INSERT INTO torrent_reports ("+torrentReportCols+") VALUES ("+
 			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+
-			b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+")",
+			b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+") "+
+			"ON CONFLICT (id) DO NOTHING",
 		r.ID, r.TelegramID, r.Username, r.Node, r.IP, r.Protocol, r.Inbound,
 		r.Source, r.Destination, r.BlockSeconds, r.WillUnblockAt, boolToInt(r.UnblockNotified), r.CreatedAt)
 	return err

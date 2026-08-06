@@ -5,7 +5,6 @@ import (
 	"html"
 	"strconv"
 	"strings"
-	"time"
 
 	"remnabot/internal/i18n"
 )
@@ -50,9 +49,9 @@ func (a *App) torrentUnblockIP(ctx context.Context, chatID int64, ip string) {
 	a.notify(ctx, chatID, i18n.T(lang, "torj.unb_ok", escapeName(ip)))
 }
 
-// closeTorrentBlocks помечает записи журнала по адресу отработанными и
-// уведомляет пользователей — иначе тикер прислал бы «блокировка снята» ещё раз
-// в исходный срок, когда это уже неправда.
+// closeTorrentBlocks закрывает записи журнала по адресу и уведомляет людей —
+// иначе тикер прислал бы «блокировка снята» ещё раз в исходный срок, когда это
+// уже неправда. Решение о самой отправке принимает общий deliverUnblocks.
 func (a *App) closeTorrentBlocks(ctx context.Context, ip string) {
 	a.mu.Lock()
 	st := a.store
@@ -65,28 +64,7 @@ func (a *App) closeTorrentBlocks(ctx context.Context, ip string) {
 		a.log.Warn("торрент-блокер: выборка записей по IP", "err", err)
 		return
 	}
-	notifyUser := a.torrentCfg().NotifyUser
-	done := map[int64]bool{}
-	for _, r := range pending {
-		if err := st.MarkTorrentUnblockNotified(ctx, r.ID); err != nil {
-			a.log.Warn("торрент-блокер: пометка разблокировки", "err", err)
-			continue
-		}
-		if !notifyUser || r.TelegramID == 0 || done[r.TelegramID] {
-			continue
-		}
-		if a.subDisabled(ctx, r.TelegramID) {
-			continue
-		}
-		done[r.TelegramID] = true
-		a.thrMu.Lock()
-		if a.torUnbSeen == nil {
-			a.torUnbSeen = map[int64]time.Time{}
-		}
-		a.torUnbSeen[r.TelegramID] = time.Now()
-		a.thrMu.Unlock()
-		a.sendTorrentUnblock(ctx, r.TelegramID)
-	}
+	a.deliverUnblocks(ctx, st, pending, false)
 }
 
 // torrentIgnoreUser добавляет пользователя панели в исключения торрент-блокера

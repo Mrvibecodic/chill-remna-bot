@@ -217,12 +217,17 @@ func (a *App) onTorrentAdmin(ctx context.Context, chatID int64, val string) {
 	case "text":
 		a.showTorrentUnblockAdmin(ctx, chatID)
 	case "edit":
-		a.getUI(chatID).torAwait = true
+		ui := a.getUI(chatID)
+		// Симметрично askInput: два ожидания ввода не должны накладываться.
+		ui.adminInput = ""
+		ui.torAwait = true
 		a.sendKB(ctx, chatID, i18n.T(lang, "toru.ask"),
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.cancel"), "torj:cancel")}})
 	case "cancel":
-		a.getUI(chatID).torAwait = false
-		a.showTorrentUnblockAdmin(ctx, chatID)
+		ui := a.getUI(chatID)
+		ui.torAwait = false
+		ui.adminInput = ""
+		a.showTorrentAdmin(ctx, chatID)
 	case "test":
 		a.sendTorrentUnblock(ctx, chatID)
 		a.showTorrentUnblockAdmin(ctx, chatID)
@@ -241,7 +246,9 @@ func (a *App) onTorrentAdmin(ctx context.Context, chatID int64, val string) {
 // setTorrentUnblockText сохраняет присланное админом сообщение вместе с
 // entities — форматирование у юзера будет 1-в-1 (как у приветствия).
 func (a *App) setTorrentUnblockText(ctx context.Context, chatID int64, m *models.Message) {
-	a.getUI(chatID).torAwait = false
+	ui := a.getUI(chatID)
+	ui.torAwait = false
+	ui.adminInput = ""
 	ents, _ := json.Marshal(m.Entities)
 	a.mu.Lock()
 	if a.botCfg != nil {
@@ -257,9 +264,13 @@ func (a *App) setTorrentUnblockText(ctx context.Context, chatID int64, m *models
 // setTorrentStrikeLimit сохраняет порог автоблокировки: 0 (и любой мусор) —
 // политика выключена.
 func (a *App) setTorrentStrikeLimit(ctx context.Context, chatID int64, text string) {
-	n, _ := strconv.Atoi(strings.TrimSpace(text))
-	if n < 0 {
-		n = 0
+	// Молчаливый Atoi превращал любую опечатку в 0, то есть ВЫКЛЮЧАЛ уже
+	// настроенную политику без единого слова.
+	n, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil || n < 0 {
+		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "toru.strike_bad"),
+			[][]models.InlineKeyboardButton{{btn(i18n.T(a.lang(chatID), "btn.cancel"), "torj:cancel")}})
+		return
 	}
 	a.getUI(chatID).adminInput = ""
 	a.mu.Lock()

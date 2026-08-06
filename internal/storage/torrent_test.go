@@ -200,3 +200,28 @@ func TestTorrentReports_BigTelegramID(t *testing.T) {
 		}
 	})
 }
+
+// Повторная доставка того же отчёта (панель не дождалась 200 и переслала)
+// не должна плодить записи: по журналу считаются страйки.
+func TestAddTorrentReport_Idempotent(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		r := &model.TorrentReport{ID: 777001, TelegramID: 42, IP: "203.0.113.7"}
+		for i := 0; i < 3; i++ {
+			cp := *r
+			if err := st.AddTorrentReport(ctx, &cp); err != nil {
+				t.Fatalf("повтор %d: %v", i, err)
+			}
+		}
+		if _, total, _ := st.UserTorrentReports(ctx, 42, "", 10, 0); total != 1 {
+			t.Fatalf("ожидалась одна запись, есть %d", total)
+		}
+		other := &model.TorrentReport{ID: 777002, TelegramID: 42, IP: "203.0.113.7"}
+		if err := st.AddTorrentReport(ctx, other); err != nil {
+			t.Fatal(err)
+		}
+		if _, total, _ := st.UserTorrentReports(ctx, 42, "", 10, 0); total != 2 {
+			t.Fatalf("разные инциденты склеились: %d", total)
+		}
+	})
+}
