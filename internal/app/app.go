@@ -726,14 +726,21 @@ func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
 	}()
 	ctx, cancel := context.WithTimeout(a.bgContext(), 10*time.Minute)
 	defer cancel()
-	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
+	// Сообщение об ошибке уходит со СВЕЖИМ контекстом: если сам pull упёрся в
+	// 10-минутный потолок, ctx уже мёртв — и EditText, и запасной sendHome
+	// падали бы молча, а админ так и смотрел бы на вечное «запускается».
+	fail := func(err error) {
 		_ = os.Remove(marker)
-		a.updateFailMsg(ctx, chatID, startMsgID, err)
+		nctx, ncancel := context.WithTimeout(a.bgContext(), time.Minute)
+		defer ncancel()
+		a.updateFailMsg(nctx, chatID, startMsgID, err)
+	}
+	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
+		fail(err)
 		return
 	}
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
-		_ = os.Remove(marker)
-		a.updateFailMsg(ctx, chatID, startMsgID, err)
+		fail(err)
 		return
 	}
 	time.AfterFunc(90*time.Second, func() {
