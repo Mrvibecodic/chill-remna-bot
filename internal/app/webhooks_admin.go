@@ -84,7 +84,8 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 			base+"/webhook/platega", base+"/webhook/heleket", base+"/webhook/tribute")
 	}
 
-	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls
+	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
+		"\n\n" + i18n.T(lang, "wh.torrent_line") + "\n" + i18n.T(lang, "wh.torrent_moved")
 
 	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "wh.btn_guide"), "wh:guide")},
@@ -120,6 +121,11 @@ func (a *App) onWebhooksAdmin(ctx context.Context, chatID int64, val string) {
 	case "base":
 		a.getUI(chatID).adminInput = "wh_base"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.wh_ask_base"), "menu:webhooks")
+	case "tadm", "tusr":
+		// Кнопки переехали в «Пользователи → Торренты», но у админа в чате
+		// могли остаться старые сообщения: молчаливый no-op выглядел бы как
+		// сломанный тумблер.
+		a.showTorrentAdmin(ctx, chatID)
 	case "secret":
 		a.getUI(chatID).adminInput = "wh_secret"
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.wh_ask_secret"), "menu:webhooks")
@@ -251,4 +257,12 @@ func (a *App) cleanupBotPortMsg(ctx context.Context) {
 	if chatID != 0 {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "wh.port_applied", a.webhookListenPortNum()))
 	}
+}
+
+// strikeLabel — подпись порога автоблокировки на кнопке: число или «выкл».
+func strikeLabel(lang string, n int) string {
+	if n <= 0 {
+		return i18n.T(lang, "wh.tor_strike_off")
+	}
+	return strconv.Itoa(n)
 }

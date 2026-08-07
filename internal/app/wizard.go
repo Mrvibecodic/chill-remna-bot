@@ -101,6 +101,7 @@ const (
 	cbRSImport  = "rsimp"
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
+	cbTorrent   = "torj"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -205,6 +206,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbWebhooks:
 		if isAdmin {
 			a.onWebhooksAdmin(ctx, chatID, val)
+		}
+	case cbTorrent:
+		if isAdmin {
+			a.onTorrentAdmin(ctx, chatID, val)
 		}
 	case cbNotify:
 		if isAdmin {

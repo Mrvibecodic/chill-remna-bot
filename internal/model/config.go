@@ -139,6 +139,7 @@ type BotConfig struct {
 	Heleket   HeleketConfig   `json:"heleket"`
 	Tribute   TributeConfig   `json:"tribute"`
 	Webhook   WebhookConfig   `json:"webhook"`
+	Torrent   TorrentConfig   `json:"torrent"`
 	Reminders RemindersConfig `json:"reminders"`
 	Referral  ReferralConfig  `json:"referral"`
 	MoyNalog  MoyNalogConfig  `json:"moynalog"`
@@ -400,6 +401,35 @@ type WebhookConfig struct {
 	TLS             bool   `json:"tls"`
 }
 
+// TorrentConfig — реакция бота на отчёты торрент-блокера панели
+// (вебхук torrent_blocker.report плагина ноды).
+type TorrentConfig struct {
+	NotifyAdmin bool `json:"notify_admin"`
+	NotifyUser  bool `json:"notify_user"`
+	// UnblockText/UnblockEntities — заданный админом текст сообщения о снятии
+	// блокировки (с телеграмным форматированием 1-в-1, как у приветствия).
+	// Пустой текст = стандартное сообщение из i18n.
+	UnblockText     string          `json:"unblock_text"`
+	UnblockEntities json.RawMessage `json:"unblock_entities"`
+	Init            bool            `json:"init"`
+	// StrikeLimit — сколько нарушений за 30 дней автоматически отключают
+	// подписку. 0 — политика выключена (значение по умолчанию: отключать
+	// платящего человека без ведома владельца бот сам не должен).
+	StrikeLimit int `json:"strike_limit"`
+}
+
+// NormalizeTorrent включает оба уведомления по умолчанию для конфигов,
+// созданных до появления настройки.
+func (c *BotConfig) NormalizeTorrent() {
+	t := &c.Torrent
+	if t.Init {
+		return
+	}
+	t.NotifyAdmin = true
+	t.NotifyUser = true
+	t.Init = true
+}
+
 type CryptoBotConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Token    string `json:"token"`
@@ -415,6 +445,24 @@ type PayLogEntry struct {
 	Stage      string
 	Detail     string
 	CreatedAt  string
+}
+
+// TorrentReport — запись журнала торрент-блокера (одна на каждый отчёт
+// панели torrent_blocker.report).
+type TorrentReport struct {
+	ID              int64
+	TelegramID      int64
+	Username        string
+	Node            string
+	IP              string
+	Protocol        string
+	Inbound         string
+	Source          string
+	Destination     string
+	BlockSeconds    int
+	WillUnblockAt   string
+	UnblockNotified bool
+	CreatedAt       string
 }
 
 type RemindersConfig struct {

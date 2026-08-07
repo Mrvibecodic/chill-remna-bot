@@ -36,6 +36,9 @@ import (
 type messenger interface {
 	Send(ctx context.Context, chatID int64, text string) int
 	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int
+	// SendEnt отправляет текст с телеграмными entities (форматирование 1-в-1,
+	// без ParseMode) — для сообщений, набранных админом в клиенте Telegram.
+	SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int
 	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
 
 	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
@@ -84,10 +87,16 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast) и разовые уведомления админу по счёту Heleket (hlNotified).
-	thrMu      sync.Mutex
-	thrLast    map[string]time.Time
-	hlNotified map[string]time.Time
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
+	// паузу между торрент-предупреждениями пользователю (torSeen).
+	thrMu         sync.Mutex
+	thrLast       map[string]time.Time
+	hlNotified    map[string]time.Time
+	torSeen       map[int64]time.Time
+	torUnbSeen    map[int64]time.Time
+	torStrikeBusy map[int64]bool
+	torStrikeSeen map[int64]time.Time
+	torStrikeFail map[int64]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -200,6 +209,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 	if ok && cfg.Installed {
 		cfg.NormalizePricing()
 		cfg.NormalizeReminders()
+		cfg.NormalizeTorrent()
 		cfg.NormalizeReferral()
 		cfg.NormalizeUpdateCheck()
 		cfg.NormalizeAddSub()
@@ -536,6 +546,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		a.setWelcomeText(ctx, chatID, m)
 		return
 	}
+	if ui.torAwait {
+		a.setTorrentUnblockText(ctx, chatID, m)
+		return
+	}
 	if ui.welcomeAwait == "img" {
 		a.setWelcomeImageURL(ctx, chatID, text)
 		return
@@ -698,14 +712,35 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	}
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)), 0o600)
-	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
+	// pull теперь синхронный (чтобы причина сбоя дошла до админа), поэтому весь
+	// процесс — в горутине: скачивание образа не должно блокировать обработку
+	// апдейтов единственным воркером.
+	go a.runSelfUpdate(chatID, startMsgID, marker)
+}
+
+func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.log.Error("паника в самообновлении", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	ctx, cancel := context.WithTimeout(a.bgContext(), 10*time.Minute)
+	defer cancel()
+	// Сообщение об ошибке уходит со СВЕЖИМ контекстом: если сам pull упёрся в
+	// 10-минутный потолок, ctx уже мёртв — и EditText, и запасной sendHome
+	// падали бы молча, а админ так и смотрел бы на вечное «запускается».
+	fail := func(err error) {
 		_ = os.Remove(marker)
-		a.updateFailMsg(ctx, chatID, startMsgID, err)
+		nctx, ncancel := context.WithTimeout(a.bgContext(), time.Minute)
+		defer ncancel()
+		a.updateFailMsg(nctx, chatID, startMsgID, err)
+	}
+	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
+		fail(err)
 		return
 	}
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
-		_ = os.Remove(marker)
-		a.updateFailMsg(ctx, chatID, startMsgID, err)
+		fail(err)
 		return
 	}
 	time.AfterFunc(90*time.Second, func() {
@@ -982,7 +1017,11 @@ func btn(text, data string) models.InlineKeyboardButton {
 }
 
 func (a *App) askInput(ctx context.Context, chatID int64, text, back string) {
-	a.getUI(chatID).inputBack = back
+	ui := a.getUI(chatID)
+	// torAwait перехватывает текст РАНЬШЕ adminInput (см. handleMessage), и
+	// незакрытое ожидание текста съедало бы ответ на этот вопрос.
+	ui.torAwait = false
+	ui.inputBack = back
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.cancel"), "inp:cancel")},
@@ -993,6 +1032,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui := a.getUI(chatID)
 	back := ui.inputBack
 	ui.adminInput = ""
+	ui.torAwait = false
 	ui.priceMonths = 0
 	ui.linkUID = 0
 	ui.inputBack = ""
@@ -1029,6 +1069,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onUsers(ctx, chatID, val, 0)
 	case "acc":
 		a.onAccess(ctx, chatID, val)
+	case cbTorrent:
+		a.onTorrentAdmin(ctx, chatID, val)
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}
@@ -1180,6 +1222,33 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 			return 0
 		}
 		m.log.Warn("send message: HTML rejected, sent as plain text", "chat_id", chatID)
+	}
+	return msg.ID
+}
+
+func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities}
+	if len(rows) > 0 {
+		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	}
+	var msg *models.Message
+	err := m.sendWithRetry(ctx, func() (e error) {
+		msg, e = m.b.SendMessage(ctx, params)
+		return e
+	})
+	if err != nil {
+		// Кривые entities (например, после ручной правки конфига) не должны
+		// глушить уведомление — повторяем без форматирования.
+		params.Entities = nil
+		err = m.sendWithRetry(ctx, func() (e error) {
+			msg, e = m.b.SendMessage(ctx, params)
+			return e
+		})
+		if err != nil {
+			m.log.Error("send message with entities", "err", err)
+			return 0
+		}
+		m.log.Warn("send message: entities rejected, sent as plain text", "chat_id", chatID)
 	}
 	return msg.ID
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -70,8 +71,13 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 		return
 	}
 	if total == 0 {
+		// Раздел «Торренты» доступен и на пустом списке: отчёты панели приходят
+		// и по тем, кого бот ещё не видел.
 		a.sendUsrKB(ctx, chatID, i18n.T(lang, "users.empty"),
-			[][]models.InlineKeyboardButton{homeRow(lang)})
+			[][]models.InlineKeyboardButton{
+				{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
+				homeRow(lang),
+			})
 		return
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
@@ -80,6 +86,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
+		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
 	}
 	for _, u := range users {
 		label := "👤 " + userLabel(&u)
@@ -201,6 +208,20 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 			}
 		}
 	}
+	// Нарушения показываем только тем, у кого они есть: пустая строка «0»
+	// в каждой карточке — это шум.
+	torLine, torCount := "", 0
+	if a.store != nil {
+		// Считаем за всё время: гейт по 30 дням прятал бы кнопку у нарушителя
+		// со старой историей, и открыть её было бы неоткуда.
+		torCount, _ = a.store.CountTorrentReports(ctx, uid, "", "")
+		if torCount > 0 {
+			last30, _ := a.store.CountTorrentReports(ctx, uid, "",
+				time.Now().UTC().Add(-torrentRepeatWindow).Format(time.RFC3339))
+			torLine = "\n" + i18n.T(lang, "user.torrents", torCount, last30)
+		}
+	}
+
 	var actions []models.InlineKeyboardButton
 	if !botBlocked || (subExists && !subBlocked) {
 		actions = append(actions, btn(i18n.T(lang, "btn.block"), "usr:block:"+id))
@@ -212,12 +233,17 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	if len(actions) > 0 {
 		rows = append(rows, actions)
 	}
+	if torCount > 0 {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.torrent_user_log"), "torj:u:"+id),
+		})
+	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:list"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
-	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock), rows)
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock)+torLine, rows)
 }
 
 func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExists, subBlocked bool) {

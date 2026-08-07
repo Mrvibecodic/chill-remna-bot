@@ -203,7 +203,7 @@ func cleanPGData(t *testing.T, dsn string) {
 	defer db.Close()
 	// payment_log добавлен: без него прогоны на общей БД накапливали записи и
 	// тест журнала видел данные предыдущего запуска.
-	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}
