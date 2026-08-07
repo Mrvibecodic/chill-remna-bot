@@ -28,26 +28,6 @@ const (
 	SectionAdminStats      = "admin_stats"
 )
 
-var SectionImages = map[string]string{
-
-	SectionWizardWelcome:       "https://plus.unsplash.com/premium_photo-1674476932936-80a969879ec2?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardDBChoose:      "https://plus.unsplash.com/premium_photo-1661386261378-8ed99f4e37ba?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardDBPostgresUp:  "https://images.unsplash.com/photo-1775616788028-ce670411dff7?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardLocation:      "https://images.unsplash.com/photo-1778452419724-1f605dc17c46?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardInstallChoice: "https://images.unsplash.com/photo-1518773553398-650c184e0bb3?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardToken:         "https://images.unsplash.com/photo-1608390063578-8dcd6c1995e8?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardCookie:        "https://images.unsplash.com/photo-1497051788611-2c64812349fa?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionWizardVerifyOK:      "https://images.unsplash.com/photo-1767260408878-4566afa38b9c?w=1280&h=640&fit=crop&auto=format&q=80",
-
-	SectionMainMenu:        "https://plus.unsplash.com/premium_photo-1733306489269-449d1e8ae119?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionBuySubscription: "https://images.unsplash.com/photo-1757185389479-6f9c6d02b96d?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionMySubscription:  "https://images.unsplash.com/photo-1744782211816-c5224434614f?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionTrial:           "https://images.unsplash.com/photo-1764385827253-3d0a5eb813fe?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionReferral:        "https://images.unsplash.com/photo-1761075666032-7540b8c58de7?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionPromoCode:       "https://plus.unsplash.com/premium_photo-1681398745480-151fc6addaaf?w=1280&h=640&fit=crop&auto=format&q=80",
-	SectionAdminStats:      "https://images.unsplash.com/photo-1745270917233-65e776a47547?w=1280&h=640&fit=crop&auto=format&q=80",
-}
-
 type Section struct {
 	Key     string
 	LabelRU string
@@ -101,9 +81,8 @@ func LabelByKey(key, lang string) string {
 	return key
 }
 
-func URL(section string) string {
-	return SectionImages[section]
-}
+// Has reports whether the section ships with a built-in banner image.
+func Has(section string) bool { return len(Bytes(section)) > 0 }
 
 func Bytes(section string) []byte {
 
