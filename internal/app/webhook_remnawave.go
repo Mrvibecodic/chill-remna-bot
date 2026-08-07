@@ -91,7 +91,7 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 
 	switch {
 	case ev.Event == "user.expiration":
-		// Панель с 2.8.20: одно событие вместо user.expires_in_*/user.expired_*_ago,
+		// Панель с 2.8.0 (контракт 2.8.20): одно событие вместо user.expires_in_*/user.expired_*_ago,
 		// конкретный интервал лежит в meta.expiration.
 		hours := 0
 		var meta rwWebhookMeta
@@ -112,7 +112,7 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 		a.pushExpiryWarning(ctx, u, ev.Event, -hours)
 		return true, nil
 	case strings.HasPrefix(ev.Event, "user.expires_in"):
-		// Панели 2.7.0–2.8.19.
+		// Панели 2.7.x (контракты до 2.8.19).
 		a.pushExpiryWarning(ctx, u, ev.Event, expiresInHours(ev.Event))
 		return true, nil
 	case ev.Event == "user.expired":

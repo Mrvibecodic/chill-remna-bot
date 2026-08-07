@@ -326,7 +326,7 @@ docker compose up -d</code></pre></li>
     <tr><td><code>POST /webhook/tribute</code></td><td>Tribute</td></tr>
     <tr><td><code>POST /webhook/remnawave</code></td><td>события панели</td></tr>
   </table></div>
-  <div class="note">📡 <b>Вебхук панели:</b> укажите в Remnawave URL <code>https://домен/webhook/remnawave</code> и секрет, тот же секрет — в боте (<b>Система → Вебхуки → Секрет</b>). По событиям панели бот шлёт напоминания «скоро истечёт»/«истекла»/«трафик исчерпан» (панели 2.7.x — <code>user.expires_in_*</code>; 2.8.20+/3.x — <code>user.expiration</code>, включите <code>EXPIRATION_NOTIFICATIONS_ENABLED</code>) и обрабатывает отчёты торрент-блокера — для них секрет обязателен, без подписи отчёты отбрасываются.</div>
+  <div class="note">📡 <b>Вебхук панели:</b> укажите в Remnawave URL <code>https://домен/webhook/remnawave</code> и секрет, тот же секрет — в боте (<b>Система → Вебхуки → Секрет</b>). По событиям панели бот шлёт напоминания «скоро истечёт»/«истекла»/«трафик исчерпан» (панели 2.7.x — <code>user.expires_in_*</code>; 2.8.0+/3.x — <code>user.expiration</code>, включите <code>EXPIRATION_NOTIFICATIONS_ENABLED</code>) и обрабатывает отчёты торрент-блокера — для них секрет обязателен, без подписи отчёты отбрасываются.</div>
   <h3>Способ A — встроенный HTTPS (рекомендуется)</h3>
   <p class="muted">Бот сам получает сертификат Let's Encrypt и слушает 80/443. Направьте домен A-записью на сервер бота, затем в админке: <b>Система → Вебхуки → Публичный HTTPS</b> (вкл) → <b>Домен</b> → <b>Применить</b>. Бот пропишет порты в compose и перезапустится.</p>
   <h3>Способ B — за reverse-proxy панели</h3>
