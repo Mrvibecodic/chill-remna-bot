@@ -84,7 +84,7 @@ func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows 
 	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, _, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
 	f.recordKB(rows)
 	return f.add(caption), ""
 }

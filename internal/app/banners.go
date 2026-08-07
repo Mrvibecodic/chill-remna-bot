@@ -51,7 +51,6 @@ func cut3(s string) (string, string, bool) {
 func (a *App) showSectionBanner(ctx context.Context, chatID int64, section string) {
 	lang := a.lang(chatID)
 	label := assets.LabelByKey(section, lang)
-	url := assets.URL(section)
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "banners.btn_upload"), "sec:upload:"+section)},
 		{btn(i18n.T(lang, "banners.btn_reset"), "sec:reset:"+section)},
@@ -59,7 +58,7 @@ func (a *App) showSectionBanner(ctx context.Context, chatID int64, section strin
 	}
 	caption := i18n.T(lang, "banners.section_caption", label)
 
-	if url == "" {
+	if !assets.Has(section) {
 
 		a.sendKB(ctx, chatID, caption, rows)
 		return
@@ -74,7 +73,7 @@ func (a *App) showSectionBanner(ctx context.Context, chatID int64, section strin
 	var newFileID string
 	embed := assets.Bytes(section)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, url, caption, rows)
+		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, caption, rows)
 		newFileID = nf
 		return id
 	})

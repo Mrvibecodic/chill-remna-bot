@@ -41,7 +41,7 @@ type messenger interface {
 	SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int
 	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
 
-	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
+	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
 	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int
 	Delete(ctx context.Context, chatID int64, msgID int)
 	RemoveKeyboard(ctx context.Context, chatID int64)
@@ -946,8 +946,7 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 }
 
 func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption string, rows [][]models.InlineKeyboardButton) {
-	url := assets.URL(section)
-	if url == "" || len([]rune(caption)) > 1000 {
+	if !assets.Has(section) || len([]rune(caption)) > 1000 {
 		a.sendKB(ctx, chatID, caption, rows)
 		return
 	}
@@ -982,7 +981,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	var newFileID string
 	embed := assets.Bytes(section)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, url, t, rows)
+		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, t, rows)
 		newFileID = nf
 		return id
 	})
@@ -1356,7 +1355,7 @@ func (m botMessenger) CreateInvoiceLink(ctx context.Context, title, description,
 	})
 }
 
-func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, urlFallback, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
 
 	build := func(source string) (*models.Message, string, error) {
 		var photo models.InputFile
@@ -1365,8 +1364,6 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 			photo = &models.InputFileString{Data: cachedFileID}
 		case "embed":
 			photo = &models.InputFileUpload{Filename: "banner.jpg", Data: bytes.NewReader(embedBytes)}
-		case "url":
-			photo = &models.InputFileString{Data: urlFallback}
 		}
 		p := &bot.SendPhotoParams{
 			ChatID:    chatID,
@@ -1387,9 +1384,6 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 	}
 	if len(embedBytes) > 0 {
 		tries = append(tries, "embed")
-	}
-	if urlFallback != "" {
-		tries = append(tries, "url")
 	}
 	if len(tries) == 0 {
 		return 0, ""

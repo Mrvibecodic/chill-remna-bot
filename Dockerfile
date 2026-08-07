@@ -11,6 +11,8 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose
 WORKDIR /app
 COPY --from=build /out/bot /app/bot
+# Уведомления о лицензиях едут вместе с бинарником (требование MIT/BSD).
+COPY LICENSE THIRD-PARTY-NOTICES.md /app/
 VOLUME ["/data"]
 ENV DATA_DIR=/data
 ENTRYPOINT ["/app/bot"]

@@ -11,8 +11,9 @@ data/
 *.db-shm
 secret.key
 bootstrap.json
-# документация в образе не нужна
+# документация в образе не нужна, кроме обязательных уведомлений о лицензиях
 *.md
+!THIRD-PARTY-NOTICES.md
 # артефакты
 bot
 /out
