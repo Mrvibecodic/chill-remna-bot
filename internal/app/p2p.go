@@ -121,7 +121,7 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	// прошлому выбору: человек нажал «1 месяц», а счёт выставился бы на год.
 	if err := a.setBuyIntent(ctx, chatID, model.PlanCodeBase, mo); err != nil {
 		a.log.Warn("намерение покупки не сохранено", "err", err, "user", chatID)
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "err.storage"))
 		return
 	}
 	a.showMethods(ctx, chatID, mo)

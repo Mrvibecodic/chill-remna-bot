@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"remnabot/internal/i18n"
@@ -168,9 +169,10 @@ func (a *App) rememberBasePlan(p *model.Plan) {
 	if p == nil {
 		return
 	}
-	// Копия глубокая: слайсы, общие с тем, что лежит в базе или строится
-	// заново, стали бы гонкой, как только под замком понадобится не только
-	// код с именем.
+	// Под замком из этой копии читаются только код и имя (basePlanIdentLocked).
+	// Слайсы копируются, чтобы не делить их с вызывающим; если под замком
+	// понадобятся сами условия, клонировать придётся и то, на что смотрят
+	// указатели внутри длительностей.
 	cp := *p
 	cp.IntSquads = append([]string(nil), p.IntSquads...)
 	cp.Durations = append([]model.PlanDuration(nil), p.Durations...)
@@ -251,7 +253,9 @@ func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseInten
 	st := a.store
 	a.mu.Unlock()
 	if st == nil {
-		return nil, nil
+		// Бот без хранилища продать ничего не может, и молчаливый круг
+		// «витрина → способы → витрина» здесь ни к чему.
+		return nil, errors.New("хранилище недоступно")
 	}
 	in, err := st.PurchaseIntent(ctx, chatID)
 	if err != nil {
@@ -261,8 +265,10 @@ func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseInten
 	if in == nil {
 		return nil, nil
 	}
-	if t, perr := time.Parse(time.RFC3339, in.CreatedAt); perr == nil &&
-		time.Since(t) > purchaseIntentTTL {
+	// Дата не разобралась — считаем выбор просроченным, а не вечным: строка
+	// без времени могла приехать откуда угодно, а «живёт вечно» здесь опаснее.
+	t, perr := time.Parse(time.RFC3339, in.CreatedAt)
+	if perr != nil || time.Since(t) > purchaseIntentTTL {
 		_ = st.DeletePurchaseIntent(ctx, chatID)
 		return nil, nil
 	}
@@ -289,55 +295,49 @@ func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) 
 	if st == nil || chatID == 0 {
 		return
 	}
-	in, err := st.PurchaseIntent(ctx, chatID)
-	if err != nil || in == nil || in.Months != months {
-		return
-	}
-	if err := st.DeletePurchaseIntent(ctx, chatID); err != nil {
+	if err := st.DeletePurchaseIntentFor(ctx, chatID, months); err != nil {
 		a.log.Warn("намерение покупки не удалено", "err", err, "user", chatID)
 	}
 }
 
-// rememberStarsSnapshot кладёт условия сделки в намерение покупки. У Stars нет
-// строки счёта в базе, а payload трогать нельзя — намерение остаётся
-// единственным местом, где снимок доживёт до подтверждения оплаты.
+// rememberStarsSnapshot кладёт условия сделки в таблицу условий счетов. У
+// Stars нет строки в очереди незакрытых счетов (её метод менять нельзя —
+// реконсилятор гасит незнакомые), а payload трогать нельзя тем более, поэтому
+// снимок живёт отдельной строкой с ключом «человек + способ + срок».
+//
+// Именно поэтому он НЕ лежит в намерении покупки: счёт из мини-аппа перебивал
+// бы выбор, сделанный в чате, а снятие выбора после покупки стирало бы условия
+// ещё не оплаченного счёта.
 func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months int, snap *model.PlanSnapshot) {
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
-	if st == nil || snap == nil {
+	if st == nil || snap == nil || months <= 0 {
 		return
 	}
-	in, err := st.PurchaseIntent(ctx, chatID)
-	if err != nil {
-		return
-	}
-	if in == nil {
-		in = &model.PurchaseIntent{TelegramID: chatID, PlanCode: model.PlanCodeBase, Months: months}
-	}
-	// Намерение одно на человека, а счёт Stars умеет выставлять и мини-апп со
-	// своим сроком. Перебивать им выбор, сделанный в чате, нельзя: экран
-	// способов оплаты остаётся подписан прежней ценой, а счёт ушёл бы на
-	// другой срок. Чужой выбор не трогаем — снимок тогда просто не сохраняем,
-	// и оплата пройдёт по текущим условиям, как было до появления снимков.
-	if in.Months != months {
-		return
-	}
-	in.Snapshot = snap
-	if err := st.SetPurchaseIntent(ctx, in); err != nil {
-		a.log.Warn("снимок Stars не сохранён", "err", err, "user", chatID)
+	if err := st.SetInvoiceSnapshot(ctx, chatID, model.PayMethodStars, months, snap); err != nil {
+		a.log.Warn("условия счёта Stars не сохранены", "err", err, "user", chatID)
 	}
 }
 
-// starsSnapshot достаёт условия сделки, снятые при отправке счёта Stars.
-// Снимок берётся только если срок совпал с оплаченным: иначе человек успел
-// выбрать другой срок и снимок уже не про эту покупку.
+// starsSnapshot достаёт условия сделки, снятые при отправке счёта Stars, и
+// убирает их: счёт оплачен, второй раз они не понадобятся.
 func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *model.PlanSnapshot {
-	in, err := a.buyIntent(ctx, chatID)
-	if err != nil || in == nil || in.Snapshot == nil || in.Months != months {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil || months <= 0 {
 		return nil
 	}
-	return in.Snapshot
+	snap, err := st.InvoiceSnapshot(ctx, chatID, model.PayMethodStars, months)
+	if err != nil {
+		a.log.Warn("условия счёта Stars не прочитаны", "err", err, "user", chatID)
+		return nil
+	}
+	if snap != nil {
+		_ = st.DeleteInvoiceSnapshot(ctx, chatID, model.PayMethodStars, months)
+	}
+	return snap
 }
 
 // buyMonthsOrAsk возвращает выбранный срок. Если выбора нет — показывает
@@ -352,8 +352,10 @@ func (a *App) buyMonthsOrAsk(ctx context.Context, chatID int64) int {
 	if err != nil {
 		// Хранилище недоступно: витрина здесь замкнула бы человека в круг
 		// «выберите срок → как оплатить → выберите срок» без единого слова о
-		// причине.
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		// причине. Текст ошибки драйвера в чат не отдаём — в нём хост, имя
+		// базы и пользователь.
+		a.log.Warn("покупка: хранилище недоступно", "err", err, "user", chatID)
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "err.storage"))
 		return 0
 	}
 	if in != nil && in.Months > 0 {

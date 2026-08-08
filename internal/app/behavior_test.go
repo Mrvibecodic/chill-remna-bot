@@ -171,6 +171,7 @@ type fakeStore struct {
 	pending   map[int64]*model.PendingInvoice
 	plans     map[string]*model.Plan
 	intents   map[int64]*model.PurchaseIntent
+	invSnaps  map[string]*model.PlanSnapshot
 	promos    map[string]*model.PromoCode
 	promoUses map[string]bool
 	webUsers  map[string]*model.WebUser
@@ -851,7 +852,43 @@ func (s *fakeStore) SetPurchaseIntent(_ context.Context, in *model.PurchaseInten
 		s.intents = map[int64]*model.PurchaseIntent{}
 	}
 	cp := *in
+	// Настоящее хранилище проставляет время само; без этого срок жизни выбора
+	// в тестах не работал бы вовсе.
+	if cp.CreatedAt == "" {
+		cp.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	in.CreatedAt = cp.CreatedAt
 	s.intents[cp.TelegramID] = &cp
+	return nil
+}
+
+func invSnapKey(telegramID int64, method string, months int) string {
+	return strconv.FormatInt(telegramID, 10) + ":" + method + ":" + strconv.Itoa(months)
+}
+
+func (s *fakeStore) SetInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error {
+	if s.invSnaps == nil {
+		s.invSnaps = map[string]*model.PlanSnapshot{}
+	}
+	if snap == nil {
+		return nil
+	}
+	cp := *snap
+	s.invSnaps[invSnapKey(telegramID, method, months)] = &cp
+	return nil
+}
+
+func (s *fakeStore) InvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error) {
+	v := s.invSnaps[invSnapKey(telegramID, method, months)]
+	if v == nil {
+		return nil, nil
+	}
+	cp := *v
+	return &cp, nil
+}
+
+func (s *fakeStore) DeleteInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) error {
+	delete(s.invSnaps, invSnapKey(telegramID, method, months))
 	return nil
 }
 
@@ -865,6 +902,13 @@ func (s *fakeStore) PurchaseIntent(_ context.Context, telegramID int64) (*model.
 
 func (s *fakeStore) DeletePurchaseIntent(_ context.Context, telegramID int64) error {
 	delete(s.intents, telegramID)
+	return nil
+}
+
+func (s *fakeStore) DeletePurchaseIntentFor(_ context.Context, telegramID int64, months int) error {
+	if in := s.intents[telegramID]; in != nil && in.Months == months {
+		delete(s.intents, telegramID)
+	}
 	return nil
 }
 

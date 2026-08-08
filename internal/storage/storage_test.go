@@ -204,7 +204,7 @@ func cleanPGData(t *testing.T, dsn string) {
 	defer db.Close()
 	// payment_log добавлен: без него прогоны на общей БД накапливали записи и
 	// тест журнала видел данные предыдущего запуска.
-	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans", "purchase_intents"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans", "purchase_intents", "invoice_snapshots"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}
@@ -931,13 +931,10 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if err != nil || got == nil || got.Months != 12 || got.PlanCode != "base" || got.CreatedAt == "" {
 			t.Fatalf("намерение не прочиталось: %+v err=%v", got, err)
 		}
-		if got.Snapshot != nil {
-			t.Fatalf("снимка не было, а он появился: %+v", got.Snapshot)
-		}
 
 		// Повторная запись вытесняет предыдущий выбор, а не плодит строки.
 		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{
-			TelegramID: 801, PlanCode: "vip", Months: 0, Days: 7, Snapshot: snap,
+			TelegramID: 801, PlanCode: "vip", Months: 0, Days: 7,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -945,8 +942,43 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if got == nil || got.PlanCode != "vip" || got.Months != 0 || got.Days != 7 {
 			t.Fatalf("выбор не обновился: %+v", got)
 		}
-		if got.Snapshot == nil || got.Snapshot.DeviceLimit != 5 || got.Snapshot.TrafficGB != 200 {
-			t.Fatalf("снимок в намерении искажён: %+v", got.Snapshot)
+
+		// Условия выставленного счёта живут отдельно и по сроку не путаются.
+		if err := st.SetInvoiceSnapshot(ctx, 801, model.PayMethodStars, 12, snap); err != nil {
+			t.Fatal(err)
+		}
+		gotSnap, err := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12)
+		if err != nil || gotSnap == nil || gotSnap.DeviceLimit != 5 || gotSnap.TrafficGB != 200 {
+			t.Fatalf("условия счёта искажены: %+v err=%v", gotSnap, err)
+		}
+		if other, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 1); other != nil {
+			t.Fatalf("условия чужого срока не должны находиться: %+v", other)
+		}
+		// Снятие выбора не трогает условия уже выставленного счёта.
+		if err := st.DeletePurchaseIntentFor(ctx, 801, 0); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.PurchaseIntent(ctx, 801); left != nil {
+			t.Fatalf("выбор на этот срок должен был сняться: %+v", left)
+		}
+		if kept, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); kept == nil {
+			t.Fatal("условия неоплаченного счёта пропали вместе с выбором")
+		}
+		// А снятие выбора на ЧУЖОЙ срок ничего не трогает.
+		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{TelegramID: 801, Months: 3}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DeletePurchaseIntentFor(ctx, 801, 12); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.PurchaseIntent(ctx, 801); left == nil || left.Months != 3 {
+			t.Fatalf("снят чужой выбор: %+v", left)
+		}
+		if err := st.DeleteInvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); left != nil {
+			t.Fatalf("условия счёта не удалились: %+v", left)
 		}
 
 		// Удаление пользователя не должно оставлять его намерение в базе.
@@ -977,8 +1009,11 @@ func TestPurchaseIntentInSnapshot(t *testing.T) {
 	src := openSQLiteTest(t)
 	if err := src.SetPurchaseIntent(ctx, &model.PurchaseIntent{
 		TelegramID: 803, PlanCode: "base", Months: 6,
-		Snapshot: &model.PlanSnapshot{Months: 6, DeviceLimit: 4},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.SetInvoiceSnapshot(ctx, 803, model.PayMethodStars, 6,
+		&model.PlanSnapshot{Months: 6, DeviceLimit: 4}); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := src.Export(ctx)
@@ -992,9 +1027,16 @@ func TestPurchaseIntentInSnapshot(t *testing.T) {
 	if err := dst.Import(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
+	if len(snap.InvoiceSnaps) != 1 {
+		t.Fatalf("условия счетов не попали в снимок: %+v", snap.InvoiceSnaps)
+	}
 	got, err := dst.PurchaseIntent(ctx, 803)
-	if err != nil || got == nil || got.Months != 6 || got.Snapshot == nil || got.Snapshot.DeviceLimit != 4 {
+	if err != nil || got == nil || got.Months != 6 {
 		t.Fatalf("намерение не восстановилось: %+v err=%v", got, err)
+	}
+	gotSnap, err := dst.InvoiceSnapshot(ctx, 803, model.PayMethodStars, 6)
+	if err != nil || gotSnap == nil || gotSnap.DeviceLimit != 4 {
+		t.Fatalf("условия счёта не восстановились: %+v err=%v", gotSnap, err)
 	}
 }
 

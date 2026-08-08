@@ -148,6 +148,7 @@ var en = map[string]string{
 	"admin.provision_fail":    "❌ Panel creation error: %s\nRequest not confirmed.",
 	"admin.pay_no_period":     "⚠️ Payment %s was received, but its subscription period could not be determined — nothing was provisioned. Please sort it out manually.",
 	"pay.no_period":           "❌ Payment received, but we could not determine the subscription period. The admin has been notified and will get in touch.",
+	"err.storage":             "❌ The service is temporarily unavailable. Please try again in a couple of minutes.",
 	"admin.not_found":         "Request not found or already processed.",
 	"menu.welcome":            "👋 <b>Welcome, %s!</b>\n\nThis bot gives you VPN access: pick a plan, pay and get a connection key in a couple of minutes.\n\nChoose an action below.",
 	"btn.buy":                 "💳 Buy",

@@ -62,6 +62,11 @@ type Storage interface {
 	SetPurchaseIntent(ctx context.Context, in *model.PurchaseIntent) error
 	PurchaseIntent(ctx context.Context, telegramID int64) (*model.PurchaseIntent, error)
 	DeletePurchaseIntent(ctx context.Context, telegramID int64) error
+	DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int) error
+
+	SetInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error
+	InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error)
+	DeleteInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) error
 
 	SavePlan(ctx context.Context, p *model.Plan) error
 	GetPlan(ctx context.Context, code string) (*model.Plan, error)
@@ -369,6 +374,8 @@ func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM purchase_intents WHERE telegram_id = "+b.ph(1), telegramID)
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM invoice_snapshots WHERE telegram_id = "+b.ph(1), telegramID)
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
@@ -756,11 +763,24 @@ type Snapshot struct {
 	// Intents — незавершённые намерения покупки. Переезд базы посреди покупки
 	// редок, но без них человек, выбравший год, доплачивал бы месяц.
 	Intents []model.PurchaseIntent
+	// InvoiceSnaps — условия выставленных счетов Stars: строки счёта у них
+	// нет, и без переноса оплата пришла бы на текущие условия, а не на
+	// проданные.
+	InvoiceSnaps []InvoiceSnap
 }
 
 type PromoUse struct {
 	Code       string
 	TelegramID int64
+	CreatedAt  string
+}
+
+// InvoiceSnap — строка условий выставленного счёта для снимка базы.
+type InvoiceSnap struct {
+	TelegramID int64
+	Method     string
+	Months     int
+	Snapshot   *model.PlanSnapshot
 	CreatedAt  string
 }
 
@@ -887,12 +907,10 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	for intentRows.Next() {
 		var in model.PurchaseIntent
-		var snapRaw string
-		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &snapRaw, &in.CreatedAt); err != nil {
+		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt); err != nil {
 			_ = intentRows.Close()
 			return nil, err
 		}
-		in.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.Intents = append(snap.Intents, in)
 	}
 	if err := intentRows.Err(); err != nil {
@@ -900,6 +918,26 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		return nil, err
 	}
 	_ = intentRows.Close()
+
+	snapRows, err := b.db.QueryContext(ctx, "SELECT "+invoiceSnapCols+" FROM invoice_snapshots")
+	if err != nil {
+		return nil, err
+	}
+	for snapRows.Next() {
+		var v InvoiceSnap
+		var raw string
+		if err := snapRows.Scan(&v.TelegramID, &v.Method, &v.Months, &raw, &v.CreatedAt); err != nil {
+			_ = snapRows.Close()
+			return nil, err
+		}
+		v.Snapshot = model.DecodePlanSnapshot(raw)
+		snap.InvoiceSnaps = append(snap.InvoiceSnaps, v)
+	}
+	if err := snapRows.Err(); err != nil {
+		_ = snapRows.Close()
+		return nil, err
+	}
+	_ = snapRows.Close()
 	urows2, err := b.db.QueryContext(ctx, "SELECT code, telegram_id, created_at FROM promo_redemptions")
 	if err != nil {
 		return nil, err
@@ -1020,12 +1058,22 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 		// Тариф с недопустимым кодом (например, записанный более новой
 		// версией с другими правилами) пропускаем: обрывать переезд всей базы
 		// из-за одной строки справочника нельзя.
-		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil && !errors.Is(err, ErrPlanCode) {
-			return err
+		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil {
+			if !errors.Is(err, ErrPlanCode) {
+				return err
+			}
+			// Молчать нельзя: иначе оператор уверен, что переехало всё.
+			fmt.Printf("перенос базы: тариф %q пропущен — недопустимый код\n", s.Plans[i].Code)
 		}
 	}
 	for i := range s.Intents {
 		if err := b.SetPurchaseIntent(ctx, &s.Intents[i]); err != nil {
+			return err
+		}
+	}
+	for i := range s.InvoiceSnaps {
+		v := &s.InvoiceSnaps[i]
+		if err := b.SetInvoiceSnapshot(ctx, v.TelegramID, v.Method, v.Months, v.Snapshot); err != nil {
 			return err
 		}
 	}

@@ -282,9 +282,9 @@ func TestStars_AppliesSnapshotFromIntent(t *testing.T) {
 
 	a.handleCallback(ctx, cb(u, "buy:1"))
 	a.handleCallback(ctx, cb(u, "method:stars"))
-	in, _ := a.buyIntent(ctx, u)
-	if in == nil || in.Snapshot == nil || in.Snapshot.DeviceLimit != 3 {
-		t.Fatalf("снимок Stars не записан в намерение: %+v", in)
+	snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
+	if snap == nil || snap.DeviceLimit != 3 {
+		t.Fatalf("условия счёта Stars не записаны: %+v", snap)
 	}
 
 	// Админ правит условия уже после того, как счёт выставлен.
@@ -465,15 +465,42 @@ func TestStarsFromMiniApp_KeepsChatChoice(t *testing.T) {
 	if got := a.buyMonths(ctx, u); got != 12 {
 		t.Fatalf("мини-апп затёр выбор из чата: %d", got)
 	}
-	if in, _ := fs.PurchaseIntent(ctx, u); in != nil && in.Snapshot != nil {
-		t.Fatalf("снимок чужого срока сохранять не надо: %+v", in.Snapshot)
+	// Условия счёта из мини-аппа живут отдельной строкой и выбору не мешают.
+	if snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); snap == nil {
+		t.Fatal("условия счёта из мини-аппа не сохранены")
 	}
-	// А для своего срока снимок сохраняется как и раньше.
 	if _, err := a.starsInvoiceLink(ctx, u, 12); err != nil {
 		t.Fatal(err)
 	}
-	if in, _ := fs.PurchaseIntent(ctx, u); in == nil || in.Snapshot == nil {
-		t.Fatalf("снимок для выбранного срока потерян: %+v", in)
+	if snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 12); snap == nil {
+		t.Fatal("условия счёта на выбранный срок потеряны")
+	}
+	if got := a.buyMonths(ctx, u); got != 12 {
+		t.Fatalf("второй счёт из мини-аппа сдвинул выбор: %d", got)
+	}
+}
+
+// Мини-апп не должен ЗАВОДИТЬ выбор срока в чате: после покупки (или по
+// истечении выбора) экран способов оплаты остаётся в переписке, и нажатие на
+// нём должно вести в витрину, а не продавать срок, взятый из мини-аппа.
+func TestStarsFromMiniApp_DoesNotCreateChatChoice(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, fs := planApp(t)
+	a.msg = fm
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 99}}
+	a.botCfg.Pricing.Stars = map[int]int{1: 99}
+	const u int64 = 555
+
+	if _, err := a.starsInvoiceLink(ctx, u, 1); err != nil {
+		t.Fatal(err)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+		t.Fatalf("мини-апп завёл выбор срока в чате: %+v", in)
+	}
+	a.handleCallback(ctx, cb(u, "method:bal"))
+	if !strings.Contains(fm.joined(), "срок подписки") {
+		t.Fatalf("ожидалась витрина, а не продажа срока из мини-аппа:\n%s", fm.joined())
 	}
 }
 
