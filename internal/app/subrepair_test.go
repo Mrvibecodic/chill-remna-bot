@@ -21,12 +21,12 @@ func repairPanel(t *testing.T, devices int, traffic int64, patches *[]map[string
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
 			mu.Lock()
-			devices, traffic := devices, traffic
+			curDevices, curTraffic := devices, traffic
 			mu.Unlock()
 			resp := map[string]any{"response": []map[string]any{{
 				"uuid": "u1", "tag": "CHILLBOT", "username": "tg_555",
 				"subscriptionUrl": "https://sub/x", "expireAt": "2099-01-01T00:00:00Z",
-				"hwidDeviceLimit": devices, "trafficLimitBytes": traffic,
+				"hwidDeviceLimit": curDevices, "trafficLimitBytes": curTraffic,
 			}}}
 			_ = json.NewEncoder(w).Encode(resp)
 			return
@@ -165,5 +165,34 @@ func TestSubRepair_SkipsExpired(t *testing.T) {
 	st := a.repairSubscriptions(context.Background())
 	if st.checked != 0 || len(*patches) != 0 {
 		t.Fatalf("истёкшая подписка не должна трогаться: checked=%d patches=%d", st.checked, len(*patches))
+	}
+}
+
+// Человек купил ВПЕРВЫЕ во время отката: снимка пользователя ещё нет, снимка у
+// платежа тоже (его писал старый образ). Условия обязаны восстановиться из
+// счёта — раньше такой пользователь вообще не попадал в выборку.
+func TestSubRepair_FirstPurchaseDuringRollback(t *testing.T) {
+	a, fs, patches := repairFixture(t, 3, repairGB)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 555)
+	_ = fs.SetSubExpiry(ctx, 555, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), "paid")
+	_ = fs.AddPayment(ctx, &model.Payment{
+		TelegramID: 555, Method: model.PayMethodYooKassa, Months: 1, Amount: "150",
+		Status: model.PaymentPaid, ExtID: "yk_first",
+	})
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		ID: 9100, Method: model.PayMethodYooKassa, ExtID: "yk_first", TelegramID: 555, Months: 1,
+		Snapshot: &model.PlanSnapshot{Months: 1, DeviceLimit: 8, TrafficGB: 100, IntSquads: []string{"squad-first"}},
+	})
+
+	st := a.repairSubscriptions(ctx)
+	if st.fixed != 1 || len(*patches) != 1 {
+		t.Fatalf("первая покупка во время отката не починена: fixed=%d patches=%d", st.fixed, len(*patches))
+	}
+	if got := (*patches)[0]["hwidDeviceLimit"]; got != float64(8) {
+		t.Fatalf("условия восстановлены неверно: %v", got)
+	}
+	if u, _ := fs.GetUser(ctx, 555); u == nil || u.Snapshot == nil || u.Snapshot.DeviceLimit != 8 {
+		t.Fatalf("снимок не закреплён за пользователем: %+v", u)
 	}
 }

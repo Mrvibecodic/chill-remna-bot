@@ -707,7 +707,7 @@ var en = map[string]string{
 	"inv.grant_failed":         "⚠️ Could not open access by this invite — technical error. Please contact the administrator, they will grant access manually.",
 	"inv.no_link":              "code %s (the link will be built once the bot knows its @username — check its connection to Telegram)",
 	"access.grandfathered":     "ℹ️ Existing users keep their access: %d. New ones can only get in by the rules of the selected mode; you can remove individual users from the whitelist in their card.",
-	"ap.admin_amount_mismatch": "⚠️ <b>Auto-charge stopped: amount mismatch</b>\nUser: %s\nExpected: %s\nPayment came for: %s\nThe price most likely changed within 24h and YooKassa returned the previous payment by the idempotency key. The subscription was NOT extended — check manually.",
+	"ap.admin_amount_mismatch": "⚠️ <b>Auto-charge: amount does not match the price</b>\nUser: %s\nExpected: %s\nCharged: %s\nThe price most likely changed within 24h and YooKassa returned the previous payment by the idempotency key. The subscription was extended for the amount actually charged — reconcile the numbers.",
 	"ap.admin_stuck":           "🆘 <b>Charged, but the subscription was not extended</b>\nUser: %s\nAmount: %s\nError: %s\nThe payment is queued — the bot will retry; if it fails, extend the subscription manually.",
 	"ap.btn_manage":            "🔁 Auto-renewal",
 	"ap.btn_row":               "🔁 Auto-renewal: %s",

@@ -654,19 +654,23 @@ const (
 		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
 )
 
-// SubRepairTarget — пользователь с действующей подпиской, о которой известно,
-// что именно ему продали.
+// SubRepairTarget — пользователь с действующей подпиской. Условия сделки
+// здесь намеренно НЕ хранятся: их источник — последняя покупка, а не история
+// пользователя (см. App.repairUser).
 type SubRepairTarget struct {
 	TelegramID  int64
 	SubExpireAt string
-	Snapshot    *model.PlanSnapshot
 }
 
 // ListSubRepairTargets возвращает кандидатов на сверку лимитов.
+//
+// Фильтра по users.plan_snapshot здесь нет намеренно: его пишет только новый
+// образ бота, и отбор по нему выкинул бы ровно тех, ради кого сверка нужна
+// больше всего, — людей, у которых ПЕРВАЯ покупка прошла во время отката.
 func (b *base) ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, sub_expire_at, plan_snapshot FROM users "+
-			"WHERE plan_snapshot <> '' AND sub_expire_at <> '' AND blocked = 0")
+		"SELECT telegram_id, sub_expire_at FROM users "+
+			"WHERE sub_expire_at <> '' AND blocked = 0")
 	if err != nil {
 		return nil, err
 	}
@@ -674,14 +678,10 @@ func (b *base) ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, err
 	var out []SubRepairTarget
 	for rows.Next() {
 		var t SubRepairTarget
-		var snapRaw string
-		if err := rows.Scan(&t.TelegramID, &t.SubExpireAt, &snapRaw); err != nil {
+		if err := rows.Scan(&t.TelegramID, &t.SubExpireAt); err != nil {
 			return nil, err
 		}
-		t.Snapshot = model.DecodePlanSnapshot(snapRaw)
-		if t.Snapshot != nil {
-			out = append(out, t)
-		}
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }

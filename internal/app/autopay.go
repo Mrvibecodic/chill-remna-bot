@@ -104,8 +104,9 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		Currency:   pay.Amount.Currency,
 		Enabled:    alreadyOn,
 		LastPayAt:  time.Now().UTC().Format(time.RFC3339),
-		// Условия, на которые человек подписался: продлевать надо их, а не то,
-		// что окажется в конфиге через полгода.
+		// Условия последнего продления. Служат для сравнения: если они
+		// изменились, человека надо предупредить — само продление всегда идёт
+		// по действующему тарифу.
 		Snapshot: snap,
 	}
 	if ap.Snapshot == nil {
@@ -462,16 +463,16 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 
 	// Окно идемпотентности ЮKassa — сутки. Если цена изменилась между
 	// попытками одного периода, по тому же ключу вернётся ПРЕЖНИЙ платёж со
-	// старой суммой. Засчитывать его как оплату новых условий нельзя: подписку
-	// не продлеваем, зовём админа разобраться вручную.
+	// старой суммой. Продление при этом НЕ останавливаем: деньги уже списаны,
+	// и оставить человека без подписки, забрав оплату, — худший из исходов.
+	// Обработка идёт как обычно, по фактической сумме платежа; расхождение
+	// уходит в журнал и админу, чтобы он свёл цифры.
 	if pay.Amount.Value != "" && !sameMoney(pay.Amount.Value, value) {
 		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, ap.TelegramID, "autocharge_amount_mismatch",
-			"ожидали %s, платёж на %s — продление остановлено", value, pay.Amount.Value)
+			"ожидали %s %s, платёж на %s %s — продлеваем по факту", value, currency, pay.Amount.Value, pay.Amount.Currency)
 		alang := a.lang(a.cfg.AdminID)
 		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ap.admin_amount_mismatch",
-			a.userLabelByID(ctx, ap.TelegramID), value, pay.Amount.Value))
-		a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, "сумма платежа не совпала с ценой")
-		return ""
+			a.userLabelByID(ctx, ap.TelegramID), value+" "+currency, pay.Amount.Value+" "+pay.Amount.Currency))
 	}
 
 	if pay.Status != "succeeded" || !pay.Paid {

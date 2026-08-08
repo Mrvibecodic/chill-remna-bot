@@ -674,3 +674,75 @@ func TestSnapshotRoundTrip(t *testing.T) {
 }
 
 const PayMethodTest = model.PayMethodCryptoBot
+
+// Запросы сверки лимитов ходят только из фоновой задачи, а app-тесты работают
+// с подменённым хранилищем — без этого теста расхождение SELECT/Scan в них
+// осталось бы незамеченным до боя.
+func TestSubRepairQueries(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		snap := &model.PlanSnapshot{Months: 6, DeviceLimit: 4, TrafficGB: 300}
+
+		_ = st.UpsertUser(ctx, 701)
+		_ = st.UpsertUser(ctx, 702)
+		if err := st.SetSubExpiry(ctx, 701, "2099-01-01T00:00:00Z", "paid"); err != nil {
+			t.Fatal(err)
+		}
+
+		targets, err := st.ListSubRepairTargets(ctx)
+		if err != nil {
+			t.Fatalf("ListSubRepairTargets: %v", err)
+		}
+		if len(targets) != 1 || targets[0].TelegramID != 701 {
+			t.Fatalf("в выборку должен попасть только подписчик: %+v", targets)
+		}
+
+		// Пополнение баланса покупкой не считается.
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: 701, Method: model.PayMethodYooKassa, Months: 0, Amount: "500",
+			Status: model.PaymentPaid, Comment: "topup", ExtID: "top_701",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if last, _ := st.LastPaidSubPayment(ctx, 701); last != nil {
+			t.Fatalf("пополнение не должно считаться покупкой: %+v", last)
+		}
+
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: 701, Method: model.PayMethodYooKassa, Months: 6, Amount: "900",
+			Status: model.PaymentPaid, ExtID: "buy_701", CreatedAt: "2026-01-01T00:00:00Z",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		last, err := st.LastPaidSubPayment(ctx, 701)
+		if err != nil || last == nil {
+			t.Fatalf("покупка не найдена: %+v err=%v", last, err)
+		}
+		if last.ExtID != "buy_701" || last.Snapshot != nil {
+			t.Fatalf("покупка прочитана неверно: %+v", last)
+		}
+
+		if err := st.SetPaymentSnapshot(ctx, last.ID, snap); err != nil {
+			t.Fatal(err)
+		}
+		last, _ = st.LastPaidSubPayment(ctx, 701)
+		if last == nil || last.Snapshot == nil || last.Snapshot.DeviceLimit != 4 {
+			t.Fatalf("снимок не дописался в платёж: %+v", last)
+		}
+
+		// Более свежая покупка вытесняет предыдущую.
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: 701, Method: model.PayMethodStars, Months: 1, Amount: "100",
+			Status: model.PaymentPaid, ExtID: "buy_701_new", CreatedAt: "2026-02-01T00:00:00Z",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		last, _ = st.LastPaidSubPayment(ctx, 701)
+		if last == nil || last.ExtID != "buy_701_new" {
+			t.Fatalf("последней должна быть свежая покупка: %+v", last)
+		}
+		if none, _ := st.LastPaidSubPayment(ctx, 702); none != nil {
+			t.Fatalf("у пользователя без покупок ничего быть не должно: %+v", none)
+		}
+	})
+}

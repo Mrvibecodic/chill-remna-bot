@@ -516,10 +516,10 @@ func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
 func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepairTarget, error) {
 	var out []storage.SubRepairTarget
 	for id, u := range s.users {
-		if u == nil || u.Snapshot == nil || u.SubExpireAt == "" {
+		if u == nil || u.SubExpireAt == "" || u.Blocked {
 			continue
 		}
-		out = append(out, storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt, Snapshot: u.Snapshot})
+		out = append(out, storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt})
 	}
 	return out, nil
 }
