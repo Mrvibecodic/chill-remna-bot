@@ -422,8 +422,14 @@ func (a *App) squadNames(ctx context.Context, activeInt []string, extUUID string
 func (a *App) startReconfigure(ctx context.Context, chatID int64) {
 	a.mu.Lock()
 	var base model.BotConfig
-	if a.botCfg != nil {
-		base = *a.botCfg
+	// Именно копия: обычное присваивание оставляет карты и слайсы общими с живым
+	// конфигом, и мастер переустановки правил бы работающего бота ещё до
+	// сохранения — да ещё и без замка. Ошибку копии глотать нельзя молча, но и
+	// падать здесь незачем: пустой конфиг мастер просто спросит заново.
+	if cp, err := a.botCfg.Clone(); err != nil {
+		a.log.Warn("копия конфига для мастера переустановки не снята", "err", err)
+	} else if cp != nil {
+		base = *cp
 	}
 	w := &wizard{step: stepDB, cfg: base, reconfig: true}
 	a.wiz[chatID] = w

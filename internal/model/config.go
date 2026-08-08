@@ -194,9 +194,30 @@ func (c *BotConfig) Clone() (*BotConfig, error) {
 	if c == nil {
 		return nil, nil
 	}
-	raw, err := json.Marshal(c)
+	raw, err := c.SnapshotJSON()
 	if err != nil {
 		return nil, err
+	}
+	return ConfigFromJSON(raw)
+}
+
+// SnapshotJSON и ConfigFromJSON — те же две половины копии, но по отдельности.
+// Замок конфига защищает не только конфиг: под ним же лежат хранилище, клиент
+// панели и состояния экранов, и берут его на каждом сообщении. Обход карт
+// (Marshal) обязан идти под замком, а вот разбор обратно — уже нет, и держать
+// на нём общий замок бота незачем.
+func (c *BotConfig) SnapshotJSON() ([]byte, error) {
+	if c == nil {
+		return nil, nil
+	}
+	return json.Marshal(c)
+}
+
+// ConfigFromJSON собирает конфиг из снимка. Пустой снимок — пустой конфиг без
+// ошибки: так вызывающему не приходится отличать «конфига нет» от сбоя.
+func ConfigFromJSON(raw []byte) (*BotConfig, error) {
+	if len(raw) == 0 {
+		return nil, nil
 	}
 	var out BotConfig
 	if err := json.Unmarshal(raw, &out); err != nil {
