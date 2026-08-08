@@ -70,9 +70,13 @@ type App struct {
 
 	newStore func(kind, dsn string) (storage.Storage, error)
 
-	mu           sync.Mutex
-	store        storage.Storage
-	botCfg       *model.BotConfig
+	mu     sync.Mutex
+	store  storage.Storage
+	botCfg *model.BotConfig
+	// basePlanRef — тариф «Базовый», прочитанный при последней синхронизации.
+	// Нужен там, где тариф требуется под замком и лезть в базу нельзя (снимок
+	// условий сделки). nil до первой синхронизации.
+	basePlanRef  *model.Plan
 	panel        *remnawave.Client
 	wiz          map[int64]*wizard
 	ui           map[int64]*uiState

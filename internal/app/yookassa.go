@@ -271,14 +271,15 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, save)
+	snap := a.planSnapshot(months)
+	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, snap.Code, save)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", "", err
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months, Snapshot: a.planSnapshot(months)})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months, Snapshot: snap})
 	}
 	return pay.Confirmation.ConfirmationURL, pay.ID, nil
 }

@@ -170,20 +170,26 @@ func (c *Client) do(ctx context.Context, method, path string, body any, idemKey 
 }
 
 func (c *Client) CreatePayment(ctx context.Context, value, currency, description, returnURL string, telegramID int64, months int) (*Payment, error) {
-	return c.CreatePaymentSaving(ctx, value, currency, description, returnURL, telegramID, months, false)
+	return c.CreatePaymentSaving(ctx, value, currency, description, returnURL, telegramID, months, "", false)
 }
 
 // CreatePaymentSaving создаёт платёж и, если save=true, просит ЮKassa
 // сохранить способ оплаты для последующих автосписаний (save_payment_method).
 // Пользователь при этом видит в форме оплаты согласие на автоплатежи; сам
 // признак дублируется в metadata, чтобы вебхук знал, что метод надо запомнить.
-func (c *Client) CreatePaymentSaving(ctx context.Context, value, currency, description, returnURL string, telegramID int64, months int, save bool) (*Payment, error) {
+func (c *Client) CreatePaymentSaving(ctx context.Context, value, currency, description, returnURL string, telegramID int64, months int, plan string, save bool) (*Payment, error) {
 	if currency == "" {
 		currency = "RUB"
 	}
 	meta := map[string]string{
 		"telegram_id": strconv.FormatInt(telegramID, 10),
 		"months":      strconv.Itoa(months),
+	}
+	// Код тарифа кладём рядом со сроком. Срок остаётся правдивым и на прежнем
+	// месте — предыдущий образ бота читает только его и продолжает работать;
+	// новый получает ещё и тариф, если строка счёта в базе не дожила.
+	if plan != "" {
+		meta["plan"] = plan
 	}
 	if save {
 		meta["autopay"] = "1"
@@ -205,7 +211,7 @@ func (c *Client) CreatePaymentSaving(ctx context.Context, value, currency, descr
 // пользователя (автоплатёж). methodID — это payment_method.id из первого
 // платежа, сделанного с save_payment_method. idemKey должен быть стабильным
 // для одной попытки списания, чтобы повтор запроса не списал деньги дважды.
-func (c *Client) ChargeSaved(ctx context.Context, methodID, value, currency, description string, telegramID int64, months int, idemKey string) (*Payment, error) {
+func (c *Client) ChargeSaved(ctx context.Context, methodID, value, currency, description string, telegramID int64, months int, plan, idemKey string) (*Payment, error) {
 	if currency == "" {
 		currency = "RUB"
 	}
@@ -217,15 +223,25 @@ func (c *Client) ChargeSaved(ctx context.Context, methodID, value, currency, des
 		"capture":           true,
 		"payment_method_id": methodID,
 		"description":       description,
-		"metadata": map[string]string{
-			"telegram_id": strconv.FormatInt(telegramID, 10),
-			"months":      strconv.Itoa(months),
-			"autocharge":  "1",
-		},
+		"metadata":          chargeMeta(telegramID, months, plan),
 	}
 	return c.do(ctx, http.MethodPost, "/payments", body, idemKey)
 }
 
 func (c *Client) GetPayment(ctx context.Context, id string) (*Payment, error) {
 	return c.do(ctx, http.MethodGet, "/payments/"+url.PathEscape(id), nil, "")
+}
+
+// chargeMeta — метаданные автосписания. Код тарифа необязателен: у платежей,
+// созданных предыдущей версией бота, его нет.
+func chargeMeta(telegramID int64, months int, plan string) map[string]string {
+	m := map[string]string{
+		"telegram_id": strconv.FormatInt(telegramID, 10),
+		"months":      strconv.Itoa(months),
+		"autocharge":  "1",
+	}
+	if plan != "" {
+		m["plan"] = plan
+	}
+	return m
 }

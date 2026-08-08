@@ -555,6 +555,7 @@ func (a *App) planSnapshot(months int) *model.PlanSnapshot {
 
 func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
 	s := &model.PlanSnapshot{Months: months}
+	s.Code, s.Name = a.basePlanIdentLocked()
 	if a.botCfg == nil {
 		return s
 	}

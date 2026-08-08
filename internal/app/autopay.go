@@ -437,7 +437,7 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	// «вернулся старый платёж по старой цене» сделана проверкой суммы ниже.
 	idem := fmt.Sprintf("ap-%d-%s-%d", ap.TelegramID, autoPayPeriod(exp), ap.Fails)
 	desc := i18n.T(lang, "yk.invoice_desc", months)
-	pay, err := client.ChargeSaved(ctx, ap.MethodID, value, currency, desc, ap.TelegramID, months, idem)
+	pay, err := client.ChargeSaved(ctx, ap.MethodID, value, currency, desc, ap.TelegramID, months, snap.Code, idem)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodYooKassa, "", ap.TelegramID, "autocharge_error", "months=%d: %v", months, err)
 		var apiErr *yookassa.APIError

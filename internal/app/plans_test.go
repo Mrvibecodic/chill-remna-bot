@@ -296,3 +296,47 @@ func TestStars_AppliesSnapshotFromIntent(t *testing.T) {
 		t.Fatalf("снимок чужого срока не должен применяться: %+v", snap)
 	}
 }
+
+// Код тарифа обязан ехать вместе со сделкой: он лежит в снимке, а снимок уже
+// расходится по счетам, заявкам, платежам и пользователю. Отдельных колонок
+// поэтому не заводим.
+func TestPlanCodeTravelsWithDeal(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+
+	// До первой синхронизации тариф ещё не прочитан — снимок всё равно обязан
+	// быть подписан кодом, иначе сделка окажется «ничья».
+	if snap := a.planSnapshot(1); snap.Code != model.PlanCodeBase || snap.Name != "Базовый" {
+		t.Fatalf("снимок без тарифа: %+v", snap)
+	}
+
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+	p.Name = "Личный"
+	if err := fs.SavePlan(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snap := a.planSnapshot(3)
+	if snap.Code != model.PlanCodeBase || snap.Name != "Личный" {
+		t.Fatalf("снимок не подхватил имя тарифа: %+v", snap)
+	}
+
+	// Заявка на перевод — один из носителей снимка.
+	a.botCfg.P2P = model.P2PConfig{Enabled: true, OpenForAll: true, Cards: []string{"0000"}}
+	a.onBuyPlan(ctx, 555, "3")
+	if _, _, _, err := a.prepareP2PCard(ctx, 555, 3); err != nil {
+		t.Fatal(err)
+	}
+	var req *model.P2PRequest
+	for _, r := range fs.reqs {
+		req = r
+	}
+	if req == nil || req.Snapshot == nil || req.Snapshot.Code != model.PlanCodeBase {
+		t.Fatalf("тариф не доехал до заявки: %+v", req)
+	}
+}

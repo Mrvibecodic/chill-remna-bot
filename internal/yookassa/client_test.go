@@ -54,7 +54,7 @@ func TestCreatePaymentSaving(t *testing.T) {
 	defer func() { BaseURL = old }()
 
 	c := New("shop1", "secret1")
-	if _, err := c.CreatePaymentSaving(context.Background(), "100.00", "RUB", "d", "https://t.me", 7, 1, true); err != nil {
+	if _, err := c.CreatePaymentSaving(context.Background(), "100.00", "RUB", "d", "https://t.me", 7, 1, "base", true); err != nil {
 		t.Fatalf("CreatePaymentSaving: %v", err)
 	}
 	if got["save_payment_method"] != true {
@@ -64,13 +64,21 @@ func TestCreatePaymentSaving(t *testing.T) {
 	if meta["autopay"] != "1" || meta["telegram_id"] != "7" {
 		t.Fatalf("metadata: %+v", meta)
 	}
+	// Срок остаётся на прежнем месте и в прежнем виде — его читает предыдущий
+	// образ бота; тариф едет рядом.
+	if meta["months"] != "1" || meta["plan"] != "base" {
+		t.Fatalf("в метаданных должны быть и срок, и тариф: %+v", meta)
+	}
 
 	got = nil
-	if _, err := c.CreatePaymentSaving(context.Background(), "100.00", "RUB", "d", "https://t.me", 7, 1, false); err != nil {
+	if _, err := c.CreatePaymentSaving(context.Background(), "100.00", "RUB", "d", "https://t.me", 7, 1, "", false); err != nil {
 		t.Fatalf("CreatePaymentSaving(false): %v", err)
 	}
 	if _, ok := got["save_payment_method"]; ok {
 		t.Fatalf("без автопродления save_payment_method слать не надо: %+v", got)
+	}
+	if meta, _ := got["metadata"].(map[string]any); meta["plan"] != nil {
+		t.Fatalf("пустой тариф в метаданные не пишем: %+v", meta)
 	}
 }
 
@@ -89,7 +97,7 @@ func TestChargeSaved(t *testing.T) {
 	defer func() { BaseURL = old }()
 
 	c := New("shop1", "secret1")
-	pay, err := c.ChargeSaved(context.Background(), "pm_1", "100.00", "RUB", "d", 7, 1, "ap-7-20260101-0")
+	pay, err := c.ChargeSaved(context.Background(), "pm_1", "100.00", "RUB", "d", 7, 1, "base", "ap-7-20260101-0")
 	if err != nil || pay.Status != "succeeded" {
 		t.Fatalf("ChargeSaved: %+v err=%v", pay, err)
 	}

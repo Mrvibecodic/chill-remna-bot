@@ -131,6 +131,7 @@ func (a *App) syncBasePlan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	a.rememberBasePlan(existing)
 	// Тариф, который уже правили редактором, конфигом не перезаписываем: это
 	// ровно та деградация отката, ради которой заведён признак. Иначе
 	// откатились на этот образ, сохранили что-нибудь в админке — и правки
@@ -150,7 +151,35 @@ func (a *App) syncBasePlan(ctx context.Context) error {
 	if existing == nil {
 		a.log.Info("тариф «Базовый» создан из текущей сетки цен", "durations", len(want.Durations))
 	}
-	return st.SavePlan(ctx, want)
+	if err := st.SavePlan(ctx, want); err != nil {
+		return err
+	}
+	a.rememberBasePlan(want)
+	return nil
+}
+
+// rememberBasePlan кладёт тариф в память процесса: снимок условий сделки
+// снимается под замком конфига, и ходить оттуда в базу нельзя.
+func (a *App) rememberBasePlan(p *model.Plan) {
+	if p == nil {
+		return
+	}
+	cp := *p
+	a.mu.Lock()
+	a.basePlanRef = &cp
+	a.mu.Unlock()
+}
+
+// basePlanIdent — код и имя тарифа для снимка сделки. Вызывать под a.mu.
+func (a *App) basePlanIdentLocked() (code, name string) {
+	if a.basePlanRef != nil {
+		return a.basePlanRef.Code, a.basePlanRef.Name
+	}
+	lang := ""
+	if a.botCfg != nil {
+		lang = a.botCfg.Language
+	}
+	return model.PlanCodeBase, basePlanName(lang)
 }
 
 // samePlan сравнивает содержательную часть тарифов, не трогая отметки времени:
