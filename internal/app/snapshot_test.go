@@ -140,3 +140,27 @@ func TestSnapshotFingerprintChangesWithTerms(t *testing.T) {
 		t.Fatal("пустой снимок не должен совпадать с непустым")
 	}
 }
+
+// Отпечаток снимка описывает УСЛОВИЯ сделки. Код и имя тарифа в него входить
+// не должны: иначе обновление бота (в снимках появился код) и переименование
+// тарифа рассылали бы всем «условия автопродления изменились» на ровном месте.
+func TestFingerprintIgnoresPlanIdentity(t *testing.T) {
+	old := &model.PlanSnapshot{Months: 1, DeviceLimit: 3, TrafficGB: 50, Price: "150"}
+	withPlan := &model.PlanSnapshot{Months: 1, DeviceLimit: 3, TrafficGB: 50, Price: "150",
+		Code: "base", Name: "Базовый"}
+	renamed := &model.PlanSnapshot{Months: 1, DeviceLimit: 3, TrafficGB: 50, Price: "150",
+		Code: "base", Name: "Личный"}
+	if old.Fingerprint() != withPlan.Fingerprint() {
+		t.Fatalf("появление кода тарифа изменило отпечаток: %s против %s",
+			old.Fingerprint(), withPlan.Fingerprint())
+	}
+	if withPlan.Fingerprint() != renamed.Fingerprint() {
+		t.Fatalf("переименование тарифа изменило отпечаток: %s против %s",
+			withPlan.Fingerprint(), renamed.Fingerprint())
+	}
+	// А изменение самих условий по-прежнему видно.
+	cheaper := &model.PlanSnapshot{Months: 1, DeviceLimit: 3, TrafficGB: 50, Price: "100"}
+	if old.Fingerprint() == cheaper.Fingerprint() {
+		t.Fatal("изменение цены обязано менять отпечаток")
+	}
+}

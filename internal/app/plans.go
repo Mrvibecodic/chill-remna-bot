@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
@@ -92,8 +93,10 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 			continue
 		}
 		// Переопределения длительности заводим только там, где в сетке
-		// действительно что-то задано: ноль в старой карте означал «не
-		// задано», и превращать его в «безлимит» нельзя.
+		// действительно что-то задано. Ноль в старой карте — это не
+		// «переопределение нулём», а «как у тарифа»: трафик тарифа и так ноль
+		// (админка называет его безлимитом), а лимит устройств ноль означает
+		// «оставить дефолт панели».
 		if gb := pr.Traffic[mo]; gb > 0 {
 			v := gb
 			d.TrafficGB = &v
@@ -165,7 +168,12 @@ func (a *App) rememberBasePlan(p *model.Plan) {
 	if p == nil {
 		return
 	}
+	// Копия глубокая: слайсы, общие с тем, что лежит в базе или строится
+	// заново, стали бы гонкой, как только под замком понадобится не только
+	// код с именем.
 	cp := *p
+	cp.IntSquads = append([]string(nil), p.IntSquads...)
+	cp.Durations = append([]model.PlanDuration(nil), p.Durations...)
 	a.mu.Lock()
 	a.basePlanRef = &cp
 	a.mu.Unlock()
@@ -228,29 +236,66 @@ func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, m
 	})
 }
 
-// buyIntent возвращает намерение покупки (nil, если человек ничего не выбирал).
-func (a *App) buyIntent(ctx context.Context, chatID int64) *model.PurchaseIntent {
+// purchaseIntentTTL — сколько живёт выбор срока. Экран со способами оплаты
+// остаётся в переписке навсегда, и без срока годности нажатие на нём через
+// месяц выставляло бы счёт по давно забытому выбору. Сутки с запасом
+// перекрывают и рестарт бота, и «оплачу вечером».
+const purchaseIntentTTL = 24 * time.Hour
+
+// buyIntent возвращает намерение покупки. nil без ошибки — человек ничего не
+// выбирал (или выбор просрочен); ошибка означает недоступное хранилище, и
+// путать её с «выбора нет» нельзя: во втором случае человека возвращают в
+// витрину, а в первом это был бы бесконечный круг.
+func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseIntent, error) {
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
 	if st == nil {
-		return nil
+		return nil, nil
 	}
 	in, err := st.PurchaseIntent(ctx, chatID)
 	if err != nil {
 		a.log.Warn("намерение покупки не прочитано", "err", err, "user", chatID)
-		return nil
+		return nil, err
 	}
-	return in
+	if in == nil {
+		return nil, nil
+	}
+	if t, perr := time.Parse(time.RFC3339, in.CreatedAt); perr == nil &&
+		time.Since(t) > purchaseIntentTTL {
+		_ = st.DeletePurchaseIntent(ctx, chatID)
+		return nil, nil
+	}
+	return in, nil
 }
 
-// buyMonths — выбранный срок в месяцах (0, если выбора нет).
+// buyMonths — выбранный срок в месяцах (0, если выбора нет или он недоступен).
 func (a *App) buyMonths(ctx context.Context, chatID int64) int {
-	in := a.buyIntent(ctx, chatID)
-	if in == nil {
+	in, err := a.buyIntent(ctx, chatID)
+	if err != nil || in == nil {
 		return 0
 	}
 	return in.Months
+}
+
+// forgetBuyIntentFor убирает выбор, по которому только что прошла покупка.
+// Сверка со сроком обязательна: продление автосписанием или добитый
+// реконсилятором старый счёт не должны стирать выбор, который человек делает
+// прямо сейчас.
+func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil || chatID == 0 {
+		return
+	}
+	in, err := st.PurchaseIntent(ctx, chatID)
+	if err != nil || in == nil || in.Months != months {
+		return
+	}
+	if err := st.DeletePurchaseIntent(ctx, chatID); err != nil {
+		a.log.Warn("намерение покупки не удалено", "err", err, "user", chatID)
+	}
 }
 
 // rememberStarsSnapshot кладёт условия сделки в намерение покупки. У Stars нет
@@ -270,7 +315,14 @@ func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months in
 	if in == nil {
 		in = &model.PurchaseIntent{TelegramID: chatID, PlanCode: model.PlanCodeBase, Months: months}
 	}
-	in.Months = months
+	// Намерение одно на человека, а счёт Stars умеет выставлять и мини-апп со
+	// своим сроком. Перебивать им выбор, сделанный в чате, нельзя: экран
+	// способов оплаты остаётся подписан прежней ценой, а счёт ушёл бы на
+	// другой срок. Чужой выбор не трогаем — снимок тогда просто не сохраняем,
+	// и оплата пройдёт по текущим условиям, как было до появления снимков.
+	if in.Months != months {
+		return
+	}
 	in.Snapshot = snap
 	if err := st.SetPurchaseIntent(ctx, in); err != nil {
 		a.log.Warn("снимок Stars не сохранён", "err", err, "user", chatID)
@@ -281,8 +333,8 @@ func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months in
 // Снимок берётся только если срок совпал с оплаченным: иначе человек успел
 // выбрать другой срок и снимок уже не про эту покупку.
 func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *model.PlanSnapshot {
-	in := a.buyIntent(ctx, chatID)
-	if in == nil || in.Snapshot == nil || in.Months != months {
+	in, err := a.buyIntent(ctx, chatID)
+	if err != nil || in == nil || in.Snapshot == nil || in.Months != months {
 		return nil
 	}
 	return in.Snapshot
@@ -296,9 +348,16 @@ func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *mode
 // вместо выбранного года. Угадывать срок за человека нельзя — ни в его пользу,
 // ни в свою.
 func (a *App) buyMonthsOrAsk(ctx context.Context, chatID int64) int {
-	months := a.buyMonths(ctx, chatID)
-	if months > 0 {
-		return months
+	in, err := a.buyIntent(ctx, chatID)
+	if err != nil {
+		// Хранилище недоступно: витрина здесь замкнула бы человека в круг
+		// «выберите срок → как оплатить → выберите срок» без единого слова о
+		// причине.
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return 0
+	}
+	if in != nil && in.Months > 0 {
+		return in.Months
 	}
 	a.showPlans(ctx, chatID)
 	return 0

@@ -7,7 +7,7 @@
 -- число весь остаток строки, и любой добавленный сегмент отклонит легитимную
 -- оплату на предпроверке).
 CREATE TABLE IF NOT EXISTS purchase_intents (
-    telegram_id   INTEGER PRIMARY KEY,
+    telegram_id   BIGINT PRIMARY KEY,
     plan_code     TEXT NOT NULL DEFAULT '',
     months        INTEGER NOT NULL DEFAULT 0,
     days          INTEGER NOT NULL DEFAULT 0,

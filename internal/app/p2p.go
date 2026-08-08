@@ -115,15 +115,24 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	}
 	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт
 	// бота, и память процесса тут не носитель (см. internal/app/plans.go).
+	//
+	// Не записалось — дальше не идём. Экран способов подписан ценами, и
+	// показать его после несостоявшейся записи значит предложить оплату по
+	// прошлому выбору: человек нажал «1 месяц», а счёт выставился бы на год.
 	if err := a.setBuyIntent(ctx, chatID, model.PlanCodeBase, mo); err != nil {
 		a.log.Warn("намерение покупки не сохранено", "err", err, "user", chatID)
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
 	}
-	a.showMethods(ctx, chatID)
+	a.showMethods(ctx, chatID, mo)
 }
 
-func (a *App) showMethods(ctx context.Context, chatID int64) {
+// showMethods рисует экран способов оплаты для ЯВНО переданного срока — тот же
+// срок, который только что записан в намерение покупки. Перечитывать его из
+// базы здесь нельзя: расхождение между подписью кнопок и тем, что уйдёт в счёт,
+// — это молчаливая продажа не того срока.
+func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
 	a.mu.Lock()
 	var p2p model.P2PConfig
 	var stars model.StarsConfig
@@ -693,6 +702,9 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		_ = a.store.SetUserSnapshot(ctx, telegramID, snap)
 	}
 	a.payLog(ctx, method, extID, telegramID, "done", "подписка выдана, ссылка отправляется")
+	// Выбор срока отработал — убираем его, иначе кнопка способа оплаты на
+	// старом экране продаст тот же срок ещё раз, минуя витрину.
+	a.forgetBuyIntentFor(ctx, telegramID, months)
 	a.grantReferralBonus(ctx, telegramID)
 	a.creditReferralPercent(ctx, telegramID, amount)
 	// Чек «Мой налог» — только по платежам ЮKassa: крипта и P2P в чек

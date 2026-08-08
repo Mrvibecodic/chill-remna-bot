@@ -1017,7 +1017,10 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 		}
 	}
 	for i := range s.Plans {
-		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil {
+		// Тариф с недопустимым кодом (например, записанный более новой
+		// версией с другими правилами) пропускаем: обрывать переезд всей базы
+		// из-за одной строки справочника нельзя.
+		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil && !errors.Is(err, ErrPlanCode) {
 			return err
 		}
 	}

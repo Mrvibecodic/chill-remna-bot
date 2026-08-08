@@ -909,6 +909,16 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		ctx := context.Background()
 		snap := &model.PlanSnapshot{Months: 12, DeviceLimit: 5, TrafficGB: 200, Price: "1400"}
 
+		// Telegram-ID давно больше 2^31 — на int4-колонке это падало и на
+		// записи, и на чтении, а вместе с ними и вся покупка из чата.
+		const bigID int64 = 7654321098
+		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{TelegramID: bigID, Months: 6}); err != nil {
+			t.Fatalf("большой telegram_id не записался: %v", err)
+		}
+		if got, err := st.PurchaseIntent(ctx, bigID); err != nil || got == nil || got.Months != 6 {
+			t.Fatalf("большой telegram_id не прочитался: %+v err=%v", got, err)
+		}
+
 		if none, err := st.PurchaseIntent(ctx, 801); err != nil || none != nil {
 			t.Fatalf("без выбора должно быть пусто: %+v err=%v", none, err)
 		}
@@ -985,5 +995,22 @@ func TestPurchaseIntentInSnapshot(t *testing.T) {
 	got, err := dst.PurchaseIntent(ctx, 803)
 	if err != nil || got == nil || got.Months != 6 || got.Snapshot == nil || got.Snapshot.DeviceLimit != 4 {
 		t.Fatalf("намерение не восстановилось: %+v err=%v", got, err)
+	}
+}
+
+// Одна битая строка справочника не должна обрывать переезд базы: тарифы —
+// единственная сущность с валидацией кода, и на ней Import спотыкался целиком.
+func TestImportSkipsInvalidPlan(t *testing.T) {
+	ctx := context.Background()
+	dst := openSQLiteTest(t)
+	err := dst.Import(ctx, &Snapshot{Plans: []model.Plan{
+		{Code: "не код", Name: "битый"},
+		{Code: "base", Name: "Базовый"},
+	}})
+	if err != nil {
+		t.Fatalf("импорт прервался из-за битого тарифа: %v", err)
+	}
+	if good, _ := dst.GetPlan(ctx, "base"); good == nil {
+		t.Fatal("нормальный тариф не импортировался")
 	}
 }

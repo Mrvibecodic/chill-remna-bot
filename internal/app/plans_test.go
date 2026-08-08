@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"remnabot/internal/config"
 	"remnabot/internal/model"
@@ -261,8 +262,8 @@ func TestBuyIntent_SurvivesRestart(t *testing.T) {
 	if got := restarted.buyMonths(ctx, u); got != 3 {
 		t.Fatalf("новый выбор не применился: %d", got)
 	}
-	if in := restarted.buyIntent(ctx, u); in == nil || in.PlanCode != model.PlanCodeBase {
-		t.Fatalf("тариф в намерении покупки не проставлен: %+v", in)
+	if in, err := restarted.buyIntent(ctx, u); err != nil || in == nil || in.PlanCode != model.PlanCodeBase {
+		t.Fatalf("тариф в намерении покупки не проставлен: %+v err=%v", in, err)
 	}
 }
 
@@ -281,7 +282,7 @@ func TestStars_AppliesSnapshotFromIntent(t *testing.T) {
 
 	a.handleCallback(ctx, cb(u, "buy:1"))
 	a.handleCallback(ctx, cb(u, "method:stars"))
-	in := a.buyIntent(ctx, u)
+	in, _ := a.buyIntent(ctx, u)
 	if in == nil || in.Snapshot == nil || in.Snapshot.DeviceLimit != 3 {
 		t.Fatalf("снимок Stars не записан в намерение: %+v", in)
 	}
@@ -444,5 +445,83 @@ func TestBonusDaysDoNotTouchLimits(t *testing.T) {
 	}
 	if _, ok := patched["hwidDeviceLimit"]; ok {
 		t.Fatalf("бонусные дни не должны менять лимит устройств: %+v", patched)
+	}
+}
+
+// Счёт Stars из мини-аппа не должен перебивать срок, выбранный в чате: там
+// висит экран, подписанный ценой другого срока.
+func TestStarsFromMiniApp_KeepsChatChoice(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 99, 12: 900}}
+	a.botCfg.Pricing.Stars = map[int]int{1: 99, 12: 900}
+	const u int64 = 555
+
+	a.onBuyPlan(ctx, u, "12")
+	// Мини-апп запрашивает ссылку на счёт Stars на другой срок.
+	if _, err := a.starsInvoiceLink(ctx, u, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.buyMonths(ctx, u); got != 12 {
+		t.Fatalf("мини-апп затёр выбор из чата: %d", got)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil && in.Snapshot != nil {
+		t.Fatalf("снимок чужого срока сохранять не надо: %+v", in.Snapshot)
+	}
+	// А для своего срока снимок сохраняется как и раньше.
+	if _, err := a.starsInvoiceLink(ctx, u, 12); err != nil {
+		t.Fatal(err)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in == nil || in.Snapshot == nil {
+		t.Fatalf("снимок для выбранного срока потерян: %+v", in)
+	}
+}
+
+// Выбор срока не должен жить вечно: нажатие на экране полугодовой давности —
+// это не «человек выбрал год», а просто старая кнопка.
+func TestBuyIntent_Expires(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	const u int64 = 555
+
+	if err := fs.SetPurchaseIntent(ctx, &model.PurchaseIntent{
+		TelegramID: u, PlanCode: model.PlanCodeBase, Months: 12,
+		CreatedAt: time.Now().UTC().Add(-purchaseIntentTTL - time.Hour).Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.buyMonths(ctx, u); got != 0 {
+		t.Fatalf("просроченный выбор применился: %d", got)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+		t.Fatalf("просроченное намерение не убрано: %+v", in)
+	}
+}
+
+// После состоявшейся покупки выбор забывается — старая кнопка способа оплаты
+// больше не продаёт тот же срок повторно.
+func TestBuyIntent_ForgottenAfterPurchase(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	ctx := context.Background()
+	const u int64 = 555
+	_ = fs.UpsertUser(ctx, u)
+
+	a.onBuyPlan(ctx, u, "1")
+	if _, _, err := a.finalizePurchase(ctx, u, 1, model.PayMethodStars, "150", "forget_1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+		t.Fatalf("выбор пережил покупку: %+v", in)
+	}
+
+	// Чужой срок (например, автопродление) выбор не стирает.
+	a.onBuyPlan(ctx, u, "12")
+	if _, _, err := a.finalizePurchase(ctx, u, 1, model.PayMethodYooKassa, "150", "forget_2", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.buyMonths(ctx, u); got != 12 {
+		t.Fatalf("продление стёрло текущий выбор человека: %d", got)
 	}
 }
