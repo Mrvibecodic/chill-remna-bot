@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -168,6 +169,7 @@ type fakeStore struct {
 	pays      map[int64]*model.Payment
 	media     map[string]string
 	pending   map[int64]*model.PendingInvoice
+	plans     map[string]*model.Plan
 	promos    map[string]*model.PromoCode
 	promoUses map[string]bool
 	webUsers  map[string]*model.WebUser
@@ -840,6 +842,46 @@ func (s *fakeStore) GetWebUserByEmail(_ context.Context, email string) (*model.W
 	}
 	return nil, nil
 }
+func (s *fakeStore) SavePlan(_ context.Context, p *model.Plan) error {
+	if p == nil {
+		return nil
+	}
+	if s.plans == nil {
+		s.plans = map[string]*model.Plan{}
+	}
+	cp := *p
+	cp.Normalize()
+	s.plans[cp.Code] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetPlan(_ context.Context, code string) (*model.Plan, error) {
+	if s.plans == nil || s.plans[code] == nil {
+		return nil, nil
+	}
+	cp := *s.plans[code]
+	return &cp, nil
+}
+
+func (s *fakeStore) ListPlans(context.Context) ([]model.Plan, error) {
+	out := make([]model.Plan, 0, len(s.plans))
+	for _, p := range s.plans {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Order != out[j].Order {
+			return out[i].Order < out[j].Order
+		}
+		return out[i].Code < out[j].Code
+	})
+	return out, nil
+}
+
+func (s *fakeStore) DeletePlan(_ context.Context, code string) error {
+	delete(s.plans, code)
+	return nil
+}
+
 func (s *fakeStore) CreatePromo(_ context.Context, p *model.PromoCode) error {
 	if s.promos == nil {
 		s.promos = map[string]*model.PromoCode{}

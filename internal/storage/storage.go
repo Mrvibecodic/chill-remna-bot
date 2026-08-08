@@ -59,6 +59,11 @@ type Storage interface {
 	DeleteUser(ctx context.Context, telegramID int64) error
 	AllUserIDs(ctx context.Context) ([]int64, error)
 
+	SavePlan(ctx context.Context, p *model.Plan) error
+	GetPlan(ctx context.Context, code string) (*model.Plan, error)
+	ListPlans(ctx context.Context) ([]model.Plan, error)
+	DeletePlan(ctx context.Context, code string) error
+
 	CreatePromo(ctx context.Context, p *model.PromoCode) error
 	CreateWebUser(ctx context.Context, u *model.WebUser) error
 	GetWebUserByEmail(ctx context.Context, email string) (*model.WebUser, error)
@@ -739,6 +744,9 @@ type Snapshot struct {
 	// незакрытые счета переставали добиваться реконсилятором.
 	AutoPays []model.AutoPay
 	Pendings []model.PendingInvoice
+	// Plans — справочник тарифов. В снимок входит с самого появления таблицы:
+	// без него переезд базы стирал бы всю тарифную сетку.
+	Plans []model.Plan
 }
 
 type PromoUse struct {
@@ -859,6 +867,11 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	} else {
 		return nil, err
 	}
+	if plans, err := b.ListPlans(ctx); err == nil {
+		snap.Plans = plans
+	} else {
+		return nil, err
+	}
 	urows2, err := b.db.QueryContext(ctx, "SELECT code, telegram_id, created_at FROM promo_redemptions")
 	if err != nil {
 		return nil, err
@@ -972,6 +985,11 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	}
 	for i := range s.Promos {
 		if err := b.CreatePromo(ctx, &s.Promos[i]); err != nil {
+			return err
+		}
+	}
+	for i := range s.Plans {
+		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil {
 			return err
 		}
 	}

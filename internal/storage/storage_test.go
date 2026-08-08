@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -203,7 +204,7 @@ func cleanPGData(t *testing.T, dsn string) {
 	defer db.Close()
 	// payment_log добавлен: без него прогоны на общей БД накапливали записи и
 	// тест журнала видел данные предыдущего запуска.
-	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}
@@ -745,4 +746,157 @@ func TestSubRepairQueries(t *testing.T) {
 			t.Fatalf("у пользователя без покупок ничего быть не должно: %+v", none)
 		}
 	})
+}
+
+// Тарифы читаются и пишутся только этими запросами, а app-тесты ходят через
+// подменённое хранилище — расхождение списка колонок и аргументов Scan видно
+// лишь на настоящей базе.
+func TestPlanRoundTrip(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		gb := 500
+		dev := 0
+		squads := []string{"sq-year"}
+		ext := ""
+		p := &model.Plan{
+			Code: "base", Name: "Базовый", Description: "описание", Icon: "🚀",
+			Order: 1, Enabled: true, TrafficGB: 100, DeviceLimit: 3, Strategy: "MONTH",
+			IntSquads: []string{"sq-1", "sq-2"}, ExtSquad: "ext-1",
+			Availability: model.PlanAvailAll, Currency: "₽", FromConfig: true,
+			Durations: []model.PlanDuration{
+				{Months: 1, Base: "150", P2P: "140", YooKassa: "160", Stars: 99},
+				{Months: 12, Base: "1500", TrafficGB: &gb, DeviceLimit: &dev, IntSquads: &squads, ExtSquad: &ext},
+			},
+		}
+		if err := st.SavePlan(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		if p.CreatedAt == "" || p.UpdatedAt == "" {
+			t.Fatalf("время не проставилось: %+v", p)
+		}
+
+		got, err := st.GetPlan(ctx, "base")
+		if err != nil || got == nil {
+			t.Fatalf("GetPlan: %+v err=%v", got, err)
+		}
+		if !got.FromConfig {
+			t.Fatalf("признак «ведомый от конфига» не прочитался: %+v", got)
+		}
+		if got.Name != "Базовый" || got.Description != "описание" || got.Icon != "🚀" ||
+			got.Order != 1 || !got.Enabled || got.TrafficGB != 100 || got.DeviceLimit != 3 ||
+			got.Strategy != "MONTH" || got.ExtSquad != "ext-1" || got.Currency != "₽" ||
+			got.Availability != model.PlanAvailAll {
+			t.Fatalf("поля тарифа искажены: %+v", got)
+		}
+		if len(got.IntSquads) != 2 || got.IntSquads[1] != "sq-2" {
+			t.Fatalf("сквады искажены: %+v", got.IntSquads)
+		}
+		if len(got.Durations) != 2 {
+			t.Fatalf("длительности не прочитались: %+v", got.Durations)
+		}
+		d1 := got.Duration(1)
+		if d1 == nil || d1.Base != "150" || d1.Stars != 99 {
+			t.Fatalf("длительность 1 мес искажена: %+v", d1)
+		}
+		if d1.Fiat(model.PayMethodP2P) != "140" || d1.Fiat(model.PayMethodYooKassa) != "160" ||
+			d1.Fiat(model.PayMethodStars) != "150" {
+			t.Fatalf("цены по способам оплаты искажены: %+v", d1)
+		}
+		// Переопределения длительности — указатели: ноль обязан пережить
+		// хранение и остаться нулём, а не превратиться в «не задано».
+		d12 := got.Duration(12)
+		if d12 == nil || d12.TrafficGB == nil || *d12.TrafficGB != 500 {
+			t.Fatalf("переопределение трафика потерялось: %+v", d12)
+		}
+		if d12.DeviceLimit == nil || *d12.DeviceLimit != 0 {
+			t.Fatalf("нулевое переопределение устройств потерялось: %+v", d12)
+		}
+		if got.DeviceLimitFor(d12) != 0 || got.DeviceLimitFor(d1) != 3 {
+			t.Fatalf("лимит устройств по длительности неверен: %d / %d",
+				got.DeviceLimitFor(d12), got.DeviceLimitFor(d1))
+		}
+		if got.TrafficGBFor(d12) != 500 || got.TrafficGBFor(d1) != 100 {
+			t.Fatalf("трафик по длительности неверен: %d / %d",
+				got.TrafficGBFor(d12), got.TrafficGBFor(d1))
+		}
+		if sq := got.IntSquadsFor(d12); len(sq) != 1 || sq[0] != "sq-year" {
+			t.Fatalf("сквады длительности неверны: %+v", sq)
+		}
+		if got.ExtSquadFor(d12) != "" || got.ExtSquadFor(d1) != "ext-1" {
+			t.Fatalf("внешний сквад по длительности неверен: %q / %q",
+				got.ExtSquadFor(d12), got.ExtSquadFor(d1))
+		}
+
+		// Повторное сохранение — обновление, а не второй тариф.
+		p.Name = "Базовый 2"
+		p.Enabled = false
+		p.Durations = p.Durations[:1]
+		if err := st.SavePlan(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = st.GetPlan(ctx, "base")
+		if got == nil || got.Name != "Базовый 2" || got.Enabled || len(got.Durations) != 1 {
+			t.Fatalf("обновление не применилось: %+v", got)
+		}
+
+		second := &model.Plan{Code: "vip", Name: "VIP", Order: 0, Availability: "мусор"}
+		// Тариф, заведённый не из конфига, обязан таким и остаться.
+		if err := st.SavePlan(ctx, second); err != nil {
+			t.Fatal(err)
+		}
+		list, err := st.ListPlans(ctx)
+		if err != nil || len(list) != 2 {
+			t.Fatalf("ListPlans: len=%d err=%v", len(list), err)
+		}
+		if list[0].Code != "vip" || list[1].Code != "base" {
+			t.Fatalf("порядок витрины неверен: %+v", list)
+		}
+		if list[0].FromConfig {
+			t.Fatalf("тариф не из конфига помечен ведомым: %+v", list[0])
+		}
+		if list[0].Availability != model.PlanAvailAll {
+			t.Fatalf("неизвестный режим доступности должен схлопываться в 'всем': %q", list[0].Availability)
+		}
+
+		if err := st.SavePlan(ctx, &model.Plan{Code: "не код"}); !errors.Is(err, ErrPlanCode) {
+			t.Fatalf("недопустимый код должен отклоняться: %v", err)
+		}
+		if err := st.DeletePlan(ctx, "vip"); err != nil {
+			t.Fatal(err)
+		}
+		if gone, _ := st.GetPlan(ctx, "vip"); gone != nil {
+			t.Fatalf("тариф не удалился: %+v", gone)
+		}
+		if none, err := st.GetPlan(ctx, "нет-такого"); err != nil || none != nil {
+			t.Fatalf("отсутствующий тариф: %+v err=%v", none, err)
+		}
+	})
+}
+
+// Тарифы обязаны переживать переезд базы: снимок без них стирал бы всю сетку.
+func TestPlansInSnapshot(t *testing.T) {
+	ctx := context.Background()
+	src := openSQLiteTest(t)
+	if err := src.SavePlan(ctx, &model.Plan{
+		Code: "base", Name: "Базовый", Enabled: true, Currency: "₽",
+		Durations: []model.PlanDuration{{Months: 3, Base: "400"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := src.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Plans) != 1 {
+		t.Fatalf("тарифы не попали в снимок: %+v", snap.Plans)
+	}
+	dst := openSQLiteTest(t)
+	if err := dst.Import(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dst.GetPlan(ctx, "base")
+	if err != nil || got == nil || got.Name != "Базовый" || len(got.Durations) != 1 ||
+		got.Durations[0].Base != "400" {
+		t.Fatalf("тариф не восстановился из снимка: %+v err=%v", got, err)
+	}
 }
