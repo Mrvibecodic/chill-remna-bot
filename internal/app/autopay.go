@@ -129,7 +129,10 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		// Купили другой период — регулярное списание меняется, молчать нельзя.
 		// Молчать нельзя не только при смене срока: при тех же месяцах могли
 		// поменяться и сумма, и условия — регулярное списание станет другим.
-		if prev.Months != months || prev.Snapshot.Fingerprint() != ap.Snapshot.Fingerprint() {
+		// Записи без снимка (созданные до обновления) не сравниваем: иначе
+		// первая же оплата слала бы ложное «условия изменились».
+		condChanged := prev.Snapshot != nil && prev.Snapshot.Fingerprint() != ap.Snapshot.Fingerprint()
+		if prev.Months != months || condChanged {
 			a.notifyKB(ctx, chatID, i18n.T(lang, "ap.period_changed", monthsWord(lang, months), a.autoPayDaysText(lang)),
 				[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")}})
 		}
@@ -498,6 +501,13 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	// Деньги уже списаны. Сначала фиксируем платёж как незавершённый: если
 	// продление в панели упадёт, его добьёт реконсилятор, и оплата не пропадёт.
 	pi := a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months, snap)
+	// Если запись уже была (ретрай того же периода), ЮKassa по ключу
+	// идемпотентности вернула ПРЕЖНИЙ платёж — значит и условия применяем те,
+	// под которые он создавался, а не снятые заново: иначе вебхук и ретрай
+	// выдали бы разные лимиты за одни и те же деньги.
+	if pi != nil && pi.Snapshot != nil {
+		snap = pi.Snapshot
+	}
 	// И сразу помечаем период оплаченным: повторно списывать за него нельзя,
 	// чем бы ни закончилось продление.
 	stamp := now.Format(time.RFC3339)
