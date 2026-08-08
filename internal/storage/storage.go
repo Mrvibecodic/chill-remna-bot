@@ -100,6 +100,7 @@ type Storage interface {
 	AddPayment(ctx context.Context, p *model.Payment) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
+	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
 
 	PaidPayments(ctx context.Context) ([]model.Payment, error)
 	PaymentByExtID(ctx context.Context, extID string) (bool, error)
@@ -293,16 +294,17 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	var refBonusPaid, whitelisted int
 	var refEarned int64
 	var webApproved, webDenied int
+	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw)}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -458,24 +460,25 @@ func (b *base) CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error 
 		r.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
-		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt)
+		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
+		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt, r.Snapshot.Encode())
 	return err
 }
 
 func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error) {
 	r := &model.P2PRequest{}
+	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at "+
-			"FROM p2p_requests WHERE id = "+b.ph(1), id).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt)
+		"SELECT "+p2pCols+" FROM p2p_requests WHERE id = "+b.ph(1), id).
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	r.Snapshot = model.DecodePlanSnapshot(snapRaw)
 	return r, nil
 }
 
@@ -495,9 +498,9 @@ func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
 		p.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
-		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt)
+		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
+		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt, p.Snapshot.Encode())
 	if err != nil && isUniqueViolation(err) {
 		return ErrDuplicateExtID
 	}
@@ -520,7 +523,7 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 		return nil, 0, err
 	}
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments "+
+		"SELECT "+paymentCols+" FROM payments "+
 			"ORDER BY created_at DESC, id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
 	if err != nil {
@@ -530,9 +533,11 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 	var out []model.Payment
 	for rows.Next() {
 		var p model.Payment
-		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
+		var snapRaw string
+		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw); err != nil {
 			return nil, 0, err
 		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		out = append(out, p)
 	}
 	return out, total, rows.Err()
@@ -578,7 +583,7 @@ func (b *base) HasPaidPayment(ctx context.Context, telegramID int64) (bool, erro
 
 func (b *base) PaidPayments(ctx context.Context) ([]model.Payment, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments "+
+		"SELECT "+paymentCols+" FROM payments "+
 			"WHERE status = "+b.ph(1)+" ORDER BY created_at DESC",
 		model.PaymentPaid)
 	if err != nil {
@@ -588,9 +593,11 @@ func (b *base) PaidPayments(ctx context.Context) ([]model.Payment, error) {
 	var out []model.Payment
 	for rows.Next() {
 		var p model.Payment
-		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
+		var snapRaw string
+		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw); err != nil {
 			return nil, err
 		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -634,6 +641,26 @@ func (b *base) DeleteMediaFileID(ctx context.Context, section string) error {
 	return err
 }
 
+// Списки колонок вынесены в константы: снимок сделки добавил их сразу в
+// несколько запросов, и расхождение между SELECT и Scan ловится только в
+// рантайме.
+const (
+	paymentCols = "id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot"
+	p2pCols     = "id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot"
+	autoPayCols = "telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, " +
+		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
+)
+
+// SetUserSnapshot запоминает условия действующей подписки пользователя.
+func (b *base) SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"INSERT INTO users (telegram_id, p2p_approved, created_at, plan_snapshot) VALUES ("+b.ph(1)+", 0, "+b.ph(2)+", "+b.ph(3)+") "+
+			"ON CONFLICT (telegram_id) DO UPDATE SET plan_snapshot = excluded.plan_snapshot",
+		telegramID, nowStr(), snap.Encode())
+	return err
+}
+
 type Snapshot struct {
 	Config    *model.BotConfig
 	Users     []model.User
@@ -670,7 +697,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 
 	urows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied FROM users")
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +707,8 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		var refEarned int64
 		var webApproved, webDenied int
 		var terms, trial sql.NullString
-		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied); err != nil {
+		var snapRaw string
+		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw); err != nil {
 			_ = urows.Close()
 			return nil, err
 		}
@@ -693,6 +721,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		u.WebDenied = webDenied != 0
 		u.TermsAcceptedAt = terms.String
 		u.TrialUsedAt = trial.String
+		u.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.Users = append(snap.Users, u)
 	}
 	if err := urows.Err(); err != nil {
@@ -702,16 +731,18 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	_ = urows.Close()
 
 	prows, err := b.db.QueryContext(ctx,
-		"SELECT id, telegram_id, method, months, amount, status, comment, ext_id, created_at FROM payments")
+		"SELECT "+paymentCols+" FROM payments")
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var p model.Payment
-		if err := prows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt); err != nil {
+		var snapRaw string
+		if err := prows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw); err != nil {
 			_ = prows.Close()
 			return nil, err
 		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.Payments = append(snap.Payments, p)
 	}
 	if err := prows.Err(); err != nil {
@@ -721,16 +752,18 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	_ = prows.Close()
 
 	rrows, err := b.db.QueryContext(ctx,
-		"SELECT id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at FROM p2p_requests")
+		"SELECT "+p2pCols+" FROM p2p_requests")
 	if err != nil {
 		return nil, err
 	}
 	for rrows.Next() {
 		var r model.P2PRequest
-		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt); err != nil {
+		var snapRaw string
+		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw); err != nil {
 			_ = rrows.Close()
 			return nil, err
 		}
+		r.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.P2P = append(snap.P2P, r)
 	}
 	if err := rrows.Err(); err != nil {
@@ -800,19 +833,21 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	_ = lrows.Close()
 
 	arows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error FROM autopay")
+		"SELECT "+autoPayCols+" FROM autopay")
 	if err != nil {
 		return nil, err
 	}
 	for arows.Next() {
 		var ap model.AutoPay
 		var enabled int
+		var snapRaw string
 		if err := arows.Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount,
-			&ap.Currency, &enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
+			&ap.Currency, &enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError, &snapRaw); err != nil {
 			_ = arows.Close()
 			return nil, err
 		}
 		ap.Enabled = enabled != 0
+		ap.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.AutoPays = append(snap.AutoPays, ap)
 	}
 	if err := arows.Err(); err != nil {
@@ -822,18 +857,20 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	_ = arows.Close()
 
 	irows, err := b.db.QueryContext(ctx,
-		"SELECT id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks FROM pending_invoices")
+		"SELECT id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks, plan_snapshot FROM pending_invoices")
 	if err != nil {
 		return nil, err
 	}
 	for irows.Next() {
 		var p model.PendingInvoice
 		var resolved int
-		if err := irows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &resolved, &p.Purpose, &p.Kopecks); err != nil {
+		var snapRaw string
+		if err := irows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &resolved, &p.Purpose, &p.Kopecks, &snapRaw); err != nil {
 			_ = irows.Close()
 			return nil, err
 		}
 		p.Resolved = resolved != 0
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		snap.Pendings = append(snap.Pendings, p)
 	}
 	if err := irows.Err(); err != nil {
@@ -895,9 +932,9 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 		p := &s.Pendings[i]
 		if _, err := b.db.ExecContext(ctx,
 			// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-			"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks) "+
-				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
-			p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, boolToInt(p.Resolved), p.Purpose, p.Kopecks); err != nil && !isUniqueViolation(err) {
+			"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks, plan_snapshot) "+
+				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
+			p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, boolToInt(p.Resolved), p.Purpose, p.Kopecks, p.Snapshot.Encode()); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}
@@ -917,6 +954,11 @@ func (b *base) importUser(ctx context.Context, u *model.User) error {
 		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid), boolToInt(u.Whitelisted), u.RefEarned, boolToInt(u.WebApproved), boolToInt(u.WebDenied))
 	if err != nil {
 		return err
+	}
+	if u.Snapshot != nil {
+		if err := b.SetUserSnapshot(ctx, u.TelegramID, u.Snapshot); err != nil {
+			return err
+		}
 	}
 	if u.TermsAcceptedAt != "" {
 		if err := b.SetTermsAccepted(ctx, u.TelegramID, u.TermsAcceptedAt); err != nil {
@@ -1255,15 +1297,15 @@ func (b *base) AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) e
 		p.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", 0, "+b.ph(7)+", "+b.ph(8)+")",
-		p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, p.Purpose, p.Kopecks)
+		"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks, plan_snapshot) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", 0, "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
+		p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, p.Purpose, p.Kopecks, p.Snapshot.Encode())
 	return err
 }
 
 func (b *base) ListUnresolvedPending(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks FROM pending_invoices "+
+		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks, plan_snapshot FROM pending_invoices "+
 			"WHERE resolved = 0 AND created_at <= "+b.ph(1)+" ORDER BY created_at ASC LIMIT "+b.ph(2),
 		createdBefore, limit)
 	if err != nil {
@@ -1273,9 +1315,11 @@ func (b *base) ListUnresolvedPending(ctx context.Context, createdBefore string, 
 	var out []model.PendingInvoice
 	for rows.Next() {
 		var p model.PendingInvoice
-		if err := rows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks); err != nil {
+		var snapRaw string
+		if err := rows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks, &snapRaw); err != nil {
 			return nil, err
 		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -1293,7 +1337,7 @@ func (b *base) PendingByExtID(ctx context.Context, extID string) (*model.Pending
 	}
 	p := &model.PendingInvoice{}
 	err := b.db.QueryRowContext(ctx,
-		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks FROM pending_invoices WHERE ext_id = "+b.ph(1)+" ORDER BY id DESC LIMIT 1", extID).
+		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks, plan_snapshot FROM pending_invoices WHERE ext_id = "+b.ph(1)+" ORDER BY id DESC LIMIT 1", extID).
 		Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1622,25 +1666,27 @@ func (b *base) SetAutoPay(ctx context.Context, ap *model.AutoPay) error {
 	}
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"INSERT INTO autopay (telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+") "+
+		"INSERT INTO autopay (telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+b.ph(15)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET method = excluded.method, method_id = excluded.method_id, "+
 			"title = excluded.title, months = excluded.months, amount = excluded.amount, currency = excluded.currency, "+
 			"enabled = excluded.enabled, last_pay_at = excluded.last_pay_at, paid_period = excluded.paid_period, "+
-			"next_try_at = excluded.next_try_at, fails = excluded.fails, last_error = excluded.last_error",
+			"next_try_at = excluded.next_try_at, fails = excluded.fails, last_error = excluded.last_error, "+
+			"plan_snapshot = excluded.plan_snapshot",
 		ap.TelegramID, ap.Method, ap.MethodID, ap.Title, ap.Months, ap.Amount, ap.Currency,
-		boolToInt(ap.Enabled), ap.CreatedAt, ap.LastPayAt, ap.PaidPeriod, ap.NextTryAt, ap.Fails, ap.LastError)
+		boolToInt(ap.Enabled), ap.CreatedAt, ap.LastPayAt, ap.PaidPeriod, ap.NextTryAt, ap.Fails, ap.LastError,
+		ap.Snapshot.Encode())
 	return err
 }
 
 func (b *base) GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay, error) {
 	var ap model.AutoPay
 	var enabled int
+	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
-		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
-			"FROM autopay WHERE telegram_id = "+b.ph(1), telegramID).
+		"SELECT "+autoPayCols+" FROM autopay WHERE telegram_id = "+b.ph(1), telegramID).
 		Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
-			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError)
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError, &snapRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1648,6 +1694,7 @@ func (b *base) GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay
 		return nil, err
 	}
 	ap.Enabled = enabled != 0
+	ap.Snapshot = model.DecodePlanSnapshot(snapRaw)
 	return &ap, nil
 }
 
@@ -1683,8 +1730,7 @@ func (b *base) MarkAutoPayCharged(ctx context.Context, telegramID int64, lastPay
 
 func (b *base) ListAutoPay(ctx context.Context) ([]model.AutoPay, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error "+
-			"FROM autopay ORDER BY telegram_id")
+		"SELECT "+autoPayCols+" FROM autopay ORDER BY telegram_id")
 	if err != nil {
 		return nil, err
 	}
@@ -1693,11 +1739,13 @@ func (b *base) ListAutoPay(ctx context.Context) ([]model.AutoPay, error) {
 	for rows.Next() {
 		var ap model.AutoPay
 		var enabled int
+		var snapRaw string
 		if err := rows.Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount, &ap.Currency,
-			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
+			&enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError, &snapRaw); err != nil {
 			return nil, err
 		}
 		ap.Enabled = enabled != 0
+		ap.Snapshot = model.DecodePlanSnapshot(snapRaw)
 		out = append(out, ap)
 	}
 	return out, rows.Err()

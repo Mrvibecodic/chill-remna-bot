@@ -115,6 +115,9 @@ type AutoPay struct {
 	NextTryAt  string
 	Fails      int
 	LastError  string
+
+	// Snapshot — условия подписки, на которую человек включил автопродление.
+	Snapshot *PlanSnapshot
 }
 
 type PanelConfig struct {
@@ -321,6 +324,9 @@ type Payment struct {
 	Comment    string
 	ExtID      string
 	CreatedAt  string
+
+	// Snapshot — условия, на которых платёж был проведён (см. PlanSnapshot).
+	Snapshot *PlanSnapshot
 }
 
 type PendingInvoice struct {
@@ -335,6 +341,8 @@ type PendingInvoice struct {
 	Purpose string
 
 	Kopecks int64
+
+	Snapshot *PlanSnapshot
 }
 
 type P2PConfig struct {
@@ -378,6 +386,11 @@ type User struct {
 	// стоит, повторные заявки админу не шлются, а юзер при попытке входа видит
 	// «доступ отклонён». Снимается ручным одобрением (adm:wok).
 	WebDenied bool
+
+	// Snapshot — условия действующей подписки. Локальной сущности подписки у
+	// бота нет, истина в панели; снимок нужен, чтобы знать, что именно
+	// продано, и уметь это восстановить.
+	Snapshot *PlanSnapshot
 }
 
 type P2PRequest struct {
@@ -390,6 +403,8 @@ type P2PRequest struct {
 	Comment    string
 	CreatedAt  string
 	DecidedAt  string
+
+	Snapshot *PlanSnapshot
 }
 
 type WebhookConfig struct {

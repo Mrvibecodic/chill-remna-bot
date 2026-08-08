@@ -513,6 +513,17 @@ func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
 	return &cp, nil
 }
 
+func (s *fakeStore) SetUserSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	s.users[id].Snapshot = snap
+	return nil
+}
+
 func (s *fakeStore) SetUserInfo(_ context.Context, id int64, username, firstName string) error {
 	if s.users == nil || s.users[id] == nil {
 		return nil
