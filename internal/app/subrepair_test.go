@@ -196,3 +196,60 @@ func TestSubRepair_FirstPurchaseDuringRollback(t *testing.T) {
 		t.Fatalf("снимок не закреплён за пользователем: %+v", u)
 	}
 }
+
+// raceStore имитирует покупку, случившуюся между чтением последней сделки и
+// записью в панель: первый вызов LastPaidSubPayment возвращает старую покупку,
+// последующие — новую.
+type raceStore struct {
+	*fakeStore
+	first *model.Payment
+	calls int
+}
+
+func (r *raceStore) LastPaidSubPayment(ctx context.Context, id int64) (*model.Payment, error) {
+	r.calls++
+	if r.calls == 1 {
+		return r.first, nil
+	}
+	return r.fakeStore.LastPaidSubPayment(ctx, id)
+}
+
+// Гонка «сверка против свежей покупки»: пока сверка правила панель по старой
+// сделке, человек купил другой тариф. Перепроверка обязана переприменить
+// условия новой сделки, иначе завышение осталось бы навсегда (обычный режим
+// «никогда не урезает» его бы не тронул).
+func TestSubRepair_RecheckAfterConcurrentPurchase(t *testing.T) {
+	a, fs, patches := repairFixture(t, 3, repairGB)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 555)
+	_ = fs.SetSubExpiry(ctx, 555, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), "paid")
+	// «Свежая» покупка, которая победит: скромнее старой.
+	_ = fs.AddPayment(ctx, &model.Payment{
+		ID: 2, TelegramID: 555, Method: model.PayMethodYooKassa, Months: 1, Amount: "150",
+		Status: model.PaymentPaid, ExtID: "yk_new",
+		Snapshot: &model.PlanSnapshot{Months: 1, DeviceLimit: 4, TrafficGB: 30, IntSquads: []string{"squad-new"}},
+	})
+	// Старая сделка, которую сверка увидит первой.
+	old := &model.Payment{
+		ID: 1, TelegramID: 555, Method: model.PayMethodYooKassa, Months: 12, Amount: "1500",
+		Status: model.PaymentPaid, ExtID: "yk_old",
+		Snapshot: &model.PlanSnapshot{Months: 12, DeviceLimit: 9, TrafficGB: 500},
+	}
+	a.store = &raceStore{fakeStore: fs, first: old}
+
+	st := a.repairSubscriptions(ctx)
+	if st.fixed != 1 {
+		t.Fatalf("сверка не сработала: %+v", st)
+	}
+	if len(*patches) < 2 {
+		t.Fatalf("перепроверка не переприменила свежую сделку: patches=%d", len(*patches))
+	}
+	lastPatch := (*patches)[len(*patches)-1]
+	if got := lastPatch["hwidDeviceLimit"]; got != float64(4) {
+		t.Fatalf("в панели остались условия старой сделки: %v", got)
+	}
+	sq, _ := lastPatch["activeInternalSquads"].([]any)
+	if len(sq) != 1 || sq[0] != "squad-new" {
+		t.Fatalf("сквады свежей сделки не применены: %v", lastPatch["activeInternalSquads"])
+	}
+}

@@ -470,7 +470,8 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	// и оставить человека без подписки, забрав оплату, — худший из исходов.
 	// Обработка идёт как обычно, по фактической сумме платежа; расхождение
 	// уходит в журнал и админу, чтобы он свёл цифры.
-	if pay.Amount.Value != "" && !sameMoney(pay.Amount.Value, value) {
+	curMismatch := pay.Amount.Currency != "" && !strings.EqualFold(pay.Amount.Currency, currency)
+	if (pay.Amount.Value != "" && !sameMoney(pay.Amount.Value, value)) || curMismatch {
 		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, ap.TelegramID, "autocharge_amount_mismatch",
 			"ожидали %s %s, платёж на %s %s — продлеваем по факту", value, currency, pay.Amount.Value, pay.Amount.Currency)
 		alang := a.lang(a.cfg.AdminID)

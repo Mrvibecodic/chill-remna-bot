@@ -100,6 +100,22 @@ func (a *App) repairUser(ctx context.Context, st storage.Storage, panel *remnawa
 	if err != nil {
 		return false
 	}
+	fixed := a.repairByLastPurchase(ctx, st, panel, t, last)
+	if !fixed || last == nil {
+		return fixed
+	}
+	// Перепроверка после правки: между чтением последней покупки и записью в
+	// панель человек мог успеть купить другой тариф — тогда сверка только что
+	// накрыла свежую сделку условиями предыдущей. Новая покупка проведена
+	// новым образом, снимок у неё есть — переприменяем её условия целиком.
+	if cur, err := st.LastPaidSubPayment(ctx, t.TelegramID); err == nil &&
+		cur != nil && cur.ID != last.ID && cur.Snapshot != nil {
+		a.repairTarget(ctx, panel, t.TelegramID, cur.Snapshot, true)
+	}
+	return true
+}
+
+func (a *App) repairByLastPurchase(ctx context.Context, st storage.Storage, panel *remnawave.Client, t storage.SubRepairTarget, last *model.Payment) bool {
 	switch {
 	case last != nil && last.Snapshot != nil:
 		// Покупку провёл образ бота со снимками — условия применены из неё.
