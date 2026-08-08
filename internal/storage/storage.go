@@ -103,6 +103,7 @@ type Storage interface {
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
 	ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error)
 	SetPaymentSnapshot(ctx context.Context, id int64, snap *model.PlanSnapshot) error
+	LastPaidSubPayment(ctx context.Context, telegramID int64) (*model.Payment, error)
 
 	PaidPayments(ctx context.Context) ([]model.Payment, error)
 	PaymentByExtID(ctx context.Context, extID string) (bool, error)
@@ -653,20 +654,56 @@ const (
 		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
 )
 
-// SubRepairTarget — строка для сверки выданных лимитов с проданными.
+// SubRepairTarget — пользователь с действующей подпиской, о которой известно,
+// что именно ему продали.
 type SubRepairTarget struct {
 	TelegramID  int64
 	SubExpireAt string
 	Snapshot    *model.PlanSnapshot
-	// LastPaidHadSnapshot=false означает, что последняя покупка проведена
-	// образом бота, который снимков не знает (то есть предыдущим, во время
-	// отката). Такой подписке лимиты применял старый код — по тогдашнему
-	// конфигу, а не по проданным условиям, поэтому её надо чинить целиком.
-	LastPaidHadSnapshot bool
-	// LastPaidID — та самая покупка. После полной переприменки условий в неё
-	// дописывается снимок: иначе сверка считала бы подписку подозрительной
-	// вечно и переприменяла бы условия каждые 12 часов.
-	LastPaidID int64
+}
+
+// ListSubRepairTargets возвращает кандидатов на сверку лимитов.
+func (b *base) ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, sub_expire_at, plan_snapshot FROM users "+
+			"WHERE plan_snapshot <> '' AND sub_expire_at <> '' AND blocked = 0")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SubRepairTarget
+	for rows.Next() {
+		var t SubRepairTarget
+		var snapRaw string
+		if err := rows.Scan(&t.TelegramID, &t.SubExpireAt, &snapRaw); err != nil {
+			return nil, err
+		}
+		t.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		if t.Snapshot != nil {
+			out = append(out, t)
+		}
+	}
+	return out, rows.Err()
+}
+
+// LastPaidSubPayment — последняя оплаченная покупка подписки пользователя
+// (пополнения баланса и триал сюда не попадают).
+func (b *base) LastPaidSubPayment(ctx context.Context, telegramID int64) (*model.Payment, error) {
+	p := &model.Payment{}
+	var snapRaw string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT "+paymentCols+" FROM payments WHERE telegram_id = "+b.ph(1)+
+			" AND status = "+b.ph(2)+subPaymentCond+" ORDER BY created_at DESC, id DESC LIMIT 1",
+		telegramID, model.PaymentPaid).
+		Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.Snapshot = model.DecodePlanSnapshot(snapRaw)
+	return p, nil
 }
 
 // SetPaymentSnapshot дописывает снимок в уже записанный платёж.
@@ -676,38 +713,6 @@ func (b *base) SetPaymentSnapshot(ctx context.Context, id int64, snap *model.Pla
 		"UPDATE payments SET plan_snapshot = "+b.ph(1)+" WHERE id = "+b.ph(2),
 		snap.Encode(), id)
 	return err
-}
-
-// ListSubRepairTargets возвращает пользователей с действующей подпиской, о
-// которой известно, что именно им продали.
-func (b *base) ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error) {
-	rows, err := b.db.QueryContext(ctx,
-		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"SELECT u.telegram_id, u.sub_expire_at, u.plan_snapshot, "+
-			"COALESCE((SELECT p.plan_snapshot FROM payments p WHERE p.telegram_id = u.telegram_id "+
-			"AND p.status = "+b.ph(1)+" AND p.months > 0 ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''), "+
-			"COALESCE((SELECT p2.id FROM payments p2 WHERE p2.telegram_id = u.telegram_id "+
-			"AND p2.status = "+b.ph(2)+" AND p2.months > 0 ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1), 0) "+
-			"FROM users u WHERE u.plan_snapshot <> '' AND u.sub_expire_at <> '' AND u.blocked = 0",
-		model.PaymentPaid, model.PaymentPaid)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []SubRepairTarget
-	for rows.Next() {
-		var t SubRepairTarget
-		var snapRaw, lastRaw string
-		if err := rows.Scan(&t.TelegramID, &t.SubExpireAt, &snapRaw, &lastRaw, &t.LastPaidID); err != nil {
-			return nil, err
-		}
-		t.Snapshot = model.DecodePlanSnapshot(snapRaw)
-		t.LastPaidHadSnapshot = lastRaw != ""
-		if t.Snapshot != nil {
-			out = append(out, t)
-		}
-	}
-	return out, rows.Err()
 }
 
 // SetUserSnapshot запоминает условия действующей подписки пользователя.
@@ -1395,15 +1400,17 @@ func (b *base) PendingByExtID(ctx context.Context, extID string) (*model.Pending
 		return nil, nil
 	}
 	p := &model.PendingInvoice{}
+	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
 		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks, plan_snapshot FROM pending_invoices WHERE ext_id = "+b.ph(1)+" ORDER BY id DESC LIMIT 1", extID).
-		Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks)
+		Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks, &snapRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	p.Snapshot = model.DecodePlanSnapshot(snapRaw)
 	return p, nil
 }
 

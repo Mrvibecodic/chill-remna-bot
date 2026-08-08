@@ -519,16 +519,22 @@ func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepair
 		if u == nil || u.Snapshot == nil || u.SubExpireAt == "" {
 			continue
 		}
-		t := storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt, Snapshot: u.Snapshot}
-		for _, p := range s.pays {
-			if p != nil && p.TelegramID == id && p.Status == model.PaymentPaid && p.Months > 0 && p.ID >= t.LastPaidID {
-				t.LastPaidID = p.ID
-				t.LastPaidHadSnapshot = p.Snapshot != nil
-			}
-		}
-		out = append(out, t)
+		out = append(out, storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt, Snapshot: u.Snapshot})
 	}
 	return out, nil
+}
+
+func (s *fakeStore) LastPaidSubPayment(_ context.Context, id int64) (*model.Payment, error) {
+	var last *model.Payment
+	for _, p := range s.pays {
+		if p == nil || p.TelegramID != id || p.Status != model.PaymentPaid || p.Months <= 0 {
+			continue
+		}
+		if last == nil || p.ID >= last.ID {
+			last = p
+		}
+	}
+	return last, nil
 }
 
 func (s *fakeStore) SetPaymentSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {

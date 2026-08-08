@@ -405,6 +405,12 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	if months <= 0 {
 		months = model.PlanMonths[0]
 	}
+	// Продление — новая сделка на действующих условиях: человек платит
+	// сегодняшнюю цену, значит и лимиты получает сегодняшние. Снимок здесь
+	// не «достаётся из подписки», а снимается заново — он фиксирует условия
+	// на время между списанием и финализацией (её могут добить вебхук или
+	// реконсилятор через минуты).
+	snap := a.planSnapshot(months)
 	pr := a.pricing()
 	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
 	currency := strings.ToUpper(pr.Currency)
@@ -422,10 +428,10 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	}
 	// Ключ идемпотентности привязан к периоду, а не к дате попытки: повтор
 	// после обрыва связи попадёт в тот же платёж, а не создаст второй.
-	// Отпечаток условий — часть ключа: окно идемпотентности ЮKassa сутки, и
-	// без него повтор после смены цены вернул бы СТАРЫЙ платёж со старой
-	// суммой, а бот засчитал бы его как оплату новых условий.
-	idem := fmt.Sprintf("ap-%d-%s-%d-%s", ap.TelegramID, autoPayPeriod(exp), ap.Fails, ap.Snapshot.Fingerprint())
+	// Ключ НЕ включает сумму и условия намеренно: повтор после обрыва связи
+	// обязан попасть в тот же платёж, иначе человека спишут дважды. Защита от
+	// «вернулся старый платёж по старой цене» сделана проверкой суммы ниже.
+	idem := fmt.Sprintf("ap-%d-%s-%d", ap.TelegramID, autoPayPeriod(exp), ap.Fails)
 	desc := i18n.T(lang, "yk.invoice_desc", months)
 	pay, err := client.ChargeSaved(ctx, ap.MethodID, value, currency, desc, ap.TelegramID, months, idem)
 	if err != nil {
@@ -454,6 +460,20 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, ap.TelegramID, "autocharge", "months=%d amount=%s status=%s", months, value, pay.Status)
 
+	// Окно идемпотентности ЮKassa — сутки. Если цена изменилась между
+	// попытками одного периода, по тому же ключу вернётся ПРЕЖНИЙ платёж со
+	// старой суммой. Засчитывать его как оплату новых условий нельзя: подписку
+	// не продлеваем, зовём админа разобраться вручную.
+	if pay.Amount.Value != "" && !sameMoney(pay.Amount.Value, value) {
+		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, ap.TelegramID, "autocharge_amount_mismatch",
+			"ожидали %s, платёж на %s — продление остановлено", value, pay.Amount.Value)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ap.admin_amount_mismatch",
+			a.userLabelByID(ctx, ap.TelegramID), value, pay.Amount.Value))
+		a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, "сумма платежа не совпала с ценой")
+		return ""
+	}
+
 	if pay.Status != "succeeded" || !pay.Paid {
 		if pay.Status == "pending" || pay.Status == "waiting_for_capture" {
 			// Платёж ещё в процессе — финализирует вебхук или реконсилятор.
@@ -462,7 +482,7 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 			// его границу — ЮKassa обработала бы запрос как НОВЫЙ платёж
 			// (двойное списание). Часовые повторы тем же ключом просто
 			// возвращают текущее состояние того же платежа.
-			a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months)
+			a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months, snap)
 			a.autoPayDefer(ctx, ap, now, autoPayRetrySoon, "ожидает подтверждения")
 			return ""
 		}
@@ -476,13 +496,13 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 
 	// Деньги уже списаны. Сначала фиксируем платёж как незавершённый: если
 	// продление в панели упадёт, его добьёт реконсилятор, и оплата не пропадёт.
-	pi := a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months)
+	pi := a.autoPayEnqueue(ctx, pay.ID, ap.TelegramID, months, snap)
 	// И сразу помечаем период оплаченным: повторно списывать за него нельзя,
 	// чем бы ни закончилось продление.
 	stamp := now.Format(time.RFC3339)
 	_ = a.store.MarkAutoPayCharged(ctx, ap.TelegramID, stamp, autoPayPeriod(exp), "", "")
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	_, expireAt, err := a.finalizePurchase(ctx, ap.TelegramID, months, model.PayMethodYooKassa, amount, pay.ID, ap.Snapshot)
+	_, expireAt, err := a.finalizePurchase(ctx, ap.TelegramID, months, model.PayMethodYooKassa, amount, pay.ID, snap)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			// Гонку выиграл вебхук — подписка продлена им, повторное сообщение
@@ -509,17 +529,30 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	return ""
 }
 
+// sameMoney сравнивает две денежные строки в формате ЮKassa («199.50»).
+// Сравнение по копейкам, а не побайтно: «199.5» и «199.50» — одна сумма.
+func sameMoney(a, b string) bool {
+	ka, oka := rubToKopecks(a)
+	kb, okb := rubToKopecks(b)
+	if !oka || !okb {
+		return a == b
+	}
+	return ka == kb
+}
+
 // autoPayEnqueue кладёт платёж в очередь незавершённых, если его там ещё нет
 // (повторная попытка возвращает тот же платёж по ключу идемпотентности — дубли
 // в очереди не нужны).
-func (a *App) autoPayEnqueue(ctx context.Context, extID string, tgID int64, months int) *model.PendingInvoice {
+func (a *App) autoPayEnqueue(ctx context.Context, extID string, tgID int64, months int, snap *model.PlanSnapshot) *model.PendingInvoice {
 	if a.store == nil || extID == "" {
 		return nil
 	}
 	if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
 		return p
 	}
-	pi := &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: extID, TelegramID: tgID, Months: months}
+	// Снимок кладём в очередь: продление часто добивают вебхук или
+	// реконсилятор, и условия они возьмут именно отсюда.
+	pi := &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: extID, TelegramID: tgID, Months: months, Snapshot: snap}
 	if err := a.store.AddPendingInvoice(ctx, pi); err != nil {
 		a.log.Warn("autopay: очередь платежей", "ext_id", extID, "err", err)
 		return nil

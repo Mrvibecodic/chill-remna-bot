@@ -6,6 +6,7 @@ import (
 
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/storage"
 )
 
 const (
@@ -68,19 +69,13 @@ func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
 		}
 		t := targets[i]
 		// Истёкшая подписка не чинится: лимиты ей всё равно применят при
-		// следующей оплате, а лишний PATCH сдвинул бы срок.
+		// следующей оплате, а лишний апдейт сдвинул бы срок.
 		if exp, e := time.Parse(time.RFC3339, t.SubExpireAt); e != nil || !exp.After(now) {
 			continue
 		}
 		stats.checked++
-		full := !t.LastPaidHadSnapshot
-		if a.repairTarget(ctx, panel, t.TelegramID, t.Snapshot, full) {
+		if a.repairUser(ctx, st, panel, t) {
 			stats.fixed++
-			if full && t.LastPaidID != 0 {
-				// Условия применены — платёж больше не «непонятного
-				// происхождения», иначе сверка ходила бы по нему вечно.
-				_ = st.SetPaymentSnapshot(ctx, t.LastPaidID, t.Snapshot)
-			}
 		}
 		select {
 		case <-ctx.Done():
@@ -92,6 +87,52 @@ func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
 		a.log.Info("сверка лимитов завершена", "checked", stats.checked, "fixed", stats.fixed)
 	}
 	return stats
+}
+
+// repairUser решает, какими условиями чинить конкретного человека, и чинит.
+//
+// Источник истины — снимок ПОСЛЕДНЕЙ покупки, а не снимок пользователя:
+// после отката на предыдущий образ последняя покупка могла пройти вообще на
+// других условиях, и чинить её по прошлой сделке значило бы отобрать
+// оплаченное.
+func (a *App) repairUser(ctx context.Context, st storage.Storage, panel *remnawave.Client, t storage.SubRepairTarget) bool {
+	last, err := st.LastPaidSubPayment(ctx, t.TelegramID)
+	if err != nil {
+		return false
+	}
+	switch {
+	case last != nil && last.Snapshot != nil:
+		// Покупку провёл образ бота со снимками — условия применены из неё.
+		// Сверяем и возвращаем недоданное, ничего не урезая.
+		return a.repairTarget(ctx, panel, t.TelegramID, last.Snapshot, false)
+
+	case last != nil:
+		// Снимка у покупки нет: её провёл образ без поддержки снимков (то
+		// есть предыдущий, во время отката) — лимиты пришли из тогдашнего
+		// конфига. Что именно продали, знает счёт, по которому платили: его
+		// выставлял уже новый образ.
+		sold := a.pendingSnapshot(ctx, last.ExtID)
+		if sold == nil {
+			// Восстановить нечего (Stars, оплата с баланса, перевод, Tribute
+			// счёта не заводят). Гадать нельзя ни в плюс, ни в минус —
+			// оставляем как есть.
+			return false
+		}
+		if !a.repairTarget(ctx, panel, t.TelegramID, sold, true) {
+			return false
+		}
+		// Условия восстановлены — фиксируем их в платеже и в пользователе,
+		// иначе сверка ходила бы по этой подписке каждые 12 часов.
+		_ = st.SetPaymentSnapshot(ctx, last.ID, sold)
+		_ = st.SetUserSnapshot(ctx, t.TelegramID, sold)
+		return true
+
+	default:
+		// Снимок у пользователя есть, а оплаченной покупки нет: так бывает,
+		// когда подписку выдали, а платёж не записался. Условий сделки взять
+		// неоткуда — не трогаем.
+		return false
+	}
 }
 
 // repairTarget возвращает true, если пользователю что-то доправили.
@@ -121,10 +162,10 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 		reason += "трафик "
 	}
 
-	// full — подписку последний раз оплачивал образ бота без снимков (то есть
-	// предыдущий, во время отката). Тогда лимиты пришли из тогдашнего
-	// конфига целиком, включая сквады, которых по панели не видно, — поэтому
-	// проданные условия применяются полностью.
+	// full — условия продал новый образ, а применял старый (откат). Сквады по
+	// панели не видны, поэтому проданное применяется целиком. Снимок здесь —
+	// именно той покупки, которую чиним, так что понизить чужими условиями
+	// невозможно.
 	if full {
 		limits = remnawave.UserLimits{
 			InternalSquads: snap.IntSquads,

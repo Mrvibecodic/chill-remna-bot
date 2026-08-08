@@ -595,3 +595,82 @@ func TestTransferKeepsAutoPayAndPending(t *testing.T) {
 		t.Fatalf("поля счёта потеряны: %+v", list[0])
 	}
 }
+
+// Круговой прогон снимка через реальное хранилище. Отдельный тест нужен
+// потому, что app-тесты ходят через подменённое хранилище: расхождение между
+// списком колонок в SELECT и аргументами Scan там не проявляется вовсе, а в
+// бою означает, что метод всегда возвращает ошибку.
+func TestSnapshotRoundTrip(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		snap := &model.PlanSnapshot{
+			Months: 3, TrafficGB: 100, DeviceLimit: 5, Strategy: "MONTH",
+			IntSquads: []string{"sq-1", "sq-2"}, ExtSquad: "ext-1", Price: "450", Currency: "₽",
+		}
+
+		if err := st.AddPendingInvoice(ctx, &model.PendingInvoice{
+			ID: 7001, Method: PayMethodTest, ExtID: "rt_pending", TelegramID: 601, Months: 3, Snapshot: snap,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.PendingByExtID(ctx, "rt_pending")
+		if err != nil {
+			t.Fatalf("PendingByExtID вернул ошибку: %v", err)
+		}
+		if got == nil || got.Snapshot == nil {
+			t.Fatalf("снимок не прочитался из счёта: %+v", got)
+		}
+		if got.Snapshot.DeviceLimit != 5 || len(got.Snapshot.IntSquads) != 2 || got.Snapshot.ExtSquad != "ext-1" {
+			t.Fatalf("снимок счёта искажён: %+v", got.Snapshot)
+		}
+		list, err := st.ListUnresolvedPending(ctx, "2099-12-31T00:00:00Z", 10)
+		if err != nil || len(list) != 1 || list[0].Snapshot == nil {
+			t.Fatalf("снимок не читается списком: len=%d err=%v", len(list), err)
+		}
+
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: 601, Method: PayMethodTest, Months: 3, Amount: "450", Status: model.PaymentPaid,
+			ExtID: "rt_pay", Snapshot: snap,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		paid, err := st.PaidPayments(ctx)
+		if err != nil || len(paid) != 1 || paid[0].Snapshot == nil || paid[0].Snapshot.TrafficGB != 100 {
+			t.Fatalf("снимок платежа не прочитался: %+v err=%v", paid, err)
+		}
+
+		r := &model.P2PRequest{TelegramID: 601, Months: 3, Price: "450", Status: model.P2PAwaiting, Snapshot: snap}
+		if err := st.CreateP2PRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		gotReq, err := st.GetP2PRequest(ctx, r.ID)
+		if err != nil || gotReq == nil || gotReq.Snapshot == nil || gotReq.Snapshot.Months != 3 {
+			t.Fatalf("снимок заявки не прочитался: %+v err=%v", gotReq, err)
+		}
+
+		if err := st.SetAutoPay(ctx, &model.AutoPay{
+			TelegramID: 601, Method: model.PayMethodYooKassa, MethodID: "pm", Months: 3, Snapshot: snap,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ap, err := st.GetAutoPay(ctx, 601)
+		if err != nil || ap == nil || ap.Snapshot == nil || ap.Snapshot.DeviceLimit != 5 {
+			t.Fatalf("снимок автосписания не прочитался: %+v err=%v", ap, err)
+		}
+		aps, err := st.ListAutoPay(ctx)
+		if err != nil || len(aps) != 1 || aps[0].Snapshot == nil {
+			t.Fatalf("снимок автосписания не читается списком: len=%d err=%v", len(aps), err)
+		}
+
+		_ = st.UpsertUser(ctx, 601)
+		if err := st.SetUserSnapshot(ctx, 601, snap); err != nil {
+			t.Fatal(err)
+		}
+		u, err := st.GetUser(ctx, 601)
+		if err != nil || u == nil || u.Snapshot == nil || u.Snapshot.Price != "450" {
+			t.Fatalf("снимок пользователя не прочитался: %+v err=%v", u, err)
+		}
+	})
+}
+
+const PayMethodTest = model.PayMethodCryptoBot

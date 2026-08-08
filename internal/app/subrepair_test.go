@@ -20,6 +20,9 @@ func repairPanel(t *testing.T, devices int, traffic int64, patches *[]map[string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			mu.Lock()
+			devices, traffic := devices, traffic
+			mu.Unlock()
 			resp := map[string]any{"response": []map[string]any{{
 				"uuid": "u1", "tag": "CHILLBOT", "username": "tg_555",
 				"subscriptionUrl": "https://sub/x", "expireAt": "2099-01-01T00:00:00Z",
@@ -33,6 +36,15 @@ func repairPanel(t *testing.T, devices int, traffic int64, patches *[]map[string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			mu.Lock()
 			*patches = append(*patches, body)
+			// Панель запоминает применённое: без этого повторный проход
+			// сверки видел бы прежние лимиты и «чинил» их бесконечно, а тест
+			// не проверял бы сходимость.
+			if v, ok := body["hwidDeviceLimit"].(float64); ok {
+				devices = int(v)
+			}
+			if v, ok := body["trafficLimitBytes"].(float64); ok {
+				traffic = int64(v)
+			}
 			mu.Unlock()
 		}
 		_, _ = w.Write([]byte(`{"response":{"uuid":"u1","subscriptionUrl":"https://sub/x","expireAt":"2099-01-01T00:00:00Z"}}`))
@@ -97,26 +109,50 @@ func TestSubRepair_NeverTakesAway(t *testing.T) {
 }
 
 // Последнюю покупку провёл образ бота без снимков — то есть предыдущий, во
-// время отката. Условия применялись из тогдашнего конфига, поэтому проданное
-// переприменяется целиком, включая сквады, которых по панели не видно.
+// время отката. Условия применялись из тогдашнего конфига, а что продали на
+// самом деле, знает счёт: его выставлял уже новый образ.
 func TestSubRepair_FullReapplyAfterRollback(t *testing.T) {
-	a, fs, patches := repairFixture(t, 5, repairGB)
+	a, fs, patches := repairFixture(t, 3, repairGB)
+	ctx := context.Background()
 	seedRepairUser(t, fs, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), nil)
+	// Счёт, по которому платили во время отката: условия ДРУГИЕ и щедрее, чем
+	// в снимке пользователя от прошлой покупки.
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		ID: 9001, Method: model.PayMethodYooKassa, ExtID: "yk_r1", TelegramID: 555, Months: 12,
+		Snapshot: &model.PlanSnapshot{Months: 12, DeviceLimit: 10, TrafficGB: 200, IntSquads: []string{"squad-new"}},
+	})
 
-	st := a.repairSubscriptions(context.Background())
+	st := a.repairSubscriptions(ctx)
 	if st.fixed != 1 || len(*patches) != 1 {
 		t.Fatalf("полная переприменка не выполнена: fixed=%d patches=%d", st.fixed, len(*patches))
 	}
+	// Ключевое: чиним по условиям ТОЙ покупки, а не по прошлому снимку
+	// пользователя (5 устройств, squad-sold) — иначе сверка отобрала бы
+	// оплаченное.
+	if got := (*patches)[0]["hwidDeviceLimit"]; got != float64(10) {
+		t.Fatalf("применены условия не той сделки: %v", got)
+	}
 	sq, _ := (*patches)[0]["activeInternalSquads"].([]any)
-	if len(sq) != 1 || sq[0] != "squad-sold" {
-		t.Fatalf("проданные сквады не восстановлены: %v", (*patches)[0]["activeInternalSquads"])
+	if len(sq) != 1 || sq[0] != "squad-new" {
+		t.Fatalf("применены сквады не той сделки: %v", (*patches)[0]["activeInternalSquads"])
 	}
 
 	// Второй проход обязан промолчать: иначе сверка ходила бы по этой
 	// подписке вечно и переприменяла условия каждые 12 часов.
-	st2 := a.repairSubscriptions(context.Background())
-	if st2.fixed != 0 {
+	if st2 := a.repairSubscriptions(ctx); st2.fixed != 0 {
 		t.Fatalf("повторный проход снова чинит уже починенное: fixed=%d", st2.fixed)
+	}
+}
+
+// Покупка без снимка и без счёта (Stars, баланс, перевод, Tribute): что именно
+// продали — неизвестно. Гадать нельзя ни в плюс, ни в минус.
+func TestSubRepair_NoGuessWithoutInvoice(t *testing.T) {
+	a, fs, patches := repairFixture(t, 1, repairGB/10)
+	seedRepairUser(t, fs, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), nil)
+
+	st := a.repairSubscriptions(context.Background())
+	if st.fixed != 0 || len(*patches) != 0 {
+		t.Fatalf("сверка применила условия, которых не знает: fixed=%d patches=%d", st.fixed, len(*patches))
 	}
 }
 
