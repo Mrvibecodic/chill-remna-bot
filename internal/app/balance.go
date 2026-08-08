@@ -372,7 +372,7 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
+	months := a.buyMonths(ctx, chatID)
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}

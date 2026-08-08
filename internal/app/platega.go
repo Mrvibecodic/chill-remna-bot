@@ -60,7 +60,7 @@ func parsePlPayload(payload string) (telegramID int64, months int) {
 
 func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
+	months := a.buyMonths(ctx, chatID)
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}

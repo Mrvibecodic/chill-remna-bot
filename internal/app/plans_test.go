@@ -227,3 +227,72 @@ func TestSyncBasePlan_SkipsEditedPlan(t *testing.T) {
 		t.Fatalf("правки редактора затёрты сеткой цен: %+v", got.Durations)
 	}
 }
+
+// Выбор срока обязан пережить рестарт бота: экран со способами оплаты остаётся
+// в чате рабочим, и раньше нажатие на нём после перезапуска молча продавало
+// месяц вместо года.
+func TestBuyIntent_SurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	const u int64 = 555
+
+	a.onBuyPlan(ctx, u, "12")
+	if a.buyMonths(ctx, u) != 12 {
+		t.Fatalf("выбор не сохранён: %d", a.buyMonths(ctx, u))
+	}
+
+	// Новый процесс: память пуста, база та же.
+	restarted := &App{
+		cfg:   a.cfg,
+		log:   a.log,
+		msg:   &fakeMsg{},
+		store: fs,
+		ui:    map[int64]*uiState{},
+	}
+	restarted.botCfg = a.botCfg
+	if got := restarted.buyMonths(ctx, u); got != 12 {
+		t.Fatalf("после рестарта выбор потерян: %d", got)
+	}
+
+	// Новый выбор вытесняет прежний.
+	restarted.onBuyPlan(ctx, u, "3")
+	if got := restarted.buyMonths(ctx, u); got != 3 {
+		t.Fatalf("новый выбор не применился: %d", got)
+	}
+	if in := restarted.buyIntent(ctx, u); in == nil || in.PlanCode != model.PlanCodeBase {
+		t.Fatalf("тариф в намерении покупки не проставлен: %+v", in)
+	}
+}
+
+// У Stars нет строки счёта, а payload трогать нельзя — снимок условий живёт в
+// намерении покупки. Правка конфига между выставлением счёта и оплатой не
+// должна доезжать до человека.
+func TestStars_AppliesSnapshotFromIntent(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	ctx := context.Background()
+	const u int64 = 555
+	_ = fs.UpsertUser(ctx, u)
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 100}}
+	a.botCfg.Pricing.Stars = map[int]int{1: 100}
+
+	a.handleCallback(ctx, cb(u, "buy:1"))
+	a.handleCallback(ctx, cb(u, "method:stars"))
+	in := a.buyIntent(ctx, u)
+	if in == nil || in.Snapshot == nil || in.Snapshot.DeviceLimit != 3 {
+		t.Fatalf("снимок Stars не записан в намерение: %+v", in)
+	}
+
+	// Админ правит условия уже после того, как счёт выставлен.
+	a.botCfg.Pricing.Devices[1] = 99
+	a.handleSuccessfulPayment(ctx, successPayMsg(u, "stars:1", 100))
+	if patched["hwidDeviceLimit"] != float64(3) {
+		t.Fatalf("применились текущие условия вместо проданных: %+v", patched)
+	}
+
+	// Снимок от другого срока к этой покупке не относится.
+	if snap := a.starsSnapshot(ctx, u, 12); snap != nil {
+		t.Fatalf("снимок чужого срока не должен применяться: %+v", snap)
+	}
+}

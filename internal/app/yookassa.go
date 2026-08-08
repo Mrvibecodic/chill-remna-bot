@@ -53,7 +53,7 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 // оплаты, чтобы потом продлевать подписку автоматически.
 func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
+	months := a.buyMonths(ctx, chatID)
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}

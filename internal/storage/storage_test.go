@@ -204,7 +204,7 @@ func cleanPGData(t *testing.T, dsn string) {
 	defer db.Close()
 	// payment_log добавлен: без него прогоны на общей БД накапливали записи и
 	// тест журнала видел данные предыдущего запуска.
-	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans", "purchase_intents"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}
@@ -898,5 +898,92 @@ func TestPlansInSnapshot(t *testing.T) {
 	if err != nil || got == nil || got.Name != "Базовый" || len(got.Durations) != 1 ||
 		got.Durations[0].Base != "400" {
 		t.Fatalf("тариф не восстановился из снимка: %+v err=%v", got, err)
+	}
+}
+
+// Намерение покупки — носитель выбранного срока и (для Stars) снимка условий.
+// Запросы к нему ходят только отсюда, поэтому round-trip против настоящей базы
+// обязателен.
+func TestPurchaseIntentRoundTrip(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		snap := &model.PlanSnapshot{Months: 12, DeviceLimit: 5, TrafficGB: 200, Price: "1400"}
+
+		if none, err := st.PurchaseIntent(ctx, 801); err != nil || none != nil {
+			t.Fatalf("без выбора должно быть пусто: %+v err=%v", none, err)
+		}
+		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{
+			TelegramID: 801, PlanCode: "base", Months: 12,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.PurchaseIntent(ctx, 801)
+		if err != nil || got == nil || got.Months != 12 || got.PlanCode != "base" || got.CreatedAt == "" {
+			t.Fatalf("намерение не прочиталось: %+v err=%v", got, err)
+		}
+		if got.Snapshot != nil {
+			t.Fatalf("снимка не было, а он появился: %+v", got.Snapshot)
+		}
+
+		// Повторная запись вытесняет предыдущий выбор, а не плодит строки.
+		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{
+			TelegramID: 801, PlanCode: "vip", Months: 0, Days: 7, Snapshot: snap,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = st.PurchaseIntent(ctx, 801)
+		if got == nil || got.PlanCode != "vip" || got.Months != 0 || got.Days != 7 {
+			t.Fatalf("выбор не обновился: %+v", got)
+		}
+		if got.Snapshot == nil || got.Snapshot.DeviceLimit != 5 || got.Snapshot.TrafficGB != 200 {
+			t.Fatalf("снимок в намерении искажён: %+v", got.Snapshot)
+		}
+
+		// Удаление пользователя не должно оставлять его намерение в базе.
+		_ = st.UpsertUser(ctx, 801)
+		if err := st.DeleteUser(ctx, 801); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.PurchaseIntent(ctx, 801); left != nil {
+			t.Fatalf("намерение пережило удаление пользователя: %+v", left)
+		}
+
+		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{TelegramID: 802, Months: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DeletePurchaseIntent(ctx, 802); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.PurchaseIntent(ctx, 802); left != nil {
+			t.Fatalf("намерение не удалилось: %+v", left)
+		}
+	})
+}
+
+// Незавершённая покупка обязана пережить переезд базы: иначе выбравший год
+// доплатит месяц.
+func TestPurchaseIntentInSnapshot(t *testing.T) {
+	ctx := context.Background()
+	src := openSQLiteTest(t)
+	if err := src.SetPurchaseIntent(ctx, &model.PurchaseIntent{
+		TelegramID: 803, PlanCode: "base", Months: 6,
+		Snapshot: &model.PlanSnapshot{Months: 6, DeviceLimit: 4},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := src.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Intents) != 1 {
+		t.Fatalf("намерения не попали в снимок: %+v", snap.Intents)
+	}
+	dst := openSQLiteTest(t)
+	if err := dst.Import(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dst.PurchaseIntent(ctx, 803)
+	if err != nil || got == nil || got.Months != 6 || got.Snapshot == nil || got.Snapshot.DeviceLimit != 4 {
+		t.Fatalf("намерение не восстановилось: %+v err=%v", got, err)
 	}
 }

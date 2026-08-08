@@ -172,3 +172,88 @@ func samePlan(a, b *model.Plan) bool {
 	}
 	return model.EncodeDurations(a.Durations) == model.EncodeDurations(b.Durations)
 }
+
+// Намерение покупки — что человек выбрал на экране «выбор срока».
+//
+// Раньше выбор жил в памяти процесса (uiState.buyMonths) и терялся при
+// рестарте: экран с кнопками рестарт переживает, и выбравший год после
+// перезапуска получал счёт на месяц — молча. Теперь выбор пишется в базу и
+// оттуда же читается всеми способами оплаты.
+
+// setBuyIntent запоминает выбранный тариф и срок.
+func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, months int) error {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return nil
+	}
+	if planCode == "" {
+		planCode = model.PlanCodeBase
+	}
+	return st.SetPurchaseIntent(ctx, &model.PurchaseIntent{
+		TelegramID: chatID,
+		PlanCode:   planCode,
+		Months:     months,
+	})
+}
+
+// buyIntent возвращает намерение покупки (nil, если человек ничего не выбирал).
+func (a *App) buyIntent(ctx context.Context, chatID int64) *model.PurchaseIntent {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return nil
+	}
+	in, err := st.PurchaseIntent(ctx, chatID)
+	if err != nil {
+		a.log.Warn("намерение покупки не прочитано", "err", err, "user", chatID)
+		return nil
+	}
+	return in
+}
+
+// buyMonths — выбранный срок в месяцах (0, если выбора нет).
+func (a *App) buyMonths(ctx context.Context, chatID int64) int {
+	in := a.buyIntent(ctx, chatID)
+	if in == nil {
+		return 0
+	}
+	return in.Months
+}
+
+// rememberStarsSnapshot кладёт условия сделки в намерение покупки. У Stars нет
+// строки счёта в базе, а payload трогать нельзя — намерение остаётся
+// единственным местом, где снимок доживёт до подтверждения оплаты.
+func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months int, snap *model.PlanSnapshot) {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil || snap == nil {
+		return
+	}
+	in, err := st.PurchaseIntent(ctx, chatID)
+	if err != nil {
+		return
+	}
+	if in == nil {
+		in = &model.PurchaseIntent{TelegramID: chatID, PlanCode: model.PlanCodeBase, Months: months}
+	}
+	in.Months = months
+	in.Snapshot = snap
+	if err := st.SetPurchaseIntent(ctx, in); err != nil {
+		a.log.Warn("снимок Stars не сохранён", "err", err, "user", chatID)
+	}
+}
+
+// starsSnapshot достаёт условия сделки, снятые при отправке счёта Stars.
+// Снимок берётся только если срок совпал с оплаченным: иначе человек успел
+// выбрать другой срок и снимок уже не про эту покупку.
+func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *model.PlanSnapshot {
+	in := a.buyIntent(ctx, chatID)
+	if in == nil || in.Snapshot == nil || in.Months != months {
+		return nil
+	}
+	return in.Snapshot
+}

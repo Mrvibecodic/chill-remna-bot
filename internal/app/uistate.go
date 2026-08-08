@@ -1,7 +1,6 @@
 package app
 
 type uiState struct {
-	buyMonths    int
 	topUpKopecks int64
 	awaitTopUp   bool
 	awaitPromo   bool

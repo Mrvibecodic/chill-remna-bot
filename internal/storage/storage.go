@@ -59,6 +59,10 @@ type Storage interface {
 	DeleteUser(ctx context.Context, telegramID int64) error
 	AllUserIDs(ctx context.Context) ([]int64, error)
 
+	SetPurchaseIntent(ctx context.Context, in *model.PurchaseIntent) error
+	PurchaseIntent(ctx context.Context, telegramID int64) (*model.PurchaseIntent, error)
+	DeletePurchaseIntent(ctx context.Context, telegramID int64) error
+
 	SavePlan(ctx context.Context, p *model.Plan) error
 	GetPlan(ctx context.Context, code string) (*model.Plan, error)
 	ListPlans(ctx context.Context) ([]model.Plan, error)
@@ -363,6 +367,8 @@ func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	// пользователем, планировщик продолжит списывать деньги за удалённого.
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM autopay WHERE telegram_id = "+b.ph(1), telegramID)
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM purchase_intents WHERE telegram_id = "+b.ph(1), telegramID)
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
@@ -747,6 +753,9 @@ type Snapshot struct {
 	// Plans — справочник тарифов. В снимок входит с самого появления таблицы:
 	// без него переезд базы стирал бы всю тарифную сетку.
 	Plans []model.Plan
+	// Intents — незавершённые намерения покупки. Переезд базы посреди покупки
+	// редок, но без них человек, выбравший год, доплачивал бы месяц.
+	Intents []model.PurchaseIntent
 }
 
 type PromoUse struct {
@@ -872,6 +881,25 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	} else {
 		return nil, err
 	}
+	intentRows, err := b.db.QueryContext(ctx, "SELECT "+intentCols+" FROM purchase_intents")
+	if err != nil {
+		return nil, err
+	}
+	for intentRows.Next() {
+		var in model.PurchaseIntent
+		var snapRaw string
+		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &snapRaw, &in.CreatedAt); err != nil {
+			_ = intentRows.Close()
+			return nil, err
+		}
+		in.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		snap.Intents = append(snap.Intents, in)
+	}
+	if err := intentRows.Err(); err != nil {
+		_ = intentRows.Close()
+		return nil, err
+	}
+	_ = intentRows.Close()
 	urows2, err := b.db.QueryContext(ctx, "SELECT code, telegram_id, created_at FROM promo_redemptions")
 	if err != nil {
 		return nil, err
@@ -990,6 +1018,11 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	}
 	for i := range s.Plans {
 		if err := b.SavePlan(ctx, &s.Plans[i]); err != nil {
+			return err
+		}
+	}
+	for i := range s.Intents {
+		if err := b.SetPurchaseIntent(ctx, &s.Intents[i]); err != nil {
 			return err
 		}
 	}

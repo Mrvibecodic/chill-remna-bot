@@ -25,7 +25,7 @@ func (a *App) starsConfig() model.StarsConfig {
 
 func (a *App) startStars(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
+	months := a.buyMonths(ctx, chatID)
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}
@@ -37,6 +37,10 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
+	// Условия сделки фиксируем в намерении покупки: у Stars нет строки счёта в
+	// базе, а payload трогать нельзя — иначе предпроверка отклонит легитимную
+	// оплату (разбор превращает в число весь остаток строки).
+	a.rememberStarsSnapshot(ctx, chatID, months, a.planSnapshot(months))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
 	a.msg.SendInvoice(ctx, chatID, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)
@@ -72,7 +76,8 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	}
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID, nil)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID,
+		a.starsSnapshot(ctx, chatID, months))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			// Telegram доставил апдейт повторно (рестарт до сдвига offset и
@@ -187,6 +192,7 @@ func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, months int) (s
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
 	lang := a.lang(chatID)
+	a.rememberStarsSnapshot(ctx, chatID, months, a.planSnapshot(months))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
 	link, err := a.msg.CreateInvoiceLink(ctx, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)

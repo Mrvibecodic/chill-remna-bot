@@ -170,6 +170,7 @@ type fakeStore struct {
 	media     map[string]string
 	pending   map[int64]*model.PendingInvoice
 	plans     map[string]*model.Plan
+	intents   map[int64]*model.PurchaseIntent
 	promos    map[string]*model.PromoCode
 	promoUses map[string]bool
 	webUsers  map[string]*model.WebUser
@@ -842,6 +843,31 @@ func (s *fakeStore) GetWebUserByEmail(_ context.Context, email string) (*model.W
 	}
 	return nil, nil
 }
+func (s *fakeStore) SetPurchaseIntent(_ context.Context, in *model.PurchaseIntent) error {
+	if in == nil {
+		return nil
+	}
+	if s.intents == nil {
+		s.intents = map[int64]*model.PurchaseIntent{}
+	}
+	cp := *in
+	s.intents[cp.TelegramID] = &cp
+	return nil
+}
+
+func (s *fakeStore) PurchaseIntent(_ context.Context, telegramID int64) (*model.PurchaseIntent, error) {
+	if s.intents == nil || s.intents[telegramID] == nil {
+		return nil, nil
+	}
+	cp := *s.intents[telegramID]
+	return &cp, nil
+}
+
+func (s *fakeStore) DeletePurchaseIntent(_ context.Context, telegramID int64) error {
+	delete(s.intents, telegramID)
+	return nil
+}
+
 func (s *fakeStore) SavePlan(_ context.Context, p *model.Plan) error {
 	if p == nil {
 		return nil

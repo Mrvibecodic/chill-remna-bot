@@ -113,13 +113,17 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	if err != nil {
 		return
 	}
-	a.getUI(chatID).buyMonths = mo
+	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт
+	// бота, и память процесса тут не носитель (см. internal/app/plans.go).
+	if err := a.setBuyIntent(ctx, chatID, model.PlanCodeBase, mo); err != nil {
+		a.log.Warn("намерение покупки не сохранено", "err", err, "user", chatID)
+	}
 	a.showMethods(ctx, chatID)
 }
 
 func (a *App) showMethods(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
+	months := a.buyMonths(ctx, chatID)
 	a.mu.Lock()
 	var p2p model.P2PConfig
 	var stars model.StarsConfig
@@ -233,8 +237,7 @@ func (a *App) notifyAdminUserRequest(ctx context.Context, userID int64) {
 }
 
 func (a *App) issueCard(ctx context.Context, chatID int64) {
-	ui := a.getUI(chatID)
-	months := ui.buyMonths
+	months := a.buyMonths(ctx, chatID)
 	if months == 0 {
 		months = model.PlanMonths[0]
 	}
@@ -242,7 +245,7 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 }
 
 // issueCardMonths is issueCard for an explicit period (used by the Mini App,
-// which has no chat-side buyMonths state).
+// which passes the period explicitly).
 func (a *App) issueCardMonths(ctx context.Context, chatID int64, months int) {
 	lang := a.lang(chatID)
 	card, price, reqID, err := a.prepareP2PCard(ctx, chatID, months)
