@@ -206,14 +206,17 @@ func TestPlansAdmin_LookSurvivesConfigSync(t *testing.T) {
 
 	// И цены при этом продолжают доезжать из конфига в тариф: направление
 	// синхронизации на этом шаге не менялось.
-	a.setBasePrice(1, "199")
-	if err := a.saveBotConfig(ctx); err != nil {
+	if err := a.setPlanPrice(ctx, "", 1, "base", "199"); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := fs.GetPlan(ctx, model.PlanCodeBase)
 	d := p.Duration(1)
 	if d == nil || d.Base != "199" {
-		t.Fatalf("цена из конфига не доехала до тарифа: %+v", p.Durations)
+		t.Fatalf("цена не записалась в тариф: %+v", p.Durations)
+	}
+	// И доехала зеркалом до сетки, по которой продаёт витрина.
+	if got := a.pricing().Base[1]; got != "199" {
+		t.Fatalf("цена не доехала зеркалом до сетки: %q", got)
 	}
 	check("после правки цены")
 }
@@ -545,7 +548,9 @@ func TestPlansAdmin_AllHandTypedFieldsEscaped(t *testing.T) {
 	planTap(t, a, "pln:icon:"+model.PlanCodeBase)
 	a.handleMessage(ctx, msgText(planAdmin, "<b>"))
 	// Валюта — свободный ввод админа на экране цен, и она едет в строку сроков.
-	a.setCurrency("<b>USD")
+	if err := a.setPlanCurrency(ctx, model.PlanCodeBase, "<b>USD"); err != nil {
+		t.Fatal(err)
+	}
 	planTap(t, a, "pln:open:"+model.PlanCodeBase)
 
 	card := fm.last()

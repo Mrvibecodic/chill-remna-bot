@@ -103,6 +103,7 @@ const (
 	cbAccess    = "acc"
 	cbTorrent   = "torj"
 	cbPlans     = "pln"
+	cbPlanSquad = "plq"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -223,6 +224,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbPlans:
 		if isAdmin {
 			a.onPlansAdmin(ctx, chatID, val)
+		}
+	case cbPlanSquad:
+		if isAdmin {
+			a.onPlanSquadToggle(ctx, chatID, val)
 		}
 	case cbPayments:
 		if isAdmin {
@@ -557,8 +562,8 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	delete(a.wiz, chatID)
 	a.mu.Unlock()
 
-	if err := a.syncBasePlan(ctx); err != nil {
-		a.log.Warn("тариф «Базовый» не сохранён", "err", err)
+	if _, err := a.syncPlansConfig(ctx); err != nil {
+		a.log.Warn("тариф «Базовый» не синхронизирован", "err", err)
 	}
 
 	a.sendKB(ctx, chatID, i18n.T(lang, "step.verify.ok", count), [][]models.InlineKeyboardButton{

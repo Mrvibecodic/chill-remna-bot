@@ -298,6 +298,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	}
 
 	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code)},
 		{btn(toggleLabel, "pln:toggle:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
@@ -412,6 +413,42 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 			})
 	case "delyes":
 		a.deletePlan(ctx, chatID, arg)
+	case "pr":
+		a.showPlanPricing(ctx, chatID, arg)
+	case "prm":
+		moStr, code, _ := strings.Cut(arg, ":")
+		mo, _ := strconv.Atoi(moStr)
+		a.showPlanMonth(ctx, chatID, code, mo)
+	case "in":
+		kind, rest, _ := strings.Cut(arg, ":")
+		moStr, code, _ := strings.Cut(rest, ":")
+		mo, _ := strconv.Atoi(moStr)
+		a.askPlanPriceInput(ctx, chatID, kind, mo, code)
+	case "cur":
+		a.askPlanValue(ctx, chatID, arg, "currency", "plans.ask_currency")
+	case "dvl":
+		a.askPlanValue(ctx, chatID, arg, "device_limit", "plans.ask_devlimit")
+	case "str":
+		a.showPlanStrategy(ctx, chatID, arg)
+	case "sts":
+		strat, code, _ := strings.Cut(arg, ":")
+		if err := a.setPlanStrategy(ctx, code, strat); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.showPlanPricing(ctx, chatID, code)
+	case "sqm":
+		moStr, code, _ := strings.Cut(arg, ":")
+		mo, _ := strconv.Atoi(moStr)
+		a.showPlanSquadEditor(ctx, chatID, code, mo)
+	case "sqc":
+		moStr, code, _ := strings.Cut(arg, ":")
+		mo, _ := strconv.Atoi(moStr)
+		if err := a.clearPlanSquadOverride(ctx, code, mo); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.showPlanSquadEditor(ctx, chatID, code, mo)
 	default:
 		// Неизвестное действие домена — это кнопка, добавленная без маршрута.
 		// Показать список честнее, чем не ответить ничем.
@@ -436,13 +473,19 @@ func (a *App) plansPage(chatID int64) int {
 	return a.getUI(chatID).plansPage
 }
 
-// forgetPlanInput снимает ожидание ввода поля тарифа.
+// forgetPlanInput снимает ожидание ввода поля тарифа — и оформления, и
+// коммерческого. Коммерческие ключи общие со старыми экранами, и снимать их
+// при навигации по тарифам обязательно: иначе вопрос «введите цену», брошенный
+// в карточке тарифа, дождался бы любого текста и записал его не туда.
 func (a *App) forgetPlanInput(chatID int64) {
 	ui := a.getUI(chatID)
 	switch ui.adminInput {
-	case "plan_name", "plan_desc", "plan_icon":
+	case "plan_name", "plan_desc", "plan_icon",
+		"baseprice", "price", "ykprice", "starprice",
+		"traffic_gb", "device_per", "device_limit", "currency":
 		ui.adminInput = ""
 		ui.inputBack = ""
+		ui.priceMonths = 0
 	}
 	ui.planCode = ""
 }

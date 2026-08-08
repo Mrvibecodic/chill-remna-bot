@@ -170,7 +170,9 @@ func TestSaveBotConfigDoesNotOvertake(t *testing.T) {
 			for i := 0; i < 25; i++ {
 				seqMu.Lock()
 				seq++
-				a.setBasePrice(1, strconv.Itoa(seq))
+				a.mu.Lock()
+				a.botCfg.Pricing.Base[1] = strconv.Itoa(seq)
+				a.mu.Unlock()
 				seqMu.Unlock()
 				if err := a.saveBotConfig(ctx); err != nil {
 					t.Error(err)
@@ -259,8 +261,7 @@ func TestPlanEditAndConfigSyncKeepBoth(t *testing.T) {
 		defer writers.Done()
 		lastName := 0
 		for i := 1; i <= rounds; i++ {
-			a.setBasePrice(1, strconv.Itoa(1000+i))
-			if err := a.saveBotConfig(ctx); err != nil {
+			if err := a.setPlanPrice(ctx, "", 1, "base", strconv.Itoa(1000+i)); err != nil {
 				t.Error(err)
 				return
 			}

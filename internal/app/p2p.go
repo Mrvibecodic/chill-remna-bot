@@ -20,6 +20,24 @@ import (
 )
 
 func (a *App) saveBotConfig(ctx context.Context) error {
+	if err := a.saveConfigOnly(ctx); err != nil {
+		return err
+	}
+	// Сохранение конфига — момент, когда тариф и сетка цен могли разойтись,
+	// поэтому синхронизация висит здесь, а не на каждом из девяти десятков
+	// вызывающих. Направление выбирает флаг тарифа: ведомый «Базовый»
+	// пересобирается из сетки, ведущий — зеркалит сетку собой
+	// (см. internal/app/plans_sync.go).
+	if _, err := a.syncPlansConfig(ctx); err != nil {
+		a.log.Warn("тариф «Базовый» не синхронизирован", "err", err)
+	}
+	return nil
+}
+
+// saveConfigOnly пишет конфиг в базу БЕЗ синхронизации тарифа. Отдельно от
+// saveBotConfig, потому что зеркало (plans_sync.go) сохраняет конфиг, уже держа
+// замок тарифов, — хвост с синхронизацией взял бы его повторно.
+func (a *App) saveConfigOnly(ctx context.Context) error {
 	// В хранилище едет копия, снятая под замком: раньше туда уходил живой
 	// конфиг, и обход его карт (JSON) шёл уже без замка — одновременно с записью
 	// в те же карты из админки, а это смерть процесса без возможности перехвата
@@ -31,6 +49,7 @@ func (a *App) saveBotConfig(ctx context.Context) error {
 	// фоновые пути (проверка обновлений, ротация карт при заявке на перевод),
 	// так что «оба сохранения из одного обработчика» здесь неверно.
 	a.cfgSaveMu.Lock()
+	defer a.cfgSaveMu.Unlock()
 	a.mu.Lock()
 	st := a.store
 	raw, err := a.botCfg.SnapshotJSON()
@@ -43,29 +62,12 @@ func (a *App) saveBotConfig(ctx context.Context) error {
 		err = derr
 	}
 	if err != nil {
-		a.cfgSaveMu.Unlock()
 		return fmt.Errorf("копия конфига: %w", err)
 	}
 	if cfg == nil || st == nil {
-		a.cfgSaveMu.Unlock()
 		return fmt.Errorf("бот не настроен")
 	}
-	if err := st.SaveConfig(ctx, cfg); err != nil {
-		a.cfgSaveMu.Unlock()
-		return err
-	}
-	// Замок сохранения отпускается ДО синхронизации тарифа: она берёт свой
-	// замок, и вложенность двух замков рано или поздно дала бы обратный порядок
-	// захвата — редактор тарифов на следующем шаге сам пишет конфиг.
-	a.cfgSaveMu.Unlock()
-	// Пока редактора тарифов нет, «Базовый» ведомый от сетки цен
-	// (см. internal/app/plans.go). Сохранение конфига — единственный момент,
-	// когда цены меняются, поэтому синхронизация висит здесь, а не на каждом
-	// из девяти десятков вызывающих.
-	if err := a.syncBasePlan(ctx); err != nil {
-		a.log.Warn("тариф «Базовый» не сохранён", "err", err)
-	}
-	return nil
+	return st.SaveConfig(ctx, cfg)
 }
 
 func (a *App) p2pConfig() model.P2PConfig {
@@ -507,6 +509,8 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		ui := a.getUI(chatID)
 		ui.adminInput = "price"
 		ui.priceMonths = mo
+		// Старый экран правит «Базовый»: контекст карточки тарифа здесь чужой.
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_price", mo), "menu:p2p")
 	case "uok":
 		a.adminApproveUser(ctx, chatID, arg, true)
@@ -816,8 +820,16 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		mo := ui.priceMonths
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		a.setFiatPrice(model.PayMethodP2P, mo, strings.TrimSpace(text))
-		_ = a.saveBotConfig(ctx)
+		code := ui.planCode
+		ui.planCode = ""
+		if err := a.setPlanPrice(ctx, code, mo, "p2p", text); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		if code != "" {
+			a.showPlanMonth(ctx, chatID, code, mo)
+			return
+		}
 		a.showP2PAdmin(ctx, chatID)
 	case "starprice":
 		mo := ui.priceMonths
@@ -830,21 +842,37 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 				[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:stars")})
 			return
 		}
-		a.setStarPrice(mo, v)
-		_ = a.saveBotConfig(ctx)
+		code := ui.planCode
+		ui.planCode = ""
+		if err := a.setPlanStars(ctx, code, mo, v); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		if code != "" {
+			a.showPlanMonth(ctx, chatID, code, mo)
+			return
+		}
 		a.showStarsAdmin(ctx, chatID)
 	case "baseprice":
 		mo := ui.priceMonths
+		code := ui.planCode
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		a.setBasePrice(mo, strings.TrimSpace(text))
-		_ = a.saveBotConfig(ctx)
-		a.showPricing(ctx, chatID)
+		ui.planCode = ""
+		if err := a.setPlanPrice(ctx, code, mo, "base", text); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.afterPlanPriceEdit(ctx, chatID, code, mo)
 	case "currency":
+		code := ui.planCode
 		ui.adminInput = ""
-		a.setCurrency(strings.TrimSpace(text))
-		_ = a.saveBotConfig(ctx)
-		a.showPricing(ctx, chatID)
+		ui.planCode = ""
+		if err := a.setPlanCurrency(ctx, code, text); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.afterPlanPriceEdit(ctx, chatID, code, 0)
 	case "p2p_cur":
 		ui.adminInput = ""
 		v := strings.TrimSpace(text)
@@ -875,8 +903,16 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		mo := ui.priceMonths
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		a.setFiatPrice(model.PayMethodYooKassa, mo, strings.TrimSpace(text))
-		_ = a.saveBotConfig(ctx)
+		code := ui.planCode
+		ui.planCode = ""
+		if err := a.setPlanPrice(ctx, code, mo, "yk", text); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		if code != "" {
+			a.showPlanMonth(ctx, chatID, code, mo)
+			return
+		}
 		a.showYooKassaAdmin(ctx, chatID)
 	case "yk_shop":
 		ui.adminInput = ""
@@ -986,19 +1022,27 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setContact(ctx, chatID, "terms", text)
 	case "traffic_gb":
 		mo := ui.priceMonths
+		code := ui.planCode
 		ui.adminInput = ""
 		ui.priceMonths = 0
+		ui.planCode = ""
 		gb, _ := strconv.Atoi(strings.TrimSpace(text))
-		a.setTrafficGB(mo, gb)
-		_ = a.saveBotConfig(ctx)
-		a.showPricing(ctx, chatID)
+		if err := a.setPlanTraffic(ctx, code, mo, gb); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.afterPlanPriceEdit(ctx, chatID, code, mo)
 	case "device_limit":
+		code := ui.planCode
 		ui.adminInput = ""
 		ui.priceMonths = 0
+		ui.planCode = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
-		a.setDeviceLimitGlobal(n)
-		_ = a.saveBotConfig(ctx)
-		a.showPricing(ctx, chatID)
+		if err := a.setPlanDeviceLimit(ctx, code, n); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.afterPlanPriceEdit(ctx, chatID, code, 0)
 	case "bcast":
 		ui.adminInput = ""
 		a.previewBroadcast(ctx, chatID, text)
@@ -1125,12 +1169,16 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setCabinetField(ctx, chatID, "favicon", text)
 	case "device_per":
 		mo := ui.priceMonths
+		code := ui.planCode
 		ui.adminInput = ""
 		ui.priceMonths = 0
+		ui.planCode = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
-		a.setDevicesPer(mo, n)
-		_ = a.saveBotConfig(ctx)
-		a.showPricing(ctx, chatID)
+		if err := a.setPlanDevices(ctx, code, mo, n); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
+		a.afterPlanPriceEdit(ctx, chatID, code, mo)
 	case "ntf_trial_days":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
@@ -1187,30 +1235,34 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "trial.q_hwid"), "menu:trial")
 	case "plan_q_price":
 		mo := ui.priceMonths
-		a.setBasePrice(mo, strings.TrimSpace(text))
+		if err := a.setPlanPrice(ctx, "", mo, "base", text); err != nil {
+			ui.adminInput = ""
+			ui.priceMonths = 0
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
 		ui.adminInput = "plan_q_traffic"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "pricing.q_traffic", mo), "menu:pricing")
 	case "plan_q_traffic":
 		mo := ui.priceMonths
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
-		a.mu.Lock()
-		if a.botCfg != nil {
-			if a.botCfg.Pricing.Traffic == nil {
-				a.botCfg.Pricing.Traffic = map[int]int{}
-			}
-			a.botCfg.Pricing.Traffic[mo] = n
+		if err := a.setPlanTraffic(ctx, "", mo, n); err != nil {
+			ui.adminInput = ""
+			ui.priceMonths = 0
+			a.planInputFailed(ctx, chatID, err)
+			return
 		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
 		ui.adminInput = "plan_q_hwid"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "pricing.q_hwid", mo), "menu:pricing")
 	case "plan_q_hwid":
 		mo := ui.priceMonths
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
-		a.setDevicesPer(mo, n)
 		ui.adminInput = ""
 		ui.priceMonths = 0
-		_ = a.saveBotConfig(ctx)
+		if err := a.setPlanDevices(ctx, "", mo, n); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
 		a.showPlanSquads(ctx, chatID, mo)
 	case "torrent_strike":
 		a.setTorrentStrikeLimit(ctx, chatID, text)
@@ -1263,51 +1315,6 @@ func (a *App) formatFiatPrices(method string) string {
 		return "—"
 	}
 	return strings.Join(parts, " ")
-}
-
-func (a *App) setFiatPrice(method string, months int, val string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	switch method {
-	case model.PayMethodP2P:
-		a.botCfg.Pricing.P2P[months] = val
-	case model.PayMethodYooKassa:
-		a.botCfg.Pricing.YooKassa[months] = val
-	}
-}
-
-func (a *App) setBasePrice(months int, val string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	a.botCfg.Pricing.Base[months] = val
-}
-
-func (a *App) setCurrency(val string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	a.botCfg.Pricing.Currency = val
-}
-
-func (a *App) setStarPrice(months, val int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	a.botCfg.Pricing.Stars[months] = val
 }
 
 func (a *App) cleanupP2PUser(ctx context.Context, userChatID int64) {

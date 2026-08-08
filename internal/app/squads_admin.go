@@ -99,42 +99,16 @@ func (a *App) onSquads(ctx context.Context, chatID int64, val string) {
 	a.showSquads(ctx, chatID)
 }
 
+// Глобальные сквады «Продаж» — это сквады уровня тарифа «Базовый»: правка идёт
+// в тариф, конфиг обновляется зеркалом (см. internal/app/plans_sync.go).
 func (a *App) toggleInternalSquad(ctx context.Context, chatID int64, uuid string) {
-	if uuid == "" {
-		return
+	if err := a.togglePlanSquad(ctx, "", 0, uuid, false); err != nil {
+		a.planInputFailed(ctx, chatID, err)
 	}
-	a.mu.Lock()
-	if a.botCfg != nil {
-		cur := a.botCfg.Plan.ActiveInternalSquads
-		idx := -1
-		for i, u := range cur {
-			if u == uuid {
-				idx = i
-				break
-			}
-		}
-		if idx >= 0 {
-			a.botCfg.Plan.ActiveInternalSquads = append(cur[:idx], cur[idx+1:]...)
-		} else {
-			a.botCfg.Plan.ActiveInternalSquads = append(cur, uuid)
-		}
-	}
-	a.mu.Unlock()
-	_ = a.saveBotConfig(ctx)
 }
 
 func (a *App) toggleExternalSquad(ctx context.Context, chatID int64, uuid string) {
-	if uuid == "" {
-		return
+	if err := a.togglePlanSquad(ctx, "", 0, uuid, true); err != nil {
+		a.planInputFailed(ctx, chatID, err)
 	}
-	a.mu.Lock()
-	if a.botCfg != nil {
-		if a.botCfg.Plan.ExternalSquadUUID == uuid {
-			a.botCfg.Plan.ExternalSquadUUID = ""
-		} else {
-			a.botCfg.Plan.ExternalSquadUUID = uuid
-		}
-	}
-	a.mu.Unlock()
-	_ = a.saveBotConfig(ctx)
 }

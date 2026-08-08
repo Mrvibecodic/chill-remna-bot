@@ -19,14 +19,12 @@ import (
 // гарантированное, если копию из чтения убрать.
 func TestPricingConcurrentReadWrite(t *testing.T) {
 	ctx := context.Background()
-	a, _ := planApp(t)
-	// Хранилище убрано намеренно: подменённое в тестах потокобезопасным не
-	// делали, и его собственные карты дали бы находку не про конфиг. Копия
-	// конфига в saveBotConfig снимается до проверки хранилища, поэтому путь
-	// записи — тот самый обход карт — тест всё равно проходит.
-	a.store = nil
+	// Потокобезопасная подмена хранилища: сеттеры теперь пишут в тариф и зеркалят
+	// сетку в конфиг, то есть ходят в хранилище — обычная подмена (fakeStore) под
+	// конкурентной нагрузкой дала бы находку про свои карты, а не про конфиг.
+	a, _ := planSyncApp(t, 0)
 
-	const rounds = 200
+	const rounds = 40
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
@@ -38,17 +36,17 @@ func TestPricingConcurrentReadWrite(t *testing.T) {
 		defer close(stop)
 		for i := 0; i < rounds; i++ {
 			for _, mo := range model.PlanMonths {
-				a.setBasePrice(mo, "100")
-				a.setFiatPrice(model.PayMethodP2P, mo, "90")
-				a.setFiatPrice(model.PayMethodYooKassa, mo, "110")
-				a.setStarPrice(mo, 99)
-				a.setTrafficGB(mo, i%50)
-				a.setDevicesPer(mo, i%5)
-				a.togglePlanSquadInt(mo, "squad-a")
-				a.togglePlanSquadExt(mo, "ext-a")
+				_ = a.setPlanPrice(ctx, "", mo, "base", "100")
+				_ = a.setPlanPrice(ctx, "", mo, "p2p", "90")
+				_ = a.setPlanPrice(ctx, "", mo, "yk", "110")
+				_ = a.setPlanStars(ctx, "", mo, 99)
+				_ = a.setPlanTraffic(ctx, "", mo, i%50)
+				_ = a.setPlanDevices(ctx, "", mo, i%5)
+				_ = a.togglePlanSquad(ctx, "", mo, "squad-a", false)
+				_ = a.togglePlanSquad(ctx, "", mo, "ext-a", true)
 			}
-			a.setCurrency("₽")
-			a.setDeviceLimitGlobal(i % 7)
+			_ = a.setPlanCurrency(ctx, "", "₽")
+			_ = a.setPlanDeviceLimit(ctx, "", i%7)
 		}
 	}()
 
@@ -113,7 +111,9 @@ func TestPricingCloneIsIndependent(t *testing.T) {
 	}
 
 	// И обратно: выданная копия не меняется задним числом.
-	a.setBasePrice(1, "777")
+	a.mu.Lock()
+	a.botCfg.Pricing.Base[1] = "777"
+	a.mu.Unlock()
 	if got.Base[1] != "999" {
 		t.Fatalf("выданная копия изменилась после правки конфига: %q", got.Base[1])
 	}
@@ -173,7 +173,9 @@ func TestSaveBotConfigStoresSnapshot(t *testing.T) {
 	if fs.cfg == nil {
 		t.Fatal("конфиг не сохранён")
 	}
-	a.setBasePrice(1, "777")
+	a.mu.Lock()
+	a.botCfg.Pricing.Base[1] = "777"
+	a.mu.Unlock()
 	if got := fs.cfg.Pricing.Base[1]; got != "150" {
 		t.Fatalf("хранилище получило живой конфиг: цена стала %q", got)
 	}

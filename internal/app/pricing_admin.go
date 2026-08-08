@@ -84,59 +84,6 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState), rows)
 }
 
-func (a *App) togglePlanSquadInt(mo int, uuid string) {
-	if uuid == "" {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	cur := a.botCfg.Pricing.SquadsInt[mo]
-	for i, u := range cur {
-		if u == uuid {
-			next := append(append([]string(nil), cur[:i]...), cur[i+1:]...)
-			if len(next) == 0 {
-				delete(a.botCfg.Pricing.SquadsInt, mo)
-			} else {
-				a.botCfg.Pricing.SquadsInt[mo] = next
-			}
-			return
-		}
-	}
-	a.botCfg.Pricing.SquadsInt[mo] = append(cur, uuid)
-}
-
-func (a *App) togglePlanSquadExt(mo int, uuid string) {
-	if uuid == "" {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	if a.botCfg.Pricing.SquadsExt[mo] == uuid {
-		delete(a.botCfg.Pricing.SquadsExt, mo)
-	} else {
-		a.botCfg.Pricing.SquadsExt[mo] = uuid
-	}
-}
-
-func (a *App) clearPlanSquads(mo int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	delete(a.botCfg.Pricing.SquadsInt, mo)
-	delete(a.botCfg.Pricing.SquadsExt, mo)
-}
-
 func (a *App) formatTrafficLimits() string {
 	pr := a.pricing()
 	var parts []string
@@ -227,19 +174,25 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 	case "sqi":
 		moStr, uuid, _ := strings.Cut(arg, ":")
 		mo, _ := strconv.Atoi(moStr)
-		a.togglePlanSquadInt(mo, uuid)
-		_ = a.saveBotConfig(ctx)
+		if err := a.togglePlanSquad(ctx, "", mo, uuid, false); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
 		a.showPlanSquads(ctx, chatID, mo)
 	case "sqe":
 		moStr, uuid, _ := strings.Cut(arg, ":")
 		mo, _ := strconv.Atoi(moStr)
-		a.togglePlanSquadExt(mo, uuid)
-		_ = a.saveBotConfig(ctx)
+		if err := a.togglePlanSquad(ctx, "", mo, uuid, true); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
 		a.showPlanSquads(ctx, chatID, mo)
 	case "sqclear":
 		mo, _ := strconv.Atoi(arg)
-		a.clearPlanSquads(mo)
-		_ = a.saveBotConfig(ctx)
+		if err := a.clearPlanSquadOverride(ctx, "", mo); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
+		}
 		a.showPlanSquads(ctx, chatID, mo)
 	case "base":
 		a.askPriceMonth(ctx, chatID, "prc")
@@ -248,9 +201,12 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "baseprice"
 		ui.priceMonths = mo
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_base_price", mo), "menu:pricing")
 	case "cur":
-		a.getUI(chatID).adminInput = "currency"
+		ui := a.getUI(chatID)
+		ui.adminInput = "currency"
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_currency"), "menu:pricing")
 	case "quick":
 		a.startPlanQuick(ctx, chatID)
@@ -259,6 +215,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "plan_q_price"
 		ui.priceMonths = mo
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "pricing.q_price", mo), "menu:pricing")
 	case "traffic":
 
@@ -272,6 +229,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "traffic_gb"
 		ui.priceMonths = mo
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_traffic_gb", mo), "menu:pricing")
 	case "devices":
 
@@ -285,6 +243,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "device_per"
 		ui.priceMonths = mo
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_devices", mo), "menu:pricing")
 	case "strategy":
 		a.sendKB(ctx, chatID, i18n.T(lang, "pricing.ask_strategy"), [][]models.InlineKeyboardButton{
@@ -294,57 +253,12 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 			navBack(lang, "menu:pricing"),
 		})
 	case "setstrat":
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.Pricing.TrafficStrategy = arg
+		if err := a.setPlanStrategy(ctx, "", arg); err != nil {
+			a.planInputFailed(ctx, chatID, err)
+			return
 		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
 		a.showPricing(ctx, chatID)
 	}
-}
-
-func (a *App) setTrafficGB(months, gb int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	if a.botCfg.Pricing.Traffic == nil {
-		a.botCfg.Pricing.Traffic = map[int]int{}
-	}
-	if gb < 0 {
-		gb = 0
-	}
-	a.botCfg.Pricing.Traffic[months] = gb
-}
-
-func (a *App) setDeviceLimitGlobal(n int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	if n < 0 {
-		n = 0
-	}
-	a.botCfg.Pricing.DeviceLimit = n
-}
-
-func (a *App) setDevicesPer(months, n int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return
-	}
-	a.botCfg.NormalizePricing()
-	if a.botCfg.Pricing.Devices == nil {
-		a.botCfg.Pricing.Devices = map[int]int{}
-	}
-	if n < 0 {
-		n = 0
-	}
-	a.botCfg.Pricing.Devices[months] = n
 }
 
 func (a *App) startPlanQuick(ctx context.Context, chatID int64) {
