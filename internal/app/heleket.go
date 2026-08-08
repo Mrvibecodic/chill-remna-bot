@@ -153,6 +153,15 @@ func parseHLOrderID(orderID string) (chatID int64, n int64, topup bool) {
 	return
 }
 
+// hlPurchaseSnapshot: у пополнения баланса условий подписки нет — снимок
+// снимается только для покупки.
+func hlPurchaseSnapshot(a *App, purpose string, months int) *model.PlanSnapshot {
+	if purpose == purposeTopUp || months <= 0 {
+		return nil
+	}
+	return a.planSnapshot(months)
+}
+
 // hlCreateInvoice — общее ядро выставления счёта для чата, мини-аппа и
 // веб-кабинета: создаёт счёт, пишет журнал и pending-запись, возвращает ссылку
 // на оплату и uuid счёта.
@@ -205,6 +214,7 @@ func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amo
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
 			Method: model.PayMethodHeleket, ExtID: extID, TelegramID: chatID,
 			Months: months, Purpose: purpose, Kopecks: kopecks,
+			Snapshot: hlPurchaseSnapshot(a, purpose, months),
 		})
 	}
 	return inv.URL, inv.UUID, nil
@@ -389,7 +399,7 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		months = model.PlanMonths[0]
 	}
 
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, a.pendingSnapshot(ctx, extID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			return

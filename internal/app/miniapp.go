@@ -228,7 +228,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 	if !deducted {
 		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "")
+	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "", nil)
 	if err != nil {
 		_ = a.store.AddBalance(ctx, tgID, kopecks) // refund on provisioning failure
 		return web.MiniActionDTO{Error: err.Error()}

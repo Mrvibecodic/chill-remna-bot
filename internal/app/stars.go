@@ -72,7 +72,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	}
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID, nil)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			// Telegram доставил апдейт повторно (рестарт до сдвига offset и

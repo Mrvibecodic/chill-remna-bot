@@ -156,7 +156,7 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 		a.payLog(ctx, model.PayMethodPlatega, txID, 0, "error", "оплата подтверждена, но получатель неизвестен: нет payload и pending-счёта")
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID, a.pendingSnapshot(ctx, txID))
 	if err != nil {
 		a.log.Error("platega finalize", "err", err, "tx", txID)
 		return
@@ -266,7 +266,7 @@ func (a *App) plCreateTransaction(ctx context.Context, chatID int64, months int,
 	}
 	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "purchase months=%d amount=%.2f RUB method=%d", months, amount, a.plMethod())
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Months: months})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Months: months, Snapshot: a.planSnapshot(months)})
 	}
 	return tx.Redirect, tx.ID, nil
 }

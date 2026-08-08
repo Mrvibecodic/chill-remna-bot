@@ -139,7 +139,7 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 		// оплату добил реконсилятор, предложение про автопродление всё равно
 		// должно уйти — но ровно один раз, только когда подписка реально выдана.
 		if a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency) {
-			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay)
+			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay, pi.Snapshot)
 		}
 	case pay.Status == "canceled":
 		_ = st.ResolvePending(ctx, pi.ID)
@@ -235,7 +235,7 @@ func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *mod
 		_ = st.ResolvePending(ctx, pi.ID)
 		return false
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, pi.TelegramID, pi.Months, pi.Method, amount, pi.ExtID)
+	link, expireAt, err := a.finalizePurchase(ctx, pi.TelegramID, pi.Months, pi.Method, amount, pi.ExtID, pi.Snapshot)
 	if err != nil {
 
 		if errors.Is(err, storage.ErrDuplicateExtID) {

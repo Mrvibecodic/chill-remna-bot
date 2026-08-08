@@ -33,7 +33,7 @@ func TestAutoPay_SavedFromPayment(t *testing.T) {
 	pay.Amount.Value = "300.00"
 	pay.Amount.Currency = "RUB"
 
-	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay, nil)
 
 	ap, _ := fs.GetAutoPay(ctx, 42)
 	if ap == nil || ap.MethodID != "pm_1" || ap.Months != 3 {
@@ -51,7 +51,7 @@ func TestAutoPay_SavedFromPayment(t *testing.T) {
 
 	// Повторная оплата уже подключённого пользователя согласие не сбрасывает.
 	pay.ID = "pay_1b"
-	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay, nil)
 	if !a.autoPayOn(ctx, 42) {
 		t.Fatal("повторная оплата не должна выключать автопродление")
 	}
@@ -66,7 +66,7 @@ func TestAutoPay_DeclineOffer(t *testing.T) {
 	pay.Metadata = map[string]string{"autopay": "1"}
 	pay.PaymentMethod.ID = "pm_d"
 	pay.PaymentMethod.Saved = true
-	a.saveAutoPayFromPayment(ctx, 49, 1, pay)
+	a.saveAutoPayFromPayment(ctx, 49, 1, pay, nil)
 
 	a.onAutoPayUser(ctx, 49, "no")
 	if a.autoPayOn(ctx, 49) {
@@ -89,7 +89,7 @@ func TestAutoPay_NotSavedWithoutFlag(t *testing.T) {
 	pay := &yookassa.Payment{ID: "pay_2"}
 	pay.PaymentMethod.ID = "pm_2"
 	pay.PaymentMethod.Saved = true // ЮKassa сохранила, но пользователь не просил
-	a.saveAutoPayFromPayment(ctx, 43, 1, pay)
+	a.saveAutoPayFromPayment(ctx, 43, 1, pay, nil)
 
 	if ap, _ := fs.GetAutoPay(ctx, 43); ap != nil {
 		t.Fatalf("автопродление не должно подключаться без флага: %+v", ap)

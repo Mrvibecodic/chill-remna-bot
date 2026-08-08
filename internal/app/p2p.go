@@ -273,7 +273,7 @@ func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (car
 	if a.store == nil {
 		return "", "", 0, errors.New("storage unavailable")
 	}
-	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting}
+	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Snapshot: a.planSnapshot(months)}
 	if err = a.store.CreateP2PRequest(ctx, req); err != nil {
 		return "", "", 0, err
 	}
@@ -505,7 +505,7 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		return
 	}
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "approved", "подтверждено администратором")
-	link, expireAt, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, p2pExt(req.ID))
+	link, expireAt, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, p2pExt(req.ID), req.Snapshot)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
@@ -530,7 +530,65 @@ func extLockIndex(s string) int {
 	return int(h.Sum32() % finalizeLockShards)
 }
 
-func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string) (string, string, error) {
+// planSnapshot фиксирует условия, на которых сейчас продаётся срок months:
+// лимиты, сквады и цену. Снимок снимается в момент ВЫСТАВЛЕНИЯ счёта и потом
+// применяется при финализации — иначе правка конфига между «нажал купить» и
+// «оплатил» меняла бы человеку условия задним числом.
+func (a *App) planSnapshot(months int) *model.PlanSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.planSnapshotLocked(months)
+}
+
+func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
+	s := &model.PlanSnapshot{Months: months}
+	if a.botCfg == nil {
+		return s
+	}
+	pr := a.botCfg.Pricing
+	// Цепочка сквадов повторяет исторический порядок: глобальный набор →
+	// одиночный сквад P2P (легаси) → набор, заданный для конкретного срока.
+	s.IntSquads = append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
+	s.ExtSquad = a.botCfg.Plan.ExternalSquadUUID
+	if len(s.IntSquads) == 0 && a.botCfg.P2P.SquadUUID != "" {
+		s.IntSquads = []string{a.botCfg.P2P.SquadUUID}
+	}
+	if sq := pr.SquadsInt[months]; len(sq) > 0 {
+		s.IntSquads = append([]string(nil), sq...)
+	}
+	if e := pr.SquadsExt[months]; e != "" {
+		s.ExtSquad = e
+	}
+	s.TrafficGB = pr.Traffic[months]
+	s.DeviceLimit = pr.DeviceLimitFor(months)
+	s.Strategy = pr.ResetStrategy()
+	s.Price = pr.Base[months]
+	s.Currency = pr.Currency
+	return s
+}
+
+// pendingSnapshot достаёт условия сделки из незакрытого счёта. Именно эта
+// строка — носитель снимка для всех внешних платёжек: payload провайдера мы
+// намеренно не меняем, чтобы предыдущий образ бота продолжал его понимать.
+func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnapshot {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil || extID == "" {
+		return nil
+	}
+	p, _ := st.PendingByExtID(ctx, extID)
+	if p == nil {
+		return nil
+	}
+	return p.Snapshot
+}
+
+// finalizePurchase выдаёт или продлевает подписку по оплаченному счёту. snap —
+// условия сделки, снятые при выставлении счёта; nil означает «снять по
+// текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
+// созданные до появления снимков).
+func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
 	// Serialize duplicate deliveries of the same payment and bail before we touch
 	// the panel if it's already been finalized (the panel extend happens below,
 	// before the AddPayment idempotency barrier, so without this two concurrent
@@ -548,26 +606,21 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	}
 	a.mu.Lock()
 	panel := a.panel
-	limits := remnawave.UserLimits{}
-	if a.botCfg != nil {
-
-		limits.InternalSquads = a.botCfg.Plan.ActiveInternalSquads
-		limits.ExternalSquad = a.botCfg.Plan.ExternalSquadUUID
-
-		if len(limits.InternalSquads) == 0 && a.botCfg.P2P.SquadUUID != "" {
-			limits.InternalSquads = []string{a.botCfg.P2P.SquadUUID}
-		}
-		if sq := a.botCfg.Pricing.SquadsInt[months]; len(sq) > 0 {
-			limits.InternalSquads = append([]string(nil), sq...)
-		}
-		if e := a.botCfg.Pricing.SquadsExt[months]; e != "" {
-			limits.ExternalSquad = e
-		}
-		limits.TrafficBytes = a.botCfg.Pricing.TrafficBytes(months)
-		limits.DeviceLimit = a.botCfg.Pricing.DeviceLimitFor(months)
-		limits.Strategy = a.botCfg.Pricing.ResetStrategy()
+	if snap == nil {
+		snap = a.planSnapshotLocked(months)
 	}
 	a.mu.Unlock()
+	// Срок из счёта главнее того, что записано в снимке: снимок мог быть снят
+	// на другой срок только из-за ошибки, и лишний рассинхрон здесь опаснее,
+	// чем расхождение внутри снимка.
+	snap.Months = months
+	limits := remnawave.UserLimits{
+		InternalSquads: snap.IntSquads,
+		ExternalSquad:  snap.ExtSquad,
+		TrafficBytes:   snap.TrafficBytes(),
+		DeviceLimit:    snap.DeviceLimit,
+		Strategy:       snap.Strategy,
+	}
 	a.payLog(ctx, method, extID, telegramID, "finalize", "months=%d amount=%s", months, amount)
 	if panel == nil {
 		a.payLog(ctx, method, extID, telegramID, "error", "панель не подключена")
@@ -586,6 +639,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	if a.store != nil {
 		err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
+			Snapshot: snap,
 		})
 		// Запись платежа — барьер идемпотентности: по ней PaymentByExtID решает,
 		// финализировать ли повторно. Транзиентный сбой (database is locked,
@@ -594,6 +648,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 			time.Sleep(200 * time.Millisecond)
 			err = a.store.AddPayment(ctx, &model.Payment{
 				TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
+				Snapshot: snap,
 			})
 		}
 		if err != nil {
@@ -616,6 +671,9 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.payment_unrecorded", methodLabel(method), extID, a.userLabelByID(ctx, telegramID), amount))
 		}
 		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
+		// Снимок действующей подписки: локальной сущности подписки у бота нет,
+		// а знать проданные условия нужно и сверке лимитов, и бонусным дням.
+		_ = a.store.SetUserSnapshot(ctx, telegramID, snap)
 	}
 	a.payLog(ctx, method, extID, telegramID, "done", "подписка выдана, ссылка отправляется")
 	a.grantReferralBonus(ctx, telegramID)

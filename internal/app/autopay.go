@@ -81,7 +81,7 @@ func (a *App) autoPayOn(ctx context.Context, chatID int64) bool {
 // выключенной, деньги начнут списываться только после явного «Подключить».
 // Вызывается и из вебхука, и из ручной проверки платежа; повторный вызов не
 // перетирает уже принятое пользователем решение.
-func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months int, pay *yookassa.Payment) {
+func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months int, pay *yookassa.Payment, snap *model.PlanSnapshot) {
 	if a.store == nil || pay == nil || chatID == 0 {
 		return
 	}
@@ -104,6 +104,12 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		Currency:   pay.Amount.Currency,
 		Enabled:    alreadyOn,
 		LastPayAt:  time.Now().UTC().Format(time.RFC3339),
+		// Условия, на которые человек подписался: продлевать надо их, а не то,
+		// что окажется в конфиге через полгода.
+		Snapshot: snap,
+	}
+	if ap.Snapshot == nil {
+		ap.Snapshot = a.planSnapshot(months)
 	}
 	if prev != nil {
 		ap.CreatedAt = prev.CreatedAt
@@ -120,7 +126,9 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 	lang := a.lang(chatID)
 	if alreadyOn {
 		// Купили другой период — регулярное списание меняется, молчать нельзя.
-		if prev.Months != months {
+		// Молчать нельзя не только при смене срока: при тех же месяцах могли
+		// поменяться и сумма, и условия — регулярное списание станет другим.
+		if prev.Months != months || prev.Snapshot.Fingerprint() != ap.Snapshot.Fingerprint() {
 			a.notifyKB(ctx, chatID, i18n.T(lang, "ap.period_changed", monthsWord(lang, months), a.autoPayDaysText(lang)),
 				[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")}})
 		}
@@ -414,7 +422,10 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	}
 	// Ключ идемпотентности привязан к периоду, а не к дате попытки: повтор
 	// после обрыва связи попадёт в тот же платёж, а не создаст второй.
-	idem := fmt.Sprintf("ap-%d-%s-%d", ap.TelegramID, autoPayPeriod(exp), ap.Fails)
+	// Отпечаток условий — часть ключа: окно идемпотентности ЮKassa сутки, и
+	// без него повтор после смены цены вернул бы СТАРЫЙ платёж со старой
+	// суммой, а бот засчитал бы его как оплату новых условий.
+	idem := fmt.Sprintf("ap-%d-%s-%d-%s", ap.TelegramID, autoPayPeriod(exp), ap.Fails, ap.Snapshot.Fingerprint())
 	desc := i18n.T(lang, "yk.invoice_desc", months)
 	pay, err := client.ChargeSaved(ctx, ap.MethodID, value, currency, desc, ap.TelegramID, months, idem)
 	if err != nil {
@@ -471,7 +482,7 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	stamp := now.Format(time.RFC3339)
 	_ = a.store.MarkAutoPayCharged(ctx, ap.TelegramID, stamp, autoPayPeriod(exp), "", "")
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	_, expireAt, err := a.finalizePurchase(ctx, ap.TelegramID, months, model.PayMethodYooKassa, amount, pay.ID)
+	_, expireAt, err := a.finalizePurchase(ctx, ap.TelegramID, months, model.PayMethodYooKassa, amount, pay.ID, ap.Snapshot)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			// Гонку выиграл вебхук — подписка продлена им, повторное сообщение

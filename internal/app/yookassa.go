@@ -151,12 +151,12 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		return
 	}
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID)
+	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID, a.pendingSnapshot(ctx, payID))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
-	a.saveAutoPayFromPayment(ctx, payChat, months, pay)
+	a.saveAutoPayFromPayment(ctx, payChat, months, pay, a.pendingSnapshot(ctx, payID))
 	a.sendSubActive(ctx, payChat, link, expireAt)
 }
 
@@ -278,7 +278,7 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months, Snapshot: a.planSnapshot(months)})
 	}
 	return pay.Confirmation.ConfirmationURL, pay.ID, nil
 }

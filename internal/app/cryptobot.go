@@ -141,7 +141,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		return
 	}
 	amount := a.cryptoAmount(months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat))
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID)
+	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID, a.pendingSnapshot(ctx, extID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.showMySubs(ctx, chatID)
@@ -218,7 +218,7 @@ func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, pri
 	}
 	a.payLog(ctx, model.PayMethodCryptoBot, "cb:"+strconv.FormatInt(inv.InvoiceID, 10), chatID, "invoice_created", "purchase months=%d price=%s %s assets=%s", months, price, fiat, cfg.Asset)
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months, Snapshot: a.planSnapshot(months)})
 	}
 	payURL := inv.MiniAppInvoiceURL
 	if web && inv.WebAppInvoiceURL != "" {

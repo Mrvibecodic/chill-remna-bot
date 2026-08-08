@@ -100,7 +100,7 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		return true, nil
 	}
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodYooKassa, amount, n.Object.ID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodYooKassa, amount, n.Object.ID, a.pendingSnapshot(ctx, n.Object.ID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.log.Info("yookassa webhook: race lost (other delivery won)", "id", n.Object.ID)
@@ -108,7 +108,7 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		}
 		return false, fmt.Errorf("finalize yookassa %s: %w", n.Object.ID, err)
 	}
-	a.saveAutoPayFromPayment(ctx, chatID, months, pay)
+	a.saveAutoPayFromPayment(ctx, chatID, months, pay, a.pendingSnapshot(ctx, n.Object.ID))
 	a.sendSubActive(ctx, chatID, link, expireAt)
 	a.log.Info("yookassa webhook: payment finalized", "id", n.Object.ID, "chat_id", chatID, "months", months)
 	return true, nil

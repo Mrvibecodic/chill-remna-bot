@@ -198,7 +198,7 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 			return true, nil
 		}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID, nil)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "finalize_error", "%v", err)
 		return false, fmt.Errorf("tribute finalize %s: %w", extID, err)

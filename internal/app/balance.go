@@ -395,7 +395,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang)})
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "")
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", nil)
 	if err != nil {
 		_ = a.store.AddBalance(ctx, chatID, kopecks)
 		a.payLog(ctx, "balance", "", chatID, "balance_refund", "kopecks=%d возвращены после ошибки выдачи", kopecks)
