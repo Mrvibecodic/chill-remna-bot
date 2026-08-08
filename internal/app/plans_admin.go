@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"html"
 	"strconv"
 	"strings"
 
@@ -39,29 +40,54 @@ var errStorageUnavailable = errors.New("хранилище недоступно"
 const plansPageSize = 8
 
 // planCodeLen — длина кода, который бот генерирует новому тарифу. Код уходит в
-// ссылку на скрытый тариф, поэтому он должен быть не перебираемым; 12 символов
-// из 32-символьного алфавита дают запас на порядки при любом мыслимом числе
+// ссылку на скрытый тариф, поэтому он должен быть неперебираемым: 12 символов
+// алфавита ниже дают около 57 бит — запас на порядки при любом мыслимом числе
 // попыток.
 const planCodeLen = 12
 
-// planCodeAlphabet — алфавит кода: без гласных и похожих символов, чтобы код
-// нельзя было спутать при чтении с экрана и чтобы в нём не сложилось слово.
+// planCodeAlphabet — алфавит кода: без гласных и без похожих начертаний, чтобы
+// код нельзя было спутать при чтении с экрана и чтобы в нём не сложилось слово.
 const planCodeAlphabet = "23456789bcdfghjkmnpqrstvwxz"
 
-// newPlanCode генерирует код тарифа. Ошибку не возвращает: crypto/rand на
-// поддерживаемых системах не отказывает, а тихий фолбэк на предсказуемый код
-// был бы хуже любой ошибки — он бы сделал перебираемой ссылку на скрытый тариф.
+// newPlanCode генерирует код тарифа.
+//
+// Ошибку возвращает, а не глотает: тихий фолбэк на предсказуемый код сделал бы
+// перебираемой ссылку на скрытый тариф, а это ровно то, от чего код и защищает.
+//
+// Остаток от деления брать нельзя: 256 на 27 не делится, и первые тринадцать
+// символов алфавита выпадали бы чаще остальных. Лишние значения отбрасываем.
 func newPlanCode() (string, error) {
+	// Наибольшее кратное длине алфавита; всё, что выше, отбрасывается.
+	limit := 256 - 256%len(planCodeAlphabet)
+	out := make([]byte, 0, planCodeLen)
 	buf := make([]byte, planCodeLen)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	out := make([]byte, planCodeLen)
-	for i, b := range buf {
-		out[i] = planCodeAlphabet[int(b)%len(planCodeAlphabet)]
+	for len(out) < planCodeLen {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if int(b) >= limit {
+				continue
+			}
+			out = append(out, planCodeAlphabet[int(b)%len(planCodeAlphabet)])
+			if len(out) == planCodeLen {
+				break
+			}
+		}
 	}
 	return string(out), nil
 }
+
+// Границы длины полей оформления. Имя уезжает в снимок условий сделки, а он
+// лежит в каждой строке платежей, счетов, заявок и автосписаний — длинное имя
+// раздувает их все. Описание ограничено тем, что подпись под баннером у
+// Telegram кончается на 1024 символах: тариф с описанием на четыре тысячи
+// символов сделал бы карточку неотправляемой, то есть неисправимой.
+const (
+	planNameMaxLen = 64
+	planDescMaxLen = 300
+	planIconMaxLen = 8
+)
 
 // planList читает тарифы для экрана. Ошибка отдаётся вызывающему: показать
 // пустой список вместо недоступного хранилища значило бы предложить админу
@@ -86,6 +112,10 @@ func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) 
 	return st.GetPlan(ctx, code)
 }
 
+// savePlan пишет тариф. Вызывать ТОЛЬКО под a.plansMu (см. editPlan): запись
+// идёт целой строкой, поэтому «прочитал → изменил → записал» без замка теряет
+// чужую правку — например, цену, которую синхронизация только что привезла из
+// конфига.
 func (a *App) savePlan(ctx context.Context, p *model.Plan) error {
 	a.mu.Lock()
 	st := a.store
@@ -103,6 +133,51 @@ func (a *App) savePlan(ctx context.Context, p *model.Plan) error {
 		a.rememberBasePlan(p)
 	}
 	return nil
+}
+
+// errPlanGone — тарифа нет: его удалили, пока экран висел в переписке.
+var errPlanGone = errors.New("тариф не найден")
+
+// editPlan выполняет «прочитать тариф → изменить → записать» под замком
+// тарифов. Замок здесь не про две горутины админки (обработчик апдейтов один),
+// а про синхронизацию «Базового» от сетки цен: её запускает и фоновая проверка
+// обновлений, и заявка обычного покупателя на перевод. Без замка правка,
+// начатая до синхронизации, записывала бы поверх неё старые цены.
+func (a *App) editPlan(ctx context.Context, code string, apply func(*model.Plan) error) (*model.Plan, error) {
+	if code == "" {
+		return nil, errPlanGone
+	}
+	a.plansMu.Lock()
+	defer a.plansMu.Unlock()
+	p, err := a.planByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, errPlanGone
+	}
+	if err := apply(p); err != nil {
+		return nil, err
+	}
+	if err := a.savePlan(ctx, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// planEditFailed сообщает админу, почему правка не применилась. Ошибку
+// хранилища в чат не отдаём (в тексте драйвера хост, база и пользователь), но и
+// молчать нельзя: молчаливый возврат в карточку читается как «сохранено».
+func (a *App) planEditFailed(ctx context.Context, chatID int64, code string, err error) {
+	lang := a.lang(chatID)
+	if errors.Is(err, errPlanGone) {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.gone"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
+		return
+	}
+	a.log.Warn("тариф не сохранён", "err", err, "plan", code)
+	a.sendPayKB(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"),
+		[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
 }
 
 func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
@@ -154,9 +229,12 @@ func planListLabel(lang string, p *model.Plan) string {
 	return mark + " " + name + " · " + i18n.T(lang, "plans.durations_short", len(p.Durations))
 }
 
-// planTitle — имя тарифа со значком. Имя может быть пустым (тариф только что
-// создан) — тогда вместо пустоты показываем код: пустая кнопка нажимается, но
-// не читается.
+// planTitle — имя тарифа со значком, как есть. Годится для подписи кнопки:
+// подписи Telegram принимает обычным текстом. Для текста сообщения нужен
+// planTitleHTML — сообщения уходят с разметкой.
+//
+// Имя может быть пустым (тариф только что создан) — тогда вместо пустоты
+// показываем код: пустая кнопка нажимается, но не читается.
 func planTitle(lang string, p *model.Plan) string {
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
@@ -166,6 +244,16 @@ func planTitle(lang string, p *model.Plan) string {
 		return icon + " " + name
 	}
 	return name
+}
+
+// planTitleHTML — то же имя, но экранированное.
+//
+// Имя и значок вводит человек, а экраны бота уходят с parse_mode=HTML: имя вида
+// «Тариф <VIP>» Telegram считает неизвестным тегом и отвечает ошибкой, то есть
+// карточка не отправляется вообще. Выбраться из этого нельзя — кнопка «Имя»
+// живёт только в этой карточке.
+func planTitleHTML(lang string, p *model.Plan) string {
+	return html.EscapeString(planTitle(lang, p))
 }
 
 func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
@@ -193,7 +281,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 		desc = i18n.T(lang, "admin.none")
 	}
 	body := i18n.T(lang, "plans.card",
-		planTitle(lang, p), p.Code, state, p.Order, desc,
+		planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc),
 		a.planLimitsLine(lang, p), planDurationsLine(lang, p))
 	// Продаёт бот пока по старой сетке цен: витрина, счета и финализация читают
 	// конфиг. Тариф, заведённый рядом, ни на что не влияет — говорим об этом
@@ -303,7 +391,7 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		// от справочника не зависят. Числа подписчиков здесь нет намеренно —
 		// пока продажи идут по старой сетке, у любого удаляемого тарифа оно
 		// ноль, а ноль в предупреждении читался бы как разрешение.
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.del_confirm", planTitle(lang, p)),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.del_confirm", planTitleHTML(lang, p)),
 			[][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "plans.btn_del_yes"), "pln:delyes:"+p.Code)},
 				navBack(lang, "pln:open:"+p.Code),
@@ -328,69 +416,112 @@ func (a *App) askPlanText(ctx context.Context, chatID int64, code, input, key st
 	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), key), "pln:open:"+code)
 }
 
+// planFieldLimit — граница длины поля и ключ сообщения о её нарушении.
+func planFieldLimit(field string) int {
+	switch field {
+	case "plan_name":
+		return planNameMaxLen
+	case "plan_desc":
+		return planDescMaxLen
+	default:
+		return planIconMaxLen
+	}
+}
+
 // applyPlanText принимает введённое значение поля тарифа.
+//
+// Слишком длинное значение НЕ обрезается: обрезка молча меняет то, что человек
+// ввёл, а имя тарифа он увидит только в списке, где оно и так укорочено. Лучше
+// сказать про границу и оставить прежнее значение.
 func (a *App) applyPlanText(ctx context.Context, chatID int64, field, text string) {
 	ui := a.getUI(chatID)
 	code := ui.planCode
 	ui.adminInput = ""
 	ui.planCode = ""
 	lang := a.lang(chatID)
-	p, err := a.planByCode(ctx, code)
-	if err != nil || p == nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.gone"))
+
+	v := strings.TrimSpace(text)
+	// Имя и значок идут в подписи кнопок, где перевод строки ломает вид, поэтому
+	// от них берём одну строку (firstLine сам обрезает пробелы). Описание
+	// многострочным быть может.
+	if field != "plan_desc" {
+		v = firstLine(v)
+	}
+	if limit := planFieldLimit(field); len([]rune(v)) > limit {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.too_long", limit),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
 		return
 	}
-	v := strings.TrimSpace(text)
-	// Прочерк — общий для админки способ «стереть значение»; у имени его нет:
-	// безымянный тариф в витрине выглядел бы как сбой.
-	switch field {
-	case "plan_name":
-		if v == "" {
-			a.showPlanCard(ctx, chatID, code)
-			return
+
+	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
+		// Прочерк — общий для админки способ «стереть значение»; у имени его нет:
+		// безымянный тариф в витрине выглядел бы как сбой.
+		switch field {
+		case "plan_name":
+			if v == "" {
+				return nil
+			}
+			p.Name = v
+		case "plan_desc":
+			if v == "-" {
+				v = ""
+			}
+			p.Description = v
+		case "plan_icon":
+			if v == "-" {
+				v = ""
+			}
+			p.Icon = v
 		}
-		p.Name = v
-	case "plan_desc":
-		if v == "-" {
-			v = ""
-		}
-		p.Description = v
-	case "plan_icon":
-		if v == "-" {
-			v = ""
-		}
-		p.Icon = v
-	}
-	if err := a.savePlan(ctx, p); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
+		return nil
+	})
+	if err != nil {
+		a.planEditFailed(ctx, chatID, code, err)
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
 }
 
 func (a *App) togglePlan(ctx context.Context, chatID int64, code string) {
-	p, err := a.planByCode(ctx, code)
-	if err != nil || p == nil {
-		a.showPlansAdmin(ctx, chatID, 0)
+	lang := a.lang(chatID)
+	// Тариф без длительностей включать нельзя: в витрине он либо пустой, либо
+	// продаётся по пустой цене. Ровно поэтому новый тариф и создаётся
+	// выключенным — здесь тот же запрет с другой стороны.
+	empty := false
+	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
+		if !p.Enabled && len(p.Durations) == 0 {
+			empty = true
+			return nil
+		}
+		p.Enabled = !p.Enabled
+		return nil
+	})
+	if err != nil {
+		a.planEditFailed(ctx, chatID, code, err)
 		return
 	}
-	p.Enabled = !p.Enabled
-	if err := a.savePlan(ctx, p); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(a.lang(chatID), "err.storage"))
+	if empty {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.enable_empty"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
 }
 
-// movePlan переставляет тариф в порядке витрины. Порядок хранится числом, и
-// меняются местами именно два соседа: так одно нажатие не переписывает весь
-// список, а одинаковые номера (их мог оставить импорт) не превращают
-// перестановку в бесконечное «ничего не происходит» — при равенстве соседу
-// номера разводятся принудительно.
+// movePlan переставляет тариф в порядке витрины.
+//
+// Номера переписываются подряд по всему списку, а не переставляются у двух
+// соседей. Причина в том, что номера не обязаны быть различными: миграция и
+// импорт оставляют нули, а при равных номерах порядок доопределяется кодом
+// тарифа — и «поменять местами номера» с таким списком либо не делает ничего,
+// либо перебрасывает тариф через несколько позиций сразу. Подряд идущие номера
+// заодно чинят список, в котором номера уже разъехались.
 func (a *App) movePlan(ctx context.Context, chatID int64, code string, delta int) {
+	a.plansMu.Lock()
 	plans, err := a.planList(ctx)
 	if err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(a.lang(chatID), "err.storage"))
+		a.plansMu.Unlock()
+		a.planEditFailed(ctx, chatID, code, err)
 		return
 	}
 	idx := -1
@@ -400,29 +531,33 @@ func (a *App) movePlan(ctx context.Context, chatID int64, code string, delta int
 			break
 		}
 	}
-	if idx < 0 {
-		a.showPlansAdmin(ctx, chatID, 0)
-		return
-	}
 	other := idx + delta
-	if other < 0 || other >= len(plans) {
+	if idx < 0 || other < 0 || other >= len(plans) {
+		a.plansMu.Unlock()
+		if idx < 0 {
+			a.showPlansAdmin(ctx, chatID, 0)
+			return
+		}
+		// Крайний тариф: молча возвращаем карточку, ничего не записывая.
 		a.showPlanCard(ctx, chatID, code)
 		return
 	}
-	cur, nb := &plans[idx], &plans[other]
-	curOrder, nbOrder := cur.Order, nb.Order
-	if curOrder == nbOrder {
-		// Список отсортирован по (order, code), поэтому соседа с тем же номером
-		// достаточно развести на единицу в нужную сторону.
-		nbOrder = curOrder + delta
+	plans[idx], plans[other] = plans[other], plans[idx]
+
+	var failed error
+	for i := range plans {
+		if plans[i].Order == i {
+			continue
+		}
+		plans[i].Order = i
+		if err := a.savePlan(ctx, &plans[i]); err != nil {
+			failed = err
+			break
+		}
 	}
-	cur.Order, nb.Order = nbOrder, curOrder
-	if err := a.savePlan(ctx, cur); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(a.lang(chatID), "err.storage"))
-		return
-	}
-	if err := a.savePlan(ctx, nb); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(a.lang(chatID), "err.storage"))
+	a.plansMu.Unlock()
+	if failed != nil {
+		a.planEditFailed(ctx, chatID, code, failed)
 		return
 	}
 	a.showPlansAdmin(ctx, chatID, 0)
@@ -441,16 +576,6 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "plans.code_failed"))
 		return
 	}
-	// Совпадение кода на таком алфавите практически невозможно, но занятый код
-	// перезаписал бы чужой тариф — поэтому проверяем.
-	if exists, err := a.planByCode(ctx, code); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
-		return
-	} else if exists != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "plans.code_failed"))
-		return
-	}
-
 	p := &model.Plan{Code: code, Availability: model.PlanAvailAll}
 	if src != nil {
 		cp := *src
@@ -458,7 +583,10 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 		p.Code = code
 		p.CreatedAt = ""
 		p.UpdatedAt = ""
-		p.Name = i18n.T(lang, "plans.copy_name", strings.TrimSpace(src.Name))
+		// Имя копии складывается из имени источника, поэтому его приходится
+		// подрезать: без этого повторное дублирование выходило бы за границу
+		// длины и упиралось в отказ вместо копии.
+		p.Name = clampRunes(i18n.T(lang, "plans.copy_name", strings.TrimSpace(src.Name)), planNameMaxLen)
 		p.IntSquads = append([]string(nil), src.IntSquads...)
 		p.Durations = clonePlanDurations(src.Durations)
 	} else {
@@ -469,14 +597,50 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 	// Копия «Базового» ведомой не наследуется: пересобирается из конфига ровно
 	// один тариф, и это тариф с кодом base.
 	p.FromConfig = false
-	// В конец списка: новый тариф не должен вытеснять действующий с первой
-	// строки витрины.
-	p.Order = a.nextPlanOrder(ctx)
-	if err := a.savePlan(ctx, p); err != nil {
+
+	// Проверка занятости кода, номер в конце списка и запись — под общим замком
+	// тарифов: между ними нельзя пускать ни синхронизацию «Базового», ни
+	// соседнее создание.
+	err = func() error {
+		a.plansMu.Lock()
+		defer a.plansMu.Unlock()
+		// Совпадение кода на таком алфавите практически невозможно, но занятый
+		// код перезаписал бы чужой тариф — поэтому проверяем.
+		exists, err := a.planByCode(ctx, code)
+		if err != nil {
+			return err
+		}
+		if exists != nil {
+			return errPlanCodeTaken
+		}
+		// В конец списка: новый тариф не должен вытеснять действующий с первой
+		// строки витрины.
+		p.Order = a.nextPlanOrder(ctx)
+		return a.savePlan(ctx, p)
+	}()
+	switch {
+	case errors.Is(err, errPlanCodeTaken):
+		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "plans.code_failed"))
+		return
+	case err != nil:
+		a.log.Warn("тариф не создан", "err", err)
 		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
+}
+
+// errPlanCodeTaken — сгенерированный код уже занят.
+var errPlanCodeTaken = errors.New("код тарифа занят")
+
+// clampRunes подрезает строку по числу символов, а не байтов: в имени тарифа
+// кириллица и эмодзи — норма.
+func clampRunes(s string, limit int) string {
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	return strings.TrimSpace(string(r[:limit]))
 }
 
 // clonePlanDurations копирует длительности вместе с тем, на что смотрят

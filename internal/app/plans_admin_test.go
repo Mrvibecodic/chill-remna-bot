@@ -322,6 +322,165 @@ func TestPlansAdmin_DeleteCopyAsksFirst(t *testing.T) {
 	}
 }
 
+// Имя тарифа вводит человек, а экраны уходят с разметкой HTML: неэкранированное
+// «<VIP>» Telegram считает неизвестным тегом и отвечает ошибкой — карточка не
+// отправляется вообще, а кнопка «Имя» живёт только в ней, то есть выбраться
+// нельзя. В тексте — экранированное значение, в подписи кнопки — исходное:
+// подписи Telegram принимает обычным текстом.
+func TestPlansAdmin_NameIsEscapedInText(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _ := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	planTap(t, a, "pln:name:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, "Тариф <VIP> & Co"))
+
+	card := fm.last()
+	if strings.Contains(card, "<VIP>") {
+		t.Fatalf("имя не экранировано, карточка не отправится: %q", card)
+	}
+	if !strings.Contains(card, "&lt;VIP&gt;") || !strings.Contains(card, "&amp;") {
+		t.Fatalf("имя потеряно при экранировании: %q", card)
+	}
+
+	planTap(t, a, "pln:list")
+	raw := false
+	for _, l := range fm.buttonLabels() {
+		if strings.Contains(l, "<VIP>") {
+			raw = true
+		}
+	}
+	if !raw {
+		t.Fatalf("в подписи кнопки имя должно быть как есть: %v", fm.buttonLabels())
+	}
+}
+
+// Границы длины: имя уезжает в снимок условий сделки (а он лежит в каждой
+// строке платежей и счетов), описание — в подпись под баннером, у которой предел
+// у Telegram. Слишком длинное значение отклоняется, прежнее остаётся.
+func TestPlansAdmin_FieldLimits(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+
+	planTap(t, a, "pln:name:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, strings.Repeat("я", planNameMaxLen+1)))
+	if !strings.Contains(fm.last(), "Слишком длинно") {
+		t.Fatalf("длинное имя принято молча: %q", fm.last())
+	}
+	after, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+	if after.Name != before.Name {
+		t.Fatalf("имя изменилось на отклонённое значение: %q", after.Name)
+	}
+
+	planTap(t, a, "pln:desc:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, strings.Repeat("о", planDescMaxLen+1)))
+	after, _ = fs.GetPlan(ctx, model.PlanCodeBase)
+	if after.Description != "" {
+		t.Fatalf("длинное описание сохранено: %d символов", len([]rune(after.Description)))
+	}
+
+	// Ровно по границе — принимается.
+	planTap(t, a, "pln:name:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, strings.Repeat("я", planNameMaxLen)))
+	after, _ = fs.GetPlan(ctx, model.PlanCodeBase)
+	if len([]rune(after.Name)) != planNameMaxLen {
+		t.Fatalf("значение по границе отклонено: %q", after.Name)
+	}
+
+	// Имя в одну строку: перевод строки в подписи кнопки превращается в мусор.
+	planTap(t, a, "pln:name:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, "Первая\nвторая"))
+	after, _ = fs.GetPlan(ctx, model.PlanCodeBase)
+	if after.Name != "Первая" {
+		t.Fatalf("имя осталось многострочным: %q", after.Name)
+	}
+}
+
+// Тариф без сроков и цен включить нельзя: в витрине он либо пустой, либо
+// продаётся по пустой цене. Ровно поэтому новый тариф и создаётся выключенным.
+func TestPlansAdmin_CannotEnableEmptyPlan(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	planTap(t, a, "pln:new")
+	list, _ := fs.ListPlans(ctx)
+	code := list[0].Code
+
+	planTap(t, a, "pln:toggle:"+code)
+	p, _ := fs.GetPlan(ctx, code)
+	if p.Enabled {
+		t.Fatal("тариф без сроков включён")
+	}
+	if !strings.Contains(fm.last(), "включать нечего") {
+		t.Fatalf("причина отказа не показана: %q", fm.last())
+	}
+}
+
+// Порядок при равных номерах: их оставляют и миграция, и импорт. Одно нажатие
+// обязано двигать тариф ровно на одну позицию, а номера — становиться
+// последовательными.
+func TestPlansAdmin_MoveWithEqualOrders(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	for _, code := range []string{"aaa", "bbb", "ccc"} {
+		if err := fs.SavePlan(ctx, &model.Plan{Code: code, Name: code, Availability: model.PlanAvailAll}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planTap(t, a, "pln:up:ccc")
+	list, _ := fs.ListPlans(ctx)
+	got := []string{list[0].Code, list[1].Code, list[2].Code}
+	want := []string{"aaa", "ccc", "bbb"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("тариф перепрыгнул позицию: %v, ожидалось %v", got, want)
+		}
+	}
+	for i := range list {
+		if list[i].Order != i {
+			t.Fatalf("номера не стали последовательными: %d у %s", list[i].Order, list[i].Code)
+		}
+	}
+}
+
+// Код тарифа генерируется без перекоса: остаток от деления 256 на длину
+// алфавита давал бы первым символам преимущество, а код должен быть
+// неперебираемым.
+func TestNewPlanCode_NoModuloBias(t *testing.T) {
+	seen := map[rune]int{}
+	const codes = 8000
+	for i := 0; i < codes; i++ {
+		code, err := newPlanCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(code) != planCodeLen || !model.ValidPlanCode(code) {
+			t.Fatalf("негодный код: %q", code)
+		}
+		for _, r := range code {
+			if !strings.ContainsRune(planCodeAlphabet, r) {
+				t.Fatalf("символ вне алфавита: %q в %q", r, code)
+			}
+			seen[r]++
+		}
+	}
+	if len(seen) != len([]rune(planCodeAlphabet)) {
+		t.Fatalf("часть алфавита не встречается: %d из %d", len(seen), len([]rune(planCodeAlphabet)))
+	}
+	expect := float64(codes*planCodeLen) / float64(len([]rune(planCodeAlphabet)))
+	for r, n := range seen {
+		if float64(n) < expect*0.8 || float64(n) > expect*1.2 {
+			t.Fatalf("перекос по символу %q: %d против ожидаемых ~%.0f", r, n, expect)
+		}
+	}
+}
+
 // Тарифы — админский раздел: у обычного пользователя ни экран, ни действия не
 // должны открываться.
 func TestPlansAdmin_NotForRegularUser(t *testing.T) {

@@ -500,6 +500,8 @@ var en = map[string]string{
 	"plans.ask_icon":             "🔣 Enter the plan icon (a single emoji). «-» clears it:",
 	"plans.new_name":             "New plan",
 	"plans.copy_name":            "%s (copy)",
+	"plans.too_long":             "✂️ Too long: %d characters max. The value was left unchanged.",
+	"plans.enable_empty":         "⚠️ The plan has no periods and prices — there is nothing to enable yet. Set them first.",
 	"plans.gone":                 "🧾 Plan not found — it may have been deleted.",
 	"plans.code_failed":          "Could not generate a plan code. Please try again.",
 	"plans.del_confirm":          "🗑 Delete plan <b>%s</b>?\n\nActive subscriptions are unaffected: the terms they were sold on are frozen at payment time and do not depend on the plan — nobody is downgraded or cut off.\n\nThe plan itself is gone for good.",

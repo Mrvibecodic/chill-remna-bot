@@ -128,6 +128,12 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 // Ошибку возвращает, но вызывающие её только логируют: тариф пока никем не
 // читается, и падать из-за него на старте бот не должен.
 func (a *App) syncBasePlan(ctx context.Context) error {
+	// Read-modify-write строки тарифа: читаем существующий, сравниваем и пишем
+	// целиком. Тот же цикл выполняет админка тарифов, поэтому оба идут под одним
+	// замком — иначе правка из карточки, начатая до синхронизации, вернула бы
+	// цену, только что приехавшую из конфига.
+	a.plansMu.Lock()
+	defer a.plansMu.Unlock()
 	a.mu.Lock()
 	cfg, st := a.botCfg, a.store
 	a.mu.Unlock()

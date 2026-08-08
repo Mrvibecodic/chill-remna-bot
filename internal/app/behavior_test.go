@@ -34,6 +34,10 @@ type fakeMsg struct {
 	downloads map[string][]byte
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
 	cbData []string
+	// btnText — подписи тех же кнопок. Подписи Telegram принимает обычным
+	// текстом, поэтому экранирование в них — ошибка, и проверять их надо
+	// отдельно от текста сообщения.
+	btnText []string
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -53,8 +57,20 @@ func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
 			if b.CallbackData != "" {
 				f.cbData = append(f.cbData, b.CallbackData)
 			}
+			if b.Text != "" {
+				f.btnText = append(f.btnText, b.Text)
+			}
 		}
 	}
+}
+
+// buttonLabels возвращает подписи всех отправленных кнопок.
+func (f *fakeMsg) buttonLabels() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.btnText))
+	copy(out, f.btnText)
+	return out
 }
 
 func hasCB(list []string, want string) bool {
