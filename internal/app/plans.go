@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"remnabot/internal/i18n"
@@ -80,20 +81,20 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 		p.IntSquads = []string{cfg.P2P.SquadUUID}
 	}
 
-	for _, mo := range model.PlanMonths {
+	// Переносится ВСЯ сетка, а не только сроки витрины. Карты сетки — map[int],
+	// и в живых установках лежат месяцы вне стандартной четвёрки (старые версии,
+	// импорт) и настройки сроков, снятых с продажи (переопределение цены без
+	// базовой). Витрина такие сроки не показывает, но автосписание продлевает
+	// покупателя по цене ИЗ СЕТКИ на его срок — тариф, потерявший месяц при
+	// переносе, после разворота синхронизации стёр бы его из сетки, и продление
+	// падало бы навсегда.
+	for _, mo := range gridMonths(pr) {
 		d := model.PlanDuration{
 			Months:   mo,
 			Base:     pr.Base[mo],
 			P2P:      pr.P2P[mo],
 			YooKassa: pr.YooKassa[mo],
 			Stars:    pr.Stars[mo],
-		}
-		// Витрина показывает срок только при непустой базовой цене — без неё
-		// до способов оплаты не дойти, каким бы ни был прайс в звёздах. Тариф
-		// обязан описывать то, что реально продаётся, поэтому условие здесь то
-		// же самое.
-		if d.Base == "" {
-			continue
 		}
 		// Переопределения длительности заводим только там, где в сетке
 		// действительно что-то задано. Ноль в старой карте — это не
@@ -116,10 +117,53 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 			v := e
 			d.ExtSquad = &v
 		}
+		// Месяц, у которого во всей сетке нет ничего, кроме пустых строк и
+		// нулей, — мусорная запись, длительность из неё не делается.
+		if d.Base == "" && d.P2P == "" && d.YooKassa == "" && d.Stars == 0 &&
+			d.TrafficGB == nil && d.DeviceLimit == nil && d.IntSquads == nil && d.ExtSquad == nil {
+			continue
+		}
 		p.Durations = append(p.Durations, d)
 	}
 	p.Normalize()
 	return p
+}
+
+// gridMonths — все месяцы, упомянутые хоть одной картой сетки, по возрастанию.
+func gridMonths(pr model.Pricing) []int {
+	seen := map[int]bool{}
+	for mo := range pr.Base {
+		seen[mo] = true
+	}
+	for mo := range pr.P2P {
+		seen[mo] = true
+	}
+	for mo := range pr.YooKassa {
+		seen[mo] = true
+	}
+	for mo := range pr.Stars {
+		seen[mo] = true
+	}
+	for mo := range pr.Traffic {
+		seen[mo] = true
+	}
+	for mo := range pr.Devices {
+		seen[mo] = true
+	}
+	for mo := range pr.SquadsInt {
+		seen[mo] = true
+	}
+	for mo := range pr.SquadsExt {
+		seen[mo] = true
+	}
+	out := make([]int, 0, len(seen))
+	for mo := range seen {
+		if mo > 0 {
+			out = append(out, mo)
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // syncBasePlan держит «Базовый» в соответствии с сеткой цен из конфига.

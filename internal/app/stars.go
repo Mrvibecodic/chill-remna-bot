@@ -152,6 +152,8 @@ func (a *App) onStars(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "starprice"
 		ui.priceMonths = mo
+		// Старый экран правит «Базовый»: контекст карточки тарифа здесь чужой.
+		ui.planCode = ""
 		prompt := i18n.T(lang, "admin.stars_ask_price", mo)
 		if s := a.starsSuggestion(lang, mo); s != "" {
 			prompt += "\n\n" + s

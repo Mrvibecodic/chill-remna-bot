@@ -833,8 +833,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.showP2PAdmin(ctx, chatID)
 	case "starprice":
 		mo := ui.priceMonths
+		code := ui.planCode
 		ui.adminInput = ""
 		ui.priceMonths = 0
+		ui.planCode = ""
 		// Строгий разбор: раньше «100 ⭐» молча превращалось в 0 и стирало цену.
 		v, err := strconv.Atoi(strings.TrimSpace(text))
 		if err != nil || v < 0 {
@@ -842,8 +844,6 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 				[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:stars")})
 			return
 		}
-		code := ui.planCode
-		ui.planCode = ""
 		if err := a.setPlanStars(ctx, code, mo, v); err != nil {
 			a.planInputFailed(ctx, chatID, err)
 			return

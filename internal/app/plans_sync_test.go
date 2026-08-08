@@ -478,3 +478,286 @@ func TestQuickSetupWritesThroughPlan(t *testing.T) {
 		t.Fatalf("быстрая настройка не доехала до сетки: %+v", pr)
 	}
 }
+
+// Перенос сетки в тариф обязан быть полным: месяцы вне стандартной четвёрки и
+// настройки сроков, снятых с продажи, переживают и перенос, и первый разворот
+// синхронизации. Терялись они молча, а по цене из сетки продлевает автосписание.
+func TestFlipPreservesLegacyMonthsAndOffSaleOverrides(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	a.mu.Lock()
+	// Легаси-месяц вне четвёрки — по нему живёт автосписание.
+	a.botCfg.Pricing.Base[2] = "260"
+	a.botCfg.Pricing.YooKassa[2] = "280"
+	// Срок снят с продажи, переопределения остались и должны вернуться с ценой.
+	a.botCfg.Pricing.P2P[6] = "610"
+	a.botCfg.Pricing.Stars[6] = 460
+	a.botCfg.Pricing.Traffic[6] = 100
+	a.mu.Unlock()
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Первая правка — флип и пересборка сетки зеркалом.
+	if err := a.setPlanPrice(ctx, "", 1, "base", "999"); err != nil {
+		t.Fatal(err)
+	}
+	pr := a.pricing()
+	if pr.Base[2] != "260" || pr.Fiat(model.PayMethodYooKassa, 2) != "280" {
+		t.Fatalf("легаси-месяц стёрт разворотом: base=%q yk=%q — автосписание на 2 мес упадёт", pr.Base[2], pr.Fiat(model.PayMethodYooKassa, 2))
+	}
+	if pr.P2P[6] != "610" || pr.Stars[6] != 460 || pr.Traffic[6] != 100 {
+		t.Fatalf("настройки снятого с продажи срока стёрты: %q/%d/%d", pr.P2P[6], pr.Stars[6], pr.Traffic[6])
+	}
+
+	// Легаси-месяц редактируется из карточки: экран открывается, цена правится.
+	fm := &fakeMsg{}
+	a.msg = fm
+	planTap(t, a, "pln:prm:2:"+model.PlanCodeBase)
+	if !strings.Contains(fm.last(), "2 мес") {
+		t.Fatalf("экран легаси-месяца не открылся: %q", fm.last())
+	}
+	planTap(t, a, "pln:in:b:2:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, "270"))
+	if got := a.pricing().Base[2]; got != "270" {
+		t.Fatalf("легаси-месяц не правится: %q", got)
+	}
+
+	// Прочерк на отсутствующем месяце длительность не создаёт.
+	p, _ := st.GetPlan(ctx, model.PlanCodeBase)
+	before := len(p.Durations)
+	if err := a.setPlanPrice(ctx, "", 3, "p2p", "-"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = st.GetPlan(ctx, model.PlanCodeBase)
+	if len(p.Durations) != before {
+		t.Fatalf("прочерк создал длительность: было %d, стало %d", before, len(p.Durations))
+	}
+}
+
+// Пустая валюта тарифа не воюет с нормализацией: NormalizePricing заполняет
+// пустую валюту сетки из легаси-полей при каждом чтении, и зеркало, пишущее
+// «пусто» поверх, устраивало бы качели с ложным «цены восстановлены» на каждом
+// старте.
+func TestEmptyPlanCurrencyDoesNotLoop(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	a.mu.Lock()
+	a.botCfg.Pricing.Currency = ""
+	a.botCfg.P2P.Currency = "RUB" // легаси-поле, из которого нормализация берёт валюту
+	a.mu.Unlock()
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.setPlanPrice(ctx, "", 1, "base", "999"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := st.GetPlan(ctx, model.PlanCodeBase)
+	if p.FromConfig {
+		t.Fatal("тариф не стал ведущим")
+	}
+
+	// Чтение цен нормализует живой конфиг — валюта воскресает из легаси-поля.
+	if got := a.pricing().Currency; got != "RUB" {
+		t.Fatalf("нормализация валюты сломана: %q", got)
+	}
+	// «Рестарт» дважды: содержательных отличий нет, лечение молчит оба раза.
+	for i := 0; i < 2; i++ {
+		changed, err := a.syncPlansConfig(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed {
+			t.Fatalf("рестарт %d: ложное «цены восстановлены» на ровном месте", i+1)
+		}
+		if got := a.pricing().Currency; got != "RUB" {
+			t.Fatalf("рестарт %d: зеркало затёрло валюту: %q", i+1, got)
+		}
+	}
+}
+
+// Сбой записи КОНФИГА после записи тарифа — не отказ правки: тариф записан,
+// сетка в памяти зеркальная, витрина продаёт по новой цене. Сказать админу
+// «не сохранилось» значило бы соврать в обратную сторону.
+func TestMirrorSaveFailureIsNotEditFailure(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.failSaveConfig = 1
+	st.mu.Unlock()
+
+	if err := a.setPlanPrice(ctx, "", 1, "base", "888"); err != nil {
+		t.Fatalf("правка объявлена несостоявшейся, хотя тариф записан: %v", err)
+	}
+	p, _ := st.GetPlan(ctx, model.PlanCodeBase)
+	if d := p.Duration(1); d == nil || d.Base != "888" {
+		t.Fatalf("тариф не записан: %+v", p.Durations)
+	}
+	if got := a.pricing().Base[1]; got != "888" {
+		t.Fatalf("сетка в памяти не зеркальная: %q", got)
+	}
+	// Следующее сохранение конфига дописывает сетку в базу.
+	if err := a.saveBotConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.cfg.Pricing.Base[1]; got != "888" {
+		t.Fatalf("сетка в базе не догнала: %q", got)
+	}
+}
+
+// Контекст тарифа не утекает на старые экраны: взведённый в карточке ввод,
+// брошенный ради экрана Stars или ЮKassa, не отправляет их цены в чужой тариф.
+func TestPlanCodeDoesNotLeakIntoLegacyScreens(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	fm := &fakeMsg{}
+	a.msg = fm
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	planTap(t, a, "pln:dup:"+model.PlanCodeBase)
+	list, _ := st.ListPlans(ctx)
+	code := ""
+	for i := range list {
+		if list[i].Code != model.PlanCodeBase {
+			code = list[i].Code
+		}
+	}
+
+	// Взвели ввод цены в карточке копии и бросили его ради экрана Stars.
+	planTap(t, a, "pln:in:b:1:"+code)
+	planTap(t, a, "star:price:1")
+	a.handleMessage(ctx, msgText(planAdmin, "77"))
+	p, _ := st.GetPlan(ctx, code)
+	if d := p.Duration(1); d != nil && d.Stars == 77 {
+		t.Fatal("цена Stars ушла в чужой тариф")
+	}
+	if got := a.pricing().StarPrice(1); got != 77 {
+		t.Fatalf("цена Stars не дошла до «Базового»: %d", got)
+	}
+
+	// То же для ЮKassa.
+	planTap(t, a, "pln:in:b:1:"+code)
+	planTap(t, a, "yk:price:3")
+	a.handleMessage(ctx, msgText(planAdmin, "444"))
+	p, _ = st.GetPlan(ctx, code)
+	if d := p.Duration(3); d != nil && d.YooKassa == "444" {
+		t.Fatal("цена ЮKassa ушла в чужой тариф")
+	}
+	if got := a.pricing().Fiat(model.PayMethodYooKassa, 3); got != "444" {
+		t.Fatalf("цена ЮKassa не дошла до «Базового»: %q", got)
+	}
+
+	// Ошибка разбора цены Stars тоже снимает контекст.
+	planTap(t, a, "pln:in:s:1:"+code)
+	a.handleMessage(ctx, msgText(planAdmin, "abc"))
+	if got := a.getUI(planAdmin).planCode; got != "" {
+		t.Fatalf("контекст пережил ошибку разбора: %q", got)
+	}
+}
+
+// Навигация по тарифам снимает взведённый коммерческий вопрос: брошенный ввод
+// цены не должен дожидаться случайного текста.
+func TestPlanNavigationForgetsCommercialInput(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	fm := &fakeMsg{}
+	a.msg = fm
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := st.GetPlan(ctx, model.PlanCodeBase)
+
+	planTap(t, a, "pln:in:b:1:"+model.PlanCodeBase)
+	planTap(t, a, "pln:open:"+model.PlanCodeBase) // ушёл с экрана ввода
+	a.handleMessage(ctx, msgText(planAdmin, "123456"))
+
+	after, _ := st.GetPlan(ctx, model.PlanCodeBase)
+	if d := after.Duration(1); d.Base != before.Duration(1).Base {
+		t.Fatalf("брошенный вопрос записал цену: %q", d.Base)
+	}
+
+	// И тумблер сквада тоже снимает вопрос.
+	planTap(t, a, "pln:in:b:1:"+model.PlanCodeBase)
+	planTap(t, a, "plq:i:0:"+planEditHash(model.PlanCodeBase)+":squad-y")
+	a.handleMessage(ctx, msgText(planAdmin, "654321"))
+	after, _ = st.GetPlan(ctx, model.PlanCodeBase)
+	if d := after.Duration(1); d.Base != before.Duration(1).Base {
+		t.Fatalf("тумблер не снял вопрос, текст записал цену: %q", d.Base)
+	}
+}
+
+// Сквады выключаются так же, как включаются, — и на уровне тарифа, и у срока;
+// пустое переопределение срока снимается целиком (наследование возвращается),
+// сброс переопределения чистит и внешний сквад.
+func TestPlanSquadToggleOffAndClear(t *testing.T) {
+	ctx := context.Background()
+	a, st := planSyncApp(t, 0)
+	fm := &fakeMsg{}
+	a.msg = fm
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Уровень тарифа: включили-выключили.
+	for _, on := range []bool{true, false} {
+		if err := a.togglePlanSquad(ctx, "", 0, "sq-t", false); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.togglePlanSquad(ctx, "", 0, "ext-t", true); err != nil {
+			t.Fatal(err)
+		}
+		p, _ := st.GetPlan(ctx, model.PlanCodeBase)
+		hasInt := false
+		for _, u := range p.IntSquads {
+			if u == "sq-t" {
+				hasInt = true
+			}
+		}
+		if hasInt != on || (p.ExtSquad == "ext-t") != on {
+			t.Fatalf("тумблер уровня тарифа: ожидалось %v, int=%v ext=%q", on, hasInt, p.ExtSquad)
+		}
+	}
+
+	// Срок: последний выключенный сквад снимает переопределение целиком.
+	if err := a.togglePlanSquad(ctx, "", 1, "sq-d", false); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := st.GetPlan(ctx, model.PlanCodeBase)
+	if d := p.Duration(1); d == nil || d.IntSquads == nil {
+		t.Fatal("переопределение срока не создано")
+	}
+	if err := a.togglePlanSquad(ctx, "", 1, "sq-d", false); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = st.GetPlan(ctx, model.PlanCodeBase)
+	if d := p.Duration(1); d.IntSquads != nil {
+		t.Fatalf("пустое переопределение осталось: %+v — срок продавался бы без сквадов вместо наследования", d.IntSquads)
+	}
+
+	// Сброс переопределения чистит и внутренние, и внешний.
+	if err := a.togglePlanSquad(ctx, "", 12, "sq-d", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.togglePlanSquad(ctx, "", 12, "ext-d", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.clearPlanSquadOverride(ctx, "", 12); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = st.GetPlan(ctx, model.PlanCodeBase)
+	if d := p.Duration(12); d.IntSquads != nil || d.ExtSquad != nil {
+		t.Fatalf("сброс не снял переопределение: %+v/%+v", d.IntSquads, d.ExtSquad)
+	}
+
+	// Подделанный месяц в тумблере длительность-призрак не создаёт.
+	a.getUI(planAdmin).planEdit = model.PlanCodeBase
+	planTap(t, a, "plq:i:99:"+planEditHash(model.PlanCodeBase)+":rogue")
+	p, _ = st.GetPlan(ctx, model.PlanCodeBase)
+	if p.Duration(99) != nil {
+		t.Fatal("подделанный месяц завёл длительность-призрак")
+	}
+}

@@ -270,6 +270,8 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "ykprice"
 		ui.priceMonths = mo
+		// Старый экран правит «Базовый»: контекст карточки тарифа здесь чужой.
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_price", mo), "menu:yookassa")
 	}
 }

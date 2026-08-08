@@ -29,6 +29,8 @@ type syncStore struct {
 	savedPrices []int
 	// failSavePlan — столько ближайших записей тарифа упадут.
 	failSavePlan int
+	// failSaveConfig — столько ближайших записей конфига упадут.
+	failSaveConfig int
 	// savePlanCalls — сколько раз тариф записывался.
 	savePlanCalls int
 	failDelete    bool
@@ -38,6 +40,13 @@ type syncStore struct {
 var errTestStore = errors.New("хранилище недоступно (тест)")
 
 func (s *syncStore) SaveConfig(ctx context.Context, c *model.BotConfig) error {
+	s.mu.Lock()
+	if s.failSaveConfig > 0 {
+		s.failSaveConfig--
+		s.mu.Unlock()
+		return errTestStore
+	}
+	s.mu.Unlock()
 	// Цена читается ДО задержки: важен порядок, в котором снимки доехали до
 	// записи, а не порядок выхода из неё.
 	price, _ := strconv.Atoi(c.Pricing.Base[1])

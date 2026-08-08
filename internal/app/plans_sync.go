@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -61,9 +62,15 @@ func (a *App) syncPlansConfig(ctx context.Context) (bool, error) {
 }
 
 // mirrorBasePlanLocked переписывает блок цен в конфиге значениями тарифа.
-// Вызывать под a.plansMu. Пишет в базу только при реальном отличии — зеркало
+// Вызывать под a.plansMu. Пишет в базу только при отличии формы — зеркало
 // висит на каждом сохранении конфига, и без этой проверки каждое сохранение
 // удваивалось бы.
+//
+// Возвращает true только при СОДЕРЖАТЕЛЬНОМ отличии — когда изменилось то, что
+// видит покупатель. У сетки несколько эквивалентных записей одного смысла
+// (ноль против отсутствия записи, легаси-сквад P2P против глобального набора),
+// и первое зеркало приводит форму к канонической: пугать админа «цены
+// восстановлены» из-за перестановки эквивалентных записей нельзя.
 func (a *App) mirrorBasePlanLocked(ctx context.Context, p *model.Plan) (bool, error) {
 	if p == nil || p.Code != model.PlanCodeBase {
 		return false, nil
@@ -74,16 +81,53 @@ func (a *App) mirrorBasePlanLocked(ctx context.Context, p *model.Plan) (bool, er
 		return false, nil
 	}
 	before, berr := a.botCfg.SnapshotJSON()
+	meaningBefore := pricingMeaning(a.botCfg)
 	applyPlanToConfig(a.botCfg, p)
 	after, aerr := a.botCfg.SnapshotJSON()
+	meaningAfter := pricingMeaning(a.botCfg)
 	a.mu.Unlock()
 	if berr == nil && aerr == nil && string(before) == string(after) {
 		return false, nil
 	}
 	if err := a.saveConfigOnly(ctx); err != nil {
-		return true, err
+		return meaningBefore != meaningAfter, err
 	}
-	return true, nil
+	return meaningBefore != meaningAfter, nil
+}
+
+// pricingMeaning — отпечаток того, что сетка означает для покупателя: цены по
+// способам, лимиты и сквады каждого срока с базовой ценой плюс общие параметры.
+// Вызывать под a.mu.
+func pricingMeaning(cfg *model.BotConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	pr := cfg.Pricing
+	var b strings.Builder
+	b.WriteString(pr.Currency)
+	b.WriteString("|")
+	b.WriteString(pr.ResetStrategy())
+	for _, mo := range gridMonths(pr) {
+		if pr.Base[mo] == "" {
+			continue // срок не продаётся — его настроек покупатель не видит
+		}
+		ints := cfg.Plan.ActiveInternalSquads
+		if len(ints) == 0 && cfg.P2P.SquadUUID != "" {
+			ints = []string{cfg.P2P.SquadUUID}
+		}
+		if sq := pr.SquadsInt[mo]; len(sq) > 0 {
+			ints = sq
+		}
+		ext := cfg.Plan.ExternalSquadUUID
+		if e := pr.SquadsExt[mo]; e != "" {
+			ext = e
+		}
+		fmt.Fprintf(&b, "|%d:%s:%s:%s:%d:%d:%d:%s:%s",
+			mo, pr.Base[mo], pr.Fiat(model.PayMethodP2P, mo), pr.Fiat(model.PayMethodYooKassa, mo),
+			pr.StarPrice(mo), pr.TrafficBytes(mo), pr.DeviceLimitFor(mo),
+			strings.Join(ints, ","), ext)
+	}
+	return b.String()
 }
 
 // applyPlanToConfig — обратная сторона basePlanFrom: тариф → сетка цен.
@@ -98,7 +142,13 @@ func applyPlanToConfig(cfg *model.BotConfig, p *model.Plan) {
 		return
 	}
 	pr := &cfg.Pricing
-	pr.Currency = p.Currency
+	// Пустую валюту тарифа зеркало не навязывает: NormalizePricing заполняет
+	// пустую валюту сетки из легаси-полей (P2P.Currency, YooKassa.Currency) при
+	// каждом чтении, и зеркало, пишущее «пусто» поверх, устроило бы вечные
+	// качели «пусто ↔ легаси» — с ложным «цены восстановлены» на каждом старте.
+	if p.Currency != "" {
+		pr.Currency = p.Currency
+	}
 	pr.TrafficStrategy = p.Strategy
 	pr.DeviceLimit = p.DeviceLimit
 	cfg.Plan.ActiveInternalSquads = append([]string(nil), p.IntSquads...)
@@ -193,8 +243,13 @@ func (a *App) editPlanPricing(ctx context.Context, code string, apply func(*mode
 		return err
 	}
 	if p.Code == model.PlanCodeBase {
+		// Ошибка записи КОНФИГА здесь — не отказ правки: тариф уже записан, и
+		// сетка в памяти уже зеркальная, то есть витрина и счета продают по
+		// новой цене. Сказать админу «не сохранилось» значило бы соврать в
+		// обратную сторону. Сетка в базе догонит при следующем сохранении
+		// конфига (их по десятку в час) или стартовым лечением.
 		if _, err := a.mirrorBasePlanLocked(ctx, p); err != nil {
-			return err
+			a.log.Warn("сетка цен не записана в базу, тариф применён", "err", err)
 		}
 	}
 	return nil

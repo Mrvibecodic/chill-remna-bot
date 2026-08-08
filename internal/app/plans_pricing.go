@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"html"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -59,7 +60,7 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 	a.getUI(chatID).planEdit = p.Code
 
 	var rows [][]models.InlineKeyboardButton
-	for _, mo := range model.PlanMonths {
+	for _, mo := range planEditorMonths(p) {
 		label := "—"
 		if d := p.Duration(mo); d != nil && d.Base != "" {
 			label = d.Base + curSuffix(p.Currency)
@@ -100,12 +101,12 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 // устройства и сквады этого срока.
 func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo int) {
 	lang := a.lang(chatID)
-	if !monthAllowed(mo) {
-		a.showPlanPricing(ctx, chatID, code)
-		return
-	}
 	p := a.planForEdit(ctx, chatID, code)
 	if p == nil {
+		return
+	}
+	if !monthEditable(p, mo) {
+		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
 	a.getUI(chatID).planEdit = p.Code
@@ -115,7 +116,8 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 		if strings.TrimSpace(v) == "" {
 			return "—"
 		}
-		return html_(v) + curSuffix(p.Currency)
+		// Валюту тоже вводит человек — экранируется вместе со значением.
+		return html_(v + curSuffix(p.Currency))
 	}
 	base, p2p, yk := "", "", ""
 	stars := 0
@@ -166,7 +168,8 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 		traffic, devices, squads), rows)
 }
 
-// monthAllowed ограничивает сроки редактора текущей сеткой.
+// monthAllowed ограничивает НОВЫЕ сроки редактора текущей сеткой: витрина,
+// фискализация и маппинги платёжек считают ровно эти четыре срока.
 func monthAllowed(mo int) bool {
 	for _, m := range model.PlanMonths {
 		if m == mo {
@@ -174,6 +177,28 @@ func monthAllowed(mo int) bool {
 		}
 	}
 	return false
+}
+
+// monthEditable — срок доступен в редакторе: стандартная сетка ИЛИ срок, уже
+// существующий у тарифа. Второе — про легаси-месяцы (импорт, старые версии):
+// перенос сетки в тариф сохраняет их, по ним продлеваются автосписания, и
+// редактор обязан уметь их показать и поправить.
+func monthEditable(p *model.Plan, mo int) bool {
+	return monthAllowed(mo) || (p != nil && p.Duration(mo) != nil)
+}
+
+// planEditorMonths — сроки для экрана тарифа: стандартная четвёрка плюс
+// легаси-месяцы, уже существующие у тарифа.
+func planEditorMonths(p *model.Plan) []int {
+	out := append([]int(nil), model.PlanMonths...)
+	for i := range p.Durations {
+		mo := p.Durations[i].Months
+		if mo > 0 && !monthAllowed(mo) {
+			out = append(out, mo)
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // planPriceInputs — какое поле спрашивает какой ввод.
@@ -192,7 +217,15 @@ var planPriceInputs = map[string]struct {
 // askPlanPriceInput взводит ввод значения для длительности тарифа.
 func (a *App) askPlanPriceInput(ctx context.Context, chatID int64, kind string, mo int, code string) {
 	spec, ok := planPriceInputs[kind]
-	if !ok || !monthAllowed(mo) || code == "" {
+	if !ok || code == "" {
+		a.showPlanPricing(ctx, chatID, code)
+		return
+	}
+	p := a.planForEdit(ctx, chatID, code)
+	if p == nil {
+		return
+	}
+	if !monthEditable(p, mo) {
 		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
@@ -257,12 +290,12 @@ func (a *App) afterPlanPriceEdit(ctx context.Context, chatID int64, code string,
 // длительности (mo > 0): списки из панели, отметки — текущий выбор тарифа.
 func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string, mo int) {
 	lang := a.lang(chatID)
-	if mo != 0 && !monthAllowed(mo) {
-		a.showPlanPricing(ctx, chatID, code)
-		return
-	}
 	p := a.planForEdit(ctx, chatID, code)
 	if p == nil {
+		return
+	}
+	if mo != 0 && !monthEditable(p, mo) {
+		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
 	a.getUI(chatID).planEdit = p.Code
@@ -356,6 +389,9 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 // Код тарифа берётся из состояния экрана, отпечаток защищает от нажатия на
 // старом сообщении, когда админ уже редактирует другой тариф.
 func (a *App) onPlanSquadToggle(ctx context.Context, chatID int64, val string) {
+	// Нажатие тумблера — уход с экрана ввода: взведённый вопрос снимается, как
+	// при любой другой навигации по тарифам.
+	a.forgetPlanInput(chatID)
 	parts := strings.SplitN(val, ":", 4)
 	if len(parts) != 4 {
 		return
@@ -366,6 +402,15 @@ func (a *App) onPlanSquadToggle(ctx context.Context, chatID int64, val string) {
 	if code == "" || planEditHash(code) != h {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "plans.sq_stale"))
 		return
+	}
+	// Месяц из callback-данных не принимается на веру: подделанный или
+	// оставшийся от прежней сетки месяц завёл бы длительность-призрак.
+	if mo != 0 {
+		p, err := a.planByCode(ctx, code)
+		if err != nil || p == nil || !monthEditable(p, mo) {
+			a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "plans.sq_stale"))
+			return
+		}
 	}
 	if err := a.togglePlanSquad(ctx, code, mo, uuid, kind == "e"); err != nil {
 		a.planInputFailed(ctx, chatID, err)
