@@ -265,6 +265,9 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 	a.mu.Lock()
 	panel := a.panel
 	tr := a.botCfg.Trial
+	// Набор сквадов уезжает в панель уже без замка, а админка правит его на
+	// месте — append идёт по тому же массиву, поэтому здесь нужна своя копия.
+	tr.InternalSquads = append([]string(nil), tr.InternalSquads...)
 	strategy := a.botCfg.Pricing.ResetStrategy()
 	a.mu.Unlock()
 	if panel == nil {

@@ -1,5 +1,7 @@
 package model
 
+import "maps"
+
 type Pricing struct {
 	Currency string         `json:"currency"`
 	Base     map[int]string `json:"base"`
@@ -17,6 +19,36 @@ type Pricing struct {
 	DeviceLimit int `json:"device_limit"`
 
 	TrafficStrategy string `json:"traffic_strategy"`
+}
+
+// Clone возвращает сетку цен, не связанную с исходной ни одной картой.
+//
+// Структура Pricing состоит почти целиком из карт, поэтому обычное присваивание
+// копирует только заголовки: копия продолжает делить с оригиналом сами данные.
+// Сетка живёт в общем конфиге, её правит админка под замком, а читают её
+// продажи, витрина, мини-апп, автосписание и вебхуки — если такое чтение
+// уходит из-под замка, получается одновременное чтение и запись карты, а это
+// не паника, которую можно перехватить, а немедленная смерть процесса.
+// Поэтому всё, что покидает замок, обязано быть копией.
+//
+// Слайсы сквадов копируются тоже: админка добавляет сквад через append, который
+// при запасе ёмкости пишет в тот же массив.
+func (p Pricing) Clone() Pricing {
+	c := p
+	c.Base = maps.Clone(p.Base)
+	c.P2P = maps.Clone(p.P2P)
+	c.YooKassa = maps.Clone(p.YooKassa)
+	c.Stars = maps.Clone(p.Stars)
+	c.Traffic = maps.Clone(p.Traffic)
+	c.Devices = maps.Clone(p.Devices)
+	c.SquadsExt = maps.Clone(p.SquadsExt)
+	if p.SquadsInt != nil {
+		c.SquadsInt = make(map[int][]string, len(p.SquadsInt))
+		for k, v := range p.SquadsInt {
+			c.SquadsInt[k] = append([]string(nil), v...)
+		}
+	}
+	return c
 }
 
 func (p Pricing) TrafficBytes(months int) int64 {

@@ -1122,6 +1122,10 @@ func (a *App) ensureHomeKey(ctx context.Context, chatID int64) {
 	a.msg.SetCommandKeyboard(ctx, chatID, i18n.T(a.lang(chatID), "btn.home"))
 }
 
+// pricing отдаёт КОПИЮ сетки цен: возвращалась она по значению, но карты внутри
+// оставались общими с конфигом, и каждый из трёх десятков вызывающих читал их
+// уже без замка, пока админка в них писала. Одновременное чтение и запись карты
+// роняет процесс мимо перехвата паники (см. model.Pricing.Clone).
 func (a *App) pricing() model.Pricing {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1129,7 +1133,7 @@ func (a *App) pricing() model.Pricing {
 		return model.Pricing{}
 	}
 	a.botCfg.NormalizePricing()
-	return a.botCfg.Pricing
+	return a.botCfg.Pricing.Clone()
 }
 
 func (a *App) lang(chatID int64) string {

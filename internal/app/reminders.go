@@ -34,6 +34,9 @@ func (a *App) remindOnce(ctx context.Context) {
 	var rc model.RemindersConfig
 	if a.botCfg != nil {
 		rc = a.botCfg.Reminders
+		// Список дней перебирается ниже без замка, а админка правит его на
+		// месте (append по тому же массиву) — здесь нужна своя копия.
+		rc.DaysList = append([]int(nil), rc.DaysList...)
 	}
 	a.mu.Unlock()
 	if st == nil {

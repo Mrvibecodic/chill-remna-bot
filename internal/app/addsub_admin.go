@@ -15,6 +15,8 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	c := a.botCfg.AddSub
+	// Набор сквадов читается ниже без замка, а правится он на месте — копия.
+	c.InternalSquads = append([]string(nil), c.InternalSquads...)
 	a.mu.Unlock()
 
 	squadNames, _ := a.squadNames(ctx, c.InternalSquads, "")

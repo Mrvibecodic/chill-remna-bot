@@ -20,9 +20,18 @@ import (
 )
 
 func (a *App) saveBotConfig(ctx context.Context) error {
+	// В хранилище едет копия, снятая под замком: там конфиг превращается в JSON,
+	// а обход карт конфига одновременно с записью в них из админки убивает
+	// процесс без возможности перехвата (см. model.BotConfig.Clone). Заодно
+	// записывается ровно то состояние, что было на момент снятия, а не то, во
+	// что конфиг успел превратиться, пока шла запись в базу.
 	a.mu.Lock()
-	cfg, st := a.botCfg, a.store
+	st := a.store
+	cfg, err := a.botCfg.Clone()
 	a.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("копия конфига: %w", err)
+	}
 	if cfg == nil || st == nil {
 		return fmt.Errorf("бот не настроен")
 	}
@@ -149,7 +158,8 @@ func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
 		stars = a.botCfg.Stars
 		yk = a.botCfg.YooKassa
 		cb = a.botCfg.CryptoBot
-		pr = a.botCfg.Pricing
+		// Карты сетки читаются ниже, уже без замка, поэтому именно копия.
+		pr = a.botCfg.Pricing.Clone()
 	}
 	a.mu.Unlock()
 
