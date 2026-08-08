@@ -60,9 +60,9 @@ func parsePlPayload(payload string) (telegramID int64, months int) {
 
 func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	cfg := a.plConfig()
 	pr := a.pricing()
@@ -149,11 +149,12 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 			chatID, months = p.TelegramID, p.Months
 		}
 	}
-	if months == 0 {
-		months = model.PlanMonths[0]
-	}
 	if chatID == 0 {
 		a.payLog(ctx, model.PayMethodPlatega, txID, 0, "error", "оплата подтверждена, но получатель неизвестен: нет payload и pending-счёта")
+		return
+	}
+	if months == 0 {
+		a.noPeriodForPayment(ctx, model.PayMethodPlatega, txID, chatID)
 		return
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID, a.pendingSnapshot(ctx, txID))

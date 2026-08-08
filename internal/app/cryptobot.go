@@ -52,9 +52,9 @@ func (a *App) cbClient() *cryptobot.Client {
 
 func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	cfg := a.cbConfig()
 	price := a.pricing().Base[months]

@@ -372,9 +372,9 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	priceStr := a.pricing().Base[months]
 	kopecks, ok := rubToKopecks(priceStr)

@@ -229,9 +229,9 @@ func purposeOrBuy(p string) string {
 
 func (a *App) startHeleket(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	price := a.pricing().Base[months]
 	if !a.hlConfig().Enabled || price == "" {
@@ -396,7 +396,8 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		return
 	}
 	if months == 0 {
-		months = model.PlanMonths[0]
+		a.noPeriodForPayment(ctx, model.PayMethodHeleket, extID, chatID)
+		return
 	}
 
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, a.pendingSnapshot(ctx, extID))

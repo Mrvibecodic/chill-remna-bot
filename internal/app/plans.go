@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 )
 
@@ -285,4 +286,34 @@ func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *mode
 		return nil
 	}
 	return in.Snapshot
+}
+
+// buyMonthsOrAsk возвращает выбранный срок. Если выбора нет — показывает
+// витрину заново и возвращает 0.
+//
+// Раньше на этом месте стоял фолбэк «считаем, что месяц»: человек, нажавший
+// способ оплаты на старом экране из истории чата, молча получал счёт на месяц
+// вместо выбранного года. Угадывать срок за человека нельзя — ни в его пользу,
+// ни в свою.
+func (a *App) buyMonthsOrAsk(ctx context.Context, chatID int64) int {
+	months := a.buyMonths(ctx, chatID)
+	if months > 0 {
+		return months
+	}
+	a.showPlans(ctx, chatID)
+	return 0
+}
+
+// noPeriodForPayment вызывается, когда деньги уже приняты, а срок подписки
+// определить не удалось: ни payload, ни строка счёта, ни намерение покупки его
+// не дали. Выдавать «срок по умолчанию» здесь нельзя — это выдача не того, за
+// что заплатили. Поэтому пишем в журнал, зовём админа и говорим человеку, что
+// им занимаются.
+func (a *App) noPeriodForPayment(ctx context.Context, method, extID string, chatID int64) {
+	a.payLog(ctx, method, extID, chatID, "error", "оплата принята, но срок подписки неизвестен — выдача не проводится")
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", method+" "+extID))
+	if chatID != 0 {
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
+	}
 }

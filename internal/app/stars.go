@@ -25,9 +25,9 @@ func (a *App) starsConfig() model.StarsConfig {
 
 func (a *App) startStars(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	amount := a.pricing().StarPrice(months)
 	if !a.starsConfig().Enabled || amount <= 0 {
@@ -71,11 +71,15 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	if _, after, ok := strings.Cut(sp.InvoicePayload, ":"); ok {
 		months, _ = strconv.Atoi(after)
 	}
-	if months == 0 {
-		months = model.PlanMonths[0]
-	}
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
+	if months <= 0 {
+		// Payload наш и проверен на предпроверке, так что сюда попасть можно
+		// только при испорченной доставке. Подставлять срок «по умолчанию»
+		// нельзя: человек заплатил за другой.
+		a.noPeriodForPayment(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID)
+		return
+	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID,
 		a.starsSnapshot(ctx, chatID, months))
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"remnabot/internal/config"
@@ -338,5 +339,64 @@ func TestPlanCodeTravelsWithDeal(t *testing.T) {
 	}
 	if req == nil || req.Snapshot == nil || req.Snapshot.Code != model.PlanCodeBase {
 		t.Fatalf("тариф не доехал до заявки: %+v", req)
+	}
+}
+
+// Кнопка способа оплаты на старом экране из истории чата больше не продаёт
+// «месяц по умолчанию»: без выбранного срока бот возвращает человека в витрину
+// и счёт не выставляет.
+func TestPayMethodWithoutPeriod_AsksAgain(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, fs := planApp(t)
+	a.msg = fm
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 99}}
+	const u int64 = 555
+
+	a.handleCallback(ctx, cb(u, "method:stars"))
+	if len(fm.invoices) != 0 {
+		t.Fatalf("счёт выставлен без выбранного срока: %v", fm.invoices)
+	}
+	if !strings.Contains(fm.joined(), "срок подписки") {
+		t.Fatalf("ожидалась витрина со сроками:\n%s", fm.joined())
+	}
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+		t.Fatalf("намерение покупки не должно появляться само: %+v", in)
+	}
+
+	// А с выбранным сроком счёт выставляется как обычно.
+	a.handleCallback(ctx, cb(u, "buy:1"))
+	a.handleCallback(ctx, cb(u, "method:stars"))
+	if len(fm.invoices) != 1 {
+		t.Fatalf("после выбора срока счёт не выставлен: %v", fm.invoices)
+	}
+}
+
+// Оплата пришла, а срок определить не удалось: подписку на «срок по умолчанию»
+// не выдаём — зовём админа и говорим человеку, что им занимаются.
+func TestPaidWithoutPeriod_CallsAdmin(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	fm := &fakeMsg{}
+	a.msg = fm
+	ctx := context.Background()
+	const u int64 = 555
+	_ = fs.UpsertUser(ctx, u)
+
+	a.handleSuccessfulPayment(ctx, successPayMsg(u, "stars:", 100))
+
+	if ok, _ := fs.HasPaidPayment(ctx, u); ok {
+		t.Fatal("подписка выдана по неизвестному сроку")
+	}
+	if patched != nil {
+		t.Fatalf("панель трогать было нельзя: %+v", patched)
+	}
+	joined := fm.joined()
+	if !strings.Contains(joined, "срок подписки определить не удалось") {
+		t.Fatalf("админ не уведомлён:\n%s", joined)
+	}
+	if !strings.Contains(joined, "Администратор уведомлён") {
+		t.Fatalf("пользователь не уведомлён:\n%s", joined)
 	}
 }

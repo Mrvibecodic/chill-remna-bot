@@ -237,9 +237,9 @@ func (a *App) notifyAdminUserRequest(ctx context.Context, userID int64) {
 }
 
 func (a *App) issueCard(ctx context.Context, chatID int64) {
-	months := a.buyMonths(ctx, chatID)
+	months := a.buyMonthsOrAsk(ctx, chatID)
 	if months == 0 {
-		months = model.PlanMonths[0]
+		return
 	}
 	a.issueCardMonths(ctx, chatID, months)
 }

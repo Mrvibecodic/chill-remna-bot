@@ -89,7 +89,10 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		return
 	}
 	if months <= 0 {
-		months = model.PlanMonths[0]
+		// Автопродление с неизвестным периодом молча спишет не за тот срок —
+		// лучше не подключать вовсе.
+		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "error", "автопродление не подключено: в metadata платежа нет срока")
+		return
 	}
 	prev := a.getAutoPay(ctx, chatID)
 	// Уже подключено — просто обновляем карту и период, ничего не спрашиваем.
@@ -407,7 +410,10 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	lang := a.lang(ap.TelegramID)
 	months := ap.Months
 	if months <= 0 {
-		months = model.PlanMonths[0]
+		// Списывать деньги за срок, которого нет в записи, нельзя.
+		reason := "у автопродления не задан период"
+		a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, reason)
+		return reason
 	}
 	// Продление — новая сделка на действующих условиях: человек платит
 	// сегодняшнюю цену, значит и лимиты получает сегодняшние. Снимок здесь
