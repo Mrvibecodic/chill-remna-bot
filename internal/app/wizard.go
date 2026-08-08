@@ -102,6 +102,7 @@ const (
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
 	cbTorrent   = "torj"
+	cbPlans     = "pln"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -218,6 +219,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbPricing:
 		if isAdmin {
 			a.onPricing(ctx, chatID, val)
+		}
+	case cbPlans:
+		if isAdmin {
+			a.onPlansAdmin(ctx, chatID, val)
 		}
 	case cbPayments:
 		if isAdmin {

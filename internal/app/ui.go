@@ -313,6 +313,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	}
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick"), btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
+		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
 		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
@@ -732,6 +733,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "yookassa":
 		if isAdmin {
 			a.showYooKassaAdmin(ctx, chatID)
+		}
+	case "plans":
+		if isAdmin {
+			a.showPlansAdmin(ctx, chatID, 0)
 		}
 	case "pricing":
 		if isAdmin {

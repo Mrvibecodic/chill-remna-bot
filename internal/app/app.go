@@ -1044,6 +1044,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui.adminInput = ""
 	ui.torAwait = false
 	ui.priceMonths = 0
+	ui.planCode = ""
 	ui.linkUID = 0
 	ui.inputBack = ""
 	ui.awaitPromo = false
@@ -1057,6 +1058,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onMenu(ctx, chatID, val, isAdmin, fname, uname)
 	case "prc":
 		a.onPricing(ctx, chatID, val)
+	case cbPlans:
+		a.onPlansAdmin(ctx, chatID, val)
 	case "yk":
 		a.onYKAdmin(ctx, chatID, val)
 	case "star":

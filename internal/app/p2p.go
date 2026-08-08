@@ -767,6 +767,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	}
 
 	switch ui.adminInput {
+	case "plan_name", "plan_desc", "plan_icon":
+		a.applyPlanText(ctx, chatID, ui.adminInput, text)
 	case "cards":
 		ui.adminInput = ""
 		cards := splitTrim(text, ";")
