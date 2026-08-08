@@ -30,8 +30,8 @@ type Plan struct {
 	// Лимиты тарифа. Раньше жили глобально на весь бот (Pricing.DeviceLimit,
 	// Pricing.TrafficStrategy) или картой по числу месяцев.
 	//
-	// TrafficGB: 0 = безлимит (так же трактует панель).
-	// DeviceLimit: 0 = без ограничения.
+	// TrafficGB: 0 = безлимит (панель снимает ограничение), как и в админке.
+	// DeviceLimit: 0 = лимит не задаётся, остаётся дефолт панели.
 	TrafficGB   int
 	DeviceLimit int
 	Strategy    string

@@ -174,6 +174,7 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 	}
 	if tb := snap.TrafficBytes(); tb > 0 && pu.TrafficLimit > 0 && pu.TrafficLimit < tb {
 		limits.TrafficBytes = tb
+		limits.TrafficSet = true
 		need = true
 		reason += "трафик "
 	}
@@ -187,6 +188,7 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 			InternalSquads: snap.IntSquads,
 			ExternalSquad:  snap.ExtSquad,
 			TrafficBytes:   snap.TrafficBytes(),
+			TrafficSet:     true,
 			DeviceLimit:    snap.DeviceLimit,
 			Strategy:       snap.Strategy,
 		}

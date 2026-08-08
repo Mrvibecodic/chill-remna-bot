@@ -271,7 +271,9 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 		return "", "", errors.New("panel offline")
 	}
 	link, expireAt, err := panel.CreateOrUpdateUserDays(ctx, chatID, tr.Days, remnawave.UserLimits{
-		TrafficBytes:   int64(tr.TrafficGB) * 1024 * 1024 * 1024,
+		TrafficBytes: int64(tr.TrafficGB) * 1024 * 1024 * 1024,
+		// «0 = безлимит» в настройках триала — тоже осознанный ноль.
+		TrafficSet:     true,
 		DeviceLimit:    tr.DeviceLimit,
 		InternalSquads: tr.InternalSquads,
 		ExternalSquad:  tr.ExternalSquadUUID,

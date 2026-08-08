@@ -632,8 +632,11 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		InternalSquads: snap.IntSquads,
 		ExternalSquad:  snap.ExtSquad,
 		TrafficBytes:   snap.TrafficBytes(),
-		DeviceLimit:    snap.DeviceLimit,
-		Strategy:       snap.Strategy,
+		// Покупка всегда задаёт трафик: ноль здесь означает «безлимит», как и
+		// написано в админке, и обязан уехать в панель нулём.
+		TrafficSet:  true,
+		DeviceLimit: snap.DeviceLimit,
+		Strategy:    snap.Strategy,
 	}
 	a.payLog(ctx, method, extID, telegramID, "finalize", "months=%d amount=%s", months, amount)
 	if panel == nil {

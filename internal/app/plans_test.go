@@ -9,6 +9,7 @@ import (
 
 	"remnabot/internal/config"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func planApp(t *testing.T) (*App, *fakeStore) {
@@ -398,5 +399,50 @@ func TestPaidWithoutPeriod_CallsAdmin(t *testing.T) {
 	}
 	if !strings.Contains(joined, "Администратор уведомлён") {
 		t.Fatalf("пользователь не уведомлён:\n%s", joined)
+	}
+}
+
+// «0 = безлимит» из админки обязан доезжать до панели нулём. Раньше нулевые
+// поля просто не отправлялись, и купивший безлимит после триала оставался с
+// триальным лимитом.
+func TestUnlimitedTrafficReachesPanel(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	ctx := context.Background()
+	const u int64 = 555
+	_ = fs.UpsertUser(ctx, u)
+	// Тариф без ограничения трафика — ровно то, что админка называет
+	// безлимитом.
+	a.botCfg.Pricing.Traffic = map[int]int{}
+
+	if _, _, err := a.finalizePurchase(ctx, u, 1, model.PayMethodStars, "150", "unlim_1", nil); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := patched["trafficLimitBytes"]
+	if !ok {
+		t.Fatalf("лимит трафика не отправлен в панель: %+v", patched)
+	}
+	if v != float64(0) {
+		t.Fatalf("безлимит должен уехать нулём, а уехало %v", v)
+	}
+}
+
+// Бонусные дни (реферальные и промокод «дни») по-прежнему обязаны НЕ трогать
+// лимиты: пустой набор — это «не менять», а не «обнулить».
+func TestBonusDaysDoNotTouchLimits(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, _ := snapApp(t, srv.URL)
+	ctx := context.Background()
+
+	if _, _, err := a.panel.CreateOrUpdateUserDays(ctx, 555, 7, remnawave.UserLimits{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := patched["trafficLimitBytes"]; ok {
+		t.Fatalf("бонусные дни не должны менять лимит трафика: %+v", patched)
+	}
+	if _, ok := patched["hwidDeviceLimit"]; ok {
+		t.Fatalf("бонусные дни не должны менять лимит устройств: %+v", patched)
 	}
 }

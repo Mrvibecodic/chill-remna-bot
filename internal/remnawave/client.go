@@ -937,7 +937,13 @@ func (c *Client) ResetAddSubDevices(ctx context.Context, telegramID int64, suffi
 }
 
 type UserLimits struct {
-	TrafficBytes   int64
+	TrafficBytes int64
+	// TrafficSet — лимит трафика задан осознанно. Без этого признака ноль
+	// неотличим от «не трогать», и «безлимит» (0 байт — панель снимает
+	// ограничение) до панели не доезжал: купивший безлимит после триала
+	// оставался с триальным лимитом. Пустой набор лимитов при этом обязан
+	// по-прежнему ничего не менять — на нём держатся бонусные дни.
+	TrafficSet     bool
 	DeviceLimit    int
 	InternalSquads []string
 	ExternalSquad  string
@@ -1006,7 +1012,7 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 }
 
 func applyLimits(body map[string]any, l UserLimits) {
-	if l.TrafficBytes > 0 {
+	if l.TrafficSet || l.TrafficBytes > 0 {
 		body["trafficLimitBytes"] = l.TrafficBytes
 	}
 	if l.Strategy != "" {
