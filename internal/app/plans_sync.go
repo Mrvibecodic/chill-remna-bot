@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 )
 
@@ -109,7 +110,16 @@ func pricingMeaning(cfg *model.BotConfig) string {
 	b.WriteString(pr.ResetStrategy())
 	for _, mo := range gridMonths(pr) {
 		if pr.Base[mo] == "" {
-			continue // срок не продаётся — его настроек покупатель не видит
+			// Срок снят с продажи, но его переопределения цен не мертвы: Fiat
+			// отдаёт их и без базовой цены, и по ним продлевает автосписание.
+			// Меняются они — админ должен узнать. Пишутся сырые значения:
+			// нули и пустые строки печатаются одинаково до и после канонизации,
+			// поэтому чистка мусорных записей уведомления не поднимает.
+			if pr.P2P[mo] == "" && pr.YooKassa[mo] == "" && pr.Stars[mo] == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "|%d!%s:%s:%d", mo, pr.P2P[mo], pr.YooKassa[mo], pr.Stars[mo])
+			continue
 		}
 		ints := cfg.Plan.ActiveInternalSquads
 		if len(ints) == 0 && cfg.P2P.SquadUUID != "" {
@@ -465,4 +475,17 @@ func toggleString(cur []string, v string) []string {
 		}
 	}
 	return append(append([]string(nil), cur...), v)
+}
+
+// sendHealNotice отправляет отложенное уведомление о лечении сетки после
+// отката. Зовётся из Run, когда мессенджер уже есть.
+func (a *App) sendHealNotice(ctx context.Context) {
+	a.mu.Lock()
+	pending := a.healNotice
+	a.healNotice = false
+	a.mu.Unlock()
+	if !pending {
+		return
+	}
+	a.notify(ctx, a.cfg.AdminID, i18n.T(a.lang(a.cfg.AdminID), "plans.mirror_healed"))
 }

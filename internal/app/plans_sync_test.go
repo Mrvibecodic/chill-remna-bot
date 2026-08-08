@@ -761,3 +761,79 @@ func TestPlanSquadToggleOffAndClear(t *testing.T) {
 		t.Fatal("подделанный месяц завёл длительность-призрак")
 	}
 }
+
+// Лечение на старте не смеет ронять процесс: при загрузке конфига мессенджера
+// ещё нет, уведомление ждёт запуска бота и уходит первым сообщением.
+func TestHealNoticeDeferredUntilRun(t *testing.T) {
+	ctx := context.Background()
+	a, _ := planSyncApp(t, 0)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.setPlanPrice(ctx, "", 1, "base", "999"); err != nil {
+		t.Fatal(err)
+	}
+	// «Откат»: сетку правят в обход тарифа; на старте мессенджера нет.
+	a.mu.Lock()
+	a.botCfg.Pricing.Base[1] = "111"
+	a.mu.Unlock()
+	a.msg = nil
+
+	changed, err := a.syncPlansConfig(ctx)
+	if err != nil || !changed {
+		t.Fatalf("лечение не сработало: %v/%v", changed, err)
+	}
+	// Ровно так ведёт себя стартовый путь: флаг вместо прямой отправки.
+	a.mu.Lock()
+	a.healNotice = true
+	a.mu.Unlock()
+
+	// Запуск: мессенджер появился, уведомление ушло один раз.
+	fm := &fakeMsg{}
+	a.msg = fm
+	a.sendHealNotice(ctx)
+	if !strings.Contains(fm.last(), "восстановлены") {
+		t.Fatalf("уведомление о лечении не ушло: %q", fm.last())
+	}
+	n := len(fm.texts)
+	a.sendHealNotice(ctx)
+	if len(fm.texts) != n {
+		t.Fatal("уведомление ушло повторно")
+	}
+}
+
+// Цены снятых с продажи сроков не немые: по переопределению без базовой цены
+// продлевает автосписание, и его изменение на откате должно поднимать
+// уведомление при лечении.
+func TestHealNoticesOffSalePriceChange(t *testing.T) {
+	ctx := context.Background()
+	a, _ := planSyncApp(t, 0)
+	a.mu.Lock()
+	a.botCfg.Pricing.YooKassa[2] = "260" // переопределение без базовой цены
+	a.mu.Unlock()
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.setPlanPrice(ctx, "", 1, "base", "999"); err != nil {
+		t.Fatal(err)
+	}
+	// Первое лечение после флипа — канонизация, молчит.
+	if changed, err := a.syncPlansConfig(ctx); err != nil || changed {
+		t.Fatalf("канонизация подняла уведомление: %v/%v", changed, err)
+	}
+
+	// «Откат»: старый образ поменял цену продления снятого с продажи срока.
+	a.mu.Lock()
+	a.botCfg.Pricing.YooKassa[2] = "999"
+	a.mu.Unlock()
+	changed, err := a.syncPlansConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("смена цены автопродления прошла без уведомления")
+	}
+	if got := a.pricing().Fiat(model.PayMethodYooKassa, 2); got != "260" {
+		t.Fatalf("цена автопродления не восстановлена из тарифа: %q", got)
+	}
+}

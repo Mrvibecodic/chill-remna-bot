@@ -84,6 +84,10 @@ type App struct {
 	mu     sync.Mutex
 	store  storage.Storage
 	botCfg *model.BotConfig
+	// healNotice — на старте зеркало нашло расхождение сетки с тарифом и
+	// восстановило её (след отката). Уведомить админа надо, но в момент
+	// загрузки конфига мессенджера ещё нет — флаг ждёт запуска бота.
+	healNotice bool
 	// basePlanRef — тариф «Базовый», прочитанный при последней синхронизации.
 	// Нужен там, где тариф требуется под замком и лезть в базу нельзя (снимок
 	// условий сделки). nil до первой синхронизации.
@@ -250,8 +254,14 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 			// Сетка отличалась от тарифа. Так бывает после отката: старый образ
 			// правит цены прямо в конфиге, а тариф — истина. Восстановили из
 			// тарифа — и говорим об этом, молча менять прайс нельзя.
+			//
+			// Само сообщение уходит из Run: здесь загрузка конфига, мессенджера
+			// ещё нет, и прямой notify падал бы на первом же старте после
+			// отката — вместе с уведомлением пропадал бы и бот.
 			a.log.Warn("сетка цен отличалась от тарифа и восстановлена из него")
-			a.notify(ctx, a.cfg.AdminID, i18n.T(a.lang(a.cfg.AdminID), "plans.mirror_healed"))
+			a.mu.Lock()
+			a.healNotice = true
+			a.mu.Unlock()
 		}
 	}
 	return nil
@@ -378,6 +388,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
+	a.sendHealNotice(ctx)
 	a.notifyUpdated(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)
