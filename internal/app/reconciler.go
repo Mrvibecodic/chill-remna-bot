@@ -13,6 +13,11 @@ import (
 	"remnabot/internal/storage"
 )
 
+// invoiceSnapRetentionDays — сколько держим условия выставленных счетов Stars.
+// Счёт в переписке оплачиваемым остаётся, но за такой срок цены и лимиты уже
+// точно менялись не раз.
+const invoiceSnapRetentionDays = 30
+
 const (
 	reconcileInterval = 2 * time.Minute
 	reconcileGrace    = 2 * time.Minute
@@ -44,9 +49,8 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		a.payLogPurgedAt = time.Now()
 		_ = st.PurgePayLogs(ctx, time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339))
 		_ = st.PurgeTorrentReports(ctx, time.Now().UTC().Add(-torrentRetention).Format(time.RFC3339))
-		// Условия счетов, которые уже не применятся (см. срок годности в
-		// starsSnapshot): с запасом, чтобы не гоняться с проверкой на чтении.
-		_ = st.PurgeInvoiceSnapshots(ctx, time.Now().UTC().Add(-2*purchaseIntentTTL).Format(time.RFC3339))
+		// Условия счетов, которые заведомо уже никто не оплатит.
+		_ = st.PurgeInvoiceSnapshots(ctx, time.Now().UTC().AddDate(0, 0, -invoiceSnapRetentionDays).Format(time.RFC3339))
 	}
 	cutoff := time.Now().UTC().Add(-reconcileGrace).Format(time.RFC3339)
 	list, err := st.ListUnresolvedPending(ctx, cutoff, reconcileBatch)

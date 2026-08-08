@@ -661,9 +661,10 @@ func TestPeriodOffSale_NotSoldAnywhere(t *testing.T) {
 	}
 }
 
-// Условия счёта Stars не применяются вечно: счёт полугодовой давности — это уже
-// не сегодняшняя сделка.
-func TestStarsSnapshot_Expires(t *testing.T) {
+// Условия счёта Stars переживают и правку конфига, и время: счёт в переписке
+// остаётся оплачиваемым, и оплата обязана применить проданное. Убирает такие
+// строки только фоновая чистка — с запасом, который счёт не переживает.
+func TestStarsSnapshot_KeptUntilPurge(t *testing.T) {
 	ctx := context.Background()
 	a, fs := planApp(t)
 	const u int64 = 555
@@ -675,10 +676,54 @@ func TestStarsSnapshot_Expires(t *testing.T) {
 	if got := a.starsSnapshot(ctx, u, 1); got == nil || got.DeviceLimit != 3 {
 		t.Fatalf("свежие условия счёта не применились: %+v", got)
 	}
-	// Состариваем строку.
+	// Счёт вчерашний — условия по-прежнему те, что продали.
 	fs.invSnapAt[invSnapKey(u, model.PayMethodStars, 1)] =
-		time.Now().UTC().Add(-purchaseIntentTTL - time.Hour).Format(time.RFC3339)
+		time.Now().UTC().Add(-30 * time.Hour).Format(time.RFC3339)
+	if got := a.starsSnapshot(ctx, u, 1); got == nil || got.DeviceLimit != 3 {
+		t.Fatalf("условия вчерашнего счёта потеряны: %+v", got)
+	}
+	// А совсем старые строки убирает чистка.
+	fs.invSnapAt[invSnapKey(u, model.PayMethodStars, 1)] =
+		time.Now().UTC().AddDate(0, 0, -invoiceSnapRetentionDays-1).Format(time.RFC3339)
+	if err := fs.PurgeInvoiceSnapshots(ctx,
+		time.Now().UTC().AddDate(0, 0, -invoiceSnapRetentionDays).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
 	if got := a.starsSnapshot(ctx, u, 1); got != nil {
-		t.Fatalf("применились условия протухшего счёта: %+v", got)
+		t.Fatalf("чистка не убрала брошенный счёт: %+v", got)
+	}
+}
+
+// Срок, снятый с продажи, не должен продаваться и по уже сделанному выбору:
+// у P2P и ЮKassa рядом остаётся переопределение цены, и без общей проверки
+// экран способов из переписки продолжал бы продавать сутки.
+func TestPeriodOffSale_NotSoldByStoredChoice(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, fs := planApp(t)
+	a.msg = fm
+	a.botCfg.P2P = model.P2PConfig{Enabled: true, OpenForAll: true, Cards: []string{"0000"}}
+	a.botCfg.Pricing.P2P = map[int]string{3: "390"}
+	a.botCfg.Pricing.YooKassa = map[int]string{3: "395"}
+	a.botCfg.YooKassa = model.YooKassaConfig{Enabled: true, ShopID: "1", SecretKey: "k"}
+	const u int64 = 555
+
+	a.handleCallback(ctx, cb(u, "buy:3"))
+	if a.buyMonths(ctx, u) != 3 {
+		t.Fatal("срок не выбрался")
+	}
+	// Админ снимает срок с продажи, переопределения цен остаются.
+	delete(a.botCfg.Pricing.Base, 3)
+
+	a.handleCallback(ctx, cb(u, "method:p2p"))
+	if len(fs.reqs) != 0 {
+		t.Fatalf("создана заявка на снятый с продажи срок: %+v", fs.reqs)
+	}
+	a.handleCallback(ctx, cb(u, "method:yk"))
+	if len(fs.pending) != 0 {
+		t.Fatalf("выставлен счёт на снятый с продажи срок: %+v", fs.pending)
+	}
+	if !strings.Contains(fm.joined(), "срок подписки") {
+		t.Fatalf("ожидалась витрина:\n%s", fm.joined())
 	}
 }

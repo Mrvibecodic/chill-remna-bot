@@ -156,10 +156,10 @@ func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
 	var rows [][]models.InlineKeyboardButton
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
-	if p2p.Enabled && pr.Fiat(model.PayMethodP2P, months) != "" {
+	if p2p.Enabled && pr.Base[months] != "" && pr.Fiat(model.PayMethodP2P, months) != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
-	if yk.Enabled && pr.Fiat(model.PayMethodYooKassa, months) != "" {
+	if yk.Enabled && pr.Base[months] != "" && pr.Fiat(model.PayMethodYooKassa, months) != "" {
 		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
@@ -289,19 +289,21 @@ func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (car
 		a.mu.Unlock()
 		return "", "", 0, errors.New(i18n.T(a.lang(chatID), "p2p.no_cards"))
 	}
+	price = pr.Fiat(model.PayMethodP2P, months)
+	if price == "" {
+		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек
+		// платит наугад, а админ подтверждает выдачу полного срока. Проверка
+		// до ротации карт: иначе отказ сдвигал бы очередь реквизитов впустую.
+		a.mu.Unlock()
+		return "", "", 0, errors.New("для этого срока не задана цена")
+	}
 	idx := 0
 	if p2p.Rotate && len(p2p.Cards) > 1 {
 		idx = p2p.RotateIdx % len(p2p.Cards)
 		a.botCfg.P2P.RotateIdx = idx + 1
 	}
 	card = p2p.Cards[idx]
-	price = pr.Fiat(model.PayMethodP2P, months)
 	a.mu.Unlock()
-	if price == "" {
-		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек
-		// платит наугад, а админ подтверждает выдачу полного срока.
-		return "", "", 0, errors.New("для этого срока не задана цена")
-	}
 	_ = a.saveBotConfig(ctx)
 
 	if a.store == nil {

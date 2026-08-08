@@ -140,7 +140,19 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		a.log.Error("cryptobot check: bad invoice payload", "invoice", invoiceID, "err", perr)
 		return
 	}
-	amount := a.cryptoAmount(months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat))
+	rawAmount := cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)
+	if months <= 0 {
+		// «tg:0» — это оплаченное пополнение, у которого не осталось строки
+		// счёта. Ветка вебхука зовёт админа, и ручная кнопка обязана вести
+		// себя так же: иначе она продлит подписку на ноль месяцев и закроет
+		// ext_id, после чего деньги не зачислить уже никак.
+		a.payLog(ctx, model.PayMethodCryptoBot, extID, payChat, "error", "оплаченное пополнение без pending-записи (сумма %s) — зачислите вручную", rawAmount)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "cb.admin_lost_topup", extID, rawAmount, a.userLabelByID(ctx, payChat)))
+		a.sendHome(ctx, chatID, i18n.T(lang, "pay.no_period"))
+		return
+	}
+	amount := a.cryptoAmount(months, rawAmount)
 	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID, a.pendingSnapshot(ctx, extID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {

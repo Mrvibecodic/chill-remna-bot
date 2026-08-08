@@ -41,9 +41,10 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	// Условия сделки фиксируем в намерении покупки: у Stars нет строки счёта в
-	// базе, а payload трогать нельзя — иначе предпроверка отклонит легитимную
-	// оплату (разбор превращает в число весь остаток строки).
+	// Условия сделки фиксируем в таблице условий счетов: у Stars нет строки в
+	// очереди незакрытых счетов, а payload трогать нельзя — иначе предпроверка
+	// отклонит легитимную оплату (разбор превращает в число весь остаток
+	// строки).
 	a.rememberStarsSnapshot(ctx, chatID, months, a.planSnapshot(months))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
