@@ -176,7 +176,7 @@ func (a *App) planEditFailed(ctx context.Context, chatID int64, code string, err
 		return
 	}
 	a.log.Warn("тариф не сохранён", "err", err, "plan", code)
-	a.sendPayKB(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"),
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "err.storage"),
 		[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
 }
 
@@ -184,7 +184,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	lang := a.lang(chatID)
 	plans, err := a.planList(ctx)
 	if err != nil {
-		a.sendPayKB(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "err.storage"),
 			[][]models.InlineKeyboardButton{navBack(lang, "menu:pay")})
 		return
 	}
@@ -198,6 +198,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	if page >= pages {
 		page = pages - 1
 	}
+	a.getUI(chatID).plansPage = page
 	from := page * plansPageSize
 	to := min(from+plansPageSize, len(plans))
 
@@ -260,7 +261,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
 	p, err := a.planByCode(ctx, code)
 	if err != nil {
-		a.sendPayKB(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"),
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "err.storage"),
 			[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
 		return
 	}
@@ -280,9 +281,13 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	if desc == "" {
 		desc = i18n.T(lang, "admin.none")
 	}
+	// Экранируется всё, что человек когда-либо вводил руками: не только имя и
+	// описание, но и валюта со стратегией внутри строк лимитов и сроков.
+	// Незакрытый тег где угодно в тексте — это отказ Telegram отправить
+	// сообщение, то есть карточка, из которой уже не выбраться.
 	body := i18n.T(lang, "plans.card",
 		planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc),
-		a.planLimitsLine(lang, p), planDurationsLine(lang, p))
+		html.EscapeString(a.planLimitsLine(lang, p)), html.EscapeString(planDurationsLine(lang, p)))
 	// Продаёт бот пока по старой сетке цен: витрина, счета и финализация читают
 	// конфиг. Тариф, заведённый рядом, ни на что не влияет — говорим об этом
 	// прямо, иначе выключённый «Базовый» выглядел бы как остановка продаж.
@@ -351,9 +356,18 @@ func planDurationsLine(lang string, p *model.Plan) string {
 func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	lang := a.lang(chatID)
+	// Любое нажатие, кроме вопроса о поле, означает, что предыдущий вопрос
+	// брошен. Иначе взведённое ожидание ввода живёт вечно: админ нажал «Имя»,
+	// ушёл с экрана — и любой текст, присланный боту через час, молча
+	// переименовывает тариф.
+	switch action {
+	case "name", "desc", "icon":
+	default:
+		a.forgetPlanInput(chatID)
+	}
 	switch action {
 	case "", "list":
-		a.showPlansAdmin(ctx, chatID, 0)
+		a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 	case "page":
 		page, _ := strconv.Atoi(arg)
 		a.showPlansAdmin(ctx, chatID, page)
@@ -376,14 +390,14 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 	case "dup":
 		src, err := a.planByCode(ctx, arg)
 		if err != nil || src == nil {
-			a.showPlansAdmin(ctx, chatID, 0)
+			a.planEditFailed(ctx, chatID, arg, planGoneOr(err))
 			return
 		}
 		a.createPlan(ctx, chatID, src)
 	case "del":
 		p, err := a.planByCode(ctx, arg)
 		if err != nil || p == nil {
-			a.showPlansAdmin(ctx, chatID, 0)
+			a.planEditFailed(ctx, chatID, arg, planGoneOr(err))
 			return
 		}
 		// Про действующих подписчиков говорим главное: удаление тарифа никого не
@@ -398,7 +412,39 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 			})
 	case "delyes":
 		a.deletePlan(ctx, chatID, arg)
+	default:
+		// Неизвестное действие домена — это кнопка, добавленная без маршрута.
+		// Показать список честнее, чем не ответить ничем.
+		a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 	}
+}
+
+// planGoneOr отличает «тариф удалили» от «база недоступна»: сообщения разные, и
+// путать их нельзя — в первом случае админу нечего ждать, во втором есть.
+func planGoneOr(err error) error {
+	if err != nil {
+		return err
+	}
+	return errPlanGone
+}
+
+// plansPage — страница списка, на которой админ был последний раз. Номер
+// страницы не в callback'ах намеренно: он нужен и после правки, и после
+// удаления, и на кнопке «назад» из карточки — протаскивать его через каждую
+// кнопку значило бы удлинять callback-данные ради того же результата.
+func (a *App) plansPage(chatID int64) int {
+	return a.getUI(chatID).plansPage
+}
+
+// forgetPlanInput снимает ожидание ввода поля тарифа.
+func (a *App) forgetPlanInput(chatID int64) {
+	ui := a.getUI(chatID)
+	switch ui.adminInput {
+	case "plan_name", "plan_desc", "plan_icon":
+		ui.adminInput = ""
+		ui.inputBack = ""
+	}
+	ui.planCode = ""
 }
 
 // askPlanText спрашивает текстовое поле тарифа. Код тарифа запоминается в
@@ -407,10 +453,18 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 // ввод.
 func (a *App) askPlanText(ctx context.Context, chatID int64, code, input, key string) {
 	if code == "" {
-		a.showPlansAdmin(ctx, chatID, 0)
+		a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 		return
 	}
 	ui := a.getUI(chatID)
+	// Незакрытые ожидания текста с ДРУГИХ экранов перехватывают сообщение раньше
+	// (handleMessage смотрит их до adminInput), и ответ на этот вопрос уходил бы
+	// в приветственный баннер, в эмодзи или в причину отказа по заявке. Админ,
+	// нажавший «Имя», спрашивается именно об имени — прежние вопросы сняты.
+	ui.welcomeAwait = ""
+	ui.awaitEmojiFor = ""
+	ui.awaitTopUp = false
+	ui.rejectReq = 0
 	ui.adminInput = input
 	ui.planCode = code
 	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), key), "pln:open:"+code)
@@ -452,26 +506,38 @@ func (a *App) applyPlanText(ctx context.Context, chatID int64, field, text strin
 			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
 		return
 	}
+	// Имя стереть нельзя ни пустой строкой, ни прочерком: безымянный тариф в
+	// витрине читается как сбой бота. Молча возвращать карточку тоже нельзя —
+	// это выглядело бы как «сохранено».
+	if field == "plan_name" && (v == "" || v == "-") {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.name_required"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
+		return
+	}
 
 	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
-		// Прочерк — общий для админки способ «стереть значение»; у имени его нет:
-		// безымянный тариф в витрине выглядел бы как сбой.
+		// Прочерк — общий для этой админки способ «стереть значение», и стирает
+		// ровно он: пустой ввод (в том числе из одних пробелов) значения не
+		// трогает, иначе случайно отправленный пробел стирал бы описание.
 		switch field {
 		case "plan_name":
-			if v == "" {
-				return nil
-			}
 			p.Name = v
 		case "plan_desc":
-			if v == "-" {
-				v = ""
+			switch v {
+			case "-":
+				p.Description = ""
+			case "":
+			default:
+				p.Description = v
 			}
-			p.Description = v
 		case "plan_icon":
-			if v == "-" {
-				v = ""
+			switch v {
+			case "-":
+				p.Icon = ""
+			case "":
+			default:
+				p.Icon = v
 			}
-			p.Icon = v
 		}
 		return nil
 	})
@@ -487,22 +553,23 @@ func (a *App) togglePlan(ctx context.Context, chatID int64, code string) {
 	// Тариф без длительностей включать нельзя: в витрине он либо пустой, либо
 	// продаётся по пустой цене. Ровно поэтому новый тариф и создаётся
 	// выключенным — здесь тот же запрет с другой стороны.
-	empty := false
 	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
 		if !p.Enabled && len(p.Durations) == 0 {
-			empty = true
-			return nil
+			// Отказ возвращается ошибкой, а не флагом: тогда строка тарифа не
+			// перезаписывается вообще — незачем трогать базу, чтобы ничего не
+			// изменить.
+			return errPlanNoDurations
 		}
 		p.Enabled = !p.Enabled
 		return nil
 	})
-	if err != nil {
-		a.planEditFailed(ctx, chatID, code, err)
-		return
-	}
-	if empty {
+	if errors.Is(err, errPlanNoDurations) {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.enable_empty"),
 			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
+		return
+	}
+	if err != nil {
+		a.planEditFailed(ctx, chatID, code, err)
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
@@ -535,11 +602,14 @@ func (a *App) movePlan(ctx context.Context, chatID int64, code string, delta int
 	if idx < 0 || other < 0 || other >= len(plans) {
 		a.plansMu.Unlock()
 		if idx < 0 {
-			a.showPlansAdmin(ctx, chatID, 0)
+			a.planEditFailed(ctx, chatID, code, errPlanGone)
 			return
 		}
-		// Крайний тариф: молча возвращаем карточку, ничего не записывая.
-		a.showPlanCard(ctx, chatID, code)
+		// Крайний тариф: в базу не пишем ничего, но и молчать нельзя — экран
+		// остался бы прежним, и кнопка выглядела бы сломанной.
+		lang := a.lang(chatID)
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.move_edge"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
 		return
 	}
 	plans[idx], plans[other] = plans[other], plans[idx]
@@ -560,7 +630,7 @@ func (a *App) movePlan(ctx context.Context, chatID int64, code string, delta int
 		a.planEditFailed(ctx, chatID, code, failed)
 		return
 	}
-	a.showPlansAdmin(ctx, chatID, 0)
+	a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 }
 
 // createPlan заводит новый тариф. src != nil — это дублирование: копия
@@ -573,7 +643,7 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 	code, err := newPlanCode()
 	if err != nil {
 		a.log.Warn("код тарифа не сгенерирован", "err", err)
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "plans.code_failed"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.code_failed"))
 		return
 	}
 	p := &model.Plan{Code: code, Availability: model.PlanAvailAll}
@@ -583,10 +653,15 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 		p.Code = code
 		p.CreatedAt = ""
 		p.UpdatedAt = ""
-		// Имя копии складывается из имени источника, поэтому его приходится
-		// подрезать: без этого повторное дублирование выходило бы за границу
-		// длины и упиралось в отказ вместо копии.
-		p.Name = clampRunes(i18n.T(lang, "plans.copy_name", strings.TrimSpace(src.Name)), planNameMaxLen)
+		// Имя копии складывается из имени источника, и подрезать надо именно
+		// имя источника, а не готовую строку: иначе у длинного имени пометка
+		// «копия» отрезалась бы, и копия становилась неотличима от источника в
+		// списке — различить их можно было бы только по коду в карточке.
+		room := planNameMaxLen - len([]rune(i18n.T(lang, "plans.copy_name", "")))
+		if room < 1 {
+			room = 1
+		}
+		p.Name = clampRunes(i18n.T(lang, "plans.copy_name", clampRunes(strings.TrimSpace(src.Name), room)), planNameMaxLen)
 		p.IntSquads = append([]string(nil), src.IntSquads...)
 		p.Durations = clonePlanDurations(src.Durations)
 	} else {
@@ -614,17 +689,22 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 			return errPlanCodeTaken
 		}
 		// В конец списка: новый тариф не должен вытеснять действующий с первой
-		// строки витрины.
-		p.Order = a.nextPlanOrder(ctx)
+		// строки витрины. Не прочитали список — не создаём: тариф, встающий
+		// первым, увели бы покупателей с действующего.
+		order, err := a.nextPlanOrder(ctx)
+		if err != nil {
+			return err
+		}
+		p.Order = order
 		return a.savePlan(ctx, p)
 	}()
 	switch {
 	case errors.Is(err, errPlanCodeTaken):
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "plans.code_failed"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.code_failed"))
 		return
 	case err != nil:
 		a.log.Warn("тариф не создан", "err", err)
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
@@ -632,6 +712,9 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 
 // errPlanCodeTaken — сгенерированный код уже занят.
 var errPlanCodeTaken = errors.New("код тарифа занят")
+
+// errPlanNoDurations — у тарифа не заданы сроки, включать нечего.
+var errPlanNoDurations = errors.New("у тарифа нет длительностей")
 
 // clampRunes подрезает строку по числу символов, а не байтов: в имени тарифа
 // кириллица и эмодзи — норма.
@@ -673,10 +756,10 @@ func clonePlanDurations(src []model.PlanDuration) []model.PlanDuration {
 }
 
 // nextPlanOrder — номер в конце списка.
-func (a *App) nextPlanOrder(ctx context.Context) int {
+func (a *App) nextPlanOrder(ctx context.Context) (int, error) {
 	plans, err := a.planList(ctx)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	next := 0
 	for i := range plans {
@@ -684,7 +767,7 @@ func (a *App) nextPlanOrder(ctx context.Context) int {
 			next = plans[i].Order + 1
 		}
 	}
-	return next
+	return next, nil
 }
 
 func (a *App) deletePlan(ctx context.Context, chatID int64, code string) {
@@ -699,12 +782,13 @@ func (a *App) deletePlan(ctx context.Context, chatID int64, code string) {
 	st := a.store
 	a.mu.Unlock()
 	if st == nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
 	if err := st.DeletePlan(ctx, code); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+i18n.T(lang, "err.storage"))
+		a.log.Warn("тариф не удалён", "err", err, "plan", code)
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	a.showPlansAdmin(ctx, chatID, 0)
+	a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 }

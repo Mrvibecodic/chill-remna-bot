@@ -177,6 +177,9 @@ func (a *App) showPricing(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "pricing.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "pricing.btn_devices"), "prc:devices")},
 		{btn(i18n.T(lang, "pricing.btn_strategy"), "prc:strategy")},
 		{btn(i18n.T(lang, "pricing.btn_squads"), "prc:squads")},
+		// Ссылка в тарифы: на этот экран отправляет карточка тарифа, и без
+		// обратного пути админ возвращался бы через «Продажи».
+		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -449,10 +450,22 @@ func TestPlansAdmin_MoveWithEqualOrders(t *testing.T) {
 	}
 }
 
-// Код тарифа генерируется без перекоса: остаток от деления 256 на длину
-// алфавита давал бы первым символам преимущество, а код должен быть
-// неперебираемым.
+// Код тарифа генерируется без перекоса. Проверка не «отклонение не больше
+// стольких процентов» (такой порог перекос по модулю не видит: 256 на 27 не
+// делится, преимущество первых символов всего около пяти процентов), а критерий
+// хи-квадрат — он на этих объёмах отличает перекос от случайности с огромным
+// запасом: у ровного распределения ожидаемое значение около 26, у перекошенного
+// счёт идёт на сотни.
 func TestNewPlanCode_NoModuloBias(t *testing.T) {
+	// Длина и алфавит проверяются литералами намеренно: сверка с теми же
+	// константами, из которых код и собран, не проверяет ничего.
+	if planCodeLen != 12 {
+		t.Fatalf("длина кода изменилась: %d — пересчитайте запас на перебор", planCodeLen)
+	}
+	if len([]rune(planCodeAlphabet)) != 27 {
+		t.Fatalf("алфавит кода изменился: %d символов — пересчитайте запас на перебор", len([]rune(planCodeAlphabet)))
+	}
+
 	seen := map[rune]int{}
 	const codes = 8000
 	for i := 0; i < codes; i++ {
@@ -460,7 +473,7 @@ func TestNewPlanCode_NoModuloBias(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(code) != planCodeLen || !model.ValidPlanCode(code) {
+		if len(code) != 12 || !model.ValidPlanCode(code) {
 			t.Fatalf("негодный код: %q", code)
 		}
 		for _, r := range code {
@@ -473,11 +486,19 @@ func TestNewPlanCode_NoModuloBias(t *testing.T) {
 	if len(seen) != len([]rune(planCodeAlphabet)) {
 		t.Fatalf("часть алфавита не встречается: %d из %d", len(seen), len([]rune(planCodeAlphabet)))
 	}
-	expect := float64(codes*planCodeLen) / float64(len([]rune(planCodeAlphabet)))
-	for r, n := range seen {
-		if float64(n) < expect*0.8 || float64(n) > expect*1.2 {
-			t.Fatalf("перекос по символу %q: %d против ожидаемых ~%.0f", r, n, expect)
-		}
+
+	buckets := float64(len([]rune(planCodeAlphabet)))
+	expect := float64(codes*12) / buckets
+	chi := 0.0
+	for _, n := range seen {
+		d := float64(n) - expect
+		chi += d * d / expect
+	}
+	// 26 степеней свободы: ровное распределение даёт около 26, порог 100
+	// достигается случайно с вероятностью порядка одной миллионной, а перекос по
+	// модулю даёт сотни.
+	if chi > 100 {
+		t.Fatalf("распределение символов кода перекошено: хи-квадрат %.0f при ожидаемых ~26", chi)
 	}
 }
 
@@ -505,5 +526,224 @@ func TestPlansAdmin_NotForRegularUser(t *testing.T) {
 	}
 	if strings.Contains(fm.last(), "Тарифы") {
 		t.Fatalf("обычному пользователю показали админский экран: %q", fm.last())
+	}
+}
+
+// Экранируется всё, что человек когда-либо вводил руками, а не только имя:
+// описание, значок и валюта тоже попадают в текст карточки, и незакрытый тег в
+// любом из них — это отказ Telegram отправить сообщение, то есть карточка, из
+// которой уже не выбраться.
+func TestPlansAdmin_AllHandTypedFieldsEscaped(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _ := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	planTap(t, a, "pln:desc:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, "до 5 <устройств> & быстро"))
+	planTap(t, a, "pln:icon:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, "<b>"))
+	// Валюта — свободный ввод админа на экране цен, и она едет в строку сроков.
+	a.setCurrency("<b>USD")
+	planTap(t, a, "pln:open:"+model.PlanCodeBase)
+
+	card := fm.last()
+	for _, raw := range []string{"<устройств>", "<b>USD"} {
+		if strings.Contains(card, raw) {
+			t.Fatalf("значение %q не экранировано, карточка не отправится: %q", raw, card)
+		}
+	}
+	if !strings.Contains(card, "&lt;устройств&gt;") || !strings.Contains(card, "&amp;") {
+		t.Fatalf("описание потеряно при экранировании: %q", card)
+	}
+	// Разметка самой карточки при этом остаётся разметкой.
+	if !strings.Contains(card, "<b>") || !strings.Contains(card, "<code>") {
+		t.Fatalf("экранирование съело разметку карточки: %q", card)
+	}
+}
+
+// Прочерк стирает описание и значок, пустой ввод не трогает ничего, а имя не
+// стирается ни тем, ни другим: безымянный тариф в витрине читается как сбой.
+func TestPlansAdmin_ClearAndEmptyInput(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	set := func(action, text string) {
+		planTap(t, a, "pln:"+action+":"+model.PlanCodeBase)
+		a.handleMessage(ctx, msgText(planAdmin, text))
+	}
+	plan := func() *model.Plan {
+		p, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+		return p
+	}
+
+	set("desc", "описание")
+	set("icon", "🚀")
+	if p := plan(); p.Description != "описание" || p.Icon != "🚀" {
+		t.Fatalf("значения не сохранены: %+v", p)
+	}
+
+	// Пустой ввод (в том числе из одних пробелов) значения не трогает.
+	set("desc", "   ")
+	set("icon", "  ")
+	if p := plan(); p.Description != "описание" || p.Icon != "🚀" {
+		t.Fatalf("пробельный ввод стёр значение: %+v", p)
+	}
+
+	set("desc", "-")
+	set("icon", "-")
+	if p := plan(); p.Description != "" || p.Icon != "" {
+		t.Fatalf("прочерк не стёр значения: %+v", p)
+	}
+
+	// Имя: ни пусто, ни прочерк — и об отказе говорится вслух.
+	before := plan().Name
+	for _, text := range []string{"", "   ", "-"} {
+		set("name", text)
+		if p := plan(); p.Name != before {
+			t.Fatalf("имя стёрто вводом %q: %q", text, p.Name)
+		}
+		if !strings.Contains(fm.last(), "должно быть имя") {
+			t.Fatalf("отказ по имени (%q) не показан: %q", text, fm.last())
+		}
+	}
+}
+
+// Отклонённое по длине значение не должно стирать прежнее, а законное значение
+// по границе — приниматься. Значок ограничен своей границей, не именной.
+func TestPlansAdmin_LimitsKeepPreviousValue(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	set := func(action, text string) {
+		planTap(t, a, "pln:"+action+":"+model.PlanCodeBase)
+		a.handleMessage(ctx, msgText(planAdmin, text))
+	}
+	plan := func() *model.Plan {
+		p, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+		return p
+	}
+
+	set("desc", "живое описание")
+	set("desc", strings.Repeat("о", planDescMaxLen+1))
+	if p := plan(); p.Description != "живое описание" {
+		t.Fatalf("отклонённое описание затёрло прежнее: %q", p.Description)
+	}
+	// Ровно по границе — принимается, и многострочность сохраняется.
+	long := strings.Repeat("о", planDescMaxLen-2) + "\nх"
+	set("desc", long)
+	if p := plan(); p.Description != long {
+		t.Fatalf("описание по границе отклонено или потеряло строки: %d символов", len([]rune(p.Description)))
+	}
+
+	set("icon", "🚀")
+	set("icon", strings.Repeat("э", planIconMaxLen+1))
+	if p := plan(); p.Icon != "🚀" {
+		t.Fatalf("значок принял значение длиннее своей границы: %q", p.Icon)
+	}
+}
+
+// Дублирование: копия обязана быть самостоятельной — свой код, не ведомая от
+// конфига, со своими датами и со своими лимитами, а не общими с источником.
+func TestPlansAdmin_DuplicateIsIndependent(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+
+	planTap(t, a, "pln:dup:"+model.PlanCodeBase)
+	list, _ := fs.ListPlans(ctx)
+	var cp *model.Plan
+	for i := range list {
+		if list[i].Code != model.PlanCodeBase {
+			cp = &list[i]
+		}
+	}
+	if cp == nil {
+		t.Fatal("копия не создана")
+	}
+	if cp.FromConfig {
+		t.Fatal("копия помечена ведомой от сетки цен — синхронизация «Базового» её затрёт")
+	}
+	if cp.CreatedAt == base.CreatedAt && base.CreatedAt != "" {
+		t.Fatal("копия унаследовала дату создания источника")
+	}
+	// Переопределения лимитов у длительностей — указатели; общие указатели
+	// означали бы, что правка копии молча меняет условия источника.
+	bd, cd := base.Duration(12), cp.Duration(12)
+	if bd == nil || cd == nil {
+		t.Fatalf("длительность 12 мес потерялась: источник %+v, копия %+v", base.Durations, cp.Durations)
+	}
+	if bd.IntSquads != nil && cd.IntSquads != nil && &(*bd.IntSquads)[0] == &(*cd.IntSquads)[0] {
+		t.Fatal("копия делит набор сквадов длительности с источником")
+	}
+	if len(base.IntSquads) > 0 && len(cp.IntSquads) > 0 && &base.IntSquads[0] == &cp.IntSquads[0] {
+		t.Fatal("копия делит сквады тарифа с источником")
+	}
+
+	// И имя копии отличимо от имени источника даже у имени по границе длины.
+	longName := strings.Repeat("я", planNameMaxLen)
+	planTap(t, a, "pln:name:"+model.PlanCodeBase)
+	a.handleMessage(ctx, msgText(planAdmin, longName))
+	planTap(t, a, "pln:dup:"+model.PlanCodeBase)
+	list, _ = fs.ListPlans(ctx)
+	for i := range list {
+		if list[i].Code == model.PlanCodeBase {
+			continue
+		}
+		if list[i].Name == longName {
+			t.Fatalf("копия неотличима от источника по имени: %q", list[i].Name)
+		}
+		if len([]rune(list[i].Name)) > planNameMaxLen {
+			t.Fatalf("имя копии длиннее границы: %d символов", len([]rune(list[i].Name)))
+		}
+	}
+}
+
+// Список листается, а действие возвращает на ту же страницу: иначе протащить
+// тариф вверх с третьей страницы значило бы листать заново после каждого
+// нажатия.
+func TestPlansAdmin_PaginationKeepsPage(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	for i := 0; i < plansPageSize*2+3; i++ {
+		code := "plan" + strconv.Itoa(100+i)
+		if err := fs.SavePlan(ctx, &model.Plan{Code: code, Name: code, Order: i, Availability: model.PlanAvailAll}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planTap(t, a, "menu:plans")
+	if !strings.Contains(fm.last(), "страница 1 из 3") {
+		t.Fatalf("первая страница не показана: %q", fm.last())
+	}
+	planTap(t, a, "pln:page:1")
+	if !strings.Contains(fm.last(), "страница 2 из 3") {
+		t.Fatalf("вторая страница не показана: %q", fm.last())
+	}
+
+	// Перестановка на второй странице оставляет админа на второй странице.
+	planTap(t, a, "pln:down:plan108")
+	if !strings.Contains(fm.last(), "страница 2 из 3") {
+		t.Fatalf("после перестановки страница сбросилась: %q", fm.last())
+	}
+	list, _ := fs.ListPlans(ctx)
+	if list[8].Code != "plan109" || list[9].Code != "plan108" {
+		t.Fatalf("тариф не переставлен: %s, %s", list[8].Code, list[9].Code)
+	}
+
+	// Кнопки из старого сообщения не должны выносить за границы списка.
+	for _, data := range []string{"pln:page:-5", "pln:page:99", "pln:page:", "pln:page:abc"} {
+		planTap(t, a, data)
+		if !strings.Contains(fm.last(), "из 3") {
+			t.Fatalf("%s: экран сломался: %q", data, fm.last())
+		}
 	}
 }
