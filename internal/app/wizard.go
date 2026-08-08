@@ -552,6 +552,10 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	delete(a.wiz, chatID)
 	a.mu.Unlock()
 
+	if err := a.syncBasePlan(ctx); err != nil {
+		a.log.Warn("тариф «Базовый» не сохранён", "err", err)
+	}
+
 	a.sendKB(ctx, chatID, i18n.T(lang, "step.verify.ok", count), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "step.verify.btn_admin"), "menu:home")},
 	})

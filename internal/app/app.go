@@ -225,6 +225,13 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 			}
 		}
 		a.log.Info("конфигурация загружена, бот установлен", "db", a.store.Kind())
+		// Тариф «Базовый»: при первом запуске новой версии текущая сетка цен
+		// переезжает в таблицу тарифов, дальше поддерживается в актуальном
+		// состоянии (см. internal/app/plans.go). Ошибка боту не мешает:
+		// продажи пока идут по конфигу.
+		if err := a.syncBasePlan(ctx); err != nil {
+			a.log.Warn("тариф «Базовый» не сохранён", "err", err)
+		}
 	}
 	return nil
 }

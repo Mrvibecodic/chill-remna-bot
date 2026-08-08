@@ -26,7 +26,17 @@ func (a *App) saveBotConfig(ctx context.Context) error {
 	if cfg == nil || st == nil {
 		return fmt.Errorf("бот не настроен")
 	}
-	return st.SaveConfig(ctx, cfg)
+	if err := st.SaveConfig(ctx, cfg); err != nil {
+		return err
+	}
+	// Пока редактора тарифов нет, «Базовый» ведомый от сетки цен
+	// (см. internal/app/plans.go). Сохранение конфига — единственный момент,
+	// когда цены меняются, поэтому синхронизация висит здесь, а не на каждом
+	// из девяти десятков вызывающих.
+	if err := a.syncBasePlan(ctx); err != nil {
+		a.log.Warn("тариф «Базовый» не сохранён", "err", err)
+	}
+	return nil
 }
 
 func (a *App) p2pConfig() model.P2PConfig {
