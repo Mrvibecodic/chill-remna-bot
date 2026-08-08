@@ -538,10 +538,16 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 	return out, total, rows.Err()
 }
 
+// subPaymentCond отбирает платежи, которые действительно являются покупкой
+// подписки. Триал (`method='trial'`) и пополнения баланса пишутся в ту же
+// таблицу с months = 0 — без этого условия они попадали и в «популярный
+// тариф», и в признак «пользователь платил».
+const subPaymentCond = " AND months > 0"
+
 func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 	var total int
 	if err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1),
+		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1)+subPaymentCond,
 		model.PaymentPaid).Scan(&total); err != nil {
 		return 0, 0, err
 	}
@@ -550,7 +556,7 @@ func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 	}
 	var months int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT months FROM payments WHERE status = "+b.ph(1)+
+		"SELECT months FROM payments WHERE status = "+b.ph(1)+subPaymentCond+
 			" GROUP BY months ORDER BY COUNT(1) DESC, months ASC LIMIT 1",
 		model.PaymentPaid).Scan(&months)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -565,7 +571,7 @@ func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 func (b *base) HasPaidPayment(ctx context.Context, telegramID int64) (bool, error) {
 	var n int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2),
+		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+subPaymentCond,
 		telegramID, model.PaymentPaid).Scan(&n)
 	return n > 0, err
 }
@@ -637,6 +643,11 @@ type Snapshot struct {
 	Promos    []model.PromoCode
 	PromoUses []PromoUse
 	PayLogs   []model.PayLogEntry
+	// AutoPays и Pendings раньше в снимок не входили: после переезда базы
+	// или восстановления из бэкапа подключённые автосписания пропадали, а
+	// незакрытые счета переставали добиваться реконсилятором.
+	AutoPays []model.AutoPay
+	Pendings []model.PendingInvoice
 }
 
 type PromoUse struct {
@@ -788,6 +799,49 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	_ = lrows.Close()
 
+	arows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, last_pay_at, paid_period, next_try_at, fails, last_error FROM autopay")
+	if err != nil {
+		return nil, err
+	}
+	for arows.Next() {
+		var ap model.AutoPay
+		var enabled int
+		if err := arows.Scan(&ap.TelegramID, &ap.Method, &ap.MethodID, &ap.Title, &ap.Months, &ap.Amount,
+			&ap.Currency, &enabled, &ap.CreatedAt, &ap.LastPayAt, &ap.PaidPeriod, &ap.NextTryAt, &ap.Fails, &ap.LastError); err != nil {
+			_ = arows.Close()
+			return nil, err
+		}
+		ap.Enabled = enabled != 0
+		snap.AutoPays = append(snap.AutoPays, ap)
+	}
+	if err := arows.Err(); err != nil {
+		_ = arows.Close()
+		return nil, err
+	}
+	_ = arows.Close()
+
+	irows, err := b.db.QueryContext(ctx,
+		"SELECT id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks FROM pending_invoices")
+	if err != nil {
+		return nil, err
+	}
+	for irows.Next() {
+		var p model.PendingInvoice
+		var resolved int
+		if err := irows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &resolved, &p.Purpose, &p.Kopecks); err != nil {
+			_ = irows.Close()
+			return nil, err
+		}
+		p.Resolved = resolved != 0
+		snap.Pendings = append(snap.Pendings, p)
+	}
+	if err := irows.Err(); err != nil {
+		_ = irows.Close()
+		return nil, err
+	}
+	_ = irows.Close()
+
 	return snap, nil
 }
 
@@ -829,6 +883,21 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	}
 	for i := range s.PayLogs {
 		if err := b.AddPayLog(ctx, &s.PayLogs[i]); err != nil && !isUniqueViolation(err) {
+			return err
+		}
+	}
+	for i := range s.AutoPays {
+		if err := b.SetAutoPay(ctx, &s.AutoPays[i]); err != nil {
+			return err
+		}
+	}
+	for i := range s.Pendings {
+		p := &s.Pendings[i]
+		if _, err := b.db.ExecContext(ctx,
+			// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+			"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks) "+
+				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
+			p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, boolToInt(p.Resolved), p.Purpose, p.Kopecks); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}

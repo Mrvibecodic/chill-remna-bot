@@ -511,3 +511,87 @@ func TestPayLogsFiltered(t *testing.T) {
 		}
 	})
 }
+
+// Триал и пополнение баланса пишутся в payments с months = 0. Ни в
+// «популярный тариф», ни в признак «пользователь платил» они попадать не
+// должны — иначе ноль выигрывает группировку, а витрина, которая показывает
+// плашку только для ненулевого срока, не показывает её никогда.
+func TestPaidPaymentIgnoresTrialAndTopUp(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const u int64 = 909
+
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: u, Method: "trial", Months: 0, Amount: "—", Status: model.PaymentPaid,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: u, Method: model.PayMethodYooKassa, Months: 0, Amount: "500 ₽",
+			Status: model.PaymentPaid, Comment: "topup", ExtID: "yk_top_909",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := st.HasPaidPayment(ctx, u); ok {
+			t.Fatal("триал и пополнение не делают пользователя платящим")
+		}
+		if months, total, _ := st.MostPopularPlan(ctx); months != 0 || total != 0 {
+			t.Fatalf("до покупок статистика должна быть пустой: months=%d total=%d", months, total)
+		}
+
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: u, Method: model.PayMethodStars, Months: 3, Amount: "300 ⭐",
+			Status: model.PaymentPaid, ExtID: "st_909",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := st.HasPaidPayment(ctx, u); !ok {
+			t.Fatal("после покупки подписки пользователь платящий")
+		}
+		if months, total, _ := st.MostPopularPlan(ctx); months != 3 || total != 1 {
+			t.Fatalf("популярный тариф: months=%d total=%d (ожидалось 3/1)", months, total)
+		}
+	})
+}
+
+// Автосписания и незакрытые счета обязаны переживать перенос базы: без них
+// после переезда у людей молча отключалось автопродление, а оплаченный, но
+// не доставленный счёт переставал добиваться реконсилятором.
+func TestTransferKeepsAutoPayAndPending(t *testing.T) {
+	src := openSQLiteTest(t)
+	dst := openSQLiteTest(t)
+	ctx := context.Background()
+
+	if err := src.SetAutoPay(ctx, &model.AutoPay{
+		TelegramID: 777, Method: model.PayMethodYooKassa, MethodID: "pm_1", Title: "Карта •• 4242",
+		Months: 3, Amount: "450", Currency: "RUB", Enabled: true, PaidPeriod: "2030-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.AddPendingInvoice(ctx, &model.PendingInvoice{
+		ID: 42, Method: model.PayMethodCryptoBot, ExtID: "cb_42", TelegramID: 777, Months: 6,
+		Purpose: "sub", Kopecks: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Transfer(ctx, src, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	ap, err := dst.GetAutoPay(ctx, 777)
+	if err != nil || ap == nil {
+		t.Fatalf("автосписание не перенеслось: %v", err)
+	}
+	if ap.MethodID != "pm_1" || ap.Months != 3 || !ap.Enabled || ap.PaidPeriod != "2030-01-01T00:00:00Z" {
+		t.Fatalf("поля автосписания потеряны: %+v", ap)
+	}
+
+	list, err := dst.ListUnresolvedPending(ctx, "2099-12-31T00:00:00Z", 10)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("незакрытый счёт не перенёсся: len=%d err=%v", len(list), err)
+	}
+	if list[0].ExtID != "cb_42" || list[0].Months != 6 {
+		t.Fatalf("поля счёта потеряны: %+v", list[0])
+	}
+}

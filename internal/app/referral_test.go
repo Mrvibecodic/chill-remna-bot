@@ -2,9 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func refTestApp(t *testing.T) (*App, *fakeStore) {
@@ -109,5 +114,55 @@ func TestReferral_Percent(t *testing.T) {
 	a.creditReferralPercent(ctx, 300, "500 ₽")
 	if ref, _ := fs.GetUser(ctx, 200); ref.Balance != 10000 {
 		t.Fatalf("percent recurring: bal=%d want 10000", ref.Balance)
+	}
+}
+
+// Бонусные дни (реферальные и промокод kind=days) идут в addReferralDays.
+// Они обязаны только сдвигать срок: если подставить в панель глобальные
+// Plan/Pricing, у человека слетит купленный набор сквадов — в том числе
+// внутри самой покупки, сразу после применения условий оплаченного срока.
+func TestReferralDays_DoesNotOverwriteLimits(t *testing.T) {
+	var patched map[string]any
+	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			_, _ = w.Write([]byte(`{"response":[{"uuid":"u1","tag":"CHILLBOT","username":"tg_555","subscriptionUrl":"https://sub/x","expireAt":"2030-01-01T00:00:00Z"}]}`))
+			return
+		}
+		if r.Method == http.MethodPatch {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			patched = body
+		}
+		_, _ = w.Write([]byte(`{"response":{"uuid":"u1","subscriptionUrl":"https://sub/x","expireAt":"2030-01-08T00:00:00Z"}}`))
+	}))
+	defer panel.Close()
+
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 555)
+	a.botCfg.Plan.ActiveInternalSquads = []string{"squad-global"}
+	a.botCfg.Plan.ExternalSquadUUID = "ext-global"
+	a.botCfg.Pricing.TrafficStrategy = "WEEK"
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panel.URL, APIToken: "t"})
+
+	ok, found := a.addReferralDays(ctx, 555, 7)
+	if !ok || !found {
+		t.Fatalf("бонусные дни не начислены: ok=%v found=%v", ok, found)
+	}
+	if patched == nil {
+		t.Fatal("панель не получила PATCH")
+	}
+	if _, has := patched["activeInternalSquads"]; has {
+		t.Fatalf("бонусные дни перезаписали сквады: %+v", patched)
+	}
+	if _, has := patched["externalSquadUuid"]; has {
+		t.Fatalf("бонусные дни перезаписали внешний сквад: %+v", patched)
+	}
+	if _, has := patched["trafficLimitStrategy"]; has {
+		t.Fatalf("бонусные дни перезаписали стратегию сброса: %+v", patched)
+	}
+	if patched["expireAt"] == nil {
+		t.Fatalf("срок не сдвинут: %+v", patched)
 	}
 }
