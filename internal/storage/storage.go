@@ -101,6 +101,8 @@ type Storage interface {
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
+	ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error)
+	SetPaymentSnapshot(ctx context.Context, id int64, snap *model.PlanSnapshot) error
 
 	PaidPayments(ctx context.Context) ([]model.Payment, error)
 	PaymentByExtID(ctx context.Context, extID string) (bool, error)
@@ -650,6 +652,63 @@ const (
 	autoPayCols = "telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, " +
 		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
 )
+
+// SubRepairTarget — строка для сверки выданных лимитов с проданными.
+type SubRepairTarget struct {
+	TelegramID  int64
+	SubExpireAt string
+	Snapshot    *model.PlanSnapshot
+	// LastPaidHadSnapshot=false означает, что последняя покупка проведена
+	// образом бота, который снимков не знает (то есть предыдущим, во время
+	// отката). Такой подписке лимиты применял старый код — по тогдашнему
+	// конфигу, а не по проданным условиям, поэтому её надо чинить целиком.
+	LastPaidHadSnapshot bool
+	// LastPaidID — та самая покупка. После полной переприменки условий в неё
+	// дописывается снимок: иначе сверка считала бы подписку подозрительной
+	// вечно и переприменяла бы условия каждые 12 часов.
+	LastPaidID int64
+}
+
+// SetPaymentSnapshot дописывает снимок в уже записанный платёж.
+func (b *base) SetPaymentSnapshot(ctx context.Context, id int64, snap *model.PlanSnapshot) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE payments SET plan_snapshot = "+b.ph(1)+" WHERE id = "+b.ph(2),
+		snap.Encode(), id)
+	return err
+}
+
+// ListSubRepairTargets возвращает пользователей с действующей подпиской, о
+// которой известно, что именно им продали.
+func (b *base) ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error) {
+	rows, err := b.db.QueryContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"SELECT u.telegram_id, u.sub_expire_at, u.plan_snapshot, "+
+			"COALESCE((SELECT p.plan_snapshot FROM payments p WHERE p.telegram_id = u.telegram_id "+
+			"AND p.status = "+b.ph(1)+" AND p.months > 0 ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''), "+
+			"COALESCE((SELECT p2.id FROM payments p2 WHERE p2.telegram_id = u.telegram_id "+
+			"AND p2.status = "+b.ph(2)+" AND p2.months > 0 ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1), 0) "+
+			"FROM users u WHERE u.plan_snapshot <> '' AND u.sub_expire_at <> '' AND u.blocked = 0",
+		model.PaymentPaid, model.PaymentPaid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SubRepairTarget
+	for rows.Next() {
+		var t SubRepairTarget
+		var snapRaw, lastRaw string
+		if err := rows.Scan(&t.TelegramID, &t.SubExpireAt, &snapRaw, &lastRaw, &t.LastPaidID); err != nil {
+			return nil, err
+		}
+		t.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		t.LastPaidHadSnapshot = lastRaw != ""
+		if t.Snapshot != nil {
+			out = append(out, t)
+		}
+	}
+	return out, rows.Err()
+}
 
 // SetUserSnapshot запоминает условия действующей подписки пользователя.
 func (b *base) SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error {

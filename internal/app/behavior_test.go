@@ -513,6 +513,33 @@ func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
 	return &cp, nil
 }
 
+func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepairTarget, error) {
+	var out []storage.SubRepairTarget
+	for id, u := range s.users {
+		if u == nil || u.Snapshot == nil || u.SubExpireAt == "" {
+			continue
+		}
+		t := storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt, Snapshot: u.Snapshot}
+		for _, p := range s.pays {
+			if p != nil && p.TelegramID == id && p.Status == model.PaymentPaid && p.Months > 0 && p.ID >= t.LastPaidID {
+				t.LastPaidID = p.ID
+				t.LastPaidHadSnapshot = p.Snapshot != nil
+			}
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SetPaymentSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	for _, p := range s.pays {
+		if p != nil && p.ID == id {
+			p.Snapshot = snap
+		}
+	}
+	return nil
+}
+
 func (s *fakeStore) SetUserSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
