@@ -222,6 +222,16 @@ func samePlan(a, b *model.Plan) bool {
 // перезапуска получал счёт на месяц — молча. Теперь выбор пишется в базу и
 // оттуда же читается всеми способами оплаты.
 
+// plannedMonths сообщает, что такой срок вообще бывает в витрине.
+func plannedMonths(months int) bool {
+	for _, m := range model.PlanMonths {
+		if m == months {
+			return true
+		}
+	}
+	return false
+}
+
 // setBuyIntent запоминает выбранный тариф и срок.
 func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, months int) error {
 	a.mu.Lock()
@@ -271,7 +281,9 @@ func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseInten
 	// без времени могла приехать откуда угодно, а «живёт вечно» здесь опаснее.
 	t, perr := time.Parse(time.RFC3339, in.CreatedAt)
 	if perr != nil || time.Since(t) > purchaseIntentTTL {
-		_ = st.DeletePurchaseIntent(ctx, chatID)
+		// Удаляем именно ту строку, которую прочитали: человек мог нажать
+		// новый срок ровно между чтением и удалением.
+		_ = st.DeletePurchaseIntentFor(ctx, chatID, in.Months, in.CreatedAt)
 		return nil, nil
 	}
 	return in, nil
@@ -297,7 +309,11 @@ func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) 
 	if st == nil || chatID == 0 {
 		return
 	}
-	if err := st.DeletePurchaseIntentFor(ctx, chatID, months); err != nil {
+	in, err := st.PurchaseIntent(ctx, chatID)
+	if err != nil || in == nil || in.Months != months {
+		return
+	}
+	if err := st.DeletePurchaseIntentFor(ctx, chatID, in.Months, in.CreatedAt); err != nil {
 		a.log.Warn("намерение покупки не удалено", "err", err, "user", chatID)
 	}
 }
@@ -322,8 +338,14 @@ func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months in
 	}
 }
 
-// starsSnapshot достаёт условия сделки, снятые при отправке счёта Stars, и
-// убирает их: счёт оплачен, второй раз они не понадобятся.
+// starsSnapshot достаёт условия сделки, снятые при отправке счёта Stars.
+//
+// Строку тут НЕ удаляем, хотя соблазн есть. Чтение идёт до финализации, и
+// удаление при чтении теряло проданные условия сразу в трёх случаях: панель
+// упала и оплату добивает повторная доставка апдейта; на один срок выставлено
+// два счёта и оплачены оба; Telegram переприслал старую оплату, а в чате висит
+// новый неоплаченный счёт. Строк на человека не больше, чем сроков в витрине,
+// и каждый новый счёт перезаписывает свою — расти этой таблице некуда.
 func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *model.PlanSnapshot {
 	a.mu.Lock()
 	st := a.store
@@ -335,9 +357,6 @@ func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *mode
 	if err != nil {
 		a.log.Warn("условия счёта Stars не прочитаны", "err", err, "user", chatID)
 		return nil
-	}
-	if snap != nil {
-		_ = st.DeleteInvoiceSnapshot(ctx, chatID, model.PayMethodStars, months)
 	}
 	return snap
 }

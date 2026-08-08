@@ -870,7 +870,11 @@ func (s *fakeStore) SetInvoiceSnapshot(_ context.Context, telegramID int64, meth
 	if s.invSnaps == nil {
 		s.invSnaps = map[string]*model.PlanSnapshot{}
 	}
+	// Настоящее хранилище на пустом снимке пишет пустую строку, то есть
+	// затирает условия. Фейк обязан вести себя так же, иначе расхождение
+	// вылезет только в бою.
 	if snap == nil {
+		delete(s.invSnaps, invSnapKey(telegramID, method, months))
 		return nil
 	}
 	cp := *snap
@@ -905,8 +909,8 @@ func (s *fakeStore) DeletePurchaseIntent(_ context.Context, telegramID int64) er
 	return nil
 }
 
-func (s *fakeStore) DeletePurchaseIntentFor(_ context.Context, telegramID int64, months int) error {
-	if in := s.intents[telegramID]; in != nil && in.Months == months {
+func (s *fakeStore) DeletePurchaseIntentFor(_ context.Context, telegramID int64, months int, createdAt string) error {
+	if in := s.intents[telegramID]; in != nil && in.Months == months && in.CreatedAt == createdAt {
 		delete(s.intents, telegramID)
 	}
 	return nil
@@ -1655,6 +1659,9 @@ func TestStarsFlow(t *testing.T) {
 	a.botCfg = &model.BotConfig{
 		Installed: true, Language: "ru",
 		Stars: model.StarsConfig{Enabled: true, Prices: map[int]int{1: 100}},
+		// Базовая цена — признак того, что срок в продаже: без неё его нет ни
+		// в витрине, ни в мини-аппе, и звёздами он тоже не продаётся.
+		Pricing: model.Pricing{Base: map[int]string{1: "150"}},
 	}
 	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
 	ctx := context.Background()

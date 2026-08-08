@@ -955,7 +955,8 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 			t.Fatalf("условия чужого срока не должны находиться: %+v", other)
 		}
 		// Снятие выбора не трогает условия уже выставленного счёта.
-		if err := st.DeletePurchaseIntentFor(ctx, 801, 0); err != nil {
+		cur, _ := st.PurchaseIntent(ctx, 801)
+		if err := st.DeletePurchaseIntentFor(ctx, 801, cur.Months, cur.CreatedAt); err != nil {
 			t.Fatal(err)
 		}
 		if left, _ := st.PurchaseIntent(ctx, 801); left != nil {
@@ -964,15 +965,24 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if kept, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); kept == nil {
 			t.Fatal("условия неоплаченного счёта пропали вместе с выбором")
 		}
-		// А снятие выбора на ЧУЖОЙ срок ничего не трогает.
-		if err := st.SetPurchaseIntent(ctx, &model.PurchaseIntent{TelegramID: 801, Months: 3}); err != nil {
+		// А снятие выбора на ЧУЖОЙ срок или по устаревшей отметке времени
+		// ничего не трогает: между чтением и удалением человек мог выбрать
+		// заново.
+		fresh := &model.PurchaseIntent{TelegramID: 801, Months: 3}
+		if err := st.SetPurchaseIntent(ctx, fresh); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.DeletePurchaseIntentFor(ctx, 801, 12); err != nil {
+		if err := st.DeletePurchaseIntentFor(ctx, 801, 12, fresh.CreatedAt); err != nil {
 			t.Fatal(err)
 		}
 		if left, _ := st.PurchaseIntent(ctx, 801); left == nil || left.Months != 3 {
 			t.Fatalf("снят чужой выбор: %+v", left)
+		}
+		if err := st.DeletePurchaseIntentFor(ctx, 801, 3, "2020-01-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := st.PurchaseIntent(ctx, 801); left == nil {
+			t.Fatal("выбор снят по устаревшей отметке времени")
 		}
 		if err := st.DeleteInvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); err != nil {
 			t.Fatal(err)

@@ -54,15 +54,16 @@ func (b *base) DeletePurchaseIntent(ctx context.Context, telegramID int64) error
 	return err
 }
 
-// DeletePurchaseIntentFor убирает выбор, только если он всё ещё на этот срок.
-// Условие в самом запросе, а не проверкой перед удалением: между чтением и
-// удалением человек успевает выбрать другой срок, и стирать этот свежий выбор
-// нельзя.
-func (b *base) DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int) error {
+// DeletePurchaseIntentFor убирает выбор, только если он всё ещё тот самый:
+// и срок, и время записи. Условия в самом запросе, а не проверкой перед
+// удалением: между чтением и удалением человек успевает нажать другую кнопку,
+// и стирать этот свежий выбор нельзя.
+func (b *base) DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int, createdAt string) error {
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"DELETE FROM purchase_intents WHERE telegram_id = "+b.ph(1)+" AND months = "+b.ph(2),
-		telegramID, months)
+		"DELETE FROM purchase_intents WHERE telegram_id = "+b.ph(1)+" AND months = "+b.ph(2)+
+			" AND created_at = "+b.ph(3),
+		telegramID, months, createdAt)
 	return err
 }
 
@@ -72,13 +73,22 @@ const invoiceSnapCols = "telegram_id, method, months, plan_snapshot, created_at"
 // SetInvoiceSnapshot запоминает условия сделки по выставленному счёту, у
 // которого нет строки в очереди незакрытых счетов (Stars).
 func (b *base) SetInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error {
+	return b.setInvoiceSnapshotAt(ctx, telegramID, method, months, snap, nowStr())
+}
+
+// setInvoiceSnapshotAt — та же запись с явным временем: переезд базы обязан
+// сохранять возраст строки, а не омолаживать брошенные счета.
+func (b *base) setInvoiceSnapshotAt(ctx context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot, createdAt string) error {
+	if createdAt == "" {
+		createdAt = nowStr()
+	}
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 		"INSERT INTO invoice_snapshots ("+invoiceSnapCols+") VALUES ("+
 			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+") "+
 			"ON CONFLICT (telegram_id, method, months) DO UPDATE SET "+
 			"plan_snapshot = excluded.plan_snapshot, created_at = excluded.created_at",
-		telegramID, method, months, snap.Encode(), nowStr())
+		telegramID, method, months, snap.Encode(), createdAt)
 	return err
 }
 

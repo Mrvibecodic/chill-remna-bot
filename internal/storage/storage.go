@@ -62,7 +62,7 @@ type Storage interface {
 	SetPurchaseIntent(ctx context.Context, in *model.PurchaseIntent) error
 	PurchaseIntent(ctx context.Context, telegramID int64) (*model.PurchaseIntent, error)
 	DeletePurchaseIntent(ctx context.Context, telegramID int64) error
-	DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int) error
+	DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int, createdAt string) error
 
 	SetInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error
 	InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error)
@@ -1073,7 +1073,7 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	}
 	for i := range s.InvoiceSnaps {
 		v := &s.InvoiceSnaps[i]
-		if err := b.SetInvoiceSnapshot(ctx, v.TelegramID, v.Method, v.Months, v.Snapshot); err != nil {
+		if err := b.setInvoiceSnapshotAt(ctx, v.TelegramID, v.Method, v.Months, v.Snapshot, v.CreatedAt); err != nil {
 			return err
 		}
 	}

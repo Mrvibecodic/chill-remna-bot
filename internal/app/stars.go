@@ -29,8 +29,12 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	if months == 0 {
 		return
 	}
-	amount := a.pricing().StarPrice(months)
-	if !a.starsConfig().Enabled || amount <= 0 {
+	pr := a.pricing()
+	amount := pr.StarPrice(months)
+	// Базовая цена — признак того, что срок вообще продаётся: витрина, тариф и
+	// оплата с баланса смотрят именно на неё. Без этой проверки срок, снятый
+	// админом с продажи, продолжал бы продаваться за звёзды.
+	if !a.starsConfig().Enabled || amount <= 0 || pr.Base[months] == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "stars.no_price"))
 		return
 	}
@@ -188,8 +192,10 @@ func (a *App) formatStarPrices() string {
 var errStarsUnavailable = errors.New("оплата звёздами недоступна")
 
 func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, months int) (string, error) {
-	amount := a.pricing().StarPrice(months)
-	if !a.starsConfig().Enabled || amount <= 0 {
+	pr := a.pricing()
+	amount := pr.StarPrice(months)
+	// Тот же гейт, что и в чате: срок без базовой цены с продажи снят.
+	if !a.starsConfig().Enabled || amount <= 0 || pr.Base[months] == "" {
 		return "", errStarsUnavailable
 	}
 	if a.store != nil {

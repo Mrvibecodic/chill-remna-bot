@@ -552,3 +552,72 @@ func TestBuyIntent_ForgottenAfterPurchase(t *testing.T) {
 		t.Fatalf("продление стёрло текущий выбор человека: %d", got)
 	}
 }
+
+// Условия счёта Stars нельзя терять при чтении: оплата может не дойти до
+// панели с первого раза, и повторная доставка обязана применить ТЕ ЖЕ
+// проданные условия, а не текущий конфиг.
+func TestStarsSnapshot_SurvivesFailedFinalize(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 99}}
+	a.botCfg.Pricing.Stars = map[int]int{1: 99}
+	const u int64 = 555
+
+	a.handleCallback(ctx, cb(u, "buy:1"))
+	a.handleCallback(ctx, cb(u, "method:stars"))
+	// Панель не подключена — финализация упадёт.
+	a.handleSuccessfulPayment(ctx, successPayMsg(u, "stars:1", 99))
+
+	snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
+	if snap == nil || snap.DeviceLimit != 3 {
+		t.Fatalf("условия счёта пропали после неудачной выдачи: %+v", snap)
+	}
+	// Второй счёт на другой срок условия первого не трогает.
+	a.handleCallback(ctx, cb(u, "buy:3"))
+	a.handleCallback(ctx, cb(u, "method:stars"))
+	if kept, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); kept == nil {
+		t.Fatal("условия счёта на месяц потерялись при выставлении счёта на три")
+	}
+}
+
+// Срок, снятый админом с продажи (нет базовой цены), не должен продаваться за
+// звёзды в обход витрины — ни из чата, ни из мини-аппа.
+func TestStars_PeriodOffSaleIsNotSold(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, _ := planApp(t)
+	a.msg = fm
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{6: 460}}
+	a.botCfg.Pricing.Stars = map[int]int{6: 460}
+	const u int64 = 555
+
+	if _, err := a.starsInvoiceLink(ctx, u, 6); err == nil {
+		t.Fatal("мини-апп выставил счёт на срок, снятый с продажи")
+	}
+	a.onBuyPlan(ctx, u, "6")
+	a.startStars(ctx, u)
+	if len(fm.invoices) != 0 {
+		t.Fatalf("счёт выставлен на срок вне витрины: %v", fm.invoices)
+	}
+}
+
+// Подделанные callback-данные не должны ни продаваться, ни выглядеть как сбой
+// хранилища.
+func TestBuyPlan_RejectsUnknownPeriod(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, fs := planApp(t)
+	a.msg = fm
+	const u int64 = 555
+
+	for _, val := range []string{"9999999999", "-5", "2", "abc"} {
+		a.onBuyPlan(ctx, u, val)
+		if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+			t.Fatalf("подделанный срок %q записан в намерение: %+v", val, in)
+		}
+	}
+	a.onBuyPlan(ctx, u, "12")
+	if got := a.buyMonths(ctx, u); got != 12 {
+		t.Fatalf("нормальный срок перестал приниматься: %d", got)
+	}
+}

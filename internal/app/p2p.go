@@ -110,7 +110,10 @@ const popularThreshold = 10
 
 func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	mo, err := strconv.Atoi(val)
-	if err != nil {
+	if err != nil || !plannedMonths(mo) {
+		// Кнопка витрины присылает только известные сроки. Всё остальное —
+		// подделанные callback-данные: на postgres такое ещё и не влезает в
+		// колонку, и человек получал бы «сервис недоступен» на ровном месте.
 		return
 	}
 	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт
