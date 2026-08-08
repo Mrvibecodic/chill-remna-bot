@@ -177,6 +177,16 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 		limits.TrafficSet = true
 		need = true
 		reason += "трафик "
+	} else if snap.TrafficGB <= 0 && pu.TrafficLimit > 0 {
+		// Продан безлимит, а в панели стоит потолок: так выглядит покупка,
+		// которую провёл предыдущий образ (он нулевой трафик не отправлял
+		// вовсе), и остаток триального лимита после такой покупки. Снятие
+		// потолка — это выдача недоданного, а не урезание, поэтому правилу
+		// «сверка никогда не отбирает» это не противоречит.
+		limits.TrafficBytes = 0
+		limits.TrafficSet = true
+		need = true
+		reason += "безлимит трафика "
 	}
 
 	// full — условия продал новый образ, а применял старый (откат). Сквады по

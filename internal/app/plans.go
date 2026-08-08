@@ -222,14 +222,18 @@ func samePlan(a, b *model.Plan) bool {
 // перезапуска получал счёт на месяц — молча. Теперь выбор пишется в базу и
 // оттуда же читается всеми способами оплаты.
 
-// plannedMonths сообщает, что такой срок вообще бывает в витрине.
-func plannedMonths(months int) bool {
-	for _, m := range model.PlanMonths {
-		if m == months {
-			return true
-		}
+// periodOnSale сообщает, продаётся ли срок прямо сейчас. Признак ровно тот же,
+// по которому срок рисует витрина, — непустая базовая цена: иначе кнопка из
+// старого сообщения или запрос мимо витрины продавали бы срок, который админ с
+// продажи снял (у P2P это ещё и заявка с пустой суммой).
+//
+// Проверять по списку model.PlanMonths мало: он захардкожен и на следующих
+// этапах, где длительности станут произвольными, начнёт молча съедать нажатия.
+func (a *App) periodOnSale(months int) bool {
+	if months <= 0 {
+		return false
 	}
-	return false
+	return a.pricing().Base[months] != ""
 }
 
 // setBuyIntent запоминает выбранный тариф и срок.
@@ -310,7 +314,11 @@ func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) 
 		return
 	}
 	in, err := st.PurchaseIntent(ctx, chatID)
-	if err != nil || in == nil || in.Months != months {
+	if err != nil {
+		a.log.Warn("намерение покупки не прочитано перед снятием", "err", err, "user", chatID)
+		return
+	}
+	if in == nil || in.Months != months {
 		return
 	}
 	if err := st.DeletePurchaseIntentFor(ctx, chatID, in.Months, in.CreatedAt); err != nil {
@@ -353,9 +361,16 @@ func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *mode
 	if st == nil || months <= 0 {
 		return nil
 	}
-	snap, err := st.InvoiceSnapshot(ctx, chatID, model.PayMethodStars, months)
+	snap, at, err := st.InvoiceSnapshot(ctx, chatID, model.PayMethodStars, months)
 	if err != nil {
 		a.log.Warn("условия счёта Stars не прочитаны", "err", err, "user", chatID)
+		return nil
+	}
+	// Счёт полугодовой давности — это уже не «условия, которые человеку
+	// продали сегодня»: цены и лимиты с тех пор менялись, и применять старые к
+	// сегодняшней оплате несправедливо в обе стороны. Окно то же, что у
+	// выбора срока.
+	if t, perr := time.Parse(time.RFC3339, at); perr != nil || time.Since(t) > purchaseIntentTTL {
 		return nil
 	}
 	return snap

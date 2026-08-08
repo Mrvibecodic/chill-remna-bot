@@ -65,8 +65,9 @@ type Storage interface {
 	DeletePurchaseIntentFor(ctx context.Context, telegramID int64, months int, createdAt string) error
 
 	SetInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error
-	InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error)
+	InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, string, error)
 	DeleteInvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) error
+	PurgeInvoiceSnapshots(ctx context.Context, before string) error
 
 	SavePlan(ctx context.Context, p *model.Plan) error
 	GetPlan(ctx context.Context, code string) (*model.Plan, error)

@@ -282,7 +282,7 @@ func TestStars_AppliesSnapshotFromIntent(t *testing.T) {
 
 	a.handleCallback(ctx, cb(u, "buy:1"))
 	a.handleCallback(ctx, cb(u, "method:stars"))
-	snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
+	snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
 	if snap == nil || snap.DeviceLimit != 3 {
 		t.Fatalf("условия счёта Stars не записаны: %+v", snap)
 	}
@@ -466,13 +466,13 @@ func TestStarsFromMiniApp_KeepsChatChoice(t *testing.T) {
 		t.Fatalf("мини-апп затёр выбор из чата: %d", got)
 	}
 	// Условия счёта из мини-аппа живут отдельной строкой и выбору не мешают.
-	if snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); snap == nil {
+	if snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); snap == nil {
 		t.Fatal("условия счёта из мини-аппа не сохранены")
 	}
 	if _, err := a.starsInvoiceLink(ctx, u, 12); err != nil {
 		t.Fatal(err)
 	}
-	if snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 12); snap == nil {
+	if snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 12); snap == nil {
 		t.Fatal("условия счёта на выбранный срок потеряны")
 	}
 	if got := a.buyMonths(ctx, u); got != 12 {
@@ -544,6 +544,7 @@ func TestBuyIntent_ForgottenAfterPurchase(t *testing.T) {
 	}
 
 	// Чужой срок (например, автопродление) выбор не стирает.
+	a.botCfg.Pricing.Base[12] = "1400"
 	a.onBuyPlan(ctx, u, "12")
 	if _, _, err := a.finalizePurchase(ctx, u, 1, model.PayMethodYooKassa, "150", "forget_2", nil); err != nil {
 		t.Fatal(err)
@@ -568,14 +569,14 @@ func TestStarsSnapshot_SurvivesFailedFinalize(t *testing.T) {
 	// Панель не подключена — финализация упадёт.
 	a.handleSuccessfulPayment(ctx, successPayMsg(u, "stars:1", 99))
 
-	snap, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
+	snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1)
 	if snap == nil || snap.DeviceLimit != 3 {
 		t.Fatalf("условия счёта пропали после неудачной выдачи: %+v", snap)
 	}
 	// Второй счёт на другой срок условия первого не трогает.
 	a.handleCallback(ctx, cb(u, "buy:3"))
 	a.handleCallback(ctx, cb(u, "method:stars"))
-	if kept, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); kept == nil {
+	if kept, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); kept == nil {
 		t.Fatal("условия счёта на месяц потерялись при выставлении счёта на три")
 	}
 }
@@ -619,5 +620,65 @@ func TestBuyPlan_RejectsUnknownPeriod(t *testing.T) {
 	a.onBuyPlan(ctx, u, "12")
 	if got := a.buyMonths(ctx, u); got != 12 {
 		t.Fatalf("нормальный срок перестал приниматься: %d", got)
+	}
+}
+
+// Срок, снятый админом с продажи, не должен продаваться ни одним способом:
+// ни звёздами, ни переводом (у P2P это была бы заявка с пустой суммой).
+func TestPeriodOffSale_NotSoldAnywhere(t *testing.T) {
+	ctx := context.Background()
+	fm := &fakeMsg{}
+	a, fs := planApp(t)
+	a.msg = fm
+	a.botCfg.P2P = model.P2PConfig{Enabled: true, OpenForAll: true, Cards: []string{"0000"}}
+	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{6: 460}}
+	a.botCfg.Pricing.Stars = map[int]int{6: 460}
+	const u int64 = 555
+
+	// 6 месяцев в сетке цен нет — витрина его не показывает.
+	a.handleCallback(ctx, cb(u, "buy:6"))
+	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
+		t.Fatalf("срок вне продажи записан в намерение: %+v", in)
+	}
+	a.handleCallback(ctx, cb(u, "method:p2p"))
+	if len(fs.reqs) != 0 {
+		t.Fatalf("создана заявка на срок вне продажи: %+v", fs.reqs)
+	}
+	if len(fm.invoices) != 0 {
+		t.Fatalf("выставлен счёт на срок вне продажи: %v", fm.invoices)
+	}
+
+	// А продаваемый срок работает как раньше.
+	a.handleCallback(ctx, cb(u, "buy:3"))
+	a.handleCallback(ctx, cb(u, "method:p2p"))
+	if len(fs.reqs) != 1 {
+		t.Fatalf("обычная заявка не создалась: %+v", fs.reqs)
+	}
+	for _, r := range fs.reqs {
+		if r.Price == "" {
+			t.Fatalf("заявка с пустой суммой: %+v", r)
+		}
+	}
+}
+
+// Условия счёта Stars не применяются вечно: счёт полугодовой давности — это уже
+// не сегодняшняя сделка.
+func TestStarsSnapshot_Expires(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	const u int64 = 555
+
+	sold := &model.PlanSnapshot{Months: 1, DeviceLimit: 3}
+	if err := fs.SetInvoiceSnapshot(ctx, u, model.PayMethodStars, 1, sold); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.starsSnapshot(ctx, u, 1); got == nil || got.DeviceLimit != 3 {
+		t.Fatalf("свежие условия счёта не применились: %+v", got)
+	}
+	// Состариваем строку.
+	fs.invSnapAt[invSnapKey(u, model.PayMethodStars, 1)] =
+		time.Now().UTC().Add(-purchaseIntentTTL - time.Hour).Format(time.RFC3339)
+	if got := a.starsSnapshot(ctx, u, 1); got != nil {
+		t.Fatalf("применились условия протухшего счёта: %+v", got)
 	}
 }

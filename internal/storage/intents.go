@@ -92,21 +92,32 @@ func (b *base) setInvoiceSnapshotAt(ctx context.Context, telegramID int64, metho
 	return err
 }
 
-// InvoiceSnapshot возвращает условия выставленного счёта; nil — их нет.
-func (b *base) InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error) {
-	var raw string
+// InvoiceSnapshot возвращает условия выставленного счёта и время его
+// выставления; nil — условий нет.
+func (b *base) InvoiceSnapshot(ctx context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, string, error) {
+	var raw, createdAt string
 	err := b.db.QueryRowContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"SELECT plan_snapshot FROM invoice_snapshots WHERE telegram_id = "+b.ph(1)+
+		"SELECT plan_snapshot, created_at FROM invoice_snapshots WHERE telegram_id = "+b.ph(1)+
 			" AND method = "+b.ph(2)+" AND months = "+b.ph(3),
-		telegramID, method, months).Scan(&raw)
+		telegramID, method, months).Scan(&raw, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, "", nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return model.DecodePlanSnapshot(raw), nil
+	return model.DecodePlanSnapshot(raw), createdAt, nil
+}
+
+// PurgeInvoiceSnapshots убирает условия счетов, которые давно никто не
+// оплатит. Иначе таблица растёт вместе с числом когда-либо заходивших: строку
+// на человека и срок никто не удаляет — при выдаче её оставляют намеренно
+// (повторная доставка оплаты обязана применить те же условия).
+func (b *base) PurgeInvoiceSnapshots(ctx context.Context, before string) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
+	_, err := b.db.ExecContext(ctx, "DELETE FROM invoice_snapshots WHERE created_at < "+b.ph(1), before)
+	return err
 }
 
 // DeleteInvoiceSnapshot убирает условия счёта после того, как он оплачен.

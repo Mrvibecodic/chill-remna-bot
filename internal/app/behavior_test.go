@@ -172,6 +172,7 @@ type fakeStore struct {
 	plans     map[string]*model.Plan
 	intents   map[int64]*model.PurchaseIntent
 	invSnaps  map[string]*model.PlanSnapshot
+	invSnapAt map[string]string
 	promos    map[string]*model.PromoCode
 	promoUses map[string]bool
 	webUsers  map[string]*model.WebUser
@@ -869,30 +870,48 @@ func invSnapKey(telegramID int64, method string, months int) string {
 func (s *fakeStore) SetInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error {
 	if s.invSnaps == nil {
 		s.invSnaps = map[string]*model.PlanSnapshot{}
+		s.invSnapAt = map[string]string{}
 	}
 	// Настоящее хранилище на пустом снимке пишет пустую строку, то есть
 	// затирает условия. Фейк обязан вести себя так же, иначе расхождение
 	// вылезет только в бою.
 	if snap == nil {
-		delete(s.invSnaps, invSnapKey(telegramID, method, months))
+		k := invSnapKey(telegramID, method, months)
+		delete(s.invSnaps, k)
+		delete(s.invSnapAt, k)
 		return nil
 	}
 	cp := *snap
-	s.invSnaps[invSnapKey(telegramID, method, months)] = &cp
+	k := invSnapKey(telegramID, method, months)
+	s.invSnaps[k] = &cp
+	s.invSnapAt[k] = time.Now().UTC().Format(time.RFC3339)
 	return nil
 }
 
-func (s *fakeStore) InvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, error) {
-	v := s.invSnaps[invSnapKey(telegramID, method, months)]
+func (s *fakeStore) InvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, string, error) {
+	k := invSnapKey(telegramID, method, months)
+	v := s.invSnaps[k]
 	if v == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 	cp := *v
-	return &cp, nil
+	return &cp, s.invSnapAt[k], nil
+}
+
+func (s *fakeStore) PurgeInvoiceSnapshots(_ context.Context, before string) error {
+	for k, at := range s.invSnapAt {
+		if at < before {
+			delete(s.invSnapAt, k)
+			delete(s.invSnaps, k)
+		}
+	}
+	return nil
 }
 
 func (s *fakeStore) DeleteInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) error {
-	delete(s.invSnaps, invSnapKey(telegramID, method, months))
+	k := invSnapKey(telegramID, method, months)
+	delete(s.invSnaps, k)
+	delete(s.invSnapAt, k)
 	return nil
 }
 

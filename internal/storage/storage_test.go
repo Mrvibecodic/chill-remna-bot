@@ -947,11 +947,11 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if err := st.SetInvoiceSnapshot(ctx, 801, model.PayMethodStars, 12, snap); err != nil {
 			t.Fatal(err)
 		}
-		gotSnap, err := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12)
+		gotSnap, _, err := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12)
 		if err != nil || gotSnap == nil || gotSnap.DeviceLimit != 5 || gotSnap.TrafficGB != 200 {
 			t.Fatalf("условия счёта искажены: %+v err=%v", gotSnap, err)
 		}
-		if other, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 1); other != nil {
+		if other, _, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 1); other != nil {
 			t.Fatalf("условия чужого срока не должны находиться: %+v", other)
 		}
 		// Снятие выбора не трогает условия уже выставленного счёта.
@@ -962,7 +962,7 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if left, _ := st.PurchaseIntent(ctx, 801); left != nil {
 			t.Fatalf("выбор на этот срок должен был сняться: %+v", left)
 		}
-		if kept, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); kept == nil {
+		if kept, _, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); kept == nil {
 			t.Fatal("условия неоплаченного счёта пропали вместе с выбором")
 		}
 		// А снятие выбора на ЧУЖОЙ срок или по устаревшей отметке времени
@@ -987,7 +987,7 @@ func TestPurchaseIntentRoundTrip(t *testing.T) {
 		if err := st.DeleteInvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); err != nil {
 			t.Fatal(err)
 		}
-		if left, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); left != nil {
+		if left, _, _ := st.InvoiceSnapshot(ctx, 801, model.PayMethodStars, 12); left != nil {
 			t.Fatalf("условия счёта не удалились: %+v", left)
 		}
 
@@ -1044,7 +1044,7 @@ func TestPurchaseIntentInSnapshot(t *testing.T) {
 	if err != nil || got == nil || got.Months != 6 {
 		t.Fatalf("намерение не восстановилось: %+v err=%v", got, err)
 	}
-	gotSnap, err := dst.InvoiceSnapshot(ctx, 803, model.PayMethodStars, 6)
+	gotSnap, _, err := dst.InvoiceSnapshot(ctx, 803, model.PayMethodStars, 6)
 	if err != nil || gotSnap == nil || gotSnap.DeviceLimit != 4 {
 		t.Fatalf("условия счёта не восстановились: %+v err=%v", gotSnap, err)
 	}

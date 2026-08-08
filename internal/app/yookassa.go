@@ -143,6 +143,20 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	}
 	payChat, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
 	months, _ := strconv.Atoi(pay.Metadata["months"])
+	if (payChat == 0 || months == 0) && a.store != nil {
+		if p, _ := a.store.PendingByExtID(ctx, payID); p != nil {
+			if payChat == 0 {
+				payChat = p.TelegramID
+			}
+			if months == 0 {
+				months = p.Months
+			}
+		}
+	}
+	if payChat != 0 && months == 0 {
+		a.noPeriodForPayment(ctx, model.PayMethodYooKassa, payID, payChat)
+		return
+	}
 	if payChat == 0 || months == 0 {
 		// Как и в вебхуке: без metadata получатель и срок неизвестны — не
 		// угадываем (нажавшему кнопку и сроку «по умолчанию» выдавать нельзя).

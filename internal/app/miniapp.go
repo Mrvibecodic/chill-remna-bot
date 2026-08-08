@@ -189,14 +189,8 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 // in-app (reuses finalizePurchase, the same provisioning core as the chat
 // flow); other methods return Redirect=true (handled in a later stage).
 func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string, web_ bool) web.MiniActionDTO {
-	valid := false
-	for _, m := range model.PlanMonths {
-		if m == months {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	// Тот же признак, что у витрины: срок без базовой цены снят с продажи.
+	if !a.periodOnSale(months) {
 		return web.MiniActionDTO{Error: "неверный период"}
 	}
 	if method == model.PayMethodP2P {

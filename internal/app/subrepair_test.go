@@ -253,3 +253,25 @@ func TestSubRepair_RecheckAfterConcurrentPurchase(t *testing.T) {
 		t.Fatalf("сквады свежей сделки не применены: %v", lastPatch["activeInternalSquads"])
 	}
 }
+
+// Проданный безлимит трафика сверка обязана возвращать: выдачу мог провести
+// предыдущий образ, который нулевой лимит в панель не отправлял вовсе, и тогда
+// у человека остаётся, например, триальный потолок.
+func TestSubRepair_RestoresSoldUnlimited(t *testing.T) {
+	a, fs, patches := repairFixture(t, 3, repairGB)
+	sold := &model.PlanSnapshot{Months: 1, DeviceLimit: 3, TrafficGB: 0}
+	seedRepairUser(t, fs, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), sold)
+
+	st := a.repairSubscriptions(context.Background())
+	if st.fixed != 1 || len(*patches) != 1 {
+		t.Fatalf("проданный безлимит не восстановлен: fixed=%d patches=%d", st.fixed, len(*patches))
+	}
+	if got, ok := (*patches)[0]["trafficLimitBytes"]; !ok || got != float64(0) {
+		t.Fatalf("в панель не ушёл нулевой лимит: %+v", (*patches)[0])
+	}
+	// Второй проход не должен чинить то же самое снова.
+	st = a.repairSubscriptions(context.Background())
+	if st.fixed != 0 || len(*patches) != 1 {
+		t.Fatalf("сверка не сошлась: fixed=%d patches=%d", st.fixed, len(*patches))
+	}
+}

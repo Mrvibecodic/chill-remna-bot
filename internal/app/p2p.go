@@ -110,10 +110,12 @@ const popularThreshold = 10
 
 func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	mo, err := strconv.Atoi(val)
-	if err != nil || !plannedMonths(mo) {
-		// Кнопка витрины присылает только известные сроки. Всё остальное —
-		// подделанные callback-данные: на postgres такое ещё и не влезает в
-		// колонку, и человек получал бы «сервис недоступен» на ровном месте.
+	if err != nil || !a.periodOnSale(mo) {
+		// Кнопка витрины присылает только сроки, которые продаются. Всё
+		// остальное — либо подделанные callback-данные (на postgres такое ещё
+		// и не влезает в колонку), либо нажатие на старом экране по сроку,
+		// который админ снял с продажи.
+		a.showPlans(ctx, chatID)
 		return
 	}
 	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт
@@ -152,14 +154,16 @@ func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
 	a.mu.Unlock()
 
 	var rows [][]models.InlineKeyboardButton
-	if p2p.Enabled {
+	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
+	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
+	if p2p.Enabled && pr.Fiat(model.PayMethodP2P, months) != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
 	if yk.Enabled && pr.Fiat(model.PayMethodYooKassa, months) != "" {
 		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
-	if stars.Enabled && pr.StarPrice(months) > 0 {
+	if stars.Enabled && pr.StarPrice(months) > 0 && pr.Base[months] != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", pr.StarPrice(months)), "method:stars")})
 	}
 	if cb.Enabled && pr.Base[months] != "" {
@@ -293,6 +297,11 @@ func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (car
 	card = p2p.Cards[idx]
 	price = pr.Fiat(model.PayMethodP2P, months)
 	a.mu.Unlock()
+	if price == "" {
+		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек
+		// платит наугад, а админ подтверждает выдачу полного срока.
+		return "", "", 0, errors.New("для этого срока не задана цена")
+	}
 	_ = a.saveBotConfig(ctx)
 
 	if a.store == nil {
