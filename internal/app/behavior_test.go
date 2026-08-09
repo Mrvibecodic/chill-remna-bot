@@ -179,21 +179,22 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
-	cfg       *model.BotConfig
-	users     map[int64]*model.User
-	reqs      map[int64]*model.P2PRequest
-	pays      map[int64]*model.Payment
-	media     map[string]string
-	pending   map[int64]*model.PendingInvoice
-	plans     map[string]*model.Plan
-	intents   map[int64]*model.PurchaseIntent
-	invSnaps  map[string]*model.PlanSnapshot
-	invSnapAt map[string]string
-	promos    map[string]*model.PromoCode
-	promoUses map[string]bool
-	webUsers  map[string]*model.WebUser
-	paylogs   []model.PayLogEntry
-	torrents  []model.TorrentReport
+	cfg        *model.BotConfig
+	users      map[int64]*model.User
+	reqs       map[int64]*model.P2PRequest
+	pays       map[int64]*model.Payment
+	media      map[string]string
+	pending    map[int64]*model.PendingInvoice
+	plans      map[string]*model.Plan
+	planAccess map[string]model.PlanAccess
+	intents    map[int64]*model.PurchaseIntent
+	invSnaps   map[string]*model.PlanSnapshot
+	invSnapAt  map[string]string
+	promos     map[string]*model.PromoCode
+	promoUses  map[string]bool
+	webUsers   map[string]*model.WebUser
+	paylogs    []model.PayLogEntry
+	torrents   []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -988,6 +989,96 @@ func (s *fakeStore) ListPlans(context.Context) ([]model.Plan, error) {
 
 func (s *fakeStore) DeletePlan(_ context.Context, code string) error {
 	delete(s.plans, code)
+	for k := range s.planAccess {
+		if s.planAccess[k].PlanCode == code {
+			delete(s.planAccess, k)
+		}
+	}
+	return nil
+}
+
+// planAccessKey повторяет первичный ключ настоящей таблицы.
+func planAccessKey(code string, tgID int64, email string) string {
+	return code + "|" + strconv.FormatInt(tgID, 10) + "|" + model.NormalizeEmail(email)
+}
+
+func (s *fakeStore) GrantPlanAccess(_ context.Context, code string, tgID int64, email string) error {
+	email = model.NormalizeEmail(email)
+	if !model.ValidPlanCode(code) || (tgID == 0) == (email == "") {
+		return errors.New("недопустимая запись списка допущенных")
+	}
+	if s.planAccess == nil {
+		s.planAccess = map[string]model.PlanAccess{}
+	}
+	k := planAccessKey(code, tgID, email)
+	if _, ok := s.planAccess[k]; ok {
+		return nil
+	}
+	s.seq++
+	s.planAccess[k] = model.PlanAccess{
+		PlanCode: code, TelegramID: tgID, Email: email,
+		CreatedAt: time.Now().UTC().Add(time.Duration(s.seq) * time.Millisecond).Format(time.RFC3339Nano),
+	}
+	return nil
+}
+
+func (s *fakeStore) RevokePlanAccess(_ context.Context, code string, tgID int64, email string) error {
+	delete(s.planAccess, planAccessKey(code, tgID, email))
+	return nil
+}
+
+func (s *fakeStore) HasPlanAccess(_ context.Context, code string, tgID int64, email string) (bool, error) {
+	email = model.NormalizeEmail(email)
+	for _, e := range s.planAccess {
+		if e.PlanCode != code {
+			continue
+		}
+		if (e.TelegramID != 0 && e.TelegramID == tgID) || (e.Email != "" && e.Email == email) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) ListPlanAccess(_ context.Context, code string) ([]model.PlanAccess, error) {
+	var out []model.PlanAccess
+	for _, e := range s.planAccess {
+		if e.PlanCode == code {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		if out[i].TelegramID != out[j].TelegramID {
+			return out[i].TelegramID < out[j].TelegramID
+		}
+		return out[i].Email < out[j].Email
+	})
+	return out, nil
+}
+
+func (s *fakeStore) ListAllPlanAccess(context.Context) ([]model.PlanAccess, error) {
+	var out []model.PlanAccess
+	for _, e := range s.planAccess {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].PlanCode != out[j].PlanCode {
+			return out[i].PlanCode < out[j].PlanCode
+		}
+		return out[i].CreatedAt < out[j].CreatedAt
+	})
+	return out, nil
+}
+
+func (s *fakeStore) ClearPlanAccess(_ context.Context, code string) error {
+	for k := range s.planAccess {
+		if s.planAccess[k].PlanCode == code {
+			delete(s.planAccess, k)
+		}
+	}
 	return nil
 }
 

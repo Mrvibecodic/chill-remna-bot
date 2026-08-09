@@ -90,9 +90,149 @@ func (b *base) ListPlans(ctx context.Context) ([]model.Plan, error) {
 // условия зафиксированы снимком сделки, поэтому удаление тарифа никого не
 // понижает.
 func (b *base) DeletePlan(ctx context.Context, code string) error {
+	// Список допущенных умирает вместе с тарифом: осиротевшие записи молча
+	// ожили бы, если код когда-нибудь будет занят другим тарифом (импорт).
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE plan_code = "+b.ph(1), code)
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
 	_, err := b.db.ExecContext(ctx, "DELETE FROM plans WHERE code = "+b.ph(1), code)
 	return err
+}
+
+// planAccessCols — единственный список колонок списка допущенных, по той же
+// причине, что и planCols: расхождение SELECT и Scan не ловится ничем, кроме
+// round-trip теста против настоящей базы.
+const planAccessCols = "plan_code, telegram_id, email, created_at"
+
+// ErrPlanAccessEntry — запись списка допущенных не прошла проверку: в ней
+// должен быть либо Telegram ID, либо e-mail, и ровно что-то одно.
+var ErrPlanAccessEntry = errors.New("storage: недопустимая запись списка допущенных")
+
+// normPlanAccess проверяет и канонизирует запись списка. Почта хранится в
+// нижнем регистре — так же её пишет кабинет и так же её ищет HasPlanAccess.
+func normPlanAccess(code string, tgID int64, email string) (int64, string, error) {
+	email = model.NormalizeEmail(email)
+	if !model.ValidPlanCode(code) {
+		return 0, "", fmt.Errorf("%w: %q", ErrPlanCode, code)
+	}
+	if (tgID == 0) == (email == "") {
+		return 0, "", ErrPlanAccessEntry
+	}
+	return tgID, email, nil
+}
+
+// GrantPlanAccess добавляет запись в список допущенных тарифа. Повторная
+// выдача той же записи не ошибка: список правится и из карточки тарифа, и из
+// карточки пользователя, и при импорте.
+func (b *base) GrantPlanAccess(ctx context.Context, code string, tgID int64, email string) error {
+	return b.grantPlanAccessAt(ctx, code, tgID, email, nowStr())
+}
+
+// grantPlanAccessAt — то же с явным временем добавления: перенос базы обязан
+// сохранять исходный порядок списка.
+func (b *base) grantPlanAccessAt(ctx context.Context, code string, tgID int64, email, createdAt string) error {
+	tgID, email, err := normPlanAccess(code, tgID, email)
+	if err != nil {
+		return err
+	}
+	if createdAt == "" {
+		createdAt = nowStr()
+	}
+	_, err = b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"INSERT INTO plan_access ("+planAccessCols+") VALUES ("+
+			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+") ON CONFLICT (plan_code, telegram_id, email) DO NOTHING",
+		code, tgID, email, createdAt)
+	return err
+}
+
+// RevokePlanAccess убирает запись из списка допущенных тарифа.
+func (b *base) RevokePlanAccess(ctx context.Context, code string, tgID int64, email string) error {
+	tgID, email, err := normPlanAccess(code, tgID, email)
+	if err != nil {
+		return err
+	}
+	_, err = b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"DELETE FROM plan_access WHERE plan_code = "+b.ph(1)+" AND telegram_id = "+b.ph(2)+" AND email = "+b.ph(3),
+		code, tgID, email)
+	return err
+}
+
+// HasPlanAccess отвечает, есть ли пользователь в списке допущенных тарифа.
+// Совпадением считается и запись по Telegram ID, и запись по почте: у
+// e-mail-аккаунтов кабинета синтетический отрицательный ID, который админ в
+// список не положит, — их пускают по почте.
+func (b *base) HasPlanAccess(ctx context.Context, code string, tgID int64, email string) (bool, error) {
+	email = model.NormalizeEmail(email)
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"SELECT COUNT(*) FROM plan_access WHERE plan_code = "+b.ph(1)+
+			" AND ((telegram_id != 0 AND telegram_id = "+b.ph(2)+") OR (email != '' AND email = "+b.ph(3)+"))",
+		code, tgID, email).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ListPlanAccess возвращает список допущенных тарифа в порядке добавления.
+// Порядок доопределён самой записью: время добавления в RFC3339 сортируется
+// как текст, а равные отметки времени упорядочиваются детерминированно.
+func (b *base) ListPlanAccess(ctx context.Context, code string) ([]model.PlanAccess, error) {
+	rows, err := b.db.QueryContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
+		"SELECT "+planAccessCols+" FROM plan_access WHERE plan_code = "+b.ph(1)+
+			" ORDER BY created_at, telegram_id, email", code)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPlanAccess(rows)
+}
+
+// ListAllPlanAccess возвращает списки допущенных всех тарифов — для снимка
+// базы.
+func (b *base) ListAllPlanAccess(ctx context.Context) ([]model.PlanAccess, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+planAccessCols+" FROM plan_access ORDER BY plan_code, created_at, telegram_id, email")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPlanAccess(rows)
+}
+
+// ClearPlanAccess очищает список допущенных тарифа: при удалении тарифа и при
+// уходе с режима «по списку» (иначе у публичного тарифа копились бы «мусорные»
+// разрешения, молча оживающие при возврате режима).
+func (b *base) ClearPlanAccess(ctx context.Context, code string) error {
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
+	_, err := b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE plan_code = "+b.ph(1), code)
+	return err
+}
+
+// PrunePlanAccess удаляет записи списков, у которых больше нет тарифа.
+// Осиротевшие строки оставляет предыдущий образ бота: его DeletePlan про
+// таблицу списков не знает, и запись молча ожила бы, достанься код новому
+// тарифу. Зовётся на старте.
+func (b *base) PrunePlanAccess(ctx context.Context) error {
+	_, err := b.db.ExecContext(ctx,
+		"DELETE FROM plan_access WHERE plan_code NOT IN (SELECT code FROM plans)")
+	return err
+}
+
+func scanPlanAccess(rows *sql.Rows) ([]model.PlanAccess, error) {
+	var out []model.PlanAccess
+	for rows.Next() {
+		var e model.PlanAccess
+		if err := rows.Scan(&e.PlanCode, &e.TelegramID, &e.Email, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // scanRow — общее у *sql.Row и *sql.Rows: один Scan на оба пути чтения, чтобы

@@ -315,6 +315,23 @@ func DecodeDurations(raw string) []PlanDuration {
 	return v
 }
 
+// PlanAccess — одна запись списка допущенных к тарифу (режим «по списку»).
+// Запись либо про Telegram-аккаунт (TelegramID != 0), либо про e-mail-аккаунт
+// кабинета (Email != ""): такие аккаунты живут с синтетическим отрицательным
+// Telegram ID, и сопоставлять их можно только по почте.
+type PlanAccess struct {
+	PlanCode   string
+	TelegramID int64
+	Email      string
+	CreatedAt  string
+}
+
+// NormalizeEmail приводит почту к виду, в котором она хранится и сравнивается:
+// без пробелов по краям и в нижнем регистре. Тот же вид использует кабинет.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 // PurchaseIntent — намерение покупки: что человек выбрал на экране «выбор
 // срока», прежде чем перейти к способу оплаты.
 //

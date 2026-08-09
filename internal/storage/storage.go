@@ -74,6 +74,14 @@ type Storage interface {
 	ListPlans(ctx context.Context) ([]model.Plan, error)
 	DeletePlan(ctx context.Context, code string) error
 
+	GrantPlanAccess(ctx context.Context, code string, tgID int64, email string) error
+	RevokePlanAccess(ctx context.Context, code string, tgID int64, email string) error
+	HasPlanAccess(ctx context.Context, code string, tgID int64, email string) (bool, error)
+	ListPlanAccess(ctx context.Context, code string) ([]model.PlanAccess, error)
+	ListAllPlanAccess(ctx context.Context) ([]model.PlanAccess, error)
+	ClearPlanAccess(ctx context.Context, code string) error
+	PrunePlanAccess(ctx context.Context) error
+
 	CreatePromo(ctx context.Context, p *model.PromoCode) error
 	CreateWebUser(ctx context.Context, u *model.WebUser) error
 	GetWebUserByEmail(ctx context.Context, email string) (*model.WebUser, error)
@@ -377,6 +385,17 @@ func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM purchase_intents WHERE telegram_id = "+b.ph(1), telegramID)
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM invoice_snapshots WHERE telegram_id = "+b.ph(1), telegramID)
+	// Записи списков допущенных: удалённый аккаунт не должен молча сохранять
+	// допуск к тарифам «по списку». У e-mail-аккаунта кабинета чистится и
+	// запись по почте.
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE telegram_id != 0 AND telegram_id = "+b.ph(1), telegramID)
+	if telegramID < 0 {
+		if wu, _ := b.GetWebUserByTgID(ctx, telegramID); wu != nil && wu.Email != "" {
+			// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+			_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE email != '' AND email = "+b.ph(1), model.NormalizeEmail(wu.Email))
+		}
+	}
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }
@@ -761,6 +780,9 @@ type Snapshot struct {
 	// Plans — справочник тарифов. В снимок входит с самого появления таблицы:
 	// без него переезд базы стирал бы всю тарифную сетку.
 	Plans []model.Plan
+	// PlanAccess — списки допущенных к тарифам: без них переезд базы молча
+	// отрезал бы всех покупателей тарифов «по списку».
+	PlanAccess []model.PlanAccess
 	// Intents — незавершённые намерения покупки. Переезд базы посреди покупки
 	// редок, но без них человек, выбравший год, доплачивал бы месяц.
 	Intents []model.PurchaseIntent
@@ -899,6 +921,11 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	if plans, err := b.ListPlans(ctx); err == nil {
 		snap.Plans = plans
+	} else {
+		return nil, err
+	}
+	if access, err := b.ListAllPlanAccess(ctx); err == nil {
+		snap.PlanAccess = access
 	} else {
 		return nil, err
 	}
@@ -1065,6 +1092,16 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 			}
 			// Молчать нельзя: иначе оператор уверен, что переехало всё.
 			fmt.Printf("перенос базы: тариф %q пропущен — недопустимый код\n", s.Plans[i].Code)
+		}
+	}
+	for i := range s.PlanAccess {
+		e := &s.PlanAccess[i]
+		if err := b.grantPlanAccessAt(ctx, e.PlanCode, e.TelegramID, e.Email, e.CreatedAt); err != nil {
+			if !errors.Is(err, ErrPlanCode) && !errors.Is(err, ErrPlanAccessEntry) {
+				return err
+			}
+			// Молчать нельзя: иначе оператор уверен, что переехало всё.
+			fmt.Printf("перенос базы: запись списка допущенных тарифа %q пропущена\n", e.PlanCode)
 		}
 	}
 	for i := range s.Intents {
