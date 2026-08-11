@@ -43,6 +43,17 @@ type Plan struct {
 	// стоит PlanAvailAll и поведение витрины не меняется.
 	Availability string
 
+	// AddSub — продаётся ли с тарифом доп-подписка (см. PlanAddSub*). Пустое
+	// значение означает «наследовать глобальный переключатель»: так тариф
+	// «Базовый» и существующие установки после обновления ведут себя ровно как
+	// раньше — опция есть у всех, пока включена глобально.
+	AddSub string
+	// AddSubName и AddSubDesc — название и описание опции ДЛЯ ЭТОГО тарифа.
+	// Пустые — берутся общие (из настроек доп-подписки), а без них — стандартный
+	// текст. Пользователь видит опцию только там, где она включена.
+	AddSubName string
+	AddSubDesc string
+
 	Currency string
 	// Durations — длительности тарифа, у каждой свои цены. Пустой список =
 	// тариф ничего не продаёт.
@@ -100,6 +111,26 @@ const (
 	PlanAvailLink = "link"
 )
 
+// Режимы доп-подписки у тарифа.
+const (
+	// PlanAddSubInherit — наследовать глобальный переключатель доп-подписки.
+	PlanAddSubInherit = ""
+	// PlanAddSubOn — опция продаётся с тарифом (при включённой инфраструктуре).
+	PlanAddSubOn = "on"
+	// PlanAddSubOff — тариф продаётся без опции.
+	PlanAddSubOff = "off"
+)
+
+// NormalizeAddSubMode приводит режим доп-подписки к валидному значению.
+// Неизвестное значение — «наследовать»: поведение как до появления поля.
+func NormalizeAddSubMode(mode string) string {
+	switch mode {
+	case PlanAddSubOn, PlanAddSubOff:
+		return mode
+	}
+	return PlanAddSubInherit
+}
+
 // PlanCodeBase — код тарифа, в который переезжает текущая сетка цен.
 const PlanCodeBase = "base"
 
@@ -152,6 +183,7 @@ func (p *Plan) Normalize() {
 	p.Code = strings.TrimSpace(p.Code)
 	p.Name = strings.TrimSpace(p.Name)
 	p.Availability = NormalizeAvailability(p.Availability)
+	p.AddSub = NormalizeAddSubMode(p.AddSub)
 	if p.TrafficGB < 0 {
 		p.TrafficGB = 0
 	}

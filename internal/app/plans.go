@@ -61,6 +61,12 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 		p.Icon = existing.Icon
 		p.Order = existing.Order
 		p.Availability = existing.Availability
+		// Режим и тексты доп-подписки — оформление тарифа: пересборка из сетки
+		// цен их не трогает. Дефолт нового «Базового» — наследовать глобальный
+		// переключатель, то есть поведение до появления опции.
+		p.AddSub = existing.AddSub
+		p.AddSubName = existing.AddSubName
+		p.AddSubDesc = existing.AddSubDesc
 		p.Enabled = existing.Enabled
 		p.CreatedAt = existing.CreatedAt
 	}
@@ -256,6 +262,7 @@ func samePlan(a, b *model.Plan) bool {
 		a.TrafficGB != b.TrafficGB || a.DeviceLimit != b.DeviceLimit ||
 		a.Strategy != b.Strategy || a.ExtSquad != b.ExtSquad ||
 		a.Availability != b.Availability || a.Currency != b.Currency ||
+		a.AddSub != b.AddSub || a.AddSubName != b.AddSubName || a.AddSubDesc != b.AddSubDesc ||
 		a.FromConfig != b.FromConfig {
 		return false
 	}

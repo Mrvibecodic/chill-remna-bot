@@ -45,6 +45,9 @@ type planFilePlan struct {
 	Description  string               `json:"description,omitempty"`
 	Icon         string               `json:"icon,omitempty"`
 	Availability string               `json:"availability,omitempty"`
+	AddSub       string               `json:"addsub,omitempty"`
+	AddSubName   string               `json:"addsub_name,omitempty"`
+	AddSubDesc   string               `json:"addsub_desc,omitempty"`
 	TrafficGB    int                  `json:"traffic_gb,omitempty"`
 	DeviceLimit  int                  `json:"device_limit,omitempty"`
 	Strategy     string               `json:"strategy,omitempty"`
@@ -77,7 +80,9 @@ func (a *App) exportPlan(ctx context.Context, chatID int64, code string) {
 		Version: planFileVersion,
 		Plan: planFilePlan{
 			Code: p.Code, Name: p.Name, Description: p.Description, Icon: p.Icon,
-			Availability: p.Availability, TrafficGB: p.TrafficGB, DeviceLimit: p.DeviceLimit,
+			Availability: p.Availability,
+			AddSub:       p.AddSub, AddSubName: p.AddSubName, AddSubDesc: p.AddSubDesc,
+			TrafficGB: p.TrafficGB, DeviceLimit: p.DeviceLimit,
 			Strategy: p.Strategy, IntSquads: p.IntSquads, ExtSquad: p.ExtSquad,
 			Currency: p.Currency, Durations: p.Durations,
 		},
@@ -127,13 +132,21 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 	p := &model.Plan{
 		Code: strings.TrimSpace(f.Plan.Code), Name: strings.TrimSpace(f.Plan.Name),
 		Description: f.Plan.Description, Icon: strings.TrimSpace(f.Plan.Icon),
-		Availability: f.Plan.Availability, TrafficGB: f.Plan.TrafficGB,
+		Availability: f.Plan.Availability,
+		AddSub:       f.Plan.AddSub, AddSubName: strings.TrimSpace(f.Plan.AddSubName), AddSubDesc: f.Plan.AddSubDesc,
+		TrafficGB:   f.Plan.TrafficGB,
 		DeviceLimit: f.Plan.DeviceLimit, Strategy: f.Plan.Strategy,
 		IntSquads: f.Plan.IntSquads, ExtSquad: f.Plan.ExtSquad,
 		Currency: f.Plan.Currency, Durations: f.Plan.Durations,
 	}
 	if !model.ValidPlanCode(p.Code) {
 		return nil, nil, fmt.Errorf("%w: недопустимый код тарифа %q", errPlanFile, p.Code)
+	}
+	if n := len([]rune(p.AddSubName)); n > planNameMaxLen {
+		return nil, nil, fmt.Errorf("%w: название опции длиннее %d символов", errPlanFile, planNameMaxLen)
+	}
+	if n := len([]rune(p.AddSubDesc)); n > planDescMaxLen {
+		return nil, nil, fmt.Errorf("%w: описание опции длиннее %d символов", errPlanFile, planDescMaxLen)
 	}
 	if p.Name == "" {
 		return nil, nil, fmt.Errorf("%w: у тарифа нет имени", errPlanFile)

@@ -33,8 +33,23 @@ type PlanSnapshot struct {
 	IntSquads   []string `json:"int_squads,omitempty"`
 	ExtSquad    string   `json:"ext_squad,omitempty"`
 
+	// AddSub — продана ли с этой сделкой доп-подписка. Указатель, а не bool:
+	// в снимках, снятых до появления опции, поля нет, и это означает «как
+	// раньше» — опция есть, пока включена глобально. Явный false появляется
+	// только у тарифов, проданных без опции.
+	AddSub *bool `json:"addsub,omitempty"`
+
 	Price    string `json:"price,omitempty"`
 	Currency string `json:"currency,omitempty"`
+}
+
+// AddSubSold — продана ли доп-подписка этой сделкой. Отсутствие снимка или
+// поля — «как раньше»: опция есть, пока включена глобально.
+func (s *PlanSnapshot) AddSubSold() bool {
+	if s == nil || s.AddSub == nil {
+		return true
+	}
+	return *s.AddSub
 }
 
 // TrafficBytes — лимит трафика снимка в байтах (0 = безлимит).
@@ -74,6 +89,13 @@ func (s *PlanSnapshot) Fingerprint() string {
 	cond := *s
 	cond.Code = ""
 	cond.Name = ""
+	// Доп-подписка «есть» канонизируется в отсутствие поля: старые снимки без
+	// поля означают ровно это, и первое обновление бота не должно рассылать
+	// «условия изменились» всем, у кого ничего не изменилось. В отпечатке
+	// участвует только явное «без опции».
+	if cond.AddSub != nil && *cond.AddSub {
+		cond.AddSub = nil
+	}
 	sum := sha256.Sum256([]byte(cond.Encode()))
 	return hex.EncodeToString(sum[:4])
 }

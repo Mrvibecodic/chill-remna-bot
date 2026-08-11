@@ -182,6 +182,9 @@ type MiniSubDTO struct {
 	AddSubLimit     int64 `json:"addsub_limit,omitempty"`
 	AddSubExhausted bool  `json:"addsub_exhausted,omitempty"`
 	AddSubOff       bool  `json:"addsub_off,omitempty"`
+	// AddSubName — название опции по тарифу пользователя (пусто — фронт
+	// показывает стандартное «Доп-сервер»).
+	AddSubName string `json:"addsub_name,omitempty"`
 }
 
 type MiniPlanDTO struct {

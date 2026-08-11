@@ -262,6 +262,15 @@ type AddSubConfig struct {
 	TrafficGB      int      `json:"traffic_gb"`
 	InternalSquads []string `json:"internal_squads"`
 	Init           bool     `json:"init"`
+	// Name и Description — общие название и описание опции для витрины и
+	// экранов подписки; тариф может переопределить их своими (Plan.AddSubName,
+	// Plan.AddSubDesc). Пустые — стандартный текст.
+	//
+	// ⚠ Поля живут в конфиге: предыдущий образ бота при сохранении конфига их
+	// молча выбрасывает. Потеря косметическая (тексты вводятся заново), ради
+	// неё отдельную таблицу не заводим.
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 func (c *BotConfig) NormalizeAddSub() {

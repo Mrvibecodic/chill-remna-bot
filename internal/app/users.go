@@ -754,19 +754,22 @@ func (a *App) addSubLine(ctx context.Context, chatID int64) string {
 		return ""
 	}
 	lang := a.lang(chatID)
+	// Название опции — тарифа пользователя (или общее): у каждого тарифа опция
+	// может называться по-своему.
+	name := a.userAddSubName(ctx, chatID)
 	switch {
 	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
-		return "\n" + i18n.T(lang, "sub.addsub_off")
+		return "\n" + i18n.T(lang, "sub.addsub_off", name)
 	case info.Exhausted:
-		return "\n" + i18n.T(lang, "sub.addsub_out")
+		return "\n" + i18n.T(lang, "sub.addsub_out", name)
 	case info.Limit <= 0:
-		return "\n" + i18n.T(lang, "sub.addsub_unlim")
+		return "\n" + i18n.T(lang, "sub.addsub_unlim", name)
 	}
 	left := info.Limit - info.Used
 	if left < 0 {
 		left = 0
 	}
-	return "\n" + i18n.T(lang, "sub.addsub", formatGB(left), formatGB(info.Limit))
+	return "\n" + i18n.T(lang, "sub.addsub", name, formatGB(left), formatGB(info.Limit))
 }
 
 // formatGB renders a byte count as GB with one decimal (trailing ".0" dropped).

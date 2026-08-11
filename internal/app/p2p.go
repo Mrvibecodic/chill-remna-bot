@@ -651,6 +651,13 @@ func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
 	s.TrafficGB = pr.Traffic[months]
 	s.DeviceLimit = pr.DeviceLimitFor(months)
 	s.Strategy = pr.ResetStrategy()
+	// Продана ли доп-подписка — часть условий сделки. Прямо из конфига и копии
+	// «Базового», без addSubParams: мы под a.mu.
+	sold := a.botCfg.AddSub.Enabled
+	if a.basePlanRef != nil && model.NormalizeAddSubMode(a.basePlanRef.AddSub) == model.PlanAddSubOff {
+		sold = false
+	}
+	s.AddSub = &sold
 	s.Price = pr.Base[months]
 	s.Currency = pr.Currency
 	return s
@@ -740,8 +747,9 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
 	a.invalidateSubCache(telegramID)
-	// Paid renewal: A's traffic was just reset, so B's must follow.
-	a.syncAddSub(ctx, telegramID, true)
+	// Paid renewal: A's traffic was just reset, so B's must follow. Продана ли
+	// опция, знает свежий снимок сделки — в базе он окажется только ниже.
+	a.syncAddSubSnap(ctx, telegramID, true, snap)
 	if a.store != nil {
 		err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
@@ -823,7 +831,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	}
 
 	switch ui.adminInput {
-	case "plan_name", "plan_desc", "plan_icon":
+	case "plan_name", "plan_desc", "plan_icon", "plan_addsub_name", "plan_addsub_desc":
 		a.applyPlanText(ctx, chatID, ui.adminInput, text)
 	case "plan_access":
 		a.applyPlanAccessInput(ctx, chatID, text)
@@ -1247,6 +1255,37 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.AddSub.TrafficGB = n
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showAddSubAdmin(ctx, chatID)
+	case "addsub_name", "addsub_desc":
+		field := ui.adminInput
+		ui.adminInput = ""
+		v := strings.TrimSpace(text)
+		if field == "addsub_name" {
+			v = firstLine(v)
+		}
+		if limit := planFieldLimit("plan_" + field); len([]rune(v)) > limit {
+			a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.too_long", limit),
+				[][]models.InlineKeyboardButton{navBack(lang, "menu:addsub")})
+			return
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			// Прочерк стирает (возврат к стандартному тексту), пустой ввод не
+			// трогает — как в полях тарифа.
+			switch {
+			case v == "-" && field == "addsub_name":
+				a.botCfg.AddSub.Name = ""
+			case v == "-":
+				a.botCfg.AddSub.Description = ""
+			case v == "":
+			case field == "addsub_name":
+				a.botCfg.AddSub.Name = v
+			default:
+				a.botCfg.AddSub.Description = v
+			}
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)

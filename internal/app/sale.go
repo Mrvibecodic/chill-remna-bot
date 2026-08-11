@@ -172,6 +172,7 @@ func (a *App) saleSnapshot(s *sale) *model.PlanSnapshot {
 // planSnapshotOf снимает условия сделки со строки тарифа — аналог
 // planSnapshotLocked, читающего сетку конфига.
 func (a *App) planSnapshotOf(p *model.Plan, d *model.PlanDuration, months int) *model.PlanSnapshot {
+	sold := a.planAddSubOn(p)
 	snap := &model.PlanSnapshot{
 		Code:        p.Code,
 		Name:        p.Name,
@@ -181,7 +182,10 @@ func (a *App) planSnapshotOf(p *model.Plan, d *model.PlanDuration, months int) *
 		Strategy:    p.Strategy,
 		IntSquads:   p.IntSquadsFor(d),
 		ExtSquad:    p.ExtSquadFor(d),
-		Currency:    p.Currency,
+		// Продана ли доп-подписка — часть условий сделки: продление применяет
+		// ровно то, что было продано, а не сегодняшний флаг тарифа.
+		AddSub:   &sold,
+		Currency: p.Currency,
 	}
 	if d != nil {
 		snap.Price = d.Base

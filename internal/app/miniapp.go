@@ -119,6 +119,8 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.AddSubLimit = add.Limit
 		dto.AddSubExhausted = add.Exhausted
 		dto.AddSubOff = strings.EqualFold(add.Status, remnawave.StatusDisabled)
+		// Название опции — тарифа пользователя (или общее).
+		dto.AddSubName = a.userAddSubName(ctx, tgID)
 	}
 	return dto
 }

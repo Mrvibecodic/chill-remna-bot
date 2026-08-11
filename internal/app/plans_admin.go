@@ -301,6 +301,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code)},
 		{btn(toggleLabel, "pln:toggle:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_avail", availModeName(lang, p.Availability)), "pln:av:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_addsub", addSubModeName(lang, p.AddSub)), "pln:as:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code), btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
@@ -472,6 +473,15 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		a.askPlanAccess(ctx, chatID, arg)
 	case "avlx":
 		a.onPlanAccessRemove(ctx, chatID, arg)
+	case "as":
+		a.showPlanAddSub(ctx, chatID, arg)
+	case "asm":
+		mode, code, _ := strings.Cut(arg, ":")
+		a.setPlanAddSubMode(ctx, chatID, code, mode)
+	case "asn":
+		a.askPlanTextTo(ctx, chatID, arg, "plan_addsub_name", "plans.ask_addsub_name", "pln:as:"+arg)
+	case "asd":
+		a.askPlanTextTo(ctx, chatID, arg, "plan_addsub_desc", "plans.ask_addsub_desc", "pln:as:"+arg)
 	case "exp":
 		a.exportPlan(ctx, chatID, arg)
 	case "imp":
@@ -510,6 +520,7 @@ func (a *App) forgetPlanInput(chatID int64) {
 	ui := a.getUI(chatID)
 	switch ui.adminInput {
 	case "plan_name", "plan_desc", "plan_icon", "plan_access",
+		"plan_addsub_name", "plan_addsub_desc",
 		"baseprice", "price", "ykprice", "starprice",
 		"traffic_gb", "device_per", "device_limit", "currency":
 		ui.adminInput = ""
@@ -556,9 +567,9 @@ func (a *App) askPlanTextTo(ctx context.Context, chatID int64, code, input, key,
 // planFieldLimit — граница длины поля и ключ сообщения о её нарушении.
 func planFieldLimit(field string) int {
 	switch field {
-	case "plan_name":
+	case "plan_name", "plan_addsub_name":
 		return planNameMaxLen
-	case "plan_desc":
+	case "plan_desc", "plan_addsub_desc":
 		return planDescMaxLen
 	default:
 		return planIconMaxLen
@@ -579,9 +590,9 @@ func (a *App) applyPlanText(ctx context.Context, chatID int64, field, text strin
 
 	v := strings.TrimSpace(text)
 	// Имя и значок идут в подписи кнопок, где перевод строки ломает вид, поэтому
-	// от них берём одну строку (firstLine сам обрезает пробелы). Описание
-	// многострочным быть может.
-	if field != "plan_desc" {
+	// от них берём одну строку (firstLine сам обрезает пробелы). Описания
+	// многострочными быть могут.
+	if field != "plan_desc" && field != "plan_addsub_desc" {
 		v = firstLine(v)
 	}
 	if limit := planFieldLimit(field); len([]rune(v)) > limit {
@@ -621,11 +632,31 @@ func (a *App) applyPlanText(ctx context.Context, chatID int64, field, text strin
 			default:
 				p.Icon = v
 			}
+		case "plan_addsub_name":
+			switch v {
+			case "-":
+				p.AddSubName = ""
+			case "":
+			default:
+				p.AddSubName = v
+			}
+		case "plan_addsub_desc":
+			switch v {
+			case "-":
+				p.AddSubDesc = ""
+			case "":
+			default:
+				p.AddSubDesc = v
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		a.planEditFailed(ctx, chatID, code, err)
+		return
+	}
+	if field == "plan_addsub_name" || field == "plan_addsub_desc" {
+		a.showPlanAddSub(ctx, chatID, code)
 		return
 	}
 	a.showPlanCard(ctx, chatID, code)
