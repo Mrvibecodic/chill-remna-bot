@@ -105,9 +105,14 @@ func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
 		return
 	}
 	if text, need := a.termsRequired(ctx, chatID); need {
+		// После «Принимаю» человека вернёт на этот же экран (см. onTerms):
+		// пришедший по ссылке на скрытый тариф не должен потерять его на
+		// витрине «Базового».
+		a.getUI(chatID).pendingPlanOffer = p.Code
 		a.askTerms(ctx, chatID, text)
 		return
 	}
+	a.getUI(chatID).pendingPlanOffer = ""
 
 	var rows [][]models.InlineKeyboardButton
 	cur := p.Currency
@@ -174,8 +179,13 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	// Вторая точка гейта: создание намерения. Кнопка могла пролежать в
 	// переписке сколько угодно — тариф успели выключить, срок снять с продажи,
 	// доступ отозвать.
+	if p == nil || !p.Enabled || !a.planAccessibleFor(ctx, p, chatID) {
+		a.planLinkFail(chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		return
+	}
 	d := p.Duration(mo)
-	if p == nil || !p.Enabled || d == nil || d.Base == "" || !a.planAccessibleFor(ctx, p, chatID) {
+	if d == nil || d.Base == "" {
 		a.planLinkFail(chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
@@ -184,6 +194,7 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 		return
 	}
 	if text, need := a.termsRequired(ctx, chatID); need {
+		a.getUI(chatID).pendingPlanOffer = p.Code
 		a.askTerms(ctx, chatID, text)
 		return
 	}

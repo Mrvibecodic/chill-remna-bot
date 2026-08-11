@@ -44,9 +44,19 @@ func (a *App) onTerms(ctx context.Context, chatID int64, val, firstName, usernam
 		if a.store != nil {
 			_ = a.store.SetTermsAccepted(ctx, chatID, time.Now().UTC().Format(time.RFC3339))
 		}
+		// Пришедшего по ссылке на тариф условия перехватили на его экране —
+		// после согласия возвращаем туда же, а не на витрину «Базового», где
+		// скрытого тарифа нет. Доступность перепроверит openPlanLink.
+		ui := a.getUI(chatID)
+		if code := ui.pendingPlanOffer; code != "" {
+			ui.pendingPlanOffer = ""
+			a.openPlanLink(ctx, chatID, code)
+			return
+		}
 		a.showPlans(ctx, chatID)
 	case "decline":
 		isAdmin := chatID == a.cfg.AdminID
+		a.getUI(chatID).pendingPlanOffer = ""
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
 	}
 }

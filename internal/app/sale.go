@@ -65,7 +65,12 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 		// Проверяем не только «выбор есть», но и «срок ещё продаётся» и «тариф
 		// доступен»: админ мог убрать цену или сменить режим доступности, пока
 		// экран способов висел в переписке.
-		if !a.periodOnSale(in.Months) || !a.baseSaleAllowed(ctx, chatID) {
+		//
+		// Гейт здесь — planAccessibleFor, а не baseSaleAllowed: у последнего
+		// режим «по ссылке» закрыт (это правило ВИТРИНЫ). Намерение на
+		// «Базовый» в режиме «по ссылке» создаётся только его экраном по
+		// ссылке — витрина в этом режиме намерений не создаёт вовсе.
+		if !a.periodOnSale(in.Months) || !a.planAccessibleFor(ctx, a.basePlanRow(ctx), chatID) {
 			return nil, nil
 		}
 		return baseSale(in.Months), nil

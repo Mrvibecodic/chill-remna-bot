@@ -102,7 +102,9 @@ func (a *App) sendReminder(ctx context.Context, chatID int64, key string, daysLe
 	if row := a.miniAppButtonRow(lang); row != nil {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")})
+	// «Продлить», а не «Купить»: подписчику тарифа по ссылке кнопка обязана
+	// открыть ЕГО тариф (showRenew), иначе напоминание продавало бы «Базовый».
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:renew")})
 	text := i18n.T(lang, key, daysLeft)
 	// Если у человека включено автопродление, напоминание «подписка кончается»
 	// без этой строки читается как «надо срочно платить руками».

@@ -146,6 +146,23 @@ func (a *App) basePlanRow(ctx context.Context) *model.Plan {
 	return p
 }
 
+// showRenew — вход «Продлить»: подписчику тарифа по ссылке открывается экран
+// ЕГО тарифа, остальным — витрина. Без этого напоминание о продлении вело
+// человека на «Базовый» и молча меняло условия.
+func (a *App) showRenew(ctx context.Context, chatID int64) {
+	code := a.userPlanCode(ctx, chatID)
+	if code != "" && code != model.PlanCodeBase {
+		p, err := a.planByCode(ctx, code)
+		if err == nil && p != nil && p.Enabled && a.planAccessibleFor(ctx, p, chatID) {
+			a.showPlanOffer(ctx, chatID, p)
+			return
+		}
+		// Тариф исчез или закрыт — честная витрина лучше молчаливой продажи
+		// чужих условий: человек выбирает заново из доступного.
+	}
+	a.showPlans(ctx, chatID)
+}
+
 // trialLockNotice — активный триал с запасом больше суток блокирует покупку
 // (общий гейт витрины и экрана тарифа по ссылке): дни триала не должны
 // сгорать.

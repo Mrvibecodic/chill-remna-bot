@@ -537,7 +537,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "buy":
 		a.showPlans(ctx, chatID)
 	case "renew":
-		a.showPlans(ctx, chatID)
+		// Продление ведёт на СВОЙ тариф: подписчику тарифа по ссылке витрина
+		// «Базового» продала бы чужие условия (или отказала бы вовсе).
+		a.showRenew(ctx, chatID)
 	case "topup":
 		a.showTopUp(ctx, chatID)
 	case "balance":

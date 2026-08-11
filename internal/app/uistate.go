@@ -54,6 +54,11 @@ type uiState struct {
 	awaitPlanImport  bool
 	planImport       *model.Plan
 	planImportAccess []model.PlanAccess
+
+	// pendingPlanOffer — код тарифа, чей экран отложен до принятия условий:
+	// человек пришёл по ссылке на скрытый тариф, а после «Принимаю» не должен
+	// оказаться на витрине «Базового» (там тарифа по ссылке нет).
+	pendingPlanOffer string
 }
 
 func (a *App) getUI(chatID int64) *uiState {
