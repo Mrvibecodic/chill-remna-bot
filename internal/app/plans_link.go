@@ -97,9 +97,23 @@ func (a *App) openPlanLink(ctx context.Context, chatID int64, code string) {
 	a.showPlanOffer(ctx, chatID, p)
 }
 
+// offerView — как показать карточку тарифа: с плашкой (продление), с «назад
+// к списку» (пришли из витрины) и с кнопкой «выбрать другой тариф».
+type offerView struct {
+	// note — строка над карточкой (например, «условия изменились»).
+	note string
+	// backToList — кнопка «назад» к списку тарифов.
+	backToList bool
+	// switchPlan — кнопка «выбрать другой тариф» (продление).
+	switchPlan bool
+}
+
 // showPlanOffer — экран одного тарифа: описание и кнопки сроков с ценами.
-// Аналог showPlans, но по строке тарифа.
 func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
+	a.showPlanOfferView(ctx, chatID, p, offerView{})
+}
+
+func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan, view offerView) {
 	lang := a.lang(chatID)
 	if a.trialLockNotice(ctx, chatID) {
 		return
@@ -115,10 +129,7 @@ func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
 	a.getUI(chatID).pendingPlanOffer = ""
 
 	var rows [][]models.InlineKeyboardButton
-	cur := p.Currency
-	if cur == "" {
-		cur = a.pricing().Currency
-	}
+	cur := planCurrencyOr(p, a.pricing().Currency)
 	for i := range p.Durations {
 		d := &p.Durations[i]
 		if d.Months <= 0 || d.Base == "" {
@@ -133,13 +144,44 @@ func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
 		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
-	rows = append(rows, homeRow(lang))
+	if view.switchPlan {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "buy.btn_switch_plan"), "menu:buy")})
+	}
+	if view.backToList {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:buy"), btn(i18n.T(lang, "btn.home"), "menu:home")})
+	} else {
+		rows = append(rows, homeRow(lang))
+	}
 
 	var b strings.Builder
+	if view.note != "" {
+		b.WriteString(view.note)
+		b.WriteString("\n\n")
+	}
+	if a.store != nil {
+		// «Чаще всего выбирают» — только если такой срок есть у ЭТОГО тарифа:
+		// подпись по чужому сроку читалась бы как сбой.
+		if months, total, err := a.store.MostPopularPlan(ctx); err == nil && months > 0 && total >= popularThreshold {
+			if d := p.Duration(months); d != nil && d.Base != "" {
+				b.WriteString(i18n.T(lang, "buy.popular", months))
+				b.WriteString("\n\n")
+			}
+		}
+	}
 	b.WriteString(i18n.T(lang, "plans.offer_title", planTitleHTML(lang, p)))
 	if desc := strings.TrimSpace(p.Description); desc != "" {
 		b.WriteString("\n\n")
 		b.WriteString(html.EscapeString(desc))
+	}
+	// Опция доп-подписки: покупатель видит её только там, где она продаётся.
+	if a.planAddSubOn(p) {
+		name, desc := a.addSubTexts(lang, p)
+		b.WriteString("\n\n")
+		b.WriteString(i18n.T(lang, "buy.addsub_line", html.EscapeString(name)))
+		if desc != "" {
+			b.WriteString("\n")
+			b.WriteString(html.EscapeString(desc))
+		}
 	}
 	if cs, _ := a.squadCountries(ctx, p.IntSquadsFor(nil)); len(cs) > 0 {
 		if line := countriesText(lang, cs); line != "" {
@@ -150,6 +192,42 @@ func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
 	b.WriteString("\n\n")
 	b.WriteString(i18n.T(lang, "plans.offer_choose"))
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, b.String(), rows)
+}
+
+// onPlanView — карточка тарифа из списка витрины: plo:<код>. Тот же троттлинг
+// и тот же единый отказ, что у ссылки: callback подделываем, а список — не
+// допуск к скрытому.
+func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
+	lang := a.lang(chatID)
+	if a.planLinkThrottled(chatID) {
+		a.log.Warn("карточка тарифа: лимит попыток", "user", chatID)
+		return
+	}
+	if !model.ValidPlanCode(code) {
+		a.planLinkFail(chatID)
+		a.showPlans(ctx, chatID)
+		return
+	}
+	p, err := a.planByCode(ctx, code)
+	if err != nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
+		return
+	}
+	if p == nil && code == model.PlanCodeBase {
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+	}
+	// Тариф «по ссылке» с витрины не открывается: список — не обладание
+	// ссылкой. Для остальных — обычный гейт доступности.
+	if p == nil || !p.Enabled || !planSellsAnything(p) ||
+		model.NormalizeAvailability(p.Availability) == model.PlanAvailLink ||
+		!a.planAccessibleFor(ctx, p, chatID) {
+		a.planLinkFail(chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		return
+	}
+	a.showPlanOfferView(ctx, chatID, p, offerView{backToList: true})
 }
 
 // onPlanBuy — нажатие срока на экране тарифа: plb:<код>:<месяцы>.
@@ -175,6 +253,14 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	if perr != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
+	}
+	if p == nil && code == model.PlanCodeBase {
+		// «Базовый» без строки — сбой стартовой синхронизации: продаёт сетка,
+		// и кнопки его карточки обязаны работать (та же логика, что в
+		// editPlanPricing).
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
 	}
 	// Вторая точка гейта: создание намерения. Кнопка могла пролежать в
 	// переписке сколько угодно — тариф успели выключить, срок снять с продажи,

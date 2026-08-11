@@ -162,6 +162,70 @@ func TestPlanAddSubAdmin_Screen(t *testing.T) {
 	}
 }
 
+// Витрина: один видимый тариф — сразу его карточка; несколько — список; тариф
+// «по ссылке» в списке не показывается и по plo не открывается.
+func TestShowcase_ListAndSingle(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	uid := int64(810)
+	// Один тариф («Базовый») — сразу сроки его карточки.
+	a.handleMessage(ctx, msgText(uid, "/buy"))
+	if !hasCB(fm.allCallbackData(), "plb:base:1") {
+		t.Fatalf("единственный тариф должен открываться сразу: %v", fm.allCallbackData())
+	}
+
+	// Второй видимый тариф — появляется список.
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	a.handleMessage(ctx, msgText(uid, "/buy"))
+	if !hasCB(fm.allCallbackData(), "plo:"+p.Code) || !hasCB(fm.allCallbackData(), "plo:base") {
+		t.Fatalf("список тарифов не показан: %v", fm.allCallbackData())
+	}
+	// Карточка из списка открывается и продаёт.
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if !hasCB(fm.allCallbackData(), "plb:"+p.Code+":1") {
+		t.Fatalf("карточка тарифа из списка не открылась: %q", fm.last())
+	}
+
+	// Тариф «по ссылке» из списка исчезает и по plo не открывается.
+	p.Availability = model.PlanAvailLink
+	_ = fs.SavePlan(ctx, p)
+	a.handleMessage(ctx, msgText(uid, "/buy"))
+	if hasCB(fm.allCallbackData()[len(fm.allCallbackData())-3:], "plo:"+p.Code) {
+		t.Fatalf("скрытый тариф не должен быть в списке")
+	}
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if !strings.Contains(fm.last(), "недоступен") {
+		t.Fatalf("plo на скрытый тариф должен отвечать отказом: %q", fm.last())
+	}
+}
+
+// Карточка тарифа показывает опцию доп-подписки только там, где она продаётся.
+func TestShowcase_AddSubLineOnOffer(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	a.botCfg.AddSub.Enabled = true
+	a.botCfg.AddSub.Name = "Второй сервер"
+	a.botCfg.AddSub.Description = "Ещё одна подписка в той же ссылке"
+	p := vipPlan(t, fs, model.PlanAvailAll)
+
+	uid := int64(820)
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if !strings.Contains(fm.last(), "Второй сервер") || !strings.Contains(fm.last(), "той же ссылке") {
+		t.Fatalf("опция должна быть в карточке: %q", fm.last())
+	}
+
+	p.AddSub = model.PlanAddSubOff
+	_ = fs.SavePlan(ctx, p)
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if strings.Contains(fm.last(), "Второй сервер") {
+		t.Fatalf("тариф без опции не должен её показывать: %q", fm.last())
+	}
+}
+
 // Общие тексты в настройках доп-подписки.
 func TestAddSubAdmin_GlobalTexts(t *testing.T) {
 	ctx := context.Background()

@@ -95,6 +95,9 @@ func (a *App) p2pAllowed(u *model.User) bool {
 	return u != nil && u.P2PApproved
 }
 
+// showPlans — витрина: список доступных покупателю тарифов. Единственный
+// видимый тариф открывается сразу карточкой (без лишнего клика — так живёт
+// типичная установка с одним «Базовым»).
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 
@@ -106,36 +109,122 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		a.askTerms(ctx, chatID, text)
 		return
 	}
-	// Первая точка гейта доступности: витрина. «Базовый» в режиме «по списку»
-	// или «только новым» человеку вне правила не показывается — и то же самое
-	// проверяют создание счёта и финализация.
-	if !a.baseSaleAllowed(ctx, chatID) {
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
+	// Первая точка гейта доступности — сама витрина: она строится только из
+	// тарифов, доступных этому покупателю. Создание счёта и финализация
+	// проверяют то же самое ещё раз.
+	plans, anySellable, err := a.storefrontPlans(ctx, chatID)
+	if err != nil {
+		a.log.Warn("витрина: тарифы не прочитаны", "err", err, "user", chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	pr := a.pricing()
-	var rows [][]models.InlineKeyboardButton
-	for _, mo := range model.PlanMonths {
-		price := pr.Base[mo]
-		if price == "" {
-			continue
-		}
-		label := i18n.T(lang, "buy.plan_btn", mo, price+curSuffix(curRUB))
-		rows = append(rows, []models.InlineKeyboardButton{btn(label, "buy:"+strconv.Itoa(mo))})
-	}
-	if len(rows) == 0 {
+	switch {
+	case len(plans) == 1:
+		a.showPlanOfferView(ctx, chatID, &plans[0], offerView{})
+		return
+	case len(plans) == 0 && anySellable:
+		// Продаваемые тарифы есть, но все закрыты от этого покупателя.
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		return
+	case len(plans) == 0:
 		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
-	rows = append(rows, homeRow(lang))
 
-	caption := i18n.T(lang, "buy.choose_plan")
-	if a.store != nil {
-		if months, total, err := a.store.MostPopularPlan(ctx); err == nil && months > 0 && total >= popularThreshold {
-			caption = i18n.T(lang, "buy.popular", months) + "\n\n" + caption
+	var rows [][]models.InlineKeyboardButton
+	for i := range plans {
+		p := &plans[i]
+		label := planTitle(lang, p)
+		if from := planMinPrice(p); from != "" {
+			label += " · " + i18n.T(lang, "buy.from_price", from+curSuffix(planCurrencyOr(p, a.pricing().Currency)))
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "plo:"+p.Code)})
+	}
+	rows = append(rows, homeRow(lang))
+	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "buy.choose_tariff"), rows)
+}
+
+// storefrontPlans — тарифы, которые видит этот покупатель: включённые, с
+// продаваемыми сроками, доступные ему и не скрытые «по ссылке». anySellable
+// говорит, есть ли вообще продаваемые тарифы (чтобы отличать пустую витрину
+// от закрытой).
+func (a *App) storefrontPlans(ctx context.Context, tgID int64) (visible []model.Plan, anySellable bool, err error) {
+	plans, err := a.planList(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	// Строки «Базового» может не быть только из-за сбоя стартовой синхронизации
+	// (или в тестах с чистым хранилищем) — витрина при этом не имеет права
+	// пустеть: собираем его из сетки конфига, как это делает editPlanPricing.
+	hasBase := false
+	for i := range plans {
+		if plans[i].Code == model.PlanCodeBase {
+			hasBase = true
+			break
 		}
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, caption, rows)
+	if !hasBase {
+		a.mu.Lock()
+		syn := basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+		if syn != nil {
+			plans = append([]model.Plan{*syn}, plans...)
+		}
+	}
+	for i := range plans {
+		p := &plans[i]
+		if !p.Enabled || !planSellsAnything(p) {
+			continue
+		}
+		anySellable = true
+		if model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
+			continue
+		}
+		if !a.planAccessibleFor(ctx, p, tgID) {
+			continue
+		}
+		visible = append(visible, *p)
+	}
+	return visible, anySellable, nil
+}
+
+// planSellsAnything — есть ли у тарифа хоть один продаваемый срок.
+func planSellsAnything(p *model.Plan) bool {
+	for i := range p.Durations {
+		if p.Durations[i].Months > 0 && p.Durations[i].Base != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// planMinPrice — минимальная базовая цена тарифа для подписи «от …».
+func planMinPrice(p *model.Plan) string {
+	best := int64(-1)
+	out := ""
+	for i := range p.Durations {
+		d := &p.Durations[i]
+		if d.Months <= 0 || d.Base == "" {
+			continue
+		}
+		k, ok := rubToKopecks(d.Base)
+		if !ok {
+			continue
+		}
+		if best < 0 || k < best {
+			best = k
+			out = d.Base
+		}
+	}
+	return out
+}
+
+// planCurrencyOr — валюта тарифа или запасная (валюта сетки).
+func planCurrencyOr(p *model.Plan, fallback string) string {
+	if p.Currency != "" {
+		return p.Currency
+	}
+	return fallback
 }
 
 const popularThreshold = 10
