@@ -112,7 +112,13 @@ func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
 	return sb.String(), best
 }
 
-func (a *App) topUpAmounts() ([]int64, int64) {
+// topUpAmounts — пресеты пополнения и потолок произвольной суммы.
+//
+// Раньше и то и другое считалось только по сетке «Базового», и цену тарифа по
+// ссылке дороже её максимума нельзя было положить на баланс одним платежом.
+// Теперь потолок учитывает ВСЕ включённые тарифы, а пресеты — только тарифы
+// публичных режимов: кнопка с ценой скрытого тарифа выдавала бы её всем.
+func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 	pr := a.pricing()
 	seen := map[int64]bool{}
 	var amts []int64
@@ -128,14 +134,47 @@ func (a *App) topUpAmounts() ([]int64, int64) {
 			maxK = k
 		}
 	}
+	if plans, err := a.planList(ctx); err == nil {
+		for i := range plans {
+			p := &plans[i]
+			if !p.Enabled {
+				continue
+			}
+			mode := model.NormalizeAvailability(p.Availability)
+			hidden := mode == model.PlanAvailList || mode == model.PlanAvailLink
+			for j := range p.Durations {
+				d := &p.Durations[j]
+				if d.Months <= 0 {
+					continue
+				}
+				k, ok := rubToKopecks(d.Base)
+				if !ok || k <= 0 {
+					continue
+				}
+				if k > maxK {
+					maxK = k
+				}
+				if hidden || seen[k] {
+					continue
+				}
+				seen[k] = true
+				amts = append(amts, k)
+			}
+		}
+	}
 	sort.Slice(amts, func(i, j int) bool { return amts[i] < amts[j] })
+	// Кнопок — не больше восьми: длинный прайс превращал бы экран пополнения
+	// в простыню. Потолок при этом считается по всем ценам.
+	if len(amts) > 8 {
+		amts = amts[:8]
+	}
 	return amts, maxK
 }
 
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
-	amts, _ := a.topUpAmounts()
+	amts, _ := a.topUpAmounts(ctx)
 	var rows [][]models.InlineKeyboardButton
 	var row []models.InlineKeyboardButton
 	for _, k := range amts {
@@ -159,7 +198,7 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	switch action {
 	case "amt":
 		k, _ := strconv.ParseInt(arg, 10, 64)
-		amts, _ := a.topUpAmounts()
+		amts, _ := a.topUpAmounts(ctx)
 		ok := false
 		for _, v := range amts {
 			if v == k {
@@ -176,7 +215,7 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	case "custom":
 		a.getUI(chatID).awaitTopUp = true
 		ask := i18n.T(lang, "topup.ask_amount")
-		if _, maxK := a.topUpAmounts(); maxK > 0 {
+		if _, maxK := a.topUpAmounts(ctx); maxK > 0 {
 			ask = i18n.T(lang, "topup.ask_amount_max", kopecksToRub(maxK))
 		}
 		a.sendKB(ctx, chatID, ask,
@@ -198,7 +237,7 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
 		return
 	}
-	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+	if _, maxK := a.topUpAmounts(ctx); maxK > 0 && k > maxK {
 		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
 		return
@@ -244,7 +283,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		a.showTopUp(ctx, chatID)
 		return
 	}
-	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+	if _, maxK := a.topUpAmounts(ctx); maxK > 0 && k > maxK {
 		a.getUI(chatID).topUpKopecks = 0
 		a.sendKB(ctx, chatID, i18n.T(lang, "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(lang, "menu:topup")})
