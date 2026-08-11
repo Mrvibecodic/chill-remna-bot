@@ -411,7 +411,13 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		// от справочника не зависят. Числа подписчиков здесь нет намеренно —
 		// пока продажи идут по старой сетке, у любого удаляемого тарифа оно
 		// ноль, а ноль в предупреждении читался бы как разрешение.
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.del_confirm", planTitleHTML(lang, p)),
+		text := i18n.T(lang, "plans.del_confirm", planTitleHTML(lang, p))
+		if model.NormalizeAvailability(p.Availability) == model.PlanAvailList {
+			if list, lerr := a.planAccessList(ctx, p.Code); lerr == nil && len(list) > 0 {
+				text += "\n\n" + i18n.T(lang, "plans.del_list_note", len(list))
+			}
+		}
+		a.sendPayKB(ctx, chatID, text,
 			[][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "plans.btn_del_yes"), "pln:delyes:"+p.Code)},
 				navBack(lang, "pln:open:"+p.Code),

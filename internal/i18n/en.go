@@ -578,6 +578,8 @@ var en = map[string]string{
 	"plans.btn_import_yes":       "✅ Import",
 	"plans.import_done":          "✅ Plan %s imported.",
 	"plans.btn_open_imported":    "📦 Open plan",
+	"plans.import_base_warn":     "❗ This is the «Basic» plan: after the import its terms become the source of truth, and the legacy pricing grid is overwritten from the file.",
+	"plans.del_list_note":        "The plan's allow-list (%d entries) will be deleted together with it.",
 	"plans.code_failed":          "Could not generate a plan code. Please try again.",
 	"plans.del_confirm":          "🗑 Delete plan <b>%s</b>?\n\nActive subscriptions are unaffected: the terms they were sold on are frozen at payment time and do not depend on the plan — nobody is downgraded or cut off.\n\nThe plan itself is gone for good.",
 	"squads.title":               "📡 <b>Squads (which nodes the user gets)</b>\n\nInternal: %d · External: %d\nActive internal: %d · External: <code>%s</code>\n\nTap a squad to toggle (multiple internal allowed, one external).",

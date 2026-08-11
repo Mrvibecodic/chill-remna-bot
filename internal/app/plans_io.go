@@ -216,6 +216,11 @@ func (a *App) handlePlanImportDoc(ctx context.Context, m *models.Message) {
 	if existing != nil {
 		kind = i18n.T(lang, "plans.import_overwrite", planTitleHTML(lang, existing))
 	}
+	if p.Code == model.PlanCodeBase {
+		// Импорт «Базового» — это ещё и разворот синхронизации: файл станет
+		// истиной, зеркало перепишет сетку цен в конфиге.
+		kind += "\n\n" + i18n.T(lang, "plans.import_base_warn")
+	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.import_preview",
 		planTitleHTML(lang, p), p.Code, availModeName(lang, p.Availability),
 		len(p.Durations), len(access), kind),
