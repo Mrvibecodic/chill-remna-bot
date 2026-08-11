@@ -226,6 +226,57 @@ func TestShowcase_AddSubLineOnOffer(t *testing.T) {
 	}
 }
 
+// Продление: без изменений — карточка как есть; условия изменились — плашка;
+// тариф исчез — честное сообщение с выбором нового.
+func TestRenew_ThreeScenarios(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	a.botCfg.AddSub.Enabled = true
+	p := vipPlan(t, fs, model.PlanAvailLink)
+	uid := int64(830)
+	_ = fs.UpsertUser(ctx, uid)
+
+	// Снимок ровно с сегодняшних условий тарифа (опция продана).
+	snap := a.planSnapshotOf(p, p.Duration(1), 1)
+	_ = fs.SetUserSnapshot(ctx, uid, snap)
+
+	// 1: условия те же — плашки нет.
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if strings.Contains(fm.last(), "изменились") {
+		t.Fatalf("плашка без изменений: %q", fm.last())
+	}
+	if !hasCB(fm.allCallbackData(), "plb:"+p.Code+":1") {
+		t.Fatalf("карточка тарифа не открылась: %q", fm.last())
+	}
+	if !strings.Contains(strings.Join(fm.buttonLabels(), "|"), "другой тариф") {
+		t.Fatalf("нет кнопки смены тарифа: %v", fm.buttonLabels())
+	}
+
+	// 2: цена срока изменилась — плашка.
+	p.Durations[0].Base = "1990"
+	_ = fs.SavePlan(ctx, p)
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if !strings.Contains(fm.last(), "изменились") {
+		t.Fatalf("плашка об изменении не показана: %q", fm.last())
+	}
+
+	// 2а: изменение только опции доп-подписки — тоже изменение условий.
+	p.Durations[0].Base = snap.Price
+	p.AddSub = model.PlanAddSubOff
+	_ = fs.SavePlan(ctx, p)
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if !strings.Contains(fm.last(), "изменились") {
+		t.Fatalf("снятая опция — изменение условий: %q", fm.last())
+	}
+
+	// 3: тариф удалён — сообщение и выбор нового.
+	_ = fs.DeletePlan(ctx, p.Code)
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if !strings.Contains(fm.last(), "больше недоступен") || !hasCB(fm.allCallbackData(), "menu:buy") {
+		t.Fatalf("сценарий «тариф исчез» не отработал: %q", fm.last())
+	}
+}
+
 // Общие тексты в настройках доп-подписки.
 func TestAddSubAdmin_GlobalTexts(t *testing.T) {
 	ctx := context.Background()

@@ -146,21 +146,84 @@ func (a *App) basePlanRow(ctx context.Context) *model.Plan {
 	return p
 }
 
-// showRenew — вход «Продлить»: подписчику тарифа по ссылке открывается экран
-// ЕГО тарифа, остальным — витрина. Без этого напоминание о продлении вело
-// человека на «Базовый» и молча меняло условия.
+// showRenew — вход «Продлить». Три сценария (по плану этапа):
+//  1. условия тарифа не изменились — карточка тарифа как есть;
+//  2. тот же тариф, но условия срока изменились (цена, лимиты, сквады, опция)
+//     — та же карточка с плашкой «условия изменились»;
+//  3. тарифа больше нет или он закрыт покупателю — честное сообщение и выбор
+//     нового тарифа, а не молчаливая продажа чужих условий.
 func (a *App) showRenew(ctx context.Context, chatID int64) {
-	code := a.userPlanCode(ctx, chatID)
-	if code != "" && code != model.PlanCodeBase {
-		p, err := a.planByCode(ctx, code)
-		if err == nil && p != nil && p.Enabled && a.planAccessibleFor(ctx, p, chatID) {
-			a.showPlanOffer(ctx, chatID, p)
-			return
-		}
-		// Тариф исчез или закрыт — честная витрина лучше молчаливой продажи
-		// чужих условий: человек выбирает заново из доступного.
+	lang := a.lang(chatID)
+	snap := a.userSnapshot(ctx, chatID)
+	code := planCodeOf(snap)
+	if snap == nil || code == "" {
+		// Покупок со снимком не было — обычная витрина.
+		a.showPlans(ctx, chatID)
+		return
 	}
-	a.showPlans(ctx, chatID)
+	p, err := a.planByCode(ctx, code)
+	if err != nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
+		return
+	}
+	if p == nil && code == model.PlanCodeBase {
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+	}
+	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
+		// Сценарий 3: тариф удалён, выключен или закрыт для покупателя.
+		a.sendKB(ctx, chatID, i18n.T(lang, "renew.plan_gone"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
+			homeRow(lang),
+		})
+		return
+	}
+	view := offerView{switchPlan: true}
+	if a.renewTermsChanged(p, snap) {
+		view.note = i18n.T(lang, "renew.terms_changed")
+	}
+	a.showPlanOfferView(ctx, chatID, p, view)
+}
+
+// renewTermsChanged — изменились ли УСЛОВИЯ проданного срока с момента покупки:
+// сравнивается снимок сделки с сегодняшним снимком того же срока (в отпечатке
+// и цена, и лимиты, и сквады, и опция доп-подписки). Снятый с продажи срок —
+// тоже изменение.
+func (a *App) renewTermsChanged(p *model.Plan, snap *model.PlanSnapshot) bool {
+	if snap == nil || snap.Months <= 0 {
+		return false
+	}
+	var cur *model.PlanSnapshot
+	if p.Code == model.PlanCodeBase {
+		// «Базовый» продаётся по сетке конфига — сравниваем с ней же.
+		cur = a.planSnapshot(snap.Months)
+	} else {
+		d := p.Duration(snap.Months)
+		if d == nil || d.Base == "" {
+			return true
+		}
+		cur = a.planSnapshotOf(p, d, snap.Months)
+	}
+	if cur == nil || cur.Price == "" {
+		return true
+	}
+	return cur.Fingerprint() != snap.Fingerprint()
+}
+
+// userSnapshot — снимок последней сделки пользователя (nil — покупок не было).
+func (a *App) userSnapshot(ctx context.Context, tgID int64) *model.PlanSnapshot {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return nil
+	}
+	u, err := st.GetUser(ctx, tgID)
+	if err != nil || u == nil {
+		return nil
+	}
+	return u.Snapshot
 }
 
 // trialLockNotice — активный триал с запасом больше суток блокирует покупку
