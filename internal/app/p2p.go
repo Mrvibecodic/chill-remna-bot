@@ -545,17 +545,12 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 	if p2p.OpenForAll {
 		openAll = i18n.T(lang, "admin.yes")
 	}
-	squad := p2p.SquadUUID
-	if squad == "" {
-		squad = i18n.T(lang, "admin.none")
-	}
-	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P), squad) +
+	text := i18n.T(lang, "admin.p2p_title", status, len(p2p.Cards), rot, curRUB, a.formatFiatPrices(model.PayMethodP2P)) +
 		i18n.T(lang, "admin.p2p_open_block", openAll)
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, p2p.Enabled, "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
-		{btn(i18n.T(lang, "admin.btn_squad"), "sq:pick")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -597,9 +592,6 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "cards":
 		a.getUI(chatID).adminInput = "cards"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_cards"), "menu:p2p")
-	case "squad":
-		a.getUI(chatID).adminInput = "squad"
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_squad"), "menu:p2p")
 	case "cur":
 		a.getUI(chatID).adminInput = "p2p_cur"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_currency"), "menu:p2p")
@@ -924,19 +916,6 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.P2P.Cards = cards
-		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
-		a.showP2PAdmin(ctx, chatID)
-	case "squad":
-		ui.adminInput = ""
-		v := strings.TrimSpace(text)
-		if v == "-" {
-			v = ""
-		}
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.P2P.SquadUUID = v
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)

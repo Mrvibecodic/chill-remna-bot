@@ -273,12 +273,13 @@ func (a *App) planInputFailed(ctx context.Context, chatID int64, err error) {
 	a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 }
 
-// afterPlanPriceEdit возвращает админа на экран, с которого он правил: старый
-// экран цен для «Базового» без контекста тарифа, иначе — экран редактора.
+// afterPlanPriceEdit возвращает админа на экран, с которого он правил: правка
+// без контекста тарифа (старые prc:-кнопки, быстрая настройка) ведёт в
+// редактор цен «Базового», иначе — на экран редактора того же тарифа.
 func (a *App) afterPlanPriceEdit(ctx context.Context, chatID int64, code string, mo int) {
 	switch {
 	case code == "":
-		a.showPricing(ctx, chatID)
+		a.showPlanPricing(ctx, chatID, model.PlanCodeBase)
 	case mo > 0:
 		a.showPlanMonth(ctx, chatID, code, mo)
 	default:

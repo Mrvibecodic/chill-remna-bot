@@ -752,3 +752,17 @@ func TestPlansAdmin_PaginationKeepsPage(t *testing.T) {
 		}
 	}
 }
+
+// Старый сводный экран цен убран: menu:pricing (кнопки из старых переписок,
+// «настроить вручную» в «Продажах») ведёт в редактор цен «Базового».
+func TestMenuPricing_OpensBasePlanEditor(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _ := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	planTap(t, a, "menu:pricing")
+	if !strings.Contains(fm.last(), "цены и лимиты") {
+		t.Fatalf("ожидался редактор цен «Базового»: %q", fm.last())
+	}
+}

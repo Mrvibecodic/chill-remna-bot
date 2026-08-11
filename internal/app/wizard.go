@@ -85,7 +85,6 @@ const (
 	cbEmoji     = "emo"
 	cbWelcome   = "wel"
 	cbUsers     = "usr"
-	cbSquad     = "sq"
 	cbSection   = "sec"
 	cbSubdomain = "subd"
 	cbPanelAuth = "pauth"
@@ -250,10 +249,6 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbUsers:
 		if isAdmin {
 			a.onUsers(ctx, chatID, val, cqMsgID(cq))
-		}
-	case cbSquad:
-		if isAdmin {
-			a.onSquad(ctx, chatID, val)
 		}
 	case cbSection:
 		if isAdmin {

@@ -748,7 +748,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		}
 	case "pricing":
 		if isAdmin {
-			a.showPricing(ctx, chatID)
+			// Старый экран цен убран: кнопки из старых переписок ведут в
+			// редактор цен «Базового» — то же содержимое, один источник истины.
+			a.showPlanPricing(ctx, chatID, model.PlanCodeBase)
 		}
 	case "payments":
 		if isAdmin {

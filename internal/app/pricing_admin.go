@@ -115,49 +115,10 @@ func (a *App) formatDeviceLimits(lang string) string {
 	return i18n.T(lang, "pricing.hwid_default")
 }
 
-func (a *App) showPricing(ctx context.Context, chatID int64) {
-	lang := a.lang(chatID)
-	pr := a.pricing()
-	table := a.formatPlansTable(lang)
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.title", curRUB, pr.ResetStrategy(), table), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "pricing.btn_base"), "prc:base")},
-		{btn(i18n.T(lang, "pricing.btn_traffic"), "prc:traffic"), btn(i18n.T(lang, "pricing.btn_devices"), "prc:devices")},
-		{btn(i18n.T(lang, "pricing.btn_strategy"), "prc:strategy")},
-		{btn(i18n.T(lang, "pricing.btn_squads"), "prc:squads")},
-		// Ссылка в тарифы: на этот экран отправляет карточка тарифа, и без
-		// обратного пути админ возвращался бы через «Продажи».
-		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
-	})
-}
-
-func (a *App) formatPlansTable(lang string) string {
-	pr := a.pricing()
-	var sb strings.Builder
-	sb.WriteString("<pre>")
-	sb.WriteString(padRight("Plan", 6) + "  " + padRight("Price", 12) + "  " + padRight("Traffic", 10) + "  HWID\n")
-	sb.WriteString(strings.Repeat("─", 40) + "\n")
-	for _, mo := range model.PlanMonths {
-		price := pr.Base[mo]
-		if price == "" {
-			price = "—"
-		} else {
-			price += curSuffix(pr.Currency)
-		}
-		traffic := i18n.T(lang, "trial.unlimited")
-		if gb := pr.Traffic[mo]; gb > 0 {
-			traffic = strconv.Itoa(gb) + " GB"
-		}
-		hwid := "—"
-		if d := pr.DeviceLimitFor(mo); d > 0 {
-			hwid = strconv.Itoa(d)
-		}
-		sb.WriteString(padRight(strconv.Itoa(mo)+"m", 6) + "  " + padRight(price, 12) + "  " + padRight(traffic, 10) + "  " + hwid + "\n")
-	}
-	sb.WriteString("</pre>")
-	return sb.String()
-}
-
+// Старый сводный экран цен (menu:pricing) убран: его содержимое целиком живёт
+// в редакторе тарифа «Базовый» (pln:pr:base), куда menu:pricing и ведёт.
+// Обработчики prc:* ниже остаются: их кнопки висят в старых переписках, а
+// быстрая настройка (prc:quick) пользуется ими и сегодня.
 func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	lang := a.lang(chatID)
@@ -257,7 +218,7 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 			a.planInputFailed(ctx, chatID, err)
 			return
 		}
-		a.showPricing(ctx, chatID)
+		a.showPlanPricing(ctx, chatID, model.PlanCodeBase)
 	}
 }
 

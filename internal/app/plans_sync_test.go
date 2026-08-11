@@ -837,3 +837,35 @@ func TestHealNoticesOffSalePriceChange(t *testing.T) {
 		t.Fatalf("цена автопродления не восстановлена из тарифа: %q", got)
 	}
 }
+
+// Легаси-поле «одиночный сквад P2P» на старте переносится в глобальный набор
+// (первую ступень всех цепочек фолбэков) и чистится — экраны его правки убраны.
+func TestFoldLegacyP2PSquad(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	a.botCfg.Plan.ActiveInternalSquads = nil
+	a.botCfg.P2P.SquadUUID = "legacy-p2p"
+
+	a.foldLegacyP2PSquad(ctx)
+	if got := a.botCfg.Plan.ActiveInternalSquads; len(got) != 1 || got[0] != "legacy-p2p" {
+		t.Fatalf("сквад не перенесён в глобальный набор: %v", got)
+	}
+	if a.botCfg.P2P.SquadUUID != "" {
+		t.Fatal("легаси-поле не очищено")
+	}
+	saved, ok, _ := fs.LoadConfig(ctx)
+	if !ok || saved.P2P.SquadUUID != "" || len(saved.Plan.ActiveInternalSquads) != 1 {
+		t.Fatalf("перенос не сохранён: %+v", saved)
+	}
+
+	// Непустой набор главнее: легаси-поле игнорировалось — просто чистится.
+	a.botCfg.Plan.ActiveInternalSquads = []string{"main"}
+	a.botCfg.P2P.SquadUUID = "legacy-p2p"
+	a.foldLegacyP2PSquad(ctx)
+	if got := a.botCfg.Plan.ActiveInternalSquads; len(got) != 1 || got[0] != "main" {
+		t.Fatalf("набор затёрт легаси-полем: %v", got)
+	}
+	if a.botCfg.P2P.SquadUUID != "" {
+		t.Fatal("легаси-поле не очищено при непустом наборе")
+	}
+}

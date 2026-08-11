@@ -213,7 +213,6 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_new"), "pln:new"), btn(i18n.T(lang, "plans.btn_import"), "pln:imp")},
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_prices"), "menu:pricing")},
 		navBack(lang, "menu:pay"),
 	)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.title", len(plans), page+1, pages), rows)
