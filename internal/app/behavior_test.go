@@ -32,6 +32,10 @@ type fakeMsg struct {
 	invoices []string
 	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
 	downloads map[string][]byte
+	// docs — документы, отправленные ботом: ключ — имя файла.
+	docs map[string][]byte
+	// preOK — ответы предпроверок Stars по порядку.
+	preOK []bool
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
 	cbData []string
 	// btnText — подписи тех же кнопок. Подписи Telegram принимает обычным
@@ -124,8 +128,29 @@ func (f *fakeMsg) SendInvoice(_ context.Context, _ int64, title, _, payload, cur
 func (f *fakeMsg) CreateInvoiceLink(_ context.Context, _, _, payload, currency string, amount int) (string, error) {
 	return "https://t.me/$invoice_" + currency + "_" + strconv.Itoa(amount) + "_" + payload, nil
 }
-func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, _ bool, _ string) {}
-func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, _ []byte, _ string) {
+func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, ok bool, _ string) {
+	f.mu.Lock()
+	f.preOK = append(f.preOK, ok)
+	f.mu.Unlock()
+}
+
+// lastPreOK — ответ последней предпроверки (false, если её не было).
+func (f *fakeMsg) lastPreOK() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.preOK) == 0 {
+		return false
+	}
+	return f.preOK[len(f.preOK)-1]
+}
+
+func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, data []byte, _ string) {
+	f.mu.Lock()
+	if f.docs == nil {
+		f.docs = map[string][]byte{}
+	}
+	f.docs[filename] = append([]byte(nil), data...)
+	f.mu.Unlock()
 	f.add("DOC:" + filename)
 }
 func (f *fakeMsg) Download(_ context.Context, fileID string) ([]byte, error) {
@@ -1076,6 +1101,15 @@ func (s *fakeStore) ListAllPlanAccess(context.Context) ([]model.PlanAccess, erro
 func (s *fakeStore) ClearPlanAccess(_ context.Context, code string) error {
 	for k := range s.planAccess {
 		if s.planAccess[k].PlanCode == code {
+			delete(s.planAccess, k)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) PrunePlanAccess(context.Context) error {
+	for k := range s.planAccess {
+		if s.plans[s.planAccess[k].PlanCode] == nil {
 			delete(s.planAccess, k)
 		}
 	}
