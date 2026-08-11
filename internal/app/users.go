@@ -238,6 +238,13 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 			btn(i18n.T(lang, "btn.torrent_user_log"), "torj:u:"+id),
 		})
 	}
+	// Кнопка допусков к тарифам «по списку» показывается, только когда такие
+	// тарифы есть: пустой экран из карточки — это шум.
+	if a.hasListPlans(ctx) {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.user_plans"), "usr:plans:"+id),
+		})
+	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
@@ -350,6 +357,13 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 			a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
 		}
 		a.showUser(ctx, chatID, uid)
+	case "plans":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.showUserPlanAccess(ctx, chatID, uid)
+	case "pg":
+		uidStr, code, _ := strings.Cut(arg, ":")
+		uid, _ := strconv.ParseInt(uidStr, 10, 64)
+		a.toggleUserPlanAccess(ctx, chatID, uid, code)
 	case "del":
 		lang := a.lang(chatID)
 		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{

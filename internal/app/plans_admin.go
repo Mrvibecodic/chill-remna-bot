@@ -300,6 +300,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code)},
 		{btn(toggleLabel, "pln:toggle:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_avail", availModeName(lang, p.Availability)), "pln:av:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code), btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
@@ -449,6 +450,18 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 			return
 		}
 		a.showPlanSquadEditor(ctx, chatID, code, mo)
+	case "av":
+		a.showPlanAvail(ctx, chatID, arg)
+	case "avm":
+		a.onPlanAvailMode(ctx, chatID, arg, false)
+	case "avmc":
+		a.onPlanAvailMode(ctx, chatID, arg, true)
+	case "avls":
+		a.showPlanAccessList(ctx, chatID, arg)
+	case "avla":
+		a.askPlanAccess(ctx, chatID, arg)
+	case "avlx":
+		a.onPlanAccessRemove(ctx, chatID, arg)
 	default:
 		// Неизвестное действие домена — это кнопка, добавленная без маршрута.
 		// Показать список честнее, чем не ответить ничем.
@@ -480,7 +493,7 @@ func (a *App) plansPage(chatID int64) int {
 func (a *App) forgetPlanInput(chatID int64) {
 	ui := a.getUI(chatID)
 	switch ui.adminInput {
-	case "plan_name", "plan_desc", "plan_icon",
+	case "plan_name", "plan_desc", "plan_icon", "plan_access",
 		"baseprice", "price", "ykprice", "starprice",
 		"traffic_gb", "device_per", "device_limit", "currency":
 		ui.adminInput = ""
@@ -495,6 +508,12 @@ func (a *App) forgetPlanInput(chatID int64) {
 // тариф, что открыт» было бы неверно — админ может открыть другой, пока ждём
 // ввод.
 func (a *App) askPlanText(ctx context.Context, chatID int64, code, input, key string) {
+	a.askPlanTextTo(ctx, chatID, code, input, key, "pln:open:"+code)
+}
+
+// askPlanTextTo — то же с явной кнопкой «назад»: вопрос списка допущенных
+// возвращает на экран доступности, а не в карточку.
+func (a *App) askPlanTextTo(ctx context.Context, chatID int64, code, input, key, back string) {
 	if code == "" {
 		a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 		return
@@ -510,7 +529,7 @@ func (a *App) askPlanText(ctx context.Context, chatID int64, code, input, key st
 	ui.rejectReq = 0
 	ui.adminInput = input
 	ui.planCode = code
-	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), key), "pln:open:"+code)
+	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), key), back)
 }
 
 // planFieldLimit — граница длины поля и ключ сообщения о её нарушении.
