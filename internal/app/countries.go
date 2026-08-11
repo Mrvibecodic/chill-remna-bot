@@ -79,18 +79,6 @@ type country struct {
 	Name string
 }
 
-// saleSquadUUIDs — сквады продажи: у тарифа по ссылке свои, у «Базового» —
-// историческая цепочка из конфига.
-func (a *App) saleSquadUUIDs(s *sale) []string {
-	if s == nil {
-		return nil
-	}
-	if s.Plan == nil {
-		return a.planSquadUUIDs(s.Months)
-	}
-	return s.Plan.IntSquadsFor(s.D)
-}
-
 // saleCountriesLine — строка стран для экрана способов оплаты.
 func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) string {
 	if s == nil {
