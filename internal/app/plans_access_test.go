@@ -367,6 +367,110 @@ func TestPlanLink_BuyGatesAndThrottle(t *testing.T) {
 	}
 }
 
+// «Базовый» в режиме «по ссылке»: витрина закрыта, но ссылка продаёт до конца —
+// намерение с экрана тарифа доводит до счёта.
+func TestBasePlanLinkMode_SellsViaLink(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+	base.Availability = model.PlanAvailLink
+	_ = fs.SavePlan(ctx, base)
+	a.botCfg.Stars.Enabled = true
+
+	uid := int64(760)
+	// Витрина закрыта.
+	a.handleMessage(ctx, msgText(uid, "/buy"))
+	if !strings.Contains(fm.last(), "недоступна") {
+		t.Fatalf("витрина должна быть закрыта: %q", fm.last())
+	}
+	// Ссылка открывает экран и продаёт: намерение пишется, счёт выставляется.
+	a.handleMessage(ctx, msgText(uid, "/start plan_"+model.PlanCodeBase))
+	if !hasCB(fm.allCallbackData(), "plb:base:1") {
+		t.Fatalf("экран «Базового» по ссылке не открылся: %v", fm.allCallbackData())
+	}
+	a.handleCallback(ctx, cb(uid, "plb:base:1"))
+	a.handleCallback(ctx, cb(uid, "method:stars"))
+	if len(fm.invoices) != 1 {
+		t.Fatalf("счёт по ссылке на «Базовый» не выставлен: %+v", fm.invoices)
+	}
+}
+
+// Принятие условий возвращает на экран тарифа по ссылке, а не на витрину.
+func TestPlanLink_TermsReturnToOffer(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	a.botCfg.Contact.TermsText = "правила"
+	p := vipPlan(t, fs, model.PlanAvailLink)
+
+	uid := int64(765)
+	a.handleMessage(ctx, msgText(uid, "/start plan_"+p.Code))
+	if !strings.Contains(fm.last(), "правила") {
+		t.Fatalf("условия не спрошены: %q", fm.last())
+	}
+	a.handleCallback(ctx, cb(uid, "terms:accept"))
+	if !strings.Contains(fm.last(), "VIP") {
+		t.Fatalf("после согласия должен открыться экран тарифа: %q", fm.last())
+	}
+}
+
+// «Продлить» подписчика тарифа по ссылке открывает ЕГО тариф, а не витрину.
+func TestRenew_OpensOwnPlan(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	p := vipPlan(t, fs, model.PlanAvailLink)
+	uid := int64(770)
+	markPaid(t, fs, uid, p.Code)
+
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if !strings.Contains(fm.last(), "VIP") || !hasCB(fm.allCallbackData(), "plb:"+p.Code+":1") {
+		t.Fatalf("продление должно вести на свой тариф: %q", fm.last())
+	}
+
+	// Тариф удалили — честная витрина вместо чужих условий.
+	_ = fs.DeletePlan(ctx, p.Code)
+	a.handleCallback(ctx, cb(uid, "menu:renew"))
+	if strings.Contains(fm.last(), "VIP") {
+		t.Fatalf("удалённый тариф не должен предлагаться: %q", fm.last())
+	}
+}
+
+// Потолок пополнения учитывает цены включённых тарифов, а пресеты не выдают
+// цену скрытого тарифа.
+func TestTopUp_CapCoversPlanPrices(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	p := vipPlan(t, fs, model.PlanAvailLink) // скрытый, 990 и 9900
+	_ = p
+
+	amts, maxK := a.topUpAmounts(ctx)
+	if maxK != 990000 {
+		t.Fatalf("потолок должен покрыть цену тарифа 9900: %d", maxK)
+	}
+	for _, k := range amts {
+		if k == 99000 || k == 990000 {
+			t.Fatalf("пресеты не должны выдавать цены скрытого тарифа: %v", amts)
+		}
+	}
+
+	// Публичный тариф в пресеты попадает.
+	p2 := &model.Plan{Code: "pubpubpubpub", Name: "Pub", Enabled: true, Availability: model.PlanAvailAll,
+		Durations: []model.PlanDuration{{Months: 1, Base: "777"}}}
+	_ = fs.SavePlan(ctx, p2)
+	amts, _ = a.topUpAmounts(ctx)
+	found := false
+	for _, k := range amts {
+		if k == 77700 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("цена публичного тарифа должна попасть в пресеты: %v", amts)
+	}
+}
+
 // Неудачи старше окна прощаются: лимит не превращается в вечный бан.
 func TestPlanLink_ThrottleExpires(t *testing.T) {
 	ctx := context.Background()
