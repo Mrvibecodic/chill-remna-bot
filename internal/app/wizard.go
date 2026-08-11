@@ -104,6 +104,7 @@ const (
 	cbTorrent   = "torj"
 	cbPlans     = "pln"
 	cbPlanSquad = "plq"
+	cbPlanBuy   = "plb"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -139,6 +140,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onUpdateCheck(ctx, chatID, val, isAdmin)
 	case cbBuy:
 		a.onBuyPlan(ctx, chatID, val)
+	case cbPlanBuy:
+		a.onPlanBuy(ctx, chatID, val)
 	case cbMethod:
 		a.onMethod(ctx, chatID, val)
 	case cbTop:

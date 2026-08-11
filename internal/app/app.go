@@ -106,8 +106,9 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
-	// паузу между торрент-предупреждениями пользователю (torSeen).
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified),
+	// паузу между торрент-предупреждениями пользователю (torSeen) и счётчик
+	// неудачных попыток открыть тариф по ссылке (planLinkFails).
 	thrMu         sync.Mutex
 	thrLast       map[string]time.Time
 	hlNotified    map[string]time.Time
@@ -116,6 +117,7 @@ type App struct {
 	torStrikeBusy map[int64]bool
 	torStrikeSeen map[int64]time.Time
 	torStrikeFail map[int64]time.Time
+	planLinkFails map[int64][]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -523,6 +525,16 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 				if msg, _ := a.redeemPromo(ctx, chatID, code); msg != "" {
 					a.send(ctx, chatID, msg)
 				}
+			}
+			// Прямая ссылка на тариф: вместо главного меню открывается экран
+			// тарифа. Режим публичности и вайтлист уже проверены выше — ссылка
+			// на тариф не даёт входа в закрытый бот.
+			if code, isPlan := strings.CutPrefix(payload, "plan_"); isPlan && code != "" {
+				if a.store != nil {
+					_ = a.store.UpsertUser(ctx, chatID)
+				}
+				a.openPlanLink(ctx, chatID, code)
+				return
 			}
 		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
