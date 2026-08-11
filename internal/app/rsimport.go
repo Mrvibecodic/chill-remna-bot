@@ -65,6 +65,11 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 	switch val {
 	case "up":
 		ui.awaitRSDump = true
+		// Ожидания файлов взаимоисключающие: незакрытое «пришлите тариф» с
+		// другого экрана перехватывало бы дамп и отвечало про «не тот файл».
+		ui.awaitPlanImport = false
+		ui.planImport = nil
+		ui.planImportAccess = nil
 		a.sendSysKB(ctx, chatID, i18n.T(lang, "rsimp.await"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.back"), "menu:rsimp")},
 		})
@@ -92,13 +97,19 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-// handleDocument принимает файл дампа. Другие документы боту не нужны.
+// handleDocument принимает файл дампа remnashop или файл тарифа. Другие
+// документы боту не нужны.
 func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
 	if m.From == nil || m.From.ID != a.cfg.AdminID {
 		return
 	}
 	ui := a.getUI(chatID)
+	if ui.awaitPlanImport {
+		ui.awaitPlanImport = false
+		a.handlePlanImportDoc(ctx, m)
+		return
+	}
 	if !ui.awaitRSDump {
 		return
 	}

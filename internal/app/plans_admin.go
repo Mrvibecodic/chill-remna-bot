@@ -212,7 +212,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 		rows = append(rows, nav)
 	}
 	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_new"), "pln:new")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_new"), "pln:new"), btn(i18n.T(lang, "plans.btn_import"), "pln:imp")},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_prices"), "menu:pricing")},
 		navBack(lang, "menu:pay"),
 	)
@@ -304,6 +304,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code), btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
 	}
 	// «Базовый» удалить нельзя: он мост к старой сетке цен, по которой продаёт
 	// предыдущий образ бота после откатa, и единственный тариф, который бот
@@ -364,6 +365,9 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 	// переименовывает тариф.
 	switch action {
 	case "name", "desc", "icon":
+	case "impok":
+		// Подтверждение импорта потребляет разобранный файл — сброс состояния
+		// здесь стёр бы его раньше времени.
 	default:
 		a.forgetPlanInput(chatID)
 	}
@@ -462,6 +466,12 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		a.askPlanAccess(ctx, chatID, arg)
 	case "avlx":
 		a.onPlanAccessRemove(ctx, chatID, arg)
+	case "exp":
+		a.exportPlan(ctx, chatID, arg)
+	case "imp":
+		a.askPlanImport(ctx, chatID)
+	case "impok":
+		a.applyPlanImport(ctx, chatID)
 	default:
 		// Неизвестное действие домена — это кнопка, добавленная без маршрута.
 		// Показать список честнее, чем не ответить ничем.
@@ -501,6 +511,11 @@ func (a *App) forgetPlanInput(chatID int64) {
 		ui.priceMonths = 0
 	}
 	ui.planCode = ""
+	// Навигация по тарифам снимает и ожидание файла импорта: иначе документ,
+	// присланный через час по другому поводу, молча становился бы тарифом.
+	ui.awaitPlanImport = false
+	ui.planImport = nil
+	ui.planImportAccess = nil
 }
 
 // askPlanText спрашивает текстовое поле тарифа. Код тарифа запоминается в

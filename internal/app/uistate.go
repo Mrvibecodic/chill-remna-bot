@@ -1,5 +1,7 @@
 package app
 
+import "remnabot/internal/model"
+
 type uiState struct {
 	topUpKopecks int64
 	awaitTopUp   bool
@@ -46,6 +48,12 @@ type uiState struct {
 
 	// Мастер переезда с remnashop: ждём файл дампа.
 	awaitRSDump bool
+
+	// Импорт тарифа: ждём JSON-файл; разобранный тариф держится здесь до
+	// подтверждения (pln:impok).
+	awaitPlanImport  bool
+	planImport       *model.Plan
+	planImportAccess []model.PlanAccess
 }
 
 func (a *App) getUI(chatID int64) *uiState {
