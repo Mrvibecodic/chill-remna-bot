@@ -372,30 +372,34 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
-	priceStr := a.pricing().Base[months]
+	months := s.Months
+	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
 	if priceStr == "" || !ok || kopecks <= 0 {
 		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
 		return
 	}
+	// Снимок — до списания: после DeductBalance отказ по любой причине означает
+	// возврат денег, и лишних причин отказа быть не должно.
+	snap := a.saleSnapshot(s)
 	deducted, err := a.store.DeductBalance(ctx, chatID, kopecks)
 	if err != nil {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
 	if deducted {
-		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d months=%d", kopecks, months)
+		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
 	}
 	if !deducted {
 		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))),
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang)})
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", nil)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
 	if err != nil {
 		_ = a.store.AddBalance(ctx, chatID, kopecks)
 		a.payLog(ctx, "balance", "", chatID, "balance_refund", "kopecks=%d возвращены после ошибки выдачи", kopecks)

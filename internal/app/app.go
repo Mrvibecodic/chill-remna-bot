@@ -389,6 +389,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
 	a.sendHealNotice(ctx)
+	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)

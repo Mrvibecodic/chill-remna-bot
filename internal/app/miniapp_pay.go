@@ -62,7 +62,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
-		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable())
+		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable(), nil)
 		return url, false, err
 
 	case model.PayMethodCryptoBot:

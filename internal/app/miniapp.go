@@ -126,6 +126,11 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 // MiniPlans mirrors the chat storefront (showPlans): period + base price
 // only — the bot does not show traffic/device details in the plan list.
 func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
+	// Первая точка гейта доступности для мини-аппа и кабинета: недоступный
+	// покупателю «Базовый» — пустая витрина, как и в чате.
+	if !a.baseSaleAllowed(ctx, tgID) {
+		return web.MiniPlansDTO{}
+	}
 	a.mu.Lock()
 	var dto web.MiniPlansDTO
 	if a.botCfg == nil {
@@ -192,6 +197,12 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 	// Тот же признак, что у витрины: срок без базовой цены снят с продажи.
 	if !a.periodOnSale(months) {
 		return web.MiniActionDTO{Error: "неверный период"}
+	}
+	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
+	// пользователь покупал бы «Базовый», недоступный ему по режиму, прямым
+	// запросом мимо витрины.
+	if !a.baseSaleAllowed(ctx, tgID) {
+		return web.MiniActionDTO{Error: "тариф недоступен"}
 	}
 	if method == model.PayMethodP2P {
 		if web_ {

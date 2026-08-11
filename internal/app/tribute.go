@@ -33,6 +33,12 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trb.not_configured"))
 		return
 	}
+	// Tribute продаёт только «Базовый», и счёт живёт на стороне Tribute —
+	// вторая точка гейта здесь, при выдаче ссылки.
+	if !a.baseSaleAllowed(ctx, chatID) {
+		a.showPlans(ctx, chatID)
+		return
+	}
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}

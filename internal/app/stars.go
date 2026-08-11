@@ -25,16 +25,16 @@ func (a *App) starsConfig() model.StarsConfig {
 
 func (a *App) startStars(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
-	pr := a.pricing()
-	amount := pr.StarPrice(months)
+	months := s.Months
+	amount := a.saleStars(s)
 	// Базовая цена — признак того, что срок вообще продаётся: витрина, тариф и
 	// оплата с баланса смотрят именно на неё. Без этой проверки срок, снятый
 	// админом с продажи, продолжал бы продаваться за звёзды.
-	if !a.starsConfig().Enabled || amount <= 0 || pr.Base[months] == "" {
+	if !a.starsConfig().Enabled || amount <= 0 || a.saleBase(s) == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "stars.no_price"))
 		return
 	}
@@ -45,11 +45,11 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	// очереди незакрытых счетов, а payload трогать нельзя — иначе предпроверка
 	// отклонит легитимную оплату (разбор превращает в число весь остаток
 	// строки).
-	a.rememberStarsSnapshot(ctx, chatID, months, a.planSnapshot(months))
+	a.rememberStarsSnapshot(ctx, chatID, months, a.saleSnapshot(s))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
 	a.msg.SendInvoice(ctx, chatID, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)
-	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_sent", "purchase months=%d stars=%d", months, amount)
+	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_sent", "purchase plan=%s months=%d stars=%d", s.planCode(), months, amount)
 }
 
 func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery) {
@@ -57,11 +57,25 @@ func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery)
 	if _, after, ok := strings.Cut(q.InvoicePayload, ":"); ok {
 		months, _ = strconv.Atoi(after)
 	}
-	if !a.starsConfig().Enabled || months <= 0 || a.pricing().StarPrice(months) != q.TotalAmount {
-		var fromID int64
-		if q.From != nil {
-			fromID = q.From.ID
+	var fromID int64
+	if q.From != nil {
+		fromID = q.From.ID
+	}
+	// Сумма сверяется с текущей ценой срока — либо в сетке «Базового», либо в
+	// тарифе, чей счёт выставлен этому человеку (payload у Stars менять нельзя,
+	// тариф опознаётся по сохранённым условиям счёта). Иначе счёт тарифа по
+	// ссылке отклонялся бы на предпроверке: его цена в звёздах своя.
+	amountOK := a.pricing().StarPrice(months) == q.TotalAmount
+	if !amountOK && months > 0 && fromID != 0 {
+		if snap := a.starsSnapshot(ctx, fromID, months); snap != nil && snap.Code != "" && snap.Code != model.PlanCodeBase {
+			if p, err := a.planByCode(ctx, snap.Code); err == nil && p != nil {
+				if d := p.Duration(months); d != nil && d.Stars > 0 && d.Stars == q.TotalAmount {
+					amountOK = true
+				}
+			}
 		}
+	}
+	if !a.starsConfig().Enabled || months <= 0 || !amountOK {
 		a.payLog(ctx, model.PayMethodStars, "", fromID, "precheckout_rejected", "payload=%s total=%d enabled=%v", q.InvoicePayload, q.TotalAmount, a.starsConfig().Enabled)
 		a.msg.AnswerPreCheckout(ctx, q.ID, false, i18n.T(a.lang(fromID), "stars.no_price"))
 		return
@@ -85,8 +99,18 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		a.noPeriodForPayment(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID)
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID,
-		a.starsSnapshot(ctx, chatID, months))
+	snap, ok := a.starsSnapshotForAmount(ctx, chatID, months, sp.TotalAmount)
+	if !ok {
+		// Сумма не совпала ни с одним известным счётом на этот срок. Выдавать
+		// «что-нибудь» нельзя: применённые условия обязаны стоить ровно
+		// оплаченного. Деньги приняты — случай разбирает админ.
+		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "error", "оплаченная сумма %d⭐ не совпала с условиями счетов — выдача не проводится", sp.TotalAmount)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodStars+" "+sp.TelegramPaymentChargeID))
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
+		return
+	}
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodStars, amount, sp.TelegramPaymentChargeID, snap)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			// Telegram доставил апдейт повторно (рестарт до сдвига offset и
@@ -100,6 +124,41 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// starsSnapshotForAmount подбирает условия сделки под фактически оплаченную
+// сумму.
+//
+// Строка условий счёта у Stars одна на (человек, срок): счёт «Базового» и
+// счёт тарифа по ссылке на тот же срок перезаписывают её по очереди, и
+// применять последний записанный снимок к ЛЮБОЙ оплате нельзя — выставив себе
+// оба счёта и оплатив дешёвый, человек получал бы условия дорогого.
+//
+// Возвращает снимок, чья цена в звёздах равна оплаченной: сохранённый снимок
+// тарифа, если сходится его цена; иначе условия «Базового», если сумма — цена
+// сетки; иначе (nil, false) — выдачи нет, случай уходит админу.
+func (a *App) starsSnapshotForAmount(ctx context.Context, chatID int64, months, paid int) (*model.PlanSnapshot, bool) {
+	snap := a.starsSnapshot(ctx, chatID, months)
+	if snap != nil && snap.Code != "" && snap.Code != model.PlanCodeBase {
+		if p, err := a.planByCode(ctx, snap.Code); err == nil && p != nil {
+			if d := p.Duration(months); d != nil && d.Stars > 0 && d.Stars == paid {
+				return snap, true
+			}
+		}
+		// Снимок тарифный, но сумма его цене не отвечает — это оплата другого
+		// счёта (базового) либо цена тарифа изменилась между счётом и оплатой.
+		snap = nil
+	}
+	if a.pricing().StarPrice(months) == paid {
+		if snap != nil {
+			// Сохранённый снимок «Базового» — условия на момент счёта.
+			return snap, true
+		}
+		// Снимок перезаписан счётом тарифа или его не было вовсе — берём
+		// текущие условия сетки: ровно то, что предпроверка сверила по цене.
+		return a.planSnapshot(months), true
+	}
+	return nil, false
 }
 
 // handleRefundedPayment — Telegram сообщил о возврате звёзд плательщику.

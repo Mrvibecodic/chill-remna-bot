@@ -166,6 +166,12 @@ func hlPurchaseSnapshot(a *App, purpose string, months int) *model.PlanSnapshot 
 // веб-кабинета: создаёт счёт, пишет журнал и pending-запись, возвращает ссылку
 // на оплату и uuid счёта.
 func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amount string, purpose string, kopecks int64) (payURL, uuid string, err error) {
+	return a.hlCreateInvoiceSnap(ctx, chatID, months, amount, purpose, kopecks, nil)
+}
+
+// hlCreateInvoiceSnap — то же с явными условиями продажи; snap == nil означает
+// «Базовый по текущей сетке» (или пополнение баланса — там снимка нет).
+func (a *App) hlCreateInvoiceSnap(ctx context.Context, chatID int64, months int, amount string, purpose string, kopecks int64, snap *model.PlanSnapshot) (payURL, uuid string, err error) {
 	client := a.hlClient()
 	if client == nil {
 		return "", "", errors.New(i18n.T(a.lang(chatID), "hl.not_configured"))
@@ -210,11 +216,14 @@ func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amo
 	extID := hlExtPrefix + inv.UUID
 	a.payLog(ctx, model.PayMethodHeleket, extID, chatID, "invoice_created",
 		"%s months=%d kopecks=%d amount=%s %s subtract=%d", purposeOrBuy(purpose), months, kopecks, inv.Amount, inv.Currency, cfg.SubtractOrDefault())
+	if snap == nil {
+		snap = hlPurchaseSnapshot(a, purpose, months)
+	}
 	if a.store != nil {
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
 			Method: model.PayMethodHeleket, ExtID: extID, TelegramID: chatID,
 			Months: months, Purpose: purpose, Kopecks: kopecks,
-			Snapshot: hlPurchaseSnapshot(a, purpose, months),
+			Snapshot: snap,
 		})
 	}
 	return inv.URL, inv.UUID, nil
@@ -229,16 +238,17 @@ func purposeOrBuy(p string) string {
 
 func (a *App) startHeleket(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
-	price := a.pricing().Base[months]
+	months := s.Months
+	price := a.saleBase(s)
 	if !a.hlConfig().Enabled || price == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.no_price"))
 		return
 	}
-	payURL, uuid, err := a.hlCreateInvoice(ctx, chatID, months, price, "", 0)
+	payURL, uuid, err := a.hlCreateInvoiceSnap(ctx, chatID, months, price, "", 0, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.fail", err.Error()))
 		return

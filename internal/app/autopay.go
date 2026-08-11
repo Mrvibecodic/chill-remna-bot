@@ -420,10 +420,38 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	// не «достаётся из подписки», а снимается заново — он фиксирует условия
 	// на время между списанием и финализацией (её могут добить вебхук или
 	// реконсилятор через минуты).
+	//
+	// «Действующие условия» — условия ТОГО тарифа, которым была последняя
+	// сделка: подписчика тарифа по ссылке нельзя молча продлить по сетке
+	// «Базового» — ни по её цене, ни с её лимитами. Режим доступности и
+	// включённость тарифа здесь НЕ проверяются: продление обещано действующему
+	// клиенту (так же сетка продлевает сроки, снятые с продажи). А вот
+	// УДАЛЁННЫЙ тариф — это отсутствие действующих условий: списание
+	// откладывается с причиной для админа, а не идёт по чужой цене.
 	snap := a.planSnapshot(months)
 	pr := a.pricing()
-	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
-	currency := strings.ToUpper(pr.Currency)
+	priceRaw := pr.Fiat(model.PayMethodYooKassa, months)
+	saleCur := pr.Currency
+	if code := planCodeOf(ap.Snapshot); code != "" && code != model.PlanCodeBase {
+		p, perr := a.planByCode(ctx, code)
+		if perr != nil {
+			a.autoPayDefer(ctx, ap, now, autoPayRetrySoon, "хранилище недоступно")
+			return ""
+		}
+		if p == nil {
+			reason := "тариф " + code + " удалён — продление остановлено"
+			a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, reason)
+			return reason
+		}
+		d := p.Duration(months)
+		snap = a.planSnapshotOf(p, d, months)
+		priceRaw = d.Fiat(model.PayMethodYooKassa)
+		if p.Currency != "" {
+			saleCur = p.Currency
+		}
+	}
+	value, okPrice := ykValue(priceRaw)
+	currency := strings.ToUpper(saleCur)
 	if !currencyCode(currency) {
 		currency = "RUB"
 	}

@@ -53,16 +53,17 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 // оплаты, чтобы потом продлевать подписку автоматически.
 func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	lang := a.lang(chatID)
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
+	months := s.Months
 	cfg := a.ykConfig()
-	pr := a.pricing()
-	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
+	fiat := a.saleFiat(s, model.PayMethodYooKassa)
+	value, okPrice := ykValue(fiat)
 	if !cfg.Enabled || !okPrice {
-		if !okPrice && pr.Fiat(model.PayMethodYooKassa, months) != "" {
-			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "error", "цена за %d мес. задана некорректно (%q) — счёт не создать", months, pr.Fiat(model.PayMethodYooKassa, months))
+		if !okPrice && fiat != "" {
+			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "error", "цена за %d мес. задана некорректно (%q) — счёт не создать", months, fiat)
 		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
 		return
@@ -84,17 +85,18 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	}
 	// См. currencyCode: проверка по длине пропускала символ «₽» (три байта),
 	// и ЮKassa отвечала 400 на такой код валюты.
-	currency := pr.Currency
+	saleCur := a.saleCurrency(s)
+	currency := saleCur
 	if !currencyCode(currency) {
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)
-	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save)
+	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
-	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency))
+	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur))
 	if save {
 		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint")
 	}
@@ -278,8 +280,9 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 
 // ykCreatePayment creates a YooKassa payment + pending invoice and returns the
 // confirmation URL. Shared by the chat flow and the Mini App so the pending
-// ExtID/format stay identical.
-func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string, save bool) (payURL, extID string, err error) {
+// ExtID/format stay identical. snap — условия продажи; nil означает «Базовый
+// по текущей сетке» (мини-апп и кабинет пока продают только его).
+func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string, save bool, snap *model.PlanSnapshot) (payURL, extID string, err error) {
 	client := a.ykClient()
 	if client == nil {
 		return "", "", fmt.Errorf("yookassa не настроена")
@@ -287,7 +290,9 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	snap := a.planSnapshot(months)
+	if snap == nil {
+		snap = a.planSnapshot(months)
+	}
 	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, snap.Code, save)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)

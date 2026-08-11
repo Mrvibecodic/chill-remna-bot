@@ -98,18 +98,19 @@ func (a *App) p2pAllowed(u *model.User) bool {
 func (a *App) showPlans(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 
-	if a.store != nil {
-		if u, _ := a.store.GetUser(ctx, chatID); u != nil && u.NotifyKind == "trial" && u.SubExpireAt != "" {
-			if exp, err := time.Parse(time.RFC3339, u.SubExpireAt); err == nil && daysUntil(exp, time.Now().UTC()) > 1 {
-				a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(u.SubExpireAt, lang)),
-					[][]models.InlineKeyboardButton{homeRow(lang)})
-				return
-			}
-		}
+	if a.trialLockNotice(ctx, chatID) {
+		return
 	}
 
 	if text, need := a.termsRequired(ctx, chatID); need {
 		a.askTerms(ctx, chatID, text)
+		return
+	}
+	// Первая точка гейта доступности: витрина. «Базовый» в режиме «по списку»
+	// или «только новым» человеку вне правила не показывается — и то же самое
+	// проверяют создание счёта и финализация.
+	if !a.baseSaleAllowed(ctx, chatID) {
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
 	pr := a.pricing()
@@ -141,11 +142,12 @@ const popularThreshold = 10
 
 func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	mo, err := strconv.Atoi(val)
-	if err != nil || !a.periodOnSale(mo) {
+	if err != nil || !a.periodOnSale(mo) || !a.baseSaleAllowed(ctx, chatID) {
 		// Кнопка витрины присылает только сроки, которые продаются. Всё
 		// остальное — либо подделанные callback-данные (на postgres такое ещё
 		// и не влезает в колонку), либо нажатие на старом экране по сроку,
-		// который админ снял с продажи.
+		// который админ снял с продажи, либо тариф, недоступный этому
+		// покупателю (вторая точка гейта — витрина покажет отказ сама).
 		a.showPlans(ctx, chatID)
 		return
 	}
@@ -168,54 +170,60 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 // базы здесь нельзя: расхождение между подписью кнопок и тем, что уйдёт в счёт,
 // — это молчаливая продажа не того срока.
 func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
+	a.showMethodsSale(ctx, chatID, baseSale(months))
+}
+
+// showMethodsSale — тот же экран для явно переданной продажи: у тарифа по
+// ссылке цены берутся из его строки, у «Базового» — из сетки конфига.
+func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	var p2p model.P2PConfig
 	var stars model.StarsConfig
 	var yk model.YooKassaConfig
-	var pr model.Pricing
 	var cb model.CryptoBotConfig
 	if a.botCfg != nil {
 		p2p = a.botCfg.P2P
 		stars = a.botCfg.Stars
 		yk = a.botCfg.YooKassa
 		cb = a.botCfg.CryptoBot
-		// Карты сетки читаются ниже, уже без замка, поэтому именно копия.
-		pr = a.botCfg.Pricing.Clone()
 	}
 	a.mu.Unlock()
+	base := a.saleBase(s)
 
 	var rows [][]models.InlineKeyboardButton
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
-	if p2p.Enabled && pr.Base[months] != "" && pr.Fiat(model.PayMethodP2P, months) != "" {
+	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
-	if yk.Enabled && pr.Base[months] != "" && pr.Fiat(model.PayMethodYooKassa, months) != "" {
-		label := i18n.T(lang, "method.yk_btn", pr.Fiat(model.PayMethodYooKassa, months)+curSuffix(a.curFor(model.PayMethodYooKassa)))
+	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" {
+		label := i18n.T(lang, "method.yk_btn", a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
-	if stars.Enabled && pr.StarPrice(months) > 0 && pr.Base[months] != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", pr.StarPrice(months)), "method:stars")})
+	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", a.saleStars(s)), "method:stars")})
 	}
-	if cb.Enabled && pr.Base[months] != "" {
-		label := i18n.T(lang, "method.cb_btn", pr.Base[months]+curSuffix(curRUB))
+	if cb.Enabled && base != "" {
+		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
-	if a.plConfig().Enabled && pr.Fiat(model.PayMethodPlatega, months) != "" {
-		label := i18n.T(lang, "method.pl_btn", pr.Fiat(model.PayMethodPlatega, months)+curSuffix(curRUB))
+	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" {
+		label := i18n.T(lang, "method.pl_btn", a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
-	if a.hlConfig().Enabled && pr.Base[months] != "" {
-		label := i18n.T(lang, "method.hl_btn", pr.Base[months]+curSuffix(curRUB))
+	if a.hlConfig().Enabled && base != "" {
+		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
-	if a.tributeCfg().Enabled && a.tributeCfg().PayURL != "" {
+	// Tribute сам определяет период и цену и о выбранном тарифе не знает —
+	// кнопка остаётся только у «Базового».
+	if s.Plan == nil && a.tributeCfg().Enabled && a.tributeCfg().PayURL != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
 	}
 
 	bal := a.userBalance(ctx, chatID)
-	if k, ok := rubToKopecks(pr.Base[months]); ok && k > 0 && bal >= k {
+	if k, ok := rubToKopecks(base); ok && k > 0 && bal >= k {
 		payBtn := []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_pay", kopecksToRub(k)), "method:bal")}
 		rows = append([][]models.InlineKeyboardButton{payBtn}, rows...)
 	}
@@ -229,7 +237,7 @@ func (a *App) showMethods(ctx context.Context, chatID int64, months int) {
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	rows = append(rows, homeRow(lang))
 	caption := i18n.T(lang, "buy.choose_method", kopecksToRub(bal))
-	if line := a.countriesLine(ctx, lang, months); line != "" {
+	if line := a.saleCountriesLine(ctx, lang, s); line != "" {
 		caption = line + "\n\n" + caption
 	}
 	a.sendPayKB(ctx, chatID, caption, rows)
@@ -285,24 +293,28 @@ func (a *App) notifyAdminUserRequest(ctx context.Context, userID int64) {
 }
 
 func (a *App) issueCard(ctx context.Context, chatID int64) {
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
-	a.issueCardMonths(ctx, chatID, months)
+	a.issueCardSale(ctx, chatID, s)
 }
 
 // issueCardMonths is issueCard for an explicit period (used by the Mini App,
-// which passes the period explicitly).
+// which passes the period explicitly and sells the base plan).
 func (a *App) issueCardMonths(ctx context.Context, chatID int64, months int) {
+	a.issueCardSale(ctx, chatID, baseSale(months))
+}
+
+func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 	lang := a.lang(chatID)
-	card, price, reqID, err := a.prepareP2PCard(ctx, chatID, months)
+	card, price, reqID, err := a.prepareP2PCardSale(ctx, chatID, s)
 	if err != nil {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
 	idStr := strconv.FormatInt(reqID, 10)
-	a.sendKB(ctx, chatID, i18n.T(lang, "p2p.card", months, price+curSuffix(curRUB), card),
+	a.sendKB(ctx, chatID, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card),
 		[][]models.InlineKeyboardButton{{
 			btn(i18n.T(lang, "p2p.paid_btn"), "p2p:paid:"+idStr),
 			btn(i18n.T(lang, "btn.cancel"), "p2p:cancel:"+idStr),
@@ -313,15 +325,21 @@ func (a *App) issueCardMonths(ctx context.Context, chatID int64, months int) {
 // returns the card + price + request id, without messaging the user (shared by
 // the chat flow and the web cabinet).
 func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (card, price string, reqID int64, err error) {
+	return a.prepareP2PCardSale(ctx, chatID, baseSale(months))
+}
+
+func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (card, price string, reqID int64, err error) {
+	months := s.Months
+	// Цена продажи считается до захвата замка: saleFiat сам берёт a.mu, когда
+	// продаётся «Базовый» по сетке.
+	price = a.saleFiat(s, model.PayMethodP2P)
 	a.mu.Lock()
 	a.botCfg.NormalizePricing()
 	p2p := a.botCfg.P2P
-	pr := a.botCfg.Pricing
 	if len(p2p.Cards) == 0 {
 		a.mu.Unlock()
 		return "", "", 0, errors.New(i18n.T(a.lang(chatID), "p2p.no_cards"))
 	}
-	price = pr.Fiat(model.PayMethodP2P, months)
 	if price == "" {
 		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек
 		// платит наугад, а админ подтверждает выдачу полного срока. Проверка
@@ -341,11 +359,11 @@ func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (car
 	if a.store == nil {
 		return "", "", 0, errors.New("storage unavailable")
 	}
-	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Snapshot: a.planSnapshot(months)}
+	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Snapshot: a.saleSnapshot(s)}
 	if err = a.store.CreateP2PRequest(ctx, req); err != nil {
 		return "", "", 0, err
 	}
-	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), chatID, "request_created", "months=%d price=%s", months, price)
+	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), chatID, "request_created", "plan=%s months=%d price=%s", s.planCode(), months, price)
 	return card, price, req.ID, nil
 }
 
@@ -660,6 +678,20 @@ func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnap
 // текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
 // созданные до появления снимков).
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
+	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap)
+	if err == nil {
+		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
+		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
+		// владельца: деньги приняты — клиент получает то, за что платил), админ
+		// узнаёт и разбирается. Вызов ПОСЛЕ ядра: внутри держится шардовый замок
+		// финализации, и чтения базы с походом в Telegram под ним тормозили бы
+		// доставку соседних оплат.
+		a.notifyPlanGateBreach(ctx, telegramID, applied)
+	}
+	return link, expireAt, err
+}
+
+func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, *model.PlanSnapshot, error) {
 	// Serialize duplicate deliveries of the same payment and bail before we touch
 	// the panel if it's already been finalized (the panel extend happens below,
 	// before the AddPayment idempotency barrier, so without this two concurrent
@@ -671,7 +703,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		if a.store != nil {
 			if done, _ := a.store.PaymentByExtID(ctx, extID); done {
 				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж уже финализирован — пропуск")
-				return "", "", storage.ErrDuplicateExtID
+				return "", "", nil, storage.ErrDuplicateExtID
 			}
 		}
 	}
@@ -698,12 +730,12 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	a.payLog(ctx, method, extID, telegramID, "finalize", "months=%d amount=%s", months, amount)
 	if panel == nil {
 		a.payLog(ctx, method, extID, telegramID, "error", "панель не подключена")
-		return "", "", fmt.Errorf("панель не подключена")
+		return "", "", nil, fmt.Errorf("панель не подключена")
 	}
 	link, expireAt, err := panel.CreateOrUpdateUser(ctx, telegramID, months, limits)
 	if err != nil {
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
-		return "", "", err
+		return "", "", nil, err
 	}
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
@@ -728,7 +760,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		if err != nil {
 			if errors.Is(err, storage.ErrDuplicateExtID) && extID != "" {
 				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж с этим ext_id уже записан")
-				return "", "", err
+				return "", "", nil, err
 			}
 			// Панель уже продлила подписку, а барьер записать не удалось. Раньше
 			// это молча глоталось — и реконсилятор, не видя платежа, продлевал бы
@@ -760,7 +792,7 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 	if method == model.PayMethodYooKassa {
 		a.fiscalize(parseAmountRub(amount), fmt.Sprintf("Подписка %d мес.", months))
 	}
-	return link, expireAt, nil
+	return link, expireAt, snap, nil
 }
 
 func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {

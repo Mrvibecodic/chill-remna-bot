@@ -52,12 +52,13 @@ func (a *App) cbClient() *cryptobot.Client {
 
 func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.buyMonthsOrAsk(ctx, chatID)
-	if months == 0 {
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
 		return
 	}
+	months := s.Months
 	cfg := a.cbConfig()
-	price := a.pricing().Base[months]
+	price := a.saleBase(s)
 	if !cfg.Enabled || price == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "cb.no_price"))
 		return
@@ -70,7 +71,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	payURL, invoiceID, err := a.cbCreateInvoice(ctx, chatID, months, price, false)
+	payURL, invoiceID, err := a.cbCreateInvoiceSnap(ctx, chatID, months, price, false, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
 		return
@@ -211,6 +212,12 @@ func (a *App) onCBAdmin(ctx context.Context, chatID int64, val string) {
 // cbCreateInvoice creates a CryptoBot invoice + pending record and returns the
 // pay URL and invoice id. Shared by chat flow and Mini App.
 func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, price string, web bool) (string, int64, error) {
+	return a.cbCreateInvoiceSnap(ctx, chatID, months, price, web, nil)
+}
+
+// cbCreateInvoiceSnap — то же с явными условиями продажи; snap == nil означает
+// «Базовый по текущей сетке».
+func (a *App) cbCreateInvoiceSnap(ctx context.Context, chatID int64, months int, price string, web bool, snap *model.PlanSnapshot) (string, int64, error) {
 	client := a.cbClient()
 	if client == nil {
 		return "", 0, errors.New("cryptobot не настроен")
@@ -229,8 +236,11 @@ func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, pri
 		return "", 0, err
 	}
 	a.payLog(ctx, model.PayMethodCryptoBot, "cb:"+strconv.FormatInt(inv.InvoiceID, 10), chatID, "invoice_created", "purchase months=%d price=%s %s assets=%s", months, price, fiat, cfg.Asset)
+	if snap == nil {
+		snap = a.planSnapshot(months)
+	}
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months, Snapshot: a.planSnapshot(months)})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months, Snapshot: snap})
 	}
 	payURL := inv.MiniAppInvoiceURL
 	if web && inv.WebAppInvoiceURL != "" {
