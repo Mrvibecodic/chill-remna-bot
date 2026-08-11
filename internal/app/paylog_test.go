@@ -93,10 +93,10 @@ func TestMiniCheckoutFailureIsLogged(t *testing.T) {
 	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
 	ctx := context.Background()
 
-	if _, _, err := a.miniPayURL(ctx, 555, 1, "нетакогометода", false); err == nil {
+	if _, _, err := a.miniPayURL(ctx, 555, baseSale(1), "нетакогометода", false); err == nil {
 		t.Fatal("ожидалась ошибка на неизвестном способе оплаты")
 	}
-	if _, _, err := a.miniPayURL(ctx, 555, 1, model.PayMethodHeleket, true); err == nil {
+	if _, _, err := a.miniPayURL(ctx, 555, baseSale(1), model.PayMethodHeleket, true); err == nil {
 		t.Fatal("ожидалась ошибка: Heleket выключен")
 	}
 

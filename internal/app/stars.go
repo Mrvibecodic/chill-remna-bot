@@ -253,25 +253,27 @@ func (a *App) formatStarPrices() string {
 // pre-checkout/successful-payment handlers treat them identically.
 var errStarsUnavailable = errors.New("оплата звёздами недоступна")
 
-func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, months int) (string, error) {
-	pr := a.pricing()
-	amount := pr.StarPrice(months)
+func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, s *sale) (string, error) {
+	months := s.Months
+	amount := a.saleStars(s)
 	// Тот же гейт, что и в чате: срок без базовой цены с продажи снят.
-	if !a.starsConfig().Enabled || amount <= 0 || pr.Base[months] == "" {
+	if !a.starsConfig().Enabled || amount <= 0 || a.saleBase(s) == "" {
 		return "", errStarsUnavailable
 	}
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
 	lang := a.lang(chatID)
-	a.rememberStarsSnapshot(ctx, chatID, months, a.planSnapshot(months))
+	// Payload остаётся "stars:<месяцы>" — это замороженный формат; условия
+	// сделки едут отдельной таблицей условий счетов, как и в чате.
+	a.rememberStarsSnapshot(ctx, chatID, months, a.saleSnapshot(s))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
 	link, err := a.msg.CreateInvoiceLink(ctx, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)
 	if err != nil {
-		a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_error", "purchase months=%d stars=%d: %v", months, amount, err)
+		a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_error", "purchase plan=%s months=%d stars=%d: %v", s.planCode(), months, amount, err)
 		return "", err
 	}
-	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_link", "purchase months=%d stars=%d", months, amount)
+	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_link", "purchase plan=%s months=%d stars=%d", s.planCode(), months, amount)
 	return link, nil
 }

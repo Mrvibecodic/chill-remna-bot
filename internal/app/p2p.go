@@ -389,12 +389,6 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	a.issueCardSale(ctx, chatID, s)
 }
 
-// issueCardMonths is issueCard for an explicit period (used by the Mini App,
-// which passes the period explicitly and sells the base plan).
-func (a *App) issueCardMonths(ctx context.Context, chatID int64, months int) {
-	a.issueCardSale(ctx, chatID, baseSale(months))
-}
-
 func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 	lang := a.lang(chatID)
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, chatID, s)

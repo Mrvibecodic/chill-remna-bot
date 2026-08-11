@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"remnabot/internal/model"
 	"remnabot/internal/web"
@@ -13,14 +14,14 @@ import (
 // Stars, or a payment-page/redirect URL (openLink) for the others. It reuses
 // the SAME invoice-creation cores as the chat flow, so pending-invoice ExtID
 // formats are identical and the existing webhooks complete the payment.
-func (a *App) miniPayURL(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
-	url, invoice, err := a.miniPayURLCore(ctx, tgID, months, method, web_)
+func (a *App) miniPayURL(ctx context.Context, tgID int64, s *sale, method string, web_ bool) (string, bool, error) {
+	url, invoice, err := a.miniPayURLCore(ctx, tgID, s, method, web_)
 	if err != nil {
 		// Ядра создания счёта пишут свои invoice_error, но отказы «метод
 		// недоступен/неизвестен» терялись совсем, а источник платежа (чат,
 		// мини-апп, кабинет) не был виден нигде — без него разбор жалобы
 		// «не смог оплатить» упирается в догадки.
-		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s months=%d: %v", miniSource(web_), months, err)
+		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s plan=%s months=%d: %v", miniSource(web_), s.planCode(), s.Months, err)
 	}
 	return url, invoice, err
 }
@@ -33,21 +34,21 @@ func miniSource(web_ bool) string {
 	return "мини-апп"
 }
 
-func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method string, web_ bool) (string, bool, error) {
+func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method string, web_ bool) (string, bool, error) {
 	// Тот же гейт условий, что и в чате (showPlans): покупка из мини-аппа и
 	// веб-кабинета не должна обходить обязательное согласие с условиями.
 	if _, need := a.termsRequired(ctx, tgID); need {
 		return "", false, errors.New("сначала примите условия использования в боте — откройте бота и нажмите «Купить»")
 	}
+	months := s.Months
 	switch method {
 	case model.PayMethodStars:
-		link, err := a.starsInvoiceLink(ctx, tgID, months)
+		link, err := a.starsInvoiceLink(ctx, tgID, s)
 		return link, true, err
 
 	case model.PayMethodYooKassa:
 		cfg := a.ykConfig()
-		pr := a.pricing()
-		value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
+		value, okPrice := ykValue(a.saleFiat(s, model.PayMethodYooKassa))
 		if !cfg.Enabled || !okPrice {
 			return "", false, errors.New("оплата картой недоступна")
 		}
@@ -57,27 +58,26 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 		}
 		// В прайсе валюта задаётся символом («₽» — тоже три байта), поэтому
 		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт 400.
-		currency := pr.Currency
+		currency := a.saleCurrency(s)
 		if !currencyCode(currency) {
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
-		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable(), nil)
+		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable(), a.saleSnapshot(s))
 		return url, false, err
 
 	case model.PayMethodCryptoBot:
 		cfg := a.cbConfig()
-		price := a.pricing().Base[months]
+		price := a.saleBase(s)
 		if !cfg.Enabled || price == "" {
 			return "", false, errors.New("оплата криптовалютой недоступна")
 		}
-		url, _, err := a.cbCreateInvoice(ctx, tgID, months, price, web_)
+		url, _, err := a.cbCreateInvoiceSnap(ctx, tgID, months, price, web_, a.saleSnapshot(s))
 		return url, false, err
 
 	case model.PayMethodPlatega:
 		cfg := a.plConfig()
-		pr := a.pricing()
-		value := pr.Fiat(model.PayMethodPlatega, months)
+		value := a.saleFiat(s, model.PayMethodPlatega)
 		if !cfg.Enabled || value == "" {
 			return "", false, errors.New("оплата недоступна")
 		}
@@ -89,18 +89,23 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 		if !okV || valueK <= 0 {
 			return "", false, errors.New("оплата недоступна")
 		}
-		url, _, err := a.plCreateTransaction(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL)
+		url, _, err := a.plCreateTransactionSnap(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL, a.saleSnapshot(s))
 		return url, false, err
 
 	case model.PayMethodHeleket:
-		price := a.pricing().Base[months]
+		price := a.saleBase(s)
 		if !a.hlConfig().Enabled || price == "" {
 			return "", false, errors.New("оплата криптовалютой недоступна")
 		}
-		url, _, err := a.hlCreateInvoice(ctx, tgID, months, price, "", 0)
+		url, _, err := a.hlCreateInvoiceSnap(ctx, tgID, months, price, "", 0, a.saleSnapshot(s))
 		return url, false, err
 
 	case model.PayMethodTribute:
+		// Tribute — внешняя фиксированная ссылка: код тарифа и его цену в неё
+		// не передать, поэтому через Tribute продаётся только «Базовый».
+		if s.Plan != nil {
+			return "", false, errors.New("оплата недоступна")
+		}
 		cfg := a.tributeCfg()
 		if !cfg.Enabled || cfg.PayURL == "" {
 			return "", false, errors.New("оплата недоступна")
@@ -117,7 +122,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, months int, method
 // card (or the approval-needed notice) into the user's bot chat — exactly like
 // the chat flow — and tells the Mini App to open the bot to finish (the
 // screenshot upload and admin confirmation happen in the chat).
-func (a *App) MiniP2P(ctx context.Context, tgID int64, months int) web.MiniActionDTO {
+func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDTO {
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	}
@@ -130,13 +135,13 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, months int) web.MiniActio
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: "Доступ к P2P ещё не подтверждён. Запрос отправлен администратору — откройте бота."}
 	}
-	a.issueCardMonths(ctx, tgID, months)
+	a.issueCardSale(ctx, tgID, s)
 	return web.MiniActionDTO{Redirect: true, Message: "Реквизиты для оплаты отправлены в бот. Откройте чат и завершите оплату."}
 }
 
 // MiniP2PWeb runs the P2P flow for the web cabinet: it returns the card + amount
 // to show in the browser (the screenshot is uploaded back via the cabinet).
-func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, months int) web.MiniActionDTO {
+func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActionDTO {
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	}
@@ -154,30 +159,27 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, months int) web.MiniAc
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: "Доступ к оплате переводом ещё не подтверждён администратором — запрос отправлен. Попробуйте позже."}
 	}
-	card, price, reqID, err := a.prepareP2PCard(ctx, tgID, months)
+	card, price, reqID, err := a.prepareP2PCardSale(ctx, tgID, s)
 	if err != nil {
 		return web.MiniActionDTO{Error: "оплата переводом недоступна"}
 	}
 	return web.MiniActionDTO{OK: true, P2PCard: card, P2PAmount: price + curSuffix(curRUB), P2PReqID: reqID}
 }
 
-// miniDesc is a neutral invoice description for Mini App payments.
+// miniDesc is a neutral invoice description for Mini App payments. Название
+// тарифа сюда намеренно не попадает: описание уходит во внешние платёжные
+// системы (и в фискальные чеки), придуманным админом строкам там не место.
 func miniDesc(months int) string {
 	return "VPN " + itoaMonths(months)
 }
 
+// itoaMonths — «N мес.» для любого срока (раньше были перечислены только
+// 1/3/6/12, и сроки тарифов вне этой четвёрки превращались в «подписка»).
 func itoaMonths(m int) string {
-	switch m {
-	case 1:
-		return "1 мес."
-	case 3:
-		return "3 мес."
-	case 6:
-		return "6 мес."
-	case 12:
-		return "12 мес."
+	if m <= 0 {
+		return "подписка"
 	}
-	return "подписка"
+	return strconv.Itoa(m) + " мес."
 }
 
 // MiniReferral mirrors showReferral: link, referral count and bonus terms.

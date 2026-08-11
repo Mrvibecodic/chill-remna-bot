@@ -459,7 +459,7 @@ func TestStarsFromMiniApp_KeepsChatChoice(t *testing.T) {
 
 	a.onBuyPlan(ctx, u, "12")
 	// Мини-апп запрашивает ссылку на счёт Stars на другой срок.
-	if _, err := a.starsInvoiceLink(ctx, u, 1); err != nil {
+	if _, err := a.starsInvoiceLink(ctx, u, baseSale(1)); err != nil {
 		t.Fatal(err)
 	}
 	if got := a.buyMonths(ctx, u); got != 12 {
@@ -469,7 +469,7 @@ func TestStarsFromMiniApp_KeepsChatChoice(t *testing.T) {
 	if snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 1); snap == nil {
 		t.Fatal("условия счёта из мини-аппа не сохранены")
 	}
-	if _, err := a.starsInvoiceLink(ctx, u, 12); err != nil {
+	if _, err := a.starsInvoiceLink(ctx, u, baseSale(12)); err != nil {
 		t.Fatal(err)
 	}
 	if snap, _, _ := fs.InvoiceSnapshot(ctx, u, model.PayMethodStars, 12); snap == nil {
@@ -492,7 +492,7 @@ func TestStarsFromMiniApp_DoesNotCreateChatChoice(t *testing.T) {
 	a.botCfg.Pricing.Stars = map[int]int{1: 99}
 	const u int64 = 555
 
-	if _, err := a.starsInvoiceLink(ctx, u, 1); err != nil {
+	if _, err := a.starsInvoiceLink(ctx, u, baseSale(1)); err != nil {
 		t.Fatal(err)
 	}
 	if in, _ := fs.PurchaseIntent(ctx, u); in != nil {
@@ -592,7 +592,7 @@ func TestStars_PeriodOffSaleIsNotSold(t *testing.T) {
 	a.botCfg.Pricing.Stars = map[int]int{6: 460}
 	const u int64 = 555
 
-	if _, err := a.starsInvoiceLink(ctx, u, 6); err == nil {
+	if _, err := a.starsInvoiceLink(ctx, u, baseSale(6)); err == nil {
 		t.Fatal("мини-апп выставил счёт на срок, снятый с продажи")
 	}
 	a.onBuyPlan(ctx, u, "6")

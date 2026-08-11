@@ -145,7 +145,7 @@ func TestBasePlanGate_MiniApp(t *testing.T) {
 	if dto := a.MiniPlans(ctx, 601); len(dto.Plans) != 0 {
 		t.Fatalf("витрина мини-аппа должна быть пустой: %+v", dto.Plans)
 	}
-	if dto := a.MiniCheckout(ctx, 601, 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, 601, "", 1, model.PayMethodBalance, false); dto.Error == "" {
 		t.Fatalf("checkout должен отказать: %+v", dto)
 	}
 	// Новому пользователю всё открыто.

@@ -125,57 +125,70 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	return dto
 }
 
-// MiniPlans mirrors the chat storefront (showPlans): period + base price
-// only — the bot does not show traffic/device details in the plan list.
+// MiniPlans mirrors the chat storefront (showPlans): тарифы, доступные этому
+// покупателю, каждый со своими сроками и условиями.
 func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
-	// Первая точка гейта доступности для мини-аппа и кабинета: недоступный
-	// покупателю «Базовый» — пустая витрина, как и в чате.
-	if !a.baseSaleAllowed(ctx, tgID) {
-		return web.MiniPlansDTO{}
-	}
-	a.mu.Lock()
 	var dto web.MiniPlansDTO
-	if a.botCfg == nil {
-		a.mu.Unlock()
+	// Первая точка гейта доступности — сама витрина: тарифы фильтруются по
+	// покупателю, скрытые «по ссылке» не показываются.
+	plans, _, err := a.storefrontPlans(ctx, tgID)
+	if err != nil {
+		a.log.Warn("мини-апп: тарифы не прочитаны", "err", err, "user", tgID)
 		return dto
 	}
-	p := a.botCfg.Pricing
-	type planRow struct {
-		months           int
-		price            string
-		traffic, devices int
-	}
-	var rows []planRow
-	for _, m := range model.PlanMonths {
-		price := p.Base[m]
-		if price == "" {
+	lang := a.lang(tgID)
+	fallbackCur := a.pricing().Currency
+	for i := range plans {
+		p := &plans[i]
+		pd := web.MiniPlanDTO{
+			Code:        p.Code,
+			Name:        p.Name,
+			Description: p.Description,
+			Icon:        p.Icon,
+			Strategy:    p.Strategy,
+		}
+		if a.planAddSubOn(p) {
+			pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
+		}
+		cur := planCurrencyOr(p, fallbackCur)
+		// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
+		// подсвечивал третью из четырёх позиций).
+		bestIdx, bestRate := -1, int64(0)
+		for j := range p.Durations {
+			d := &p.Durations[j]
+			if d.Months <= 0 || d.Base == "" {
+				continue
+			}
+			// squadCountries ходит в панель (кэш) и сам берёт a.mu.
+			cs, configs := a.squadCountries(ctx, p.IntSquadsFor(d))
+			var countries []web.MiniCountryDTO
+			for _, c := range cs {
+				countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+			}
+			pd.Durations = append(pd.Durations, web.MiniDurationDTO{
+				Months:    d.Months,
+				Price:     d.Base,
+				Currency:  cur,
+				TrafficGB: p.TrafficGBFor(d),
+				Devices:   p.DeviceLimitFor(d),
+				Countries: countries,
+				Configs:   configs,
+			})
+			if k, ok := rubToKopecks(d.Base); ok && k > 0 {
+				rate := k / int64(d.Months)
+				if bestIdx < 0 || rate < bestRate {
+					bestIdx, bestRate = len(pd.Durations)-1, rate
+				}
+			}
+		}
+		if bestIdx >= 0 && len(pd.Durations) > 1 {
+			pd.Durations[bestIdx].Best = true
+		}
+		if len(pd.Durations) == 0 {
 			continue
 		}
-		rows = append(rows, planRow{m, price, p.Traffic[m], p.DeviceLimitFor(m)})
+		dto.Plans = append(dto.Plans, pd)
 	}
-	currency := p.Currency
-	strategy := p.ResetStrategy()
-	a.mu.Unlock()
-
-	// planCountries hits the panel (cached) and locks a.mu internally, so it
-	// must run AFTER releasing the lock above.
-	for _, r := range rows {
-		cs, configs := a.planCountries(ctx, r.months)
-		var countries []web.MiniCountryDTO
-		for _, c := range cs {
-			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
-		}
-		dto.Plans = append(dto.Plans, web.MiniPlanDTO{
-			Months:    r.months,
-			Price:     r.price,
-			Currency:  currency,
-			TrafficGB: r.traffic,
-			Devices:   r.devices,
-			Countries: countries,
-			Configs:   configs,
-		})
-	}
-	dto.Strategy = strategy
 	return dto
 }
 
@@ -192,35 +205,70 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
 }
 
-// MiniCheckout buys/renews a period. Only the "balance" method completes
-// in-app (reuses finalizePurchase, the same provisioning core as the chat
-// flow); other methods return Redirect=true (handled in a later stage).
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method string, web_ bool) web.MiniActionDTO {
-	// Тот же признак, что у витрины: срок без базовой цены снят с продажи.
-	if !a.periodOnSale(months) {
-		return web.MiniActionDTO{Error: "неверный период"}
+// miniSale разрешает пару «тариф + срок» из запроса мини-аппа/кабинета в
+// продажу. nil — продавать нечего: неизвестный код, срок снят с продажи,
+// тариф выключен или закрыт этому покупателю. Правила зеркалят чат: витрина
+// такого не предлагает, значит и счёт по прямому запросу не создаётся.
+func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int) *sale {
+	if code == "" || code == model.PlanCodeBase {
+		// Пустой код — старый фронт из кэша: он знает только «Базовый».
+		// Тот же признак, что у витрины: срок без базовой цены снят с продажи.
+		if !a.periodOnSale(months) {
+			return nil
+		}
+		// Гейт здесь — baseSaleAllowed, а не planAccessibleFor: у мини-аппа нет
+		// экрана тарифа по ссылке, поэтому «Базовый» в режиме «по ссылке» из
+		// него не продаётся вовсе (покупка по ссылке живёт в чате).
+		if !a.baseSaleAllowed(ctx, tgID) {
+			return nil
+		}
+		return baseSale(months)
 	}
+	p, err := a.planByCode(ctx, code)
+	if err != nil || p == nil || !p.Enabled {
+		return nil
+	}
+	// «По ссылке» продаётся только со своего экрана в чате: мини-апп такие
+	// тарифы не показывает, и API не должен становиться обходом скрытности.
+	if model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
+		return nil
+	}
+	if !a.planAccessibleFor(ctx, p, tgID) {
+		return nil
+	}
+	d := p.Duration(months)
+	if d == nil || d.Base == "" {
+		return nil
+	}
+	return &sale{Plan: p, D: d, Months: months}
+}
+
+// MiniCheckout buys/renews a plan duration. Only the "balance" method
+// completes in-app (reuses finalizePurchase, the same provisioning core as
+// the chat flow); other methods return a payment URL or Redirect=true.
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, web_ bool) web.MiniActionDTO {
 	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
-	// пользователь покупал бы «Базовый», недоступный ему по режиму, прямым
+	// пользователь покупал бы тариф, недоступный ему по режиму, прямым
 	// запросом мимо витрины.
-	if !a.baseSaleAllowed(ctx, tgID) {
+	s := a.miniSale(ctx, tgID, plan, months)
+	if s == nil {
 		return web.MiniActionDTO{Error: "тариф недоступен"}
 	}
 	if method == model.PayMethodP2P {
 		if web_ {
-			return a.MiniP2PWeb(ctx, tgID, months)
+			return a.MiniP2PWeb(ctx, tgID, s)
 		}
-		return a.MiniP2P(ctx, tgID, months)
+		return a.MiniP2P(ctx, tgID, s)
 	}
 	if method != model.PayMethodBalance {
-		payURL, invoice, err := a.miniPayURL(ctx, tgID, months, method, web_)
+		payURL, invoice, err := a.miniPayURL(ctx, tgID, s, method, web_)
 		if err != nil {
 			return web.MiniActionDTO{Error: err.Error()}
 		}
 		return web.MiniActionDTO{OK: true, PayURL: payURL, Invoice: invoice}
 	}
 
-	priceStr := a.pricing().Base[months]
+	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
 	if priceStr == "" || !ok || kopecks <= 0 {
 		return web.MiniActionDTO{Error: "тариф недоступен"}
@@ -228,6 +276,9 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	}
+	// Снимок — до списания (как в чате): после DeductBalance любой отказ
+	// означает возврат денег, и лишних причин отказа быть не должно.
+	snap := a.saleSnapshot(s)
 	deducted, err := a.store.DeductBalance(ctx, tgID, kopecks)
 	if err != nil {
 		return web.MiniActionDTO{Error: err.Error()}
@@ -235,7 +286,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, months int, method s
 	if !deducted {
 		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "", nil)
+	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
 	if err != nil {
 		_ = a.store.AddBalance(ctx, tgID, kopecks) // refund on provisioning failure
 		return web.MiniActionDTO{Error: err.Error()}
