@@ -18,7 +18,7 @@ func TestP2POpenForAll(t *testing.T) {
 	a.botCfg.Pricing.Base = map[int]string{1: "100"}
 	ctx := context.Background()
 
-	a.getUI(200).buyMonths = 1
+	a.onBuyPlan(ctx, 200, "1")
 	a.startP2P(ctx, 200)
 
 	joined := strings.Join(fm.texts, "\n")

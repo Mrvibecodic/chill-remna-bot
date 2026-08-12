@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +32,16 @@ type fakeMsg struct {
 	invoices []string
 	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
 	downloads map[string][]byte
+	// docs — документы, отправленные ботом: ключ — имя файла.
+	docs map[string][]byte
+	// preOK — ответы предпроверок Stars по порядку.
+	preOK []bool
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
 	cbData []string
+	// btnText — подписи тех же кнопок. Подписи Telegram принимает обычным
+	// текстом, поэтому экранирование в них — ошибка, и проверять их надо
+	// отдельно от текста сообщения.
+	btnText []string
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -52,8 +61,20 @@ func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
 			if b.CallbackData != "" {
 				f.cbData = append(f.cbData, b.CallbackData)
 			}
+			if b.Text != "" {
+				f.btnText = append(f.btnText, b.Text)
+			}
 		}
 	}
+}
+
+// buttonLabels возвращает подписи всех отправленных кнопок.
+func (f *fakeMsg) buttonLabels() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.btnText))
+	copy(out, f.btnText)
+	return out
 }
 
 func hasCB(list []string, want string) bool {
@@ -107,8 +128,29 @@ func (f *fakeMsg) SendInvoice(_ context.Context, _ int64, title, _, payload, cur
 func (f *fakeMsg) CreateInvoiceLink(_ context.Context, _, _, payload, currency string, amount int) (string, error) {
 	return "https://t.me/$invoice_" + currency + "_" + strconv.Itoa(amount) + "_" + payload, nil
 }
-func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, _ bool, _ string) {}
-func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, _ []byte, _ string) {
+func (f *fakeMsg) AnswerPreCheckout(_ context.Context, _ string, ok bool, _ string) {
+	f.mu.Lock()
+	f.preOK = append(f.preOK, ok)
+	f.mu.Unlock()
+}
+
+// lastPreOK — ответ последней предпроверки (false, если её не было).
+func (f *fakeMsg) lastPreOK() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.preOK) == 0 {
+		return false
+	}
+	return f.preOK[len(f.preOK)-1]
+}
+
+func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, data []byte, _ string) {
+	f.mu.Lock()
+	if f.docs == nil {
+		f.docs = map[string][]byte{}
+	}
+	f.docs[filename] = append([]byte(nil), data...)
+	f.mu.Unlock()
 	f.add("DOC:" + filename)
 }
 func (f *fakeMsg) Download(_ context.Context, fileID string) ([]byte, error) {
@@ -162,17 +204,22 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
-	cfg       *model.BotConfig
-	users     map[int64]*model.User
-	reqs      map[int64]*model.P2PRequest
-	pays      map[int64]*model.Payment
-	media     map[string]string
-	pending   map[int64]*model.PendingInvoice
-	promos    map[string]*model.PromoCode
-	promoUses map[string]bool
-	webUsers  map[string]*model.WebUser
-	paylogs   []model.PayLogEntry
-	torrents  []model.TorrentReport
+	cfg        *model.BotConfig
+	users      map[int64]*model.User
+	reqs       map[int64]*model.P2PRequest
+	pays       map[int64]*model.Payment
+	media      map[string]string
+	pending    map[int64]*model.PendingInvoice
+	plans      map[string]*model.Plan
+	planAccess map[string]model.PlanAccess
+	intents    map[int64]*model.PurchaseIntent
+	invSnaps   map[string]*model.PlanSnapshot
+	invSnapAt  map[string]string
+	promos     map[string]*model.PromoCode
+	promoUses  map[string]bool
+	webUsers   map[string]*model.WebUser
+	paylogs    []model.PayLogEntry
+	torrents   []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -255,6 +302,13 @@ func (s *fakeStore) SetAutoPay(_ context.Context, ap *model.AutoPay) error {
 	}
 	cp := *ap
 	s.autopays[ap.TelegramID] = &cp
+	return nil
+}
+
+func (s *fakeStore) UpdateAutoPaySnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.Snapshot = snap
+	}
 	return nil
 }
 
@@ -511,6 +565,50 @@ func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
 	}
 	cp := *s.users[id]
 	return &cp, nil
+}
+
+func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepairTarget, error) {
+	var out []storage.SubRepairTarget
+	for id, u := range s.users {
+		if u == nil || u.SubExpireAt == "" || u.Blocked {
+			continue
+		}
+		out = append(out, storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt})
+	}
+	return out, nil
+}
+
+func (s *fakeStore) LastPaidSubPayment(_ context.Context, id int64) (*model.Payment, error) {
+	var last *model.Payment
+	for _, p := range s.pays {
+		if p == nil || p.TelegramID != id || p.Status != model.PaymentPaid || p.Months <= 0 {
+			continue
+		}
+		if last == nil || p.ID >= last.ID {
+			last = p
+		}
+	}
+	return last, nil
+}
+
+func (s *fakeStore) SetPaymentSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	for _, p := range s.pays {
+		if p != nil && p.ID == id {
+			p.Snapshot = snap
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SetUserSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	if s.users == nil {
+		s.users = map[int64]*model.User{}
+	}
+	if s.users[id] == nil {
+		s.users[id] = &model.User{TelegramID: id}
+	}
+	s.users[id].Snapshot = snap
+	return nil
 }
 
 func (s *fakeStore) SetUserInfo(_ context.Context, id int64, username, firstName string) error {
@@ -796,6 +894,245 @@ func (s *fakeStore) GetWebUserByEmail(_ context.Context, email string) (*model.W
 	}
 	return nil, nil
 }
+func (s *fakeStore) SetPurchaseIntent(_ context.Context, in *model.PurchaseIntent) error {
+	if in == nil {
+		return nil
+	}
+	if s.intents == nil {
+		s.intents = map[int64]*model.PurchaseIntent{}
+	}
+	cp := *in
+	// Настоящее хранилище проставляет время само; без этого срок жизни выбора
+	// в тестах не работал бы вовсе.
+	if cp.CreatedAt == "" {
+		cp.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	in.CreatedAt = cp.CreatedAt
+	s.intents[cp.TelegramID] = &cp
+	return nil
+}
+
+func invSnapKey(telegramID int64, method string, months int) string {
+	return strconv.FormatInt(telegramID, 10) + ":" + method + ":" + strconv.Itoa(months)
+}
+
+func (s *fakeStore) SetInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int, snap *model.PlanSnapshot) error {
+	if s.invSnaps == nil {
+		s.invSnaps = map[string]*model.PlanSnapshot{}
+		s.invSnapAt = map[string]string{}
+	}
+	// Настоящее хранилище на пустом снимке пишет пустую строку, то есть
+	// затирает условия. Фейк обязан вести себя так же, иначе расхождение
+	// вылезет только в бою.
+	if snap == nil {
+		k := invSnapKey(telegramID, method, months)
+		delete(s.invSnaps, k)
+		delete(s.invSnapAt, k)
+		return nil
+	}
+	cp := *snap
+	k := invSnapKey(telegramID, method, months)
+	s.invSnaps[k] = &cp
+	s.invSnapAt[k] = time.Now().UTC().Format(time.RFC3339)
+	return nil
+}
+
+func (s *fakeStore) InvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, string, error) {
+	k := invSnapKey(telegramID, method, months)
+	v := s.invSnaps[k]
+	if v == nil {
+		return nil, "", nil
+	}
+	cp := *v
+	return &cp, s.invSnapAt[k], nil
+}
+
+func (s *fakeStore) PurgeInvoiceSnapshots(_ context.Context, before string) error {
+	for k, at := range s.invSnapAt {
+		if at < before {
+			delete(s.invSnapAt, k)
+			delete(s.invSnaps, k)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) DeleteInvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) error {
+	k := invSnapKey(telegramID, method, months)
+	delete(s.invSnaps, k)
+	delete(s.invSnapAt, k)
+	return nil
+}
+
+func (s *fakeStore) PurchaseIntent(_ context.Context, telegramID int64) (*model.PurchaseIntent, error) {
+	if s.intents == nil || s.intents[telegramID] == nil {
+		return nil, nil
+	}
+	cp := *s.intents[telegramID]
+	return &cp, nil
+}
+
+func (s *fakeStore) DeletePurchaseIntent(_ context.Context, telegramID int64) error {
+	delete(s.intents, telegramID)
+	return nil
+}
+
+func (s *fakeStore) DeletePurchaseIntentFor(_ context.Context, telegramID int64, months int, createdAt string) error {
+	if in := s.intents[telegramID]; in != nil && in.Months == months && in.CreatedAt == createdAt {
+		delete(s.intents, telegramID)
+	}
+	return nil
+}
+
+func (s *fakeStore) SavePlan(_ context.Context, p *model.Plan) error {
+	if p == nil {
+		return nil
+	}
+	if s.plans == nil {
+		s.plans = map[string]*model.Plan{}
+	}
+	cp := *p
+	cp.Normalize()
+	s.plans[cp.Code] = &cp
+	return nil
+}
+
+func (s *fakeStore) GetPlan(_ context.Context, code string) (*model.Plan, error) {
+	if s.plans == nil || s.plans[code] == nil {
+		return nil, nil
+	}
+	cp := *s.plans[code]
+	return &cp, nil
+}
+
+func (s *fakeStore) ListPlans(context.Context) ([]model.Plan, error) {
+	out := make([]model.Plan, 0, len(s.plans))
+	for _, p := range s.plans {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Order != out[j].Order {
+			return out[i].Order < out[j].Order
+		}
+		return out[i].Code < out[j].Code
+	})
+	return out, nil
+}
+
+func (s *fakeStore) DeletePlan(_ context.Context, code string) error {
+	delete(s.plans, code)
+	for k := range s.planAccess {
+		if s.planAccess[k].PlanCode == code {
+			delete(s.planAccess, k)
+		}
+	}
+	return nil
+}
+
+// planAccessKey повторяет первичный ключ настоящей таблицы.
+func planAccessKey(code string, tgID int64, email string) string {
+	return code + "|" + strconv.FormatInt(tgID, 10) + "|" + model.NormalizeEmail(email)
+}
+
+func (s *fakeStore) GrantPlanAccess(_ context.Context, code string, tgID int64, email string) error {
+	email = model.NormalizeEmail(email)
+	if !model.ValidPlanCode(code) || (tgID == 0) == (email == "") {
+		return errors.New("недопустимая запись списка допущенных")
+	}
+	if s.planAccess == nil {
+		s.planAccess = map[string]model.PlanAccess{}
+	}
+	k := planAccessKey(code, tgID, email)
+	if _, ok := s.planAccess[k]; ok {
+		return nil
+	}
+	s.seq++
+	s.planAccess[k] = model.PlanAccess{
+		PlanCode: code, TelegramID: tgID, Email: email,
+		CreatedAt: time.Now().UTC().Add(time.Duration(s.seq) * time.Millisecond).Format(time.RFC3339Nano),
+	}
+	return nil
+}
+
+func (s *fakeStore) RevokePlanAccess(_ context.Context, code string, tgID int64, email string) error {
+	delete(s.planAccess, planAccessKey(code, tgID, email))
+	return nil
+}
+
+func (s *fakeStore) HasPlanAccess(_ context.Context, code string, tgID int64, email string) (bool, error) {
+	email = model.NormalizeEmail(email)
+	for _, e := range s.planAccess {
+		if e.PlanCode != code {
+			continue
+		}
+		if (e.TelegramID != 0 && e.TelegramID == tgID) || (e.Email != "" && e.Email == email) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) ListPlanAccess(_ context.Context, code string) ([]model.PlanAccess, error) {
+	var out []model.PlanAccess
+	for _, e := range s.planAccess {
+		if e.PlanCode == code {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		if out[i].TelegramID != out[j].TelegramID {
+			return out[i].TelegramID < out[j].TelegramID
+		}
+		return out[i].Email < out[j].Email
+	})
+	return out, nil
+}
+
+func (s *fakeStore) ListAllPlanAccess(context.Context) ([]model.PlanAccess, error) {
+	var out []model.PlanAccess
+	for _, e := range s.planAccess {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].PlanCode != out[j].PlanCode {
+			return out[i].PlanCode < out[j].PlanCode
+		}
+		return out[i].CreatedAt < out[j].CreatedAt
+	})
+	return out, nil
+}
+
+func (s *fakeStore) ClearPlanAccess(_ context.Context, code string) error {
+	for k := range s.planAccess {
+		if s.planAccess[k].PlanCode == code {
+			delete(s.planAccess, k)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) PrunePlanAccess(context.Context) error {
+	for k := range s.planAccess {
+		if s.plans[s.planAccess[k].PlanCode] == nil {
+			delete(s.planAccess, k)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) CountUsersOnPlan(_ context.Context, code, activeAfter string) (int, error) {
+	n := 0
+	for _, u := range s.users {
+		if u != nil && u.Snapshot != nil && u.Snapshot.Code == code && u.SubExpireAt > activeAfter {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) CreatePromo(_ context.Context, p *model.PromoCode) error {
 	if s.promos == nil {
 		s.promos = map[string]*model.PromoCode{}
@@ -1499,6 +1836,9 @@ func TestStarsFlow(t *testing.T) {
 	a.botCfg = &model.BotConfig{
 		Installed: true, Language: "ru",
 		Stars: model.StarsConfig{Enabled: true, Prices: map[int]int{1: 100}},
+		// Базовая цена — признак того, что срок в продаже: без неё его нет ни
+		// в витрине, ни в мини-аппе, и звёздами он тоже не продаётся.
+		Pricing: model.Pricing{Base: map[int]string{1: "150"}},
 	}
 	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
 	ctx := context.Background()

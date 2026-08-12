@@ -34,6 +34,9 @@ func (a *App) remindOnce(ctx context.Context) {
 	var rc model.RemindersConfig
 	if a.botCfg != nil {
 		rc = a.botCfg.Reminders
+		// Список дней перебирается ниже без замка, а админка правит его на
+		// месте (append по тому же массиву) — здесь нужна своя копия.
+		rc.DaysList = append([]int(nil), rc.DaysList...)
 	}
 	a.mu.Unlock()
 	if st == nil {
@@ -99,7 +102,9 @@ func (a *App) sendReminder(ctx context.Context, chatID int64, key string, daysLe
 	if row := a.miniAppButtonRow(lang); row != nil {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")})
+	// «Продлить», а не «Купить»: подписчику тарифа по ссылке кнопка обязана
+	// открыть ЕГО тариф (showRenew), иначе напоминание продавало бы «Базовый».
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:renew")})
 	text := i18n.T(lang, key, daysLeft)
 	// Если у человека включено автопродление, напоминание «подписка кончается»
 	// без этой строки читается как «надо срочно платить руками».

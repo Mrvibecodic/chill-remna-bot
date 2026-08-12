@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestAutoPay_SavedFromPayment(t *testing.T) {
 	pay.Amount.Value = "300.00"
 	pay.Amount.Currency = "RUB"
 
-	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay, nil)
 
 	ap, _ := fs.GetAutoPay(ctx, 42)
 	if ap == nil || ap.MethodID != "pm_1" || ap.Months != 3 {
@@ -51,7 +52,7 @@ func TestAutoPay_SavedFromPayment(t *testing.T) {
 
 	// Повторная оплата уже подключённого пользователя согласие не сбрасывает.
 	pay.ID = "pay_1b"
-	a.saveAutoPayFromPayment(ctx, 42, 3, pay)
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay, nil)
 	if !a.autoPayOn(ctx, 42) {
 		t.Fatal("повторная оплата не должна выключать автопродление")
 	}
@@ -66,7 +67,7 @@ func TestAutoPay_DeclineOffer(t *testing.T) {
 	pay.Metadata = map[string]string{"autopay": "1"}
 	pay.PaymentMethod.ID = "pm_d"
 	pay.PaymentMethod.Saved = true
-	a.saveAutoPayFromPayment(ctx, 49, 1, pay)
+	a.saveAutoPayFromPayment(ctx, 49, 1, pay, nil)
 
 	a.onAutoPayUser(ctx, 49, "no")
 	if a.autoPayOn(ctx, 49) {
@@ -89,7 +90,7 @@ func TestAutoPay_NotSavedWithoutFlag(t *testing.T) {
 	pay := &yookassa.Payment{ID: "pay_2"}
 	pay.PaymentMethod.ID = "pm_2"
 	pay.PaymentMethod.Saved = true // ЮKassa сохранила, но пользователь не просил
-	a.saveAutoPayFromPayment(ctx, 43, 1, pay)
+	a.saveAutoPayFromPayment(ctx, 43, 1, pay, nil)
 
 	if ap, _ := fs.GetAutoPay(ctx, 43); ap != nil {
 		t.Fatalf("автопродление не должно подключаться без флага: %+v", ap)
@@ -288,5 +289,47 @@ func TestCurrencyHelpers(t *testing.T) {
 	}
 	if !currencyCode("rub") {
 		t.Fatal("трёхбуквенный код должен проходить")
+	}
+}
+
+// Записи автосписания, созданные до появления снимков, не должны получать
+// ложное «условия изменились» на первой же оплате: сравнивать не с чем.
+func TestSaveAutoPay_NoFalseChangeNoticeForLegacyRows(t *testing.T) {
+	a, fs := autoPayApp(t)
+	ctx := context.Background()
+
+	// Старая запись: включена, тот же срок, снимка нет (до миграции 0049).
+	_ = fs.SetAutoPay(ctx, &model.AutoPay{
+		TelegramID: 42, Method: model.PayMethodYooKassa, MethodID: "pm_old", Months: 3, Enabled: true,
+	})
+
+	pay := &yookassa.Payment{ID: "pay_leg"}
+	pay.Metadata = map[string]string{"autopay": "1"}
+	pay.PaymentMethod.ID = "pm_old"
+	pay.PaymentMethod.Saved = true
+	pay.Amount.Value = "300.00"
+	pay.Amount.Currency = "RUB"
+
+	fm := a.msg.(*fakeMsg)
+	n0 := len(fm.texts)
+	a.saveAutoPayFromPayment(ctx, 42, 3, pay, nil)
+	for _, txt := range fm.texts[n0:] {
+		if strings.Contains(txt, "Автопродление теперь на") {
+			t.Fatalf("ложное уведомление об изменении условий: %q", txt)
+		}
+	}
+
+	// А вот реальная смена срока уведомление обязана прислать.
+	pay.ID = "pay_leg2"
+	n1 := len(fm.texts)
+	a.saveAutoPayFromPayment(ctx, 42, 6, pay, nil)
+	found := false
+	for _, txt := range fm.texts[n1:] {
+		if strings.Contains(txt, "Автопродление теперь на") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("при смене срока уведомление не пришло")
 	}
 }

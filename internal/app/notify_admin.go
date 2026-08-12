@@ -18,7 +18,11 @@ func (a *App) remindersCfg() model.RemindersConfig {
 	if a.botCfg == nil {
 		return model.RemindersConfig{}
 	}
-	return a.botCfg.Reminders
+	rc := a.botCfg.Reminders
+	// Список дней уезжает из-под замка, а правится он на месте (append по тому
+	// же массиву) — отдаём копию.
+	rc.DaysList = append([]int(nil), rc.DaysList...)
+	return rc
 }
 
 func (a *App) showNotifyAdmin(ctx context.Context, chatID int64) {

@@ -79,11 +79,27 @@ type country struct {
 	Name string
 }
 
+// saleCountriesLine — строка стран для экрана способов оплаты.
+func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) string {
+	if s == nil {
+		return ""
+	}
+	if s.Plan == nil {
+		return a.countriesLine(ctx, lang, s.Months)
+	}
+	cs, _ := a.squadCountries(ctx, s.Plan.IntSquadsFor(s.D))
+	return countriesText(lang, cs)
+}
+
 // planCountries returns the distinct countries available to a plan, taken from
 // host remarks (e.g. "🇩🇪 Германия"), deduped by flag and in first-seen order,
 // plus the count of accessible inbounds (configs).
 func (a *App) planCountries(ctx context.Context, months int) (countries []country, inbounds int) {
-	squadIDs := a.planSquadUUIDs(months)
+	return a.squadCountries(ctx, a.planSquadUUIDs(months))
+}
+
+// squadCountries — страны и число конфигов для явно заданного набора сквадов.
+func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries []country, inbounds int) {
 	if len(squadIDs) == 0 {
 		return nil, 0
 	}
@@ -172,6 +188,11 @@ func cleanCountryName(s string) string {
 // buy screen, or "" when the plan has no detectable countries.
 func (a *App) countriesLine(ctx context.Context, lang string, months int) string {
 	cs, _ := a.planCountries(ctx, months)
+	return countriesText(lang, cs)
+}
+
+// countriesText — общий рендер списка стран ("" — стран нет).
+func countriesText(lang string, cs []country) string {
 	if len(cs) == 0 {
 		return ""
 	}

@@ -71,7 +71,7 @@ func TestBalance_TopUpIdempotentAndAutopay(t *testing.T) {
 		t.Fatalf("после двух одинаковых топ-апов баланс должен быть 50000, got %+v", got)
 	}
 
-	a.getUI(u).buyMonths = 1
+	a.onBuyPlan(ctx, u, "1")
 	a.payFromBalance(ctx, u)
 	got, _ := fs.GetUser(ctx, u)
 	if got == nil || got.Balance != 50000-15000 {

@@ -141,8 +141,8 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 		return true, nil
 	}
 
-	amount := a.cryptoAmount(months, rawAmount)
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID)
+	amount := a.cryptoAmount(pendingSnap(pending), months, rawAmount)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID, pendingSnap(pending))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.log.Info("cryptobot webhook: race lost", "id", up.Payload.InvoiceID)
@@ -154,6 +154,15 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 	a.sendSubActive(ctx, chatID, link, expireAt)
 	a.log.Info("cryptobot webhook: payment finalized", "id", up.Payload.InvoiceID, "chat_id", chatID, "months", months)
 	return true, nil
+}
+
+// pendingSnap — снимок из уже прочитанной pending-записи (в вебхуке она
+// доверенней payload и потому читается заранее).
+func pendingSnap(p *model.PendingInvoice) *model.PlanSnapshot {
+	if p == nil {
+		return nil
+	}
+	return p.Snapshot
 }
 
 func parseCryptoBotPayload(raw string) (int64, int, error) {

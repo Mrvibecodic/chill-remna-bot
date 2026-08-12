@@ -313,6 +313,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	}
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick"), btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
+		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
 		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
@@ -421,8 +422,14 @@ func (a *App) squadNames(ctx context.Context, activeInt []string, extUUID string
 func (a *App) startReconfigure(ctx context.Context, chatID int64) {
 	a.mu.Lock()
 	var base model.BotConfig
-	if a.botCfg != nil {
-		base = *a.botCfg
+	// Именно копия: обычное присваивание оставляет карты и слайсы общими с живым
+	// конфигом, и мастер переустановки правил бы работающего бота ещё до
+	// сохранения — да ещё и без замка. Ошибку копии глотать нельзя молча, но и
+	// падать здесь незачем: пустой конфиг мастер просто спросит заново.
+	if cp, err := a.botCfg.Clone(); err != nil {
+		a.log.Warn("копия конфига для мастера переустановки не снята", "err", err)
+	} else if cp != nil {
+		base = *cp
 	}
 	w := &wizard{step: stepDB, cfg: base, reconfig: true}
 	a.wiz[chatID] = w
@@ -530,7 +537,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "buy":
 		a.showPlans(ctx, chatID)
 	case "renew":
-		a.showPlans(ctx, chatID)
+		// Продление ведёт на СВОЙ тариф: подписчику тарифа по ссылке витрина
+		// «Базового» продала бы чужие условия (или отказала бы вовсе).
+		a.showRenew(ctx, chatID)
 	case "topup":
 		a.showTopUp(ctx, chatID)
 	case "balance":
@@ -733,9 +742,15 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.showYooKassaAdmin(ctx, chatID)
 		}
+	case "plans":
+		if isAdmin {
+			a.showPlansAdmin(ctx, chatID, 0)
+		}
 	case "pricing":
 		if isAdmin {
-			a.showPricing(ctx, chatID)
+			// Старый экран цен убран: кнопки из старых переписок ведут в
+			// редактор цен «Базового» — то же содержимое, один источник истины.
+			a.showPlanPricing(ctx, chatID, model.PlanCodeBase)
 		}
 	case "payments":
 		if isAdmin {

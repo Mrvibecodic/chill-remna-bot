@@ -428,7 +428,7 @@ function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px">
 
 /* ---- main screen ---- */
 function render(me,menu,sub,plans){
-  STATE.plans=(plans&&plans.plans)||[]; STATE.strategy=(plans&&plans.strategy)||'';
+  STATE.plans=(plans&&plans.plans)||[];
   var ub='';
   if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
   let h='<div class="stagger">';
@@ -444,7 +444,7 @@ function render(me,menu,sub,plans){
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
         (dleft!==null?'<div class="c"><div class="k">ОСТАЛОСЬ</div><div class="v">'+dleft+' '+daysWord(dleft)+'</div></div>':'')+
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
-        (atext!==null?'<div class="c"><div class="k">ДОП-СЕРВЕР</div><div class="v">'+esc(atext)+'</div></div>':'')+
+        (atext!==null?'<div class="c"><div class="k">'+esc((sub.addsub_name||'Доп-сервер').toUpperCase())+'</div><div class="v">'+esc(atext)+'</div></div>':'')+
       '</div></div>';
     h+='<div class="acctgrp">'+ub+pass+'</div>';
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
@@ -452,7 +452,7 @@ function render(me,menu,sub,plans){
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
-    if(menu.can_renew)h+='<div class="hint center">Для продления выберите период ниже</div>';
+    if(menu.can_renew&&STATE.plans.length)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
@@ -461,14 +461,16 @@ function render(me,menu,sub,plans){
     // Автопродление могло остаться включённым с прошлой подписки — дать выключить.
     if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
   }
-  if(plans.plans&&plans.plans.length){
+  if(STATE.plans.length===1){
+    // Единственный тариф — сразу сроки, без лишнего клика (как в чате).
+    h+='<div class="sec-title">'+IC.tag+esc(planTitle(STATE.plans[0]))+'</div>';
+    h+=durListHTML(STATE.plans[0]);
+  }else if(STATE.plans.length){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
-    plans.plans.forEach((p,i)=>{
-      const best=i===Math.min(2,plans.plans.length-1);
-      const lab=esc(p.price)+' '+esc(p.currency);
-      h+='<div class="plan'+(best?' best':'')+'" onclick="buyPlan('+p.months+',\''+lab+'\')">'+
-        '<div class="pl"><span class="pm">'+monthsWord(p.months)+'</span><span class="ps">'+esc(planSub(p))+(p.countries&&p.countries.length?(' · 🌍 '+p.countries.length+' '+plural(p.countries.length,'страна','страны','стран')):'')+'</span></div>'+
-        '<span class="price">'+lab+'</span></div>';
+    STATE.plans.forEach(function(p){
+      h+='<div class="plan" onclick="openPlan(\''+jsq(p.code)+'\')">'+
+        '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span><span class="ps">'+esc(planCardSub(p))+'</span></div>'+
+        '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';
   }
@@ -562,35 +564,93 @@ async function doResetDevices(el){
 }
 
 var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'ежедневно',WEEK:'еженедельно',MONTH:'ежемесячно',MONTH_ROLLING:'ежемесячно'};
-function planTraffic(p){return (p&&p.traffic_gb>0)?(p.traffic_gb+' ГБ'):'Безлимит';}
-function planDevices(p){return (p&&p.devices>0)?(p.devices+' устр.'):'';}
-function planSub(p){var d=planDevices(p);return planTraffic(p)+' трафик'+(d?(' · '+d):'');}
-function planByMonths(m){return (STATE.plans||[]).filter(function(x){return x.months==m;})[0]||{};}
+// planTraffic/planDevices/planSub принимают СРОК тарифа (duration): лимиты
+// в v2-схеме живут на сроке, а не на тарифе.
+function planTraffic(d){return (d&&d.traffic_gb>0)?(d.traffic_gb+' ГБ'):'Безлимит';}
+function planDevices(d){return (d&&d.devices>0)?(d.devices+' устр.'):'';}
+function planSub(d){var x=planDevices(d);return planTraffic(d)+' трафик'+(x?(' · '+x):'');}
+function planByCode(c){return (STATE.plans||[]).filter(function(p){return p.code===c;})[0]||null;}
+function durByMonths(p,m){return ((p&&p.durations)||[]).filter(function(d){return d.months==m;})[0]||null;}
+function planTitle(p){return (p.icon?p.icon+' ':'')+(p.name||p.code);}
+// Подпись карточки тарифа в списке: описание админа, иначе условия первого срока.
+function planCardSub(p){
+  if(p.description)return p.description;
+  var d=(p.durations||[])[0];
+  return d?planSub(d):'';
+}
+// «от X ₽» — минимальная цена по срокам тарифа. Пробелы-разделители тысяч
+// убираются до разбора: parseFloat('9 900') вернул бы 9.
+function planMinLabel(p){
+  var best=null;
+  (p.durations||[]).forEach(function(d){
+    var v=parseFloat(String(d.price).replace(/[\s ]/g,'').replace(',','.'));
+    if(!isFinite(v))return;
+    if(!best||v<best.v)best={v:v,lab:d.price+' '+(d.currency||'')};
+  });
+  return best?best.lab.trim():'';
+}
+// Список сроков тарифа («выгодный» приходит с сервера — цена за месяц).
+function durListHTML(p){
+  var h='<div class="cols">';
+  (p.durations||[]).forEach(function(d){
+    var lab=esc(d.price)+' '+esc(d.currency||'');
+    h+='<div class="plan'+(d.best?' best':'')+'" onclick="buyPlan(\''+jsq(p.code)+'\','+d.months+')">'+
+      '<div class="pl"><span class="pm">'+monthsWord(d.months)+'</span><span class="ps">'+esc(planSub(d))+(d.countries&&d.countries.length?(' · 🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран')):'')+'</span></div>'+
+      '<span class="price">'+lab+'</span></div>';
+  });
+  return h+'</div>';
+}
+// Экран тарифа: описание, опция доп-подписки и выбор срока.
+function openPlan(code){
+  haptic('tap');
+  var p=planByCode(code);
+  if(!p){boot();return;}
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
+    '<div class="title">'+esc(planTitle(p))+'</div>'+
+    (p.description?'<div class="hint" style="margin-top:4px">'+esc(p.description)+'</div>':'')+'</div>';
+  if(p.addsub_name){
+    h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
+      (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
+  }
+  h+='<div class="sec-title">'+IC.tag+'Срок подписки</div>';
+  h+=durListHTML(p);
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
+}
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
 function monthsWord(n){return n+' '+plural(n,'месяц','месяца','месяцев');}
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
 function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
-function buyPlan(months,label){
+function buyPlan(code,months){
   haptic('tap');
+  var p=planByCode(code),d=durByMonths(p,months);
+  if(!p||!d){boot();return;}
   var methods=[];
   if(STATE.balanceK>0)methods.push('balance');
-  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars'))methods.push(m);});
+  // Tribute сам определяет период и цену и о тарифе не знает — кнопка только
+  // у «Базового» (сервер такой счёт всё равно не создаст).
+  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&code!=='base'))methods.push(m);});
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
-  var p=planByMonths(months);
+  var label=d.price+' '+(d.currency||'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+
-    '<div class="payhead"><div class="title">'+monthsWord(months)+'</div><div class="bigprice">'+esc(label)+'</div></div></div>';
+    '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+monthsWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
   h+='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
-  h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(p))+'</b></div>';
-  if(p.devices>0)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+p.devices+'</b></div>';
-  if(STATE.strategy&&STRAT_LABELS[STATE.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[STATE.strategy])+'</b></div>';
-  if(p.countries&&p.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+p.countries.length+'</b></div>';
-  if(p.configs>0)h+='<div class="frow"><span class="l">'+IC.layers+'Конфигов</span><b>'+p.configs+'</b></div>';
+  h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
+  if(d.devices>0)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+d.devices+'</b></div>';
+  if(p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
+  if(d.configs>0)h+='<div class="frow"><span class="l">'+IC.layers+'Конфигов</span><b>'+d.configs+'</b></div>';
+  if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
+  // Смена тарифа: сервер прислал зачёт остатка — показываем сдвиг срока до оплаты.
+  if(d.switch_days)h+='<div class="frow"><span class="l">💱 Зачёт остатка</span><b>'+(d.switch_days>0?'+':'')+d.switch_days+' '+plural(Math.abs(d.switch_days),'день','дня','дней')+'</b></div>';
   h+='</div>';
-  if(p.countries&&p.countries.length){
+  if(d.switch_days)h+='<div class="hint">Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен, срок сдвинется на указанное число дней.</div>';
+  if(p.addsub_name&&p.addsub_desc)h+='<div class="hint">'+esc(p.addsub_desc)+'</div>';
+  if(d.countries&&d.countries.length){
     h+='<div class="sec-title">'+IC.globe+'Доступные страны</div><div class="chips">';
-    p.countries.forEach(function(c){
+    d.countries.forEach(function(c){
       var fl=c.code?('<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">'):(c.flag?esc(c.flag)+' ':'');
       h+='<span class="chip2">'+fl+esc(c.name||c.flag||'')+'</span>';
     });
@@ -599,13 +659,13 @@ function buyPlan(months,label){
   h+='<div class="sec-title">Способ оплаты</div>';
   var apOn=STATE.ap&&STATE.ap.available;
   methods.forEach(function(m){
-    h+='<button class="btn sec" onclick="pay('+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
+    h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
     if(m==='yookassa'&&apOn){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
   });
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
-  view(h,boot);
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 function renderP2PCard(card,amount,reqID){
   haptic('tap');setBack(boot);
@@ -631,9 +691,9 @@ async function p2pUpload(reqID,el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   busy(el,false);
 }
-async function pay(months,method,el){
+async function pay(plan,months,method,el){
   haptic('tap');busy(el,true);
-  try{const r=await post('/api/miniapp/checkout',{months:months,method:method});
+  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method});
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){

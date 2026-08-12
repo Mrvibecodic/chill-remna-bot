@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -15,6 +17,8 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	c := a.botCfg.AddSub
+	// Набор сквадов читается ниже без замка, а правится он на месте — копия.
+	c.InternalSquads = append([]string(nil), c.InternalSquads...)
 	a.mu.Unlock()
 
 	squadNames, _ := a.squadNames(ctx, c.InternalSquads, "")
@@ -33,10 +37,20 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 	if c.Enabled {
 		toggleLabel = i18n.T(lang, "addsub.btn_disable")
 	}
-	title := i18n.T(lang, "addsub.title", state, traffic, squadNames)
+	name := strings.TrimSpace(c.Name)
+	if name == "" {
+		name = i18n.T(lang, "addsub.default_name")
+	}
+	desc := strings.TrimSpace(c.Description)
+	if desc == "" {
+		desc = i18n.T(lang, "admin.none")
+	}
+	title := i18n.T(lang, "addsub.title", state, traffic, squadNames) +
+		"\n\n" + i18n.T(lang, "addsub.texts_line", html.EscapeString(name), html.EscapeString(desc))
 	rows := [][]models.InlineKeyboardButton{
 		{btn(toggleLabel, "addsub:toggle")},
 		{btn(i18n.T(lang, "addsub.btn_gb"), "addsub:gb"), btn(i18n.T(lang, "addsub.btn_squads"), "addsub:squads")},
+		{btn(i18n.T(lang, "addsub.btn_name"), "addsub:name"), btn(i18n.T(lang, "addsub.btn_desc"), "addsub:desc")},
 	}
 	if c.Enabled {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "addsub.btn_sync"), "addsub:sync")})
@@ -62,6 +76,12 @@ func (a *App) onAddSubAdmin(ctx context.Context, chatID int64, val string) {
 	case "gb":
 		a.getUI(chatID).adminInput = "addsub_gb"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "addsub.ask_gb"), "menu:addsub")
+	case "name":
+		a.getUI(chatID).adminInput = "addsub_name"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "addsub.ask_name"), "menu:addsub")
+	case "desc":
+		a.getUI(chatID).adminInput = "addsub_desc"
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "addsub.ask_desc"), "menu:addsub")
 	case "squads", "refresh", "noop":
 		a.showAddSubSquads(ctx, chatID)
 	case "int":
@@ -195,6 +215,11 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 			return st
 		}
 		u := targets[i]
+		// Тариф пользователя мог быть продан без опции — такому доп-подписка
+		// не создаётся и при массовой синхронизации.
+		if u.TelegramID != 0 && !a.addSubSoldTo(ctx, u.TelegramID) {
+			continue
+		}
 		res, uerr := panel.UpsertAddSubForUser(ctx, u, opt)
 		switch {
 		case uerr != nil:

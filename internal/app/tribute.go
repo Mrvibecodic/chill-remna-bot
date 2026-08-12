@@ -33,6 +33,12 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trb.not_configured"))
 		return
 	}
+	// Tribute продаёт только «Базовый», и счёт живёт на стороне Tribute —
+	// вторая точка гейта здесь, при выдаче ссылки.
+	if !a.baseSaleAllowed(ctx, chatID) {
+		a.showPlans(ctx, chatID)
+		return
+	}
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
@@ -198,7 +204,7 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 			return true, nil
 		}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID, nil)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "finalize_error", "%v", err)
 		return false, fmt.Errorf("tribute finalize %s: %w", extID, err)

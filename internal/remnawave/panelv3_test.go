@@ -155,7 +155,7 @@ func TestV3UnknownUserIsNotFound(t *testing.T) {
 func TestV3PatchUsesNumericID(t *testing.T) {
 	p := newV3Panel()
 	c := p.start(t)
-	if _, _, err := c.CreateOrUpdateUser(context.Background(), 42, 1, UserLimits{TrafficBytes: 10}); err != nil {
+	if _, _, err := c.CreateOrUpdateUser(context.Background(), 42, 1, 0, UserLimits{TrafficBytes: 10}); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.patches) != 1 {

@@ -94,13 +94,31 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 	}
 	chatID, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
 	months, _ := strconv.Atoi(pay.Metadata["months"])
+	// Метаданные могли не дойти (платёж создан не ботом, потеря на стороне
+	// платёжки) — срок и получатель лежат ещё и в строке счёта.
+	if (chatID == 0 || months == 0) && a.store != nil {
+		if p, _ := a.store.PendingByExtID(ctx, n.Object.ID); p != nil {
+			if chatID == 0 {
+				chatID = p.TelegramID
+			}
+			if months == 0 {
+				months = p.Months
+			}
+		}
+	}
+	if chatID != 0 && months == 0 {
+		// Деньги приняты, а срок неизвестен: молча пропускать нельзя, но и
+		// повторять доставку незачем — разбирается человек.
+		a.noPeriodForPayment(ctx, model.PayMethodYooKassa, n.Object.ID, chatID)
+		return true, nil
+	}
 	if chatID == 0 || months == 0 {
 		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "error", "в metadata платежа нет telegram_id/months — получатель неизвестен")
 		a.log.Error("yookassa webhook: missing metadata", "id", n.Object.ID)
 		return true, nil
 	}
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodYooKassa, amount, n.Object.ID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodYooKassa, amount, n.Object.ID, a.pendingSnapshot(ctx, n.Object.ID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.log.Info("yookassa webhook: race lost (other delivery won)", "id", n.Object.ID)
@@ -108,7 +126,7 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		}
 		return false, fmt.Errorf("finalize yookassa %s: %w", n.Object.ID, err)
 	}
-	a.saveAutoPayFromPayment(ctx, chatID, months, pay)
+	a.saveAutoPayFromPayment(ctx, chatID, months, pay, a.pendingSnapshot(ctx, n.Object.ID))
 	a.sendSubActive(ctx, chatID, link, expireAt)
 	a.log.Info("yookassa webhook: payment finalized", "id", n.Object.ID, "chat_id", chatID, "months", months)
 	return true, nil

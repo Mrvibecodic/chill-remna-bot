@@ -60,10 +60,14 @@ func (a *App) userBalance(ctx context.Context, chatID int64) int64 {
 func (a *App) showBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
-	table, best := a.balanceForecast(lang, bal)
+	table, best, planLine := a.balanceForecast(ctx, chatID, lang, bal)
 	caption := i18n.T(lang, "balance.head", kopecksToRub(bal))
 	if table != "" {
-		caption += "\n\n" + i18n.T(lang, "balance.forecast_hdr") + "\n" + table
+		hdr := i18n.T(lang, "balance.forecast_hdr")
+		if planLine != "" {
+			hdr = i18n.T(lang, "balance.forecast_plan", planLine)
+		}
+		caption += "\n\n" + hdr + "\n" + table
 		if best > 0 {
 			caption += "\n" + i18n.T(lang, "balance.max_months", best)
 		}
@@ -76,26 +80,54 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 	})
 }
 
-func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
-	pr := a.pricing()
+// balanceForecast — таблица «на сколько хватит баланса». Считает по тарифу
+// покупателя (снимок последней сделки): прогноз по чужой сетке обещал бы
+// человеку не его цены. Без своего тарифа — а также для «Базового»,
+// выключенного, удалённого или тарифа в чужой валюте — по сетке, как раньше.
+// Третье значение — подпись тарифа для заголовка ("" — прогноз по сетке).
+func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, balKopecks int64) (string, int, string) {
+	type entry struct {
+		months int
+		price  string
+	}
+	var list []entry
+	title := ""
+	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
+		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
+			for i := range p.Durations {
+				d := &p.Durations[i]
+				if d.Months > 0 && d.Base != "" {
+					list = append(list, entry{d.Months, d.Base})
+				}
+			}
+			if len(list) > 0 {
+				title = planTitleHTML(lang, p)
+			}
+		}
+	}
+	if len(list) == 0 {
+		title = ""
+		pr := a.pricing()
+		for _, mo := range model.PlanMonths {
+			if base := pr.Base[mo]; base != "" {
+				list = append(list, entry{mo, base})
+			}
+		}
+	}
 	var sb strings.Builder
 	sb.WriteString("<pre>")
 	sb.WriteString(padRight("Plan", 6) + "  " + padRight("Price", 11) + "  " + i18n.T(lang, "balance.col_lasts") + "\n")
 	sb.WriteString(strings.Repeat("─", 34) + "\n")
 	best := 0
 	rows := 0
-	for _, mo := range model.PlanMonths {
-		base := pr.Base[mo]
-		if base == "" {
-			continue
-		}
-		k, ok := rubToKopecks(base)
+	for _, e := range list {
+		k, ok := rubToKopecks(e.price)
 		if !ok || k <= 0 {
 			continue
 		}
 		rows++
 		count := int(balKopecks / k)
-		total := count * mo
+		total := count * e.months
 		if total > best {
 			best = total
 		}
@@ -103,16 +135,22 @@ func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
 		if count > 0 {
 			lasts = fmt.Sprintf("%d× ≈ %d %s", count, total, i18n.T(lang, "balance.mo"))
 		}
-		sb.WriteString(padRight(strconv.Itoa(mo)+"m", 6) + "  " + padRight(base+curSuffix(curRUB), 11) + "  " + lasts + "\n")
+		sb.WriteString(padRight(strconv.Itoa(e.months)+"m", 6) + "  " + padRight(e.price+curSuffix(curRUB), 11) + "  " + lasts + "\n")
 	}
 	sb.WriteString("</pre>")
 	if rows == 0 {
-		return "", 0
+		return "", 0, ""
 	}
-	return sb.String(), best
+	return sb.String(), best, title
 }
 
-func (a *App) topUpAmounts() ([]int64, int64) {
+// topUpAmounts — пресеты пополнения и потолок произвольной суммы.
+//
+// Раньше и то и другое считалось только по сетке «Базового», и цену тарифа по
+// ссылке дороже её максимума нельзя было положить на баланс одним платежом.
+// Теперь потолок учитывает ВСЕ включённые тарифы, а пресеты — только тарифы
+// публичных режимов: кнопка с ценой скрытого тарифа выдавала бы её всем.
+func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 	pr := a.pricing()
 	seen := map[int64]bool{}
 	var amts []int64
@@ -128,14 +166,52 @@ func (a *App) topUpAmounts() ([]int64, int64) {
 			maxK = k
 		}
 	}
+	if plans, err := a.planList(ctx); err == nil {
+		for i := range plans {
+			p := &plans[i]
+			if !p.Enabled {
+				continue
+			}
+			// Цены тарифа в чужой валюте — не рубли: ни в пресеты, ни в
+			// потолок (с баланса такой тариф всё равно не продаётся).
+			if p.Currency != "" && p.Currency != pr.Currency {
+				continue
+			}
+			mode := model.NormalizeAvailability(p.Availability)
+			hidden := mode == model.PlanAvailList || mode == model.PlanAvailLink
+			for j := range p.Durations {
+				d := &p.Durations[j]
+				if d.Months <= 0 {
+					continue
+				}
+				k, ok := rubToKopecks(d.Base)
+				if !ok || k <= 0 {
+					continue
+				}
+				if k > maxK {
+					maxK = k
+				}
+				if hidden || seen[k] {
+					continue
+				}
+				seen[k] = true
+				amts = append(amts, k)
+			}
+		}
+	}
 	sort.Slice(amts, func(i, j int) bool { return amts[i] < amts[j] })
+	// Кнопок — не больше восьми: длинный прайс превращал бы экран пополнения
+	// в простыню. Потолок при этом считается по всем ценам.
+	if len(amts) > 8 {
+		amts = amts[:8]
+	}
 	return amts, maxK
 }
 
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
-	amts, _ := a.topUpAmounts()
+	amts, _ := a.topUpAmounts(ctx)
 	var rows [][]models.InlineKeyboardButton
 	var row []models.InlineKeyboardButton
 	for _, k := range amts {
@@ -159,7 +235,7 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	switch action {
 	case "amt":
 		k, _ := strconv.ParseInt(arg, 10, 64)
-		amts, _ := a.topUpAmounts()
+		amts, _ := a.topUpAmounts(ctx)
 		ok := false
 		for _, v := range amts {
 			if v == k {
@@ -176,7 +252,7 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	case "custom":
 		a.getUI(chatID).awaitTopUp = true
 		ask := i18n.T(lang, "topup.ask_amount")
-		if _, maxK := a.topUpAmounts(); maxK > 0 {
+		if _, maxK := a.topUpAmounts(ctx); maxK > 0 {
 			ask = i18n.T(lang, "topup.ask_amount_max", kopecksToRub(maxK))
 		}
 		a.sendKB(ctx, chatID, ask,
@@ -198,7 +274,7 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
 		return
 	}
-	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+	if _, maxK := a.topUpAmounts(ctx); maxK > 0 && k > maxK {
 		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
 		return
@@ -244,7 +320,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		a.showTopUp(ctx, chatID)
 		return
 	}
-	if _, maxK := a.topUpAmounts(); maxK > 0 && k > maxK {
+	if _, maxK := a.topUpAmounts(ctx); maxK > 0 && k > maxK {
 		a.getUI(chatID).topUpKopecks = 0
 		a.sendKB(ctx, chatID, i18n.T(lang, "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(lang, "menu:topup")})
@@ -372,30 +448,36 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
-	if months == 0 {
-		months = model.PlanMonths[0]
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
+		return
 	}
-	priceStr := a.pricing().Base[months]
+	months := s.Months
+	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
-	if priceStr == "" || !ok || kopecks <= 0 {
+	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
+	// иначе «5 $» молча списались бы как «5 ₽».
+	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
 		return
 	}
+	// Снимок — до списания: после DeductBalance отказ по любой причине означает
+	// возврат денег, и лишних причин отказа быть не должно.
+	snap := a.saleSnapshot(s)
 	deducted, err := a.store.DeductBalance(ctx, chatID, kopecks)
 	if err != nil {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
 	}
 	if deducted {
-		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d months=%d", kopecks, months)
+		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
 	}
 	if !deducted {
 		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))),
 			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang)})
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "")
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
 	if err != nil {
 		_ = a.store.AddBalance(ctx, chatID, kopecks)
 		a.payLog(ctx, "balance", "", chatID, "balance_refund", "kopecks=%d возвращены после ошибки выдачи", kopecks)

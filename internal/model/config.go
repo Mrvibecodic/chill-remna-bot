@@ -115,6 +115,11 @@ type AutoPay struct {
 	NextTryAt  string
 	Fails      int
 	LastError  string
+
+	// Snapshot — условия последнего продления. Нужен, чтобы заметить, что
+	// тариф изменился, и предупредить человека: списание всегда идёт по
+	// действующим условиям, а не по замороженным.
+	Snapshot *PlanSnapshot
 }
 
 type PanelConfig struct {
@@ -172,6 +177,55 @@ type BotConfig struct {
 	Cabinet CabinetConfig `json:"cabinet"`
 }
 
+// Clone возвращает независимую копию конфига.
+//
+// Нужна на записи в базу. Хранилище получало живой указатель и превращало
+// конфиг в JSON уже без замка, а внутри конфига десяток карт, которые админка
+// правит под замком: обход карты одновременно с записью в неё убивает процесс
+// без всякой возможности перехватить. Копия снимается под замком, дальше в
+// хранилище едет она, и записывается ровно то состояние, что было на момент
+// снятия.
+//
+// Круг через JSON выбран намеренно: конфиг и хранится как JSON, то есть круг по
+// определению переносит всё, что вообще подлежит сохранению, и не требует
+// дописывать копию для каждого нового поля — иначе первое же добавленное поле
+// осталось бы поделённым между копиями молча.
+func (c *BotConfig) Clone() (*BotConfig, error) {
+	if c == nil {
+		return nil, nil
+	}
+	raw, err := c.SnapshotJSON()
+	if err != nil {
+		return nil, err
+	}
+	return ConfigFromJSON(raw)
+}
+
+// SnapshotJSON и ConfigFromJSON — те же две половины копии, но по отдельности.
+// Замок конфига защищает не только конфиг: под ним же лежат хранилище, клиент
+// панели и состояния экранов, и берут его на каждом сообщении. Обход карт
+// (Marshal) обязан идти под замком, а вот разбор обратно — уже нет, и держать
+// на нём общий замок бота незачем.
+func (c *BotConfig) SnapshotJSON() ([]byte, error) {
+	if c == nil {
+		return nil, nil
+	}
+	return json.Marshal(c)
+}
+
+// ConfigFromJSON собирает конфиг из снимка. Пустой снимок — пустой конфиг без
+// ошибки: так вызывающему не приходится отличать «конфига нет» от сбоя.
+func ConfigFromJSON(raw []byte) (*BotConfig, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out BotConfig
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 type UpdateCheckConfig struct {
 	Enabled    bool   `json:"enabled"`
 	Hour       int    `json:"hour"`
@@ -208,6 +262,15 @@ type AddSubConfig struct {
 	TrafficGB      int      `json:"traffic_gb"`
 	InternalSquads []string `json:"internal_squads"`
 	Init           bool     `json:"init"`
+	// Name и Description — общие название и описание опции для витрины и
+	// экранов подписки; тариф может переопределить их своими (Plan.AddSubName,
+	// Plan.AddSubDesc). Пустые — стандартный текст.
+	//
+	// ⚠ Поля живут в конфиге: предыдущий образ бота при сохранении конфига их
+	// молча выбрасывает. Потеря косметическая (тексты вводятся заново), ради
+	// неё отдельную таблицу не заводим.
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 func (c *BotConfig) NormalizeAddSub() {
@@ -229,6 +292,11 @@ type TrialConfig struct {
 	DeviceLimit       int      `json:"device_limit"`
 	InternalSquads    []string `json:"internal_squads"`
 	ExternalSquadUUID string   `json:"external_squad_uuid"`
+	// Strategy — своя стратегия сброса трафика триала; пусто — как у сетки
+	// «Базового» (историческое поведение). ⚠ Поле живёт в конфиге-блобе:
+	// старый образ при сохранении конфига его молча выбрасывает — триал
+	// вернётся к стратегии сетки. Потеря косметическая.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 type SubscriptionPlan struct {
@@ -321,6 +389,9 @@ type Payment struct {
 	Comment    string
 	ExtID      string
 	CreatedAt  string
+
+	// Snapshot — условия, на которых платёж был проведён (см. PlanSnapshot).
+	Snapshot *PlanSnapshot
 }
 
 type PendingInvoice struct {
@@ -335,6 +406,8 @@ type PendingInvoice struct {
 	Purpose string
 
 	Kopecks int64
+
+	Snapshot *PlanSnapshot
 }
 
 type P2PConfig struct {
@@ -378,6 +451,11 @@ type User struct {
 	// стоит, повторные заявки админу не шлются, а юзер при попытке входа видит
 	// «доступ отклонён». Снимается ручным одобрением (adm:wok).
 	WebDenied bool
+
+	// Snapshot — условия действующей подписки. Локальной сущности подписки у
+	// бота нет, истина в панели; снимок нужен, чтобы знать, что именно
+	// продано, и уметь это восстановить.
+	Snapshot *PlanSnapshot
 }
 
 type P2PRequest struct {
@@ -390,6 +468,8 @@ type P2PRequest struct {
 	Comment    string
 	CreatedAt  string
 	DecidedAt  string
+
+	Snapshot *PlanSnapshot
 }
 
 type WebhookConfig struct {

@@ -53,16 +53,17 @@ func (a *App) startYooKassa(ctx context.Context, chatID int64) {
 // оплаты, чтобы потом продлевать подписку автоматически.
 func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
-	if months == 0 {
-		months = model.PlanMonths[0]
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
+		return
 	}
+	months := s.Months
 	cfg := a.ykConfig()
-	pr := a.pricing()
-	value, okPrice := ykValue(pr.Fiat(model.PayMethodYooKassa, months))
+	fiat := a.saleFiat(s, model.PayMethodYooKassa)
+	value, okPrice := ykValue(fiat)
 	if !cfg.Enabled || !okPrice {
-		if !okPrice && pr.Fiat(model.PayMethodYooKassa, months) != "" {
-			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "error", "цена за %d мес. задана некорректно (%q) — счёт не создать", months, pr.Fiat(model.PayMethodYooKassa, months))
+		if !okPrice && fiat != "" {
+			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "error", "цена за %d мес. задана некорректно (%q) — счёт не создать", months, fiat)
 		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
 		return
@@ -83,18 +84,24 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 		returnURL = "https://t.me"
 	}
 	// См. currencyCode: проверка по длине пропускала символ «₽» (три байта),
-	// и ЮKassa отвечала 400 на такой код валюты.
-	currency := pr.Currency
+	// и ЮKassa отвечала 400 на такой код валюты. Рублёвый фолбэк допустим
+	// только для валюты сетки — чужой символ тарифа списался бы как рубли.
+	saleCur := a.saleCurrency(s)
+	currency := saleCur
 	if !currencyCode(currency) {
+		if !a.ykSaleCurrencyOK(s) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
+			return
+		}
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)
-	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save)
+	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
-	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(pr.Currency))
+	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur))
 	if save {
 		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint")
 	}
@@ -143,6 +150,20 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	}
 	payChat, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
 	months, _ := strconv.Atoi(pay.Metadata["months"])
+	if (payChat == 0 || months == 0) && a.store != nil {
+		if p, _ := a.store.PendingByExtID(ctx, payID); p != nil {
+			if payChat == 0 {
+				payChat = p.TelegramID
+			}
+			if months == 0 {
+				months = p.Months
+			}
+		}
+	}
+	if payChat != 0 && months == 0 {
+		a.noPeriodForPayment(ctx, model.PayMethodYooKassa, payID, payChat)
+		return
+	}
 	if payChat == 0 || months == 0 {
 		// Как и в вебхуке: без metadata получатель и срок неизвестны — не
 		// угадываем (нажавшему кнопку и сроку «по умолчанию» выдавать нельзя).
@@ -151,12 +172,12 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		return
 	}
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID)
+	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID, a.pendingSnapshot(ctx, payID))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
 		return
 	}
-	a.saveAutoPayFromPayment(ctx, payChat, months, pay)
+	a.saveAutoPayFromPayment(ctx, payChat, months, pay, a.pendingSnapshot(ctx, payID))
 	a.sendSubActive(ctx, payChat, link, expireAt)
 }
 
@@ -256,14 +277,17 @@ func (a *App) onYKAdmin(ctx context.Context, chatID int64, val string) {
 		ui := a.getUI(chatID)
 		ui.adminInput = "ykprice"
 		ui.priceMonths = mo
+		// Старый экран правит «Базовый»: контекст карточки тарифа здесь чужой.
+		ui.planCode = ""
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.yk_ask_price", mo), "menu:yookassa")
 	}
 }
 
 // ykCreatePayment creates a YooKassa payment + pending invoice and returns the
 // confirmation URL. Shared by the chat flow and the Mini App so the pending
-// ExtID/format stay identical.
-func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string, save bool) (payURL, extID string, err error) {
+// ExtID/format stay identical. snap — условия продажи; nil означает «Базовый
+// по текущей сетке» (мини-апп и кабинет пока продают только его).
+func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, value, currency, returnURL, desc string, save bool, snap *model.PlanSnapshot) (payURL, extID string, err error) {
 	client := a.ykClient()
 	if client == nil {
 		return "", "", fmt.Errorf("yookassa не настроена")
@@ -271,14 +295,17 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, save)
+	if snap == nil {
+		snap = a.planSnapshot(months)
+	}
+	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, snap.Code, save)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", "", err
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: pay.ID, TelegramID: chatID, Months: months, Snapshot: snap})
 	}
 	return pay.Confirmation.ConfirmationURL, pay.ID, nil
 }

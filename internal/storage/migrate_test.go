@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -160,6 +161,29 @@ func TestMigrationsApplyOnSQLite(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("таблица %s не создана на SQLite", tbl)
+		}
+	}
+}
+
+// Telegram-ID давно перевалили за 2^31, поэтому в postgres такая колонка
+// обязана быть BIGINT: int4 роняет и запись, и чтение у большинства
+// современных аккаунтов, а на sqlite (там INTEGER восьмибайтовый) это не
+// воспроизводится ни в бою, ни в тестах.
+func TestPGTelegramIDColumnsAreBigint(t *testing.T) {
+	re := regexp.MustCompile(`(?i)^\s*telegram_id\s+(\w+)`)
+	for _, n := range migrationNames(t, "pg") {
+		body, err := migrationsFS.ReadFile("migrations/pg/" + n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			m := re.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			if !strings.EqualFold(m[1], "BIGINT") {
+				t.Errorf("pg/%s: telegram_id объявлен %s — нужен BIGINT", n, m[1])
+			}
 		}
 	}
 }

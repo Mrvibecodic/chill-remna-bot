@@ -85,7 +85,6 @@ const (
 	cbEmoji     = "emo"
 	cbWelcome   = "wel"
 	cbUsers     = "usr"
-	cbSquad     = "sq"
 	cbSection   = "sec"
 	cbSubdomain = "subd"
 	cbPanelAuth = "pauth"
@@ -102,6 +101,10 @@ const (
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
 	cbTorrent   = "torj"
+	cbPlans     = "pln"
+	cbPlanSquad = "plq"
+	cbPlanBuy   = "plb"
+	cbPlanView  = "plo"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -137,6 +140,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onUpdateCheck(ctx, chatID, val, isAdmin)
 	case cbBuy:
 		a.onBuyPlan(ctx, chatID, val)
+	case cbPlanBuy:
+		a.onPlanBuy(ctx, chatID, val)
+	case cbPlanView:
+		a.onPlanView(ctx, chatID, val)
 	case cbMethod:
 		a.onMethod(ctx, chatID, val)
 	case cbTop:
@@ -219,6 +226,14 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onPricing(ctx, chatID, val)
 		}
+	case cbPlans:
+		if isAdmin {
+			a.onPlansAdmin(ctx, chatID, val)
+		}
+	case cbPlanSquad:
+		if isAdmin {
+			a.onPlanSquadToggle(ctx, chatID, val)
+		}
 	case cbPayments:
 		if isAdmin {
 			a.onPayments(ctx, chatID, val)
@@ -234,10 +249,6 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbUsers:
 		if isAdmin {
 			a.onUsers(ctx, chatID, val, cqMsgID(cq))
-		}
-	case cbSquad:
-		if isAdmin {
-			a.onSquad(ctx, chatID, val)
 		}
 	case cbSection:
 		if isAdmin {
@@ -551,6 +562,10 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	a.panel = client
 	delete(a.wiz, chatID)
 	a.mu.Unlock()
+
+	if _, err := a.syncPlansConfig(ctx); err != nil {
+		a.log.Warn("тариф «Базовый» не синхронизирован", "err", err)
+	}
 
 	a.sendKB(ctx, chatID, i18n.T(lang, "step.verify.ok", count), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "step.verify.btn_admin"), "menu:home")},

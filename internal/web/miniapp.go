@@ -31,8 +31,9 @@ type MiniProvider interface {
 
 	// MiniTrial activates the free trial (mirrors the chat trial flow).
 	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
-	// MiniCheckout performs an in-app purchase for the given period+method.
-	MiniCheckout(ctx context.Context, tgID int64, months int, method string, web bool) MiniActionDTO
+	// MiniCheckout performs an in-app purchase of the given plan (empty plan
+	// code = «Базовый», как слали старые фронты) for the period+method.
+	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, web bool) MiniActionDTO
 
 	// MiniAutoPay reports the user's automatic-renewal state.
 	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
@@ -182,22 +183,50 @@ type MiniSubDTO struct {
 	AddSubLimit     int64 `json:"addsub_limit,omitempty"`
 	AddSubExhausted bool  `json:"addsub_exhausted,omitempty"`
 	AddSubOff       bool  `json:"addsub_off,omitempty"`
+	// AddSubName — название опции по тарифу пользователя (пусто — фронт
+	// показывает стандартное «Доп-сервер»).
+	AddSubName string `json:"addsub_name,omitempty"`
 }
 
+// MiniPlanDTO — один ТАРИФ витрины (v2: раньше это был один срок «Базового»;
+// схема ломающая, фронт обновляется тем же релизом).
 type MiniPlanDTO struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	// Strategy — traffic reset strategy ЭТОГО тарифа
+	// (NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING).
+	Strategy string `json:"strategy,omitempty"`
+	// AddSubName/AddSubDesc — опция доп-подписки тарифа; непустое имя означает
+	// «опция продаётся с тарифом», иначе фронт её не показывает.
+	AddSubName string `json:"addsub_name,omitempty"`
+	AddSubDesc string `json:"addsub_desc,omitempty"`
+	// Durations — продаваемые сроки тарифа.
+	Durations []MiniDurationDTO `json:"durations"`
+}
+
+// MiniDurationDTO — один срок тарифа.
+type MiniDurationDTO struct {
 	Months   int    `json:"months"`
 	Price    string `json:"price"`
 	Currency string `json:"currency"`
-	// TrafficGB is the plan's traffic allowance in GB; 0 means unlimited.
+	// TrafficGB is the duration's traffic allowance in GB; 0 means unlimited.
 	TrafficGB int `json:"traffic_gb"`
-	// Devices is the plan's HWID device limit; 0 means no explicit limit
-	// (panel default).
+	// Devices is the HWID device limit; 0 means no explicit limit (panel
+	// default).
 	Devices int `json:"devices"`
-	// Countries are the distinct countries available to the plan's squad,
-	// deduped. Each carries a flag emoji, ISO code (for image flags), and name.
+	// Countries are the distinct countries available to the duration's squads.
 	Countries []MiniCountryDTO `json:"countries,omitempty"`
-	// Configs is the number of inbounds (configs) accessible to the plan.
+	// Configs is the number of inbounds (configs) accessible.
 	Configs int `json:"configs,omitempty"`
+	// Best — сервер отмечает самый выгодный срок (лучшая цена за месяц);
+	// раньше фронт подсвечивал третью позицию из четырёх.
+	Best bool `json:"best,omitempty"`
+	// SwitchDays — зачёт остатка при смене тарифа: на сколько дней сдвинется
+	// конец срока сверх обычного продления (обычно отрицательное при
+	// апгрейде). 0 — зачёта нет (нет активной подписки или тариф тот же).
+	SwitchDays int `json:"switch_days,omitempty"`
 }
 
 // MiniCountryDTO is one destination country available to a plan.
@@ -209,9 +238,6 @@ type MiniCountryDTO struct {
 
 type MiniPlansDTO struct {
 	Plans []MiniPlanDTO `json:"plans"`
-	// Strategy is the traffic reset strategy shared by all plans
-	// (NO_RESET/DAY/WEEK/MONTH/MONTH_ROLLING).
-	Strategy string `json:"strategy,omitempty"`
 }
 
 // MiniConnectButtonDTO is one install button (store link) for an app.
@@ -381,6 +407,8 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		// Plan — код тарифа; пустой (старый фронт из кэша) = «Базовый».
+		Plan   string `json:"plan"`
 		Months int    `json:"months"`
 		Method string `json:"method"`
 	}
@@ -390,7 +418,7 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Months, req.Method, web))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, web))
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.

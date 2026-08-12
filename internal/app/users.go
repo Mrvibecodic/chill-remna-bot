@@ -238,6 +238,13 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 			btn(i18n.T(lang, "btn.torrent_user_log"), "torj:u:"+id),
 		})
 	}
+	// Кнопка допусков к тарифам «по списку» показывается, только когда такие
+	// тарифы есть: пустой экран из карточки — это шум.
+	if a.hasListPlans(ctx) {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.user_plans"), "usr:plans:"+id),
+		})
+	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
@@ -350,6 +357,13 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 			a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
 		}
 		a.showUser(ctx, chatID, uid)
+	case "plans":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.showUserPlanAccess(ctx, chatID, uid)
+	case "pg":
+		uidStr, code, _ := strings.Cut(arg, ":")
+		uid, _ := strconv.ParseInt(uidStr, 10, 64)
+		a.toggleUserPlanAccess(ctx, chatID, uid, code)
 	case "del":
 		lang := a.lang(chatID)
 		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
@@ -579,7 +593,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 
 	type row struct{ date, method, user, term, amount, status string }
 	rows := make([]row, 0, len(items))
-	wMethod, wUser, wAmount := len("Method"), len("User"), len("Amount")
+	wMethod, wUser, wAmount, wTerm := len("Method"), len("User"), len("Amount"), len("Term")
 	for _, p := range items {
 		date := p.CreatedAt
 		if len(date) >= 10 {
@@ -591,6 +605,27 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		}
 		user := strconv.FormatInt(p.TelegramID, 10)
 		term := strconv.Itoa(p.Months) + "m"
+		// Голое «Nm» с тарифами стало неинформативным: одинаковые сроки у
+		// разных тарифов стоят по-разному. Тариф — из снимка сделки; сделки
+		// «Базового» и старые (без снимка) остаются как были.
+		if code := planCodeOf(p.Snapshot); code != "" && code != model.PlanCodeBase {
+			name := p.Snapshot.Name
+			if name == "" {
+				name = code
+			}
+			// Имя тарифа — свободный текст админа, а сообщение уходит с
+			// parse_mode=HTML (и внутри <pre> тоже): спецсимволы не
+			// экранируем сущностями — они ломали бы моноширинное выравнивание
+			// (&amp; — 5 рун вместо одной), — а просто выбрасываем.
+			name = strings.Map(func(r rune) rune {
+				switch r {
+				case '<', '>', '&':
+					return -1
+				}
+				return r
+			}, name)
+			term += "·" + truncRunes(name, 12)
+		}
 		method := payMethodLabel(p.Method)
 		amount := p.Amount
 		rows = append(rows, row{date, method, user, term, amount, i18n.T(lang, statusKey)})
@@ -602,6 +637,9 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		}
 		if l := visualWidth(amount); l > wAmount {
 			wAmount = l
+		}
+		if l := visualWidth(term); l > wTerm {
+			wTerm = l
 		}
 	}
 
@@ -616,7 +654,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	sb.WriteString("\n<pre>")
 	header := padRight("Date", 10) + "  " + padRight("Method", wMethod) + "  " +
-		padRight("User", wUser) + "  " + padRight("Term", 4) + "  " +
+		padRight("User", wUser) + "  " + padRight("Term", wTerm) + "  " +
 		padRight("Amount", wAmount) + "  " + "Status"
 	sb.WriteString(header)
 	sb.WriteString("\n")
@@ -629,7 +667,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		sb.WriteString("  ")
 		sb.WriteString(padRight(r.user, wUser))
 		sb.WriteString("  ")
-		sb.WriteString(padRight(r.term, 4))
+		sb.WriteString(padRight(r.term, wTerm))
 		sb.WriteString("  ")
 		sb.WriteString(padRight(r.amount, wAmount))
 		sb.WriteString("  ")
@@ -646,6 +684,16 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
 	kbRows = append(kbRows, back)
 	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
+}
+
+// truncRunes обрезает строку до n рун с «…»: имена тарифов в таблице платежей
+// не должны раздувать колонку.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func padRight(s string, w int) string {
@@ -740,19 +788,22 @@ func (a *App) addSubLine(ctx context.Context, chatID int64) string {
 		return ""
 	}
 	lang := a.lang(chatID)
+	// Название опции — тарифа пользователя (или общее): у каждого тарифа опция
+	// может называться по-своему.
+	name := a.userAddSubName(ctx, chatID)
 	switch {
 	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
-		return "\n" + i18n.T(lang, "sub.addsub_off")
+		return "\n" + i18n.T(lang, "sub.addsub_off", name)
 	case info.Exhausted:
-		return "\n" + i18n.T(lang, "sub.addsub_out")
+		return "\n" + i18n.T(lang, "sub.addsub_out", name)
 	case info.Limit <= 0:
-		return "\n" + i18n.T(lang, "sub.addsub_unlim")
+		return "\n" + i18n.T(lang, "sub.addsub_unlim", name)
 	}
 	left := info.Limit - info.Used
 	if left < 0 {
 		left = 0
 	}
-	return "\n" + i18n.T(lang, "sub.addsub", formatGB(left), formatGB(info.Limit))
+	return "\n" + i18n.T(lang, "sub.addsub", name, formatGB(left), formatGB(info.Limit))
 }
 
 // formatGB renders a byte count as GB with one decimal (trailing ".0" dropped).
@@ -783,82 +834,4 @@ func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Cl
 		val += " / " + strconv.Itoa(info.Limit)
 	}
 	return "\n\n" + i18n.T(a.lang(chatID), "sub.devices", val)
-}
-
-func (a *App) showSquadPicker(ctx context.Context, chatID int64) {
-	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	cur := ""
-	if a.botCfg != nil {
-		cur = a.botCfg.P2P.SquadUUID
-	}
-	a.mu.Unlock()
-
-	curLabel := cur
-	if curLabel == "" {
-		curLabel = i18n.T(lang, "squad.none")
-	}
-
-	manualRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "squad.manual"), "sq:manual")}
-	backRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:p2p"), btn(i18n.T(lang, "btn.home"), "menu:home")}
-
-	if panel == nil {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.fail", i18n.T(lang, "admin.none")),
-			[][]models.InlineKeyboardButton{manualRow, backRow})
-		return
-	}
-	squads, err := panel.ListSquads(ctx)
-	if err != nil {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.fail", err.Error()),
-			[][]models.InlineKeyboardButton{manualRow, backRow})
-		return
-	}
-	var rows [][]models.InlineKeyboardButton
-	for _, sq := range squads {
-		if sq.UUID == "" {
-			continue
-		}
-		name := sq.Name
-		if name == "" {
-			name = sq.UUID
-		}
-		if sq.UUID == cur {
-			name = "✅ " + name
-		}
-		rows = append(rows, []models.InlineKeyboardButton{btn(name, "sq:set:"+sq.UUID)})
-	}
-	if len(rows) == 0 {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.empty"),
-			[][]models.InlineKeyboardButton{manualRow, backRow})
-		return
-	}
-	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "squad.clear"), "sq:set:-"), btn(i18n.T(lang, "squad.refresh"), "sq:refresh")},
-		manualRow, backRow)
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "squad.title", curLabel), rows)
-}
-
-func (a *App) onSquad(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := strings.Cut(val, ":")
-	lang := a.lang(chatID)
-	switch action {
-	case "pick", "refresh":
-		a.showSquadPicker(ctx, chatID)
-	case "manual":
-		a.getUI(chatID).adminInput = "squad"
-		a.askInput(ctx, chatID, i18n.T(lang, "admin.ask_squad"), "menu:users")
-	case "set":
-		v := arg
-		if v == "-" {
-			v = ""
-		}
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.P2P.SquadUUID = v
-		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
-		a.showP2PAdmin(ctx, chatID)
-	}
 }

@@ -70,9 +70,28 @@ type App struct {
 
 	newStore func(kind, dsn string) (storage.Storage, error)
 
-	mu           sync.Mutex
-	store        storage.Storage
-	botCfg       *model.BotConfig
+	// cfgSaveMu сериализует сохранение конфига: снимок и запись в базу под одним
+	// замком, иначе два сохранения доезжают до базы в обратном порядке и в базе
+	// остаётся состояние, снятое раньше. Порядок захвата: cfgSaveMu → mu и
+	// никогда наоборот; с plansMu не вкладывается вовсе.
+	cfgSaveMu sync.Mutex
+	// plansMu сериализует «прочитал тариф → изменил → записал»: строку тарифа
+	// пишут и админка, и синхронизация «Базового» от сетки цен, причём пишут
+	// целиком. Без замка правка из карточки возвращала бы цену, только что
+	// приехавшую из конфига. Порядок захвата: plansMu → mu.
+	plansMu sync.Mutex
+
+	mu     sync.Mutex
+	store  storage.Storage
+	botCfg *model.BotConfig
+	// healNotice — на старте зеркало нашло расхождение сетки с тарифом и
+	// восстановило её (след отката). Уведомить админа надо, но в момент
+	// загрузки конфига мессенджера ещё нет — флаг ждёт запуска бота.
+	healNotice bool
+	// basePlanRef — тариф «Базовый», прочитанный при последней синхронизации.
+	// Нужен там, где тариф требуется под замком и лезть в базу нельзя (снимок
+	// условий сделки). nil до первой синхронизации.
+	basePlanRef  *model.Plan
 	panel        *remnawave.Client
 	wiz          map[int64]*wizard
 	ui           map[int64]*uiState
@@ -87,8 +106,9 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
-	// паузу между торрент-предупреждениями пользователю (torSeen).
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified),
+	// паузу между торрент-предупреждениями пользователю (torSeen) и счётчик
+	// неудачных попыток открыть тариф по ссылке (planLinkFails).
 	thrMu         sync.Mutex
 	thrLast       map[string]time.Time
 	hlNotified    map[string]time.Time
@@ -97,6 +117,7 @@ type App struct {
 	torStrikeBusy map[int64]bool
 	torStrikeSeen map[int64]time.Time
 	torStrikeFail map[int64]time.Time
+	planLinkFails map[int64][]time.Time
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -116,6 +137,11 @@ type App struct {
 	// whole panel user list at the same time.
 	addSubSyncing atomic.Bool
 
+	// finalizeUserLk serializes finalizePurchase per USER (striped): два
+	// РАЗНЫХ платежа одного человека (P2P-заявка + вебхук) иначе считали бы
+	// зачёт остатка при смене тарифа от одного и того же снимка — и остаток
+	// конвертировался бы дважды. Берётся ПОСЛЕ finalizeLk, порядок строгий.
+	finalizeUserLk [finalizeLockShards]sync.Mutex
 	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
 	// delivered twice concurrently (webhook redelivery vs reconciler vs manual
 	// check) can't extend the panel subscription more than once.
@@ -225,8 +251,59 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 			}
 		}
 		a.log.Info("конфигурация загружена, бот установлен", "db", a.store.Kind())
+		// Одиночный сквад P2P — легаси до глобального набора: переносим в
+		// набор и чистим поле, дальше живёт только набор (и тариф).
+		a.foldLegacyP2PSquad(ctx)
+		// Тариф «Базовый»: при первом запуске новой версии текущая сетка цен
+		// переезжает в таблицу тарифов; после первой правки цен тариф ведущий и
+		// сетка зеркалится из него (см. internal/app/plans_sync.go). Ошибка
+		// боту не мешает: продажи идут по конфигу.
+		if mirrored, err := a.syncPlansConfig(ctx); err != nil {
+			a.log.Warn("тариф «Базовый» не синхронизирован", "err", err)
+		} else if mirrored {
+			// Сетка отличалась от тарифа. Так бывает после отката: старый образ
+			// правит цены прямо в конфиге, а тариф — истина. Восстановили из
+			// тарифа — и говорим об этом, молча менять прайс нельзя.
+			//
+			// Само сообщение уходит из Run: здесь загрузка конфига, мессенджера
+			// ещё нет, и прямой notify падал бы на первом же старте после
+			// отката — вместе с уведомлением пропадал бы и бот.
+			a.log.Warn("сетка цен отличалась от тарифа и восстановлена из него")
+			a.mu.Lock()
+			a.healNotice = true
+			a.mu.Unlock()
+		}
 	}
 	return nil
+}
+
+// foldLegacyP2PSquad переносит одиночный сквад P2P (легаси-поле совсем старых
+// версий) в глобальный набор сквадов — ровно туда, откуда его и так читала
+// первая ступень всех цепочек фолбэков, — и чистит само поле. Перенос
+// откатоустойчив: старый образ тоже продаёт по глобальному набору, когда тот
+// непуст. Сами фолбэки по коду остаются — вдруг где-то лежит конфиг, записанный
+// старым образом уже после переноса.
+//
+// Экраны правки этого поля убраны: сквады правятся в тарифе (и в глобальном
+// наборе «Сквады»), два места истины для одного и того же — источник расхождений.
+func (a *App) foldLegacyP2PSquad(ctx context.Context) {
+	a.mu.Lock()
+	cfg := a.botCfg
+	if cfg == nil || cfg.P2P.SquadUUID == "" {
+		a.mu.Unlock()
+		return
+	}
+	if len(cfg.Plan.ActiveInternalSquads) == 0 {
+		cfg.Plan.ActiveInternalSquads = []string{cfg.P2P.SquadUUID}
+	}
+	// При непустом наборе легаси-поле всеми читателями игнорировалось — чистка
+	// ничего не меняет в поведении.
+	cfg.P2P.SquadUUID = ""
+	a.mu.Unlock()
+	// Без хвоста синхронизации: syncPlansConfig вызывается следом на старте.
+	if err := a.saveConfigOnly(ctx); err != nil {
+		a.log.Warn("перенос легаси-сквада P2P не сохранён", "err", err)
+	}
 }
 
 // newPanel собирает клиента панели из сохранённой конфигурации, наложив на неё
@@ -350,6 +427,8 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
+	a.sendHealNotice(ctx)
+	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)
@@ -483,6 +562,16 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 				if msg, _ := a.redeemPromo(ctx, chatID, code); msg != "" {
 					a.send(ctx, chatID, msg)
 				}
+			}
+			// Прямая ссылка на тариф: вместо главного меню открывается экран
+			// тарифа. Режим публичности и вайтлист уже проверены выше — ссылка
+			// на тариф не даёт входа в закрытый бот.
+			if code, isPlan := strings.CutPrefix(payload, "plan_"); isPlan && code != "" {
+				if a.store != nil {
+					_ = a.store.UpsertUser(ctx, chatID)
+				}
+				a.openPlanLink(ctx, chatID, code)
+				return
 			}
 		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
@@ -1033,6 +1122,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui.adminInput = ""
 	ui.torAwait = false
 	ui.priceMonths = 0
+	ui.planCode = ""
 	ui.linkUID = 0
 	ui.inputBack = ""
 	ui.awaitPromo = false
@@ -1046,6 +1136,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onMenu(ctx, chatID, val, isAdmin, fname, uname)
 	case "prc":
 		a.onPricing(ctx, chatID, val)
+	case cbPlans:
+		a.onPlansAdmin(ctx, chatID, val)
 	case "yk":
 		a.onYKAdmin(ctx, chatID, val)
 	case "star":
@@ -1111,6 +1203,10 @@ func (a *App) ensureHomeKey(ctx context.Context, chatID int64) {
 	a.msg.SetCommandKeyboard(ctx, chatID, i18n.T(a.lang(chatID), "btn.home"))
 }
 
+// pricing отдаёт КОПИЮ сетки цен: возвращалась она по значению, но карты внутри
+// оставались общими с конфигом, и каждый из трёх десятков вызывающих читал их
+// уже без замка, пока админка в них писала. Одновременное чтение и запись карты
+// роняет процесс мимо перехвата паники (см. model.Pricing.Clone).
 func (a *App) pricing() model.Pricing {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1118,7 +1214,7 @@ func (a *App) pricing() model.Pricing {
 		return model.Pricing{}
 	}
 	a.botCfg.NormalizePricing()
-	return a.botCfg.Pricing
+	return a.botCfg.Pricing.Clone()
 }
 
 func (a *App) lang(chatID int64) string {

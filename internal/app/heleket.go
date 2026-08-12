@@ -153,10 +153,25 @@ func parseHLOrderID(orderID string) (chatID int64, n int64, topup bool) {
 	return
 }
 
+// hlPurchaseSnapshot: у пополнения баланса условий подписки нет — снимок
+// снимается только для покупки.
+func hlPurchaseSnapshot(a *App, purpose string, months int) *model.PlanSnapshot {
+	if purpose == purposeTopUp || months <= 0 {
+		return nil
+	}
+	return a.planSnapshot(months)
+}
+
 // hlCreateInvoice — общее ядро выставления счёта для чата, мини-аппа и
 // веб-кабинета: создаёт счёт, пишет журнал и pending-запись, возвращает ссылку
 // на оплату и uuid счёта.
 func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amount string, purpose string, kopecks int64) (payURL, uuid string, err error) {
+	return a.hlCreateInvoiceSnap(ctx, chatID, months, amount, purpose, kopecks, nil)
+}
+
+// hlCreateInvoiceSnap — то же с явными условиями продажи; snap == nil означает
+// «Базовый по текущей сетке» (или пополнение баланса — там снимка нет).
+func (a *App) hlCreateInvoiceSnap(ctx context.Context, chatID int64, months int, amount string, purpose string, kopecks int64, snap *model.PlanSnapshot) (payURL, uuid string, err error) {
 	client := a.hlClient()
 	if client == nil {
 		return "", "", errors.New(i18n.T(a.lang(chatID), "hl.not_configured"))
@@ -201,10 +216,14 @@ func (a *App) hlCreateInvoice(ctx context.Context, chatID int64, months int, amo
 	extID := hlExtPrefix + inv.UUID
 	a.payLog(ctx, model.PayMethodHeleket, extID, chatID, "invoice_created",
 		"%s months=%d kopecks=%d amount=%s %s subtract=%d", purposeOrBuy(purpose), months, kopecks, inv.Amount, inv.Currency, cfg.SubtractOrDefault())
+	if snap == nil {
+		snap = hlPurchaseSnapshot(a, purpose, months)
+	}
 	if a.store != nil {
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{
 			Method: model.PayMethodHeleket, ExtID: extID, TelegramID: chatID,
 			Months: months, Purpose: purpose, Kopecks: kopecks,
+			Snapshot: snap,
 		})
 	}
 	return inv.URL, inv.UUID, nil
@@ -219,16 +238,19 @@ func purposeOrBuy(p string) string {
 
 func (a *App) startHeleket(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
-	if months == 0 {
-		months = model.PlanMonths[0]
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
+		return
 	}
-	price := a.pricing().Base[months]
-	if !a.hlConfig().Enabled || price == "" {
+	months := s.Months
+	price := a.saleBase(s)
+	// Валюта тарифа ≠ валюта сетки: Heleket выставил бы счёт с числом тарифа
+	// в чужой валюте.
+	if !a.hlConfig().Enabled || price == "" || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.no_price"))
 		return
 	}
-	payURL, uuid, err := a.hlCreateInvoice(ctx, chatID, months, price, "", 0)
+	payURL, uuid, err := a.hlCreateInvoiceSnap(ctx, chatID, months, price, "", 0, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.fail", err.Error()))
 		return
@@ -386,10 +408,11 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		return
 	}
 	if months == 0 {
-		months = model.PlanMonths[0]
+		a.noPeriodForPayment(ctx, model.PayMethodHeleket, extID, chatID)
+		return
 	}
 
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, a.pendingSnapshot(ctx, extID))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			return

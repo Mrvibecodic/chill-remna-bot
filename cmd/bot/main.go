@@ -58,7 +58,7 @@ func main() {
 	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
-	wg.Add(7)
+	wg.Add(8)
 	var botErr, webErr error
 
 	go func() {
@@ -74,6 +74,11 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunReconciler(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+		a.RunSubRepair(ctx)
 	}()
 
 	go func() {

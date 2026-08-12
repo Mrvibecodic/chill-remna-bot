@@ -13,6 +13,11 @@ import (
 	"remnabot/internal/storage"
 )
 
+// invoiceSnapRetentionDays — сколько держим условия выставленных счетов Stars.
+// Счёт в переписке оплачиваемым остаётся, но за такой срок цены и лимиты уже
+// точно менялись не раз.
+const invoiceSnapRetentionDays = 30
+
 const (
 	reconcileInterval = 2 * time.Minute
 	reconcileGrace    = 2 * time.Minute
@@ -44,6 +49,8 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		a.payLogPurgedAt = time.Now()
 		_ = st.PurgePayLogs(ctx, time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339))
 		_ = st.PurgeTorrentReports(ctx, time.Now().UTC().Add(-torrentRetention).Format(time.RFC3339))
+		// Условия счетов, которые заведомо уже никто не оплатит.
+		_ = st.PurgeInvoiceSnapshots(ctx, time.Now().UTC().AddDate(0, 0, -invoiceSnapRetentionDays).Format(time.RFC3339))
 	}
 	cutoff := time.Now().UTC().Add(-reconcileGrace).Format(time.RFC3339)
 	list, err := st.ListUnresolvedPending(ctx, cutoff, reconcileBatch)
@@ -139,7 +146,7 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 		// оплату добил реконсилятор, предложение про автопродление всё равно
 		// должно уйти — но ровно один раз, только когда подписка реально выдана.
 		if a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency) {
-			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay)
+			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay, pi.Snapshot)
 		}
 	case pay.Status == "canceled":
 		_ = st.ResolvePending(ctx, pi.ID)
@@ -166,7 +173,7 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch inv.Status {
 	case "paid":
-		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)))
+		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Snapshot, pi.Months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)))
 	case "expired":
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
@@ -235,7 +242,7 @@ func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *mod
 		_ = st.ResolvePending(ctx, pi.ID)
 		return false
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, pi.TelegramID, pi.Months, pi.Method, amount, pi.ExtID)
+	link, expireAt, err := a.finalizePurchase(ctx, pi.TelegramID, pi.Months, pi.Method, amount, pi.ExtID, pi.Snapshot)
 	if err != nil {
 
 		if errors.Is(err, storage.ErrDuplicateExtID) {

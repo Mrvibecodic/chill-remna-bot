@@ -60,14 +60,16 @@ func parsePlPayload(payload string) (telegramID int64, months int) {
 
 func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	months := a.getUI(chatID).buyMonths
-	if months == 0 {
-		months = model.PlanMonths[0]
+	s := a.saleOrAsk(ctx, chatID)
+	if s == nil {
+		return
 	}
+	months := s.Months
 	cfg := a.plConfig()
-	pr := a.pricing()
-	value := pr.Fiat(model.PayMethodPlatega, months)
-	if !cfg.Enabled || value == "" {
+	value := a.saleFiat(s, model.PayMethodPlatega)
+	// Валюта тарифа ≠ валюта сетки: Platega считает в рублях, и число тарифа
+	// в чужой валюте списалось бы как рубли.
+	if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "pl.no_price"))
 		return
 	}
@@ -93,7 +95,7 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	}
 	amount := float64(valueK) / 100
 	desc := i18n.T(lang, "pl.invoice_desc", months)
-	redirect, txID, err := a.plCreateTransaction(ctx, chatID, months, amount, desc, returnURL)
+	redirect, txID, err := a.plCreateTransactionSnap(ctx, chatID, months, amount, desc, returnURL, a.saleSnapshot(s))
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "pl.fail", err.Error()))
 		return
@@ -149,14 +151,15 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 			chatID, months = p.TelegramID, p.Months
 		}
 	}
-	if months == 0 {
-		months = model.PlanMonths[0]
-	}
 	if chatID == 0 {
 		a.payLog(ctx, model.PayMethodPlatega, txID, 0, "error", "оплата подтверждена, но получатель неизвестен: нет payload и pending-счёта")
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID)
+	if months == 0 {
+		a.noPeriodForPayment(ctx, model.PayMethodPlatega, txID, chatID)
+		return
+	}
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID, a.pendingSnapshot(ctx, txID))
 	if err != nil {
 		a.log.Error("platega finalize", "err", err, "tx", txID)
 		return
@@ -249,9 +252,10 @@ func (a *App) setPlategaField(ctx context.Context, chatID int64, field, text str
 	a.showPlategaAdmin(ctx, chatID)
 }
 
-// plCreateTransaction creates a Platega transaction + pending record and
-// returns the redirect URL. Shared by chat flow and Mini App.
-func (a *App) plCreateTransaction(ctx context.Context, chatID int64, months int, amount float64, desc, returnURL string) (redirect, txID string, err error) {
+// plCreateTransactionSnap creates a Platega transaction + pending record and
+// returns the redirect URL. Shared by chat flow and Mini App. snap == nil
+// означает «Базовый по текущей сетке».
+func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months int, amount float64, desc, returnURL string, snap *model.PlanSnapshot) (redirect, txID string, err error) {
 	client := a.plClient()
 	if client == nil {
 		return "", "", fmt.Errorf("platega не настроена")
@@ -265,8 +269,11 @@ func (a *App) plCreateTransaction(ctx context.Context, chatID int64, months int,
 		return "", "", err
 	}
 	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "purchase months=%d amount=%.2f RUB method=%d", months, amount, a.plMethod())
+	if snap == nil {
+		snap = a.planSnapshot(months)
+	}
 	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Months: months})
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Months: months, Snapshot: snap})
 	}
 	return tx.Redirect, tx.ID, nil
 }
