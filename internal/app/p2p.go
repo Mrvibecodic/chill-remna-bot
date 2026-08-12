@@ -330,6 +330,11 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	rows = append(rows, homeRow(lang))
 	caption := i18n.T(lang, "buy.choose_method", kopecksToRub(bal))
+	// Смена тарифа: показываем зачёт остатка теми же цифрами, которые применит
+	// финализация, — человек должен видеть сдвиг срока ДО оплаты.
+	if cred := a.switchCreditFor(ctx, chatID, s); cred != 0 {
+		caption = i18n.T(lang, "buy.switch_days", cred) + "\n\n" + caption
+	}
 	if line := a.saleCountriesLine(ctx, lang, s); line != "" {
 		caption = line + "\n\n" + caption
 	}
@@ -777,6 +782,9 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		// Upsert идемпотентен, повторная доставка платежа безопасна. Оплата
 		// уже продлила подписку и сбросила трафик A — трафик B идёт следом.
 		a.syncAddSubSnap(ctx, telegramID, true, applied)
+		// Автосписание следует за последней сделкой: купил другой тариф любым
+		// способом — продлеваться должен ОН, а не молча возвращаться прежний.
+		a.autoPayFollowPurchase(ctx, telegramID, applied)
 		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
 		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
 		// владельца: деньги приняты — клиент получает то, за что платил), админ
@@ -803,6 +811,12 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 			}
 		}
 	}
+	// Пер-пользовательская сериализация (строго ПОСЛЕ шардов ext_id): два
+	// разных платежа одного человека, финализируясь параллельно, считали бы
+	// зачёт остатка от одного снимка — и конвертировали бы его дважды.
+	ulk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(telegramID, 10))]
+	ulk.Lock()
+	defer ulk.Unlock()
 	a.mu.Lock()
 	panel := a.panel
 	if snap == nil {
@@ -813,6 +827,12 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// на другой срок только из-за ошибки, и лишний рассинхрон здесь опаснее,
 	// чем расхождение внутри снимка.
 	snap.Months = months
+	// Фактически уплаченная цена — в снимок: по ней считается зачёт остатка
+	// при БУДУЩЕЙ смене тарифа (скидочные переопределения способа не должны
+	// зачитываться по полной цене).
+	if paid := paidRub(amount); paid != "" {
+		snap.Paid = paid
+	}
 	limits := remnawave.UserLimits{
 		InternalSquads: snap.IntSquads,
 		ExternalSquad:  snap.ExtSquad,
@@ -828,7 +848,25 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 		a.payLog(ctx, method, extID, telegramID, "error", "панель не подключена")
 		return "", "", nil, fmt.Errorf("панель не подключена")
 	}
-	link, expireAt, err := panel.CreateOrUpdateUser(ctx, telegramID, months, limits)
+	// Смена тарифа: остаток старой сделки зачитывается днями по соотношению
+	// цен (см. plans_switch.go). Обычное продление того же тарифа — ноль.
+	// Снимок и конец срока читаются один раз: из них же считается оплаченное
+	// окно нового снимка (BoughtDays).
+	var prevSnap *model.PlanSnapshot
+	prevExpire := ""
+	if a.store != nil {
+		if u, _ := a.store.GetUser(ctx, telegramID); u != nil {
+			prevSnap, prevExpire = u.Snapshot, u.SubExpireAt
+		}
+	}
+	extraDays := switchCredit(prevSnap, prevExpire, snap)
+	if extraDays != 0 {
+		a.payLog(ctx, method, extID, telegramID, "switch_credit", "plan=%s days=%+d", snap.Code, extraDays)
+	}
+	// Оплаченное окно: остаток прежнего окна (при смене тарифа —
+	// конвертированный) плюс купленные месяцы. Бонусные дни сюда не входят.
+	snap.BoughtDays = boughtDaysAfter(prevSnap, prevExpire, snap, months, extraDays)
+	link, expireAt, err := panel.CreateOrUpdateUser(ctx, telegramID, months, extraDays, limits)
 	if err != nil {
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
 		return "", "", nil, err

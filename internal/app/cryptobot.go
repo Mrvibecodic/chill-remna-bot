@@ -23,7 +23,14 @@ func (a *App) cbConfig() model.CryptoBotConfig {
 	return a.botCfg.CryptoBot
 }
 
-func (a *App) cryptoAmount(months int, fallback string) string {
+// cryptoAmount — сумма покупки для журнала и снимка сделки: цена ПРОДАННОЙ
+// сделки из снимка счёта (тарифы продаются не по сетке!), иначе цена сетки,
+// иначе сырая крипто-сумма. Цена сетки для тарифной сделки записала бы в Paid
+// чужую цену — и зачёт остатка при смене тарифа считался бы по ней.
+func (a *App) cryptoAmount(snap *model.PlanSnapshot, months int, fallback string) string {
+	if snap != nil && snap.Price != "" {
+		return snap.Price + curSuffix(curSymbol(a.hlCurrency()))
+	}
 	if p := a.pricing().Base[months]; p != "" {
 		return p + curSuffix(curSymbol(a.hlCurrency()))
 	}
@@ -155,8 +162,9 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "pay.no_period"))
 		return
 	}
-	amount := a.cryptoAmount(months, rawAmount)
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID, a.pendingSnapshot(ctx, extID))
+	pSnap := a.pendingSnapshot(ctx, extID)
+	amount := a.cryptoAmount(pSnap, months, rawAmount)
+	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID, pSnap)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.showMySubs(ctx, chatID)

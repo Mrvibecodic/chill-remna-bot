@@ -141,7 +141,7 @@ func (a *App) HandleCryptoBotWebhook(ctx context.Context, signature string, body
 		return true, nil
 	}
 
-	amount := a.cryptoAmount(months, rawAmount)
+	amount := a.cryptoAmount(pendingSnap(pending), months, rawAmount)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID, pendingSnap(pending))
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {

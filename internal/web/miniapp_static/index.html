@@ -643,7 +643,10 @@ function buyPlan(code,months){
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.configs>0)h+='<div class="frow"><span class="l">'+IC.layers+'Конфигов</span><b>'+d.configs+'</b></div>';
   if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
+  // Смена тарифа: сервер прислал зачёт остатка — показываем сдвиг срока до оплаты.
+  if(d.switch_days)h+='<div class="frow"><span class="l">💱 Зачёт остатка</span><b>'+(d.switch_days>0?'+':'')+d.switch_days+' '+plural(Math.abs(d.switch_days),'день','дня','дней')+'</b></div>';
   h+='</div>';
+  if(d.switch_days)h+='<div class="hint">Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен, срок сдвинется на указанное число дней.</div>';
   if(p.addsub_name&&p.addsub_desc)h+='<div class="hint">'+esc(p.addsub_desc)+'</div>';
   if(d.countries&&d.countries.length){
     h+='<div class="sec-title">'+IC.globe+'Доступные страны</div><div class="chips">';

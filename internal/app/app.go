@@ -137,6 +137,11 @@ type App struct {
 	// whole panel user list at the same time.
 	addSubSyncing atomic.Bool
 
+	// finalizeUserLk serializes finalizePurchase per USER (striped): два
+	// РАЗНЫХ платежа одного человека (P2P-заявка + вебхук) иначе считали бы
+	// зачёт остатка при смене тарифа от одного и того же снимка — и остаток
+	// конвертировался бы дважды. Берётся ПОСЛЕ finalizeLk, порядок строгий.
+	finalizeUserLk [finalizeLockShards]sync.Mutex
 	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
 	// delivered twice concurrently (webhook redelivery vs reconciler vs manual
 	// check) can't extend the panel subscription more than once.

@@ -89,6 +89,8 @@ var en = map[string]string{
 	"buy.from_price":          "from %s",
 	"buy.btn_switch_plan":     "🔀 Pick another plan",
 	"buy.addsub_line":         "➕ <b>%s</b> — included in the plan",
+	"buy.switch_note":         "💱 The remainder of your current plan is not lost: when switching it is converted into days by price ratio. The exact shift is shown before payment.",
+	"buy.switch_days":         "💱 Current plan remainder credit: %+d day(s) to the term after payment (converted by price ratio).",
 	"renew.plan_gone":         "ℹ️ The plan you were on is no longer available. Pick a new one — your current subscription is unaffected: the paid terms are locked until it ends.",
 	"renew.terms_changed":     "⚠️ <b>The plan's terms have changed</b> since your last payment — check the price and contents before renewing.",
 	"buy.trial_locked":        "🎁 Your free trial is active until <b>%s</b>.\n\nYou can buy a paid plan on the trial expiry day — this way you won't lose paid days (time stacks on top of current).",
@@ -825,6 +827,7 @@ var en = map[string]string{
 
 	// --- Automatic renewal (YooKassa recurring payments) ---
 	"ap.pay_hint":              "🔁 After the payment we will offer to turn on auto-renewal — the card is stored by YooKassa (the bot never sees its number), and nothing is charged unless you agree.",
+	"ap.plan_changed":          "🔄 Auto-renewal now follows plan <b>%s</b>: future charges renew it at its price. You can disable it anytime in the auto-renewal section.",
 	"ap.offer":                 "🔁 <b>Turn on auto-renewal?</b>\n\nThe bot will renew your subscription for %s and charge the saved card %s — no need to remember about payment or lose access.\n\nThe amount is the plan price at the moment of the charge, and every charge is announced here. You can turn it off any time with one button: «My subscription» → «🔁 Auto-renewal». Nothing is charged after that.",
 	"ap.btn_enable_now":        "🔁 Yes, turn on auto-renewal",
 	"ap.btn_decline":           "No thanks, I will pay myself",

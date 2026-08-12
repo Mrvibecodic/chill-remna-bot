@@ -138,6 +138,15 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 	}
 	lang := a.lang(tgID)
 	fallbackCur := a.pricing().Currency
+	// Снимок последней сделки и конец срока — один раз на витрину, а не на
+	// каждый срок каждого тарифа: зачёт остатка считается чистой функцией.
+	var oldSnap *model.PlanSnapshot
+	oldExpire := ""
+	if a.store != nil {
+		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
+			oldSnap, oldExpire = u.Snapshot, u.SubExpireAt
+		}
+	}
 	for i := range plans {
 		p := &plans[i]
 		pd := web.MiniPlanDTO{
@@ -173,6 +182,9 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 				Devices:   p.DeviceLimitFor(d),
 				Countries: countries,
 				Configs:   configs,
+				// Зачёт остатка при смене тарифа — та же математика, что
+				// применит финализация (см. plans_switch.go).
+				SwitchDays: switchCredit(oldSnap, oldExpire, a.planSnapshotOf(p, d, d.Months)),
 			})
 			if k, ok := rubToKopecks(d.Base); ok && k > 0 {
 				rate := k / int64(d.Months)

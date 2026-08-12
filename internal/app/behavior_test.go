@@ -305,6 +305,13 @@ func (s *fakeStore) SetAutoPay(_ context.Context, ap *model.AutoPay) error {
 	return nil
 }
 
+func (s *fakeStore) UpdateAutoPaySnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	if ap := s.autopays[id]; ap != nil {
+		ap.Snapshot = snap
+	}
+	return nil
+}
+
 func (s *fakeStore) GetAutoPay(_ context.Context, id int64) (*model.AutoPay, error) {
 	if s.autopays == nil || s.autopays[id] == nil {
 		return nil, nil

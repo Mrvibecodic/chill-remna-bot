@@ -50,6 +50,7 @@ type Storage interface {
 	DeleteInvite(ctx context.Context, code string) error
 
 	SetAutoPay(ctx context.Context, ap *model.AutoPay) error
+	UpdateAutoPaySnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
 	GetAutoPay(ctx context.Context, telegramID int64) (*model.AutoPay, error)
 	SetAutoPayEnabled(ctx context.Context, telegramID int64, on bool) error
 	UpdateAutoPayResult(ctx context.Context, telegramID int64, lastPayAt, nextTryAt string, fails int, lastError string) error
@@ -1864,6 +1865,17 @@ func (b *base) DeleteInvite(ctx context.Context, code string) error {
 // ---------------------------------------------------------------------------
 
 // SetAutoPay создаёт или перезаписывает запись автосписания пользователя.
+// UpdateAutoPaySnapshot атомарно меняет ТОЛЬКО снимок автосписания: полная
+// перезапись строки (SetAutoPay) в этом месте гонялась бы с параллельным
+// выключением автопродления пользователем и молча включала бы его обратно.
+func (b *base) UpdateAutoPaySnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error {
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"UPDATE autopay SET plan_snapshot = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
+		snap.Encode(), telegramID)
+	return err
+}
+
 func (b *base) SetAutoPay(ctx context.Context, ap *model.AutoPay) error {
 	if ap.CreatedAt == "" {
 		ap.CreatedAt = nowStr()

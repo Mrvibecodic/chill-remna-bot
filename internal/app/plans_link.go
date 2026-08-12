@@ -183,6 +183,13 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 			b.WriteString(html.EscapeString(desc))
 		}
 	}
+	// Смена тарифа: остаток не сгорает — говорим об этом прямо на карточке.
+	// Точный сдвиг в днях (по соотношению цен) покажет экран способов оплаты:
+	// он зависит от выбранного срока.
+	if a.switchingFrom(ctx, chatID, p.Code) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(i18n.T(lang, "buy.switch_note"))
+	}
 	if cs, _ := a.squadCountries(ctx, p.IntSquadsFor(nil)); len(cs) > 0 {
 		if line := countriesText(lang, cs); line != "" {
 			b.WriteString("\n\n")

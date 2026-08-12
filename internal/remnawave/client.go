@@ -950,12 +950,17 @@ type UserLimits struct {
 	Strategy       string
 }
 
-func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months int, limits UserLimits) (string, string, error) {
+// CreateOrUpdateUser продлевает (или создаёт) подписку на months календарных
+// месяцев от текущего конца. extraDays — поправка зачёта при смене тарифа:
+// остаток старого тарифа конвертируется в дни нового по соотношению цен, и
+// поправка (обычно отрицательная при апгрейде) сдвигает конец срока; ноль —
+// обычное продление.
+func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months, extraDays int, limits UserLimits) (string, string, error) {
 	existing, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
 		return "", "", err
 	}
-	expire := nextExpire(existing, months)
+	expire := nextExpire(existing, months, extraDays)
 
 	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
@@ -1712,14 +1717,21 @@ func (c *Client) upsertCall(ctx context.Context, method, path string, body any) 
 	return env.Response.SubscriptionURL, env.Response.ExpireAt, nil
 }
 
-func nextExpire(existing *panelUser, months int) string {
-	base := time.Now().UTC()
+func nextExpire(existing *panelUser, months, extraDays int) string {
+	now := time.Now().UTC()
+	base := now
 	if existing != nil && existing.ExpireAt != "" {
 		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
 			base = t
 		}
 	}
-	return base.AddDate(0, months, 0).Format(time.RFC3339)
+	next := base.AddDate(0, months, 0).AddDate(0, 0, extraDays)
+	// Поправка зачёта не может съесть купленные месяцы: как бы ни был мал
+	// остаток, оплаченный срок отсчитывается минимум от «сейчас».
+	if floor := now.AddDate(0, months, 0); next.Before(floor) {
+		next = floor
+	}
+	return next.Format(time.RFC3339)
 }
 
 // writeOK covers every success code a write may answer with across panel

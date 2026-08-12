@@ -223,6 +223,10 @@ type MiniDurationDTO struct {
 	// Best — сервер отмечает самый выгодный срок (лучшая цена за месяц);
 	// раньше фронт подсвечивал третью позицию из четырёх.
 	Best bool `json:"best,omitempty"`
+	// SwitchDays — зачёт остатка при смене тарифа: на сколько дней сдвинется
+	// конец срока сверх обычного продления (обычно отрицательное при
+	// апгрейде). 0 — зачёта нет (нет активной подписки или тариф тот же).
+	SwitchDays int `json:"switch_days,omitempty"`
 }
 
 // MiniCountryDTO is one destination country available to a plan.

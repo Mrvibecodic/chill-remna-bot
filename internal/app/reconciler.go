@@ -173,7 +173,7 @@ func (a *App) reconcileCryptoBot(ctx context.Context, st storage.Storage, pi *mo
 	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch inv.Status {
 	case "paid":
-		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)))
+		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Snapshot, pi.Months, cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)))
 	case "expired":
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
