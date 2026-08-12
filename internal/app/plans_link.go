@@ -168,7 +168,7 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 			}
 		}
 	}
-	b.WriteString(i18n.T(lang, "plans.offer_title", planTitleHTML(lang, p)))
+	b.WriteString(i18n.T(lang, "plans.offer_title", planCardTitleHTML(lang, p)))
 	if desc := strings.TrimSpace(p.Description); desc != "" {
 		b.WriteString("\n\n")
 		b.WriteString(html.EscapeString(desc))
@@ -196,9 +196,106 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 			b.WriteString(line)
 		}
 	}
+	if terms := planTermsText(lang, p); terms != "" {
+		b.WriteString("\n\n")
+		b.WriteString(terms)
+	}
 	b.WriteString("\n\n")
 	b.WriteString(i18n.T(lang, "plans.offer_choose"))
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, b.String(), rows)
+}
+
+// planCardTitleHTML — заголовок карточки тарифа для покупателя: значок,
+// заданный в админке, а без него — дефолтная коробка.
+func planCardTitleHTML(lang string, p *model.Plan) string {
+	if strings.TrimSpace(p.Icon) != "" {
+		return planTitleHTML(lang, p)
+	}
+	cp := *p
+	cp.Icon = "📦"
+	return planTitleHTML(lang, &cp)
+}
+
+// planTermsText — условия тарифа для карточки покупателя: трафик и устройства.
+// Значения одинаковы у всех продаваемых сроков — одной строкой; различаются —
+// с разбивкой по срокам. Лимит устройств 0 означает дефолт панели — это число
+// боту неизвестно, поэтому тариф без единого своего лимита строку устройств
+// не показывает.
+func planTermsText(lang string, p *model.Plan) string {
+	type cond struct{ months, traffic, devices int }
+	var conds []cond
+	for i := range p.Durations {
+		d := &p.Durations[i]
+		if d.Months <= 0 || d.Base == "" {
+			continue
+		}
+		conds = append(conds, cond{d.Months, p.TrafficGBFor(d), p.DeviceLimitFor(d)})
+	}
+	if len(conds) == 0 {
+		return ""
+	}
+	sameTraffic, sameDevices, anyDevices := true, true, false
+	for _, c := range conds {
+		if c.traffic != conds[0].traffic {
+			sameTraffic = false
+		}
+		if c.devices != conds[0].devices {
+			sameDevices = false
+		}
+		if c.devices > 0 {
+			anyDevices = true
+		}
+	}
+	var b strings.Builder
+	if sameTraffic {
+		b.WriteString(i18n.T(lang, "buy.traffic", trafficValue(lang, p.Strategy, conds[0].traffic)))
+	} else {
+		parts := make([]string, 0, len(conds))
+		for _, c := range conds {
+			parts = append(parts, i18n.T(lang, "buy.per_months", c.months, trafficValue(lang, p.Strategy, c.traffic)))
+		}
+		b.WriteString(i18n.T(lang, "buy.traffic", strings.Join(parts, " · ")))
+	}
+	if anyDevices {
+		b.WriteString("\n")
+		if sameDevices {
+			b.WriteString(i18n.T(lang, "buy.devices", devicesValue(lang, conds[0].devices)))
+		} else {
+			parts := make([]string, 0, len(conds))
+			for _, c := range conds {
+				parts = append(parts, i18n.T(lang, "buy.per_months", c.months, devicesValue(lang, c.devices)))
+			}
+			b.WriteString(i18n.T(lang, "buy.devices", strings.Join(parts, " · ")))
+		}
+	}
+	return b.String()
+}
+
+// trafficValue — «безлимит» или «N ГБ …» с периодом сброса трафика.
+func trafficValue(lang, strategy string, gb int) string {
+	if gb <= 0 {
+		return i18n.T(lang, "trial.unlimited")
+	}
+	// Незнакомую строку панель считает MONTH (см. model.ValidStrategy) — здесь
+	// то же самое; MONTH_ROLLING для покупателя — тот же «в месяц».
+	key := "buy.tr_month"
+	switch strategy {
+	case "NO_RESET":
+		key = "buy.tr_total"
+	case "DAY":
+		key = "buy.tr_day"
+	case "WEEK":
+		key = "buy.tr_week"
+	}
+	return i18n.T(lang, key, gb)
+}
+
+// devicesValue — лимит устройств; 0 — дефолт панели, числа у бота нет.
+func devicesValue(lang string, n int) string {
+	if n <= 0 {
+		return i18n.T(lang, "buy.dev_default")
+	}
+	return i18n.T(lang, "buy.dev_n", n)
 }
 
 // onPlanView — карточка тарифа из списка витрины: plo:<код>. Тот же троттлинг
