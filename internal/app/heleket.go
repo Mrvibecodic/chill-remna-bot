@@ -244,7 +244,9 @@ func (a *App) startHeleket(ctx context.Context, chatID int64) {
 	}
 	months := s.Months
 	price := a.saleBase(s)
-	if !a.hlConfig().Enabled || price == "" {
+	// Валюта тарифа ≠ валюта сетки: Heleket выставил бы счёт с числом тарифа
+	// в чужой валюте.
+	if !a.hlConfig().Enabled || price == "" || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.no_price"))
 		return
 	}

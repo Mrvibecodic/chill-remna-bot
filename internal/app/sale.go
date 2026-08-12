@@ -70,7 +70,15 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 		// режим «по ссылке» закрыт (это правило ВИТРИНЫ). Намерение на
 		// «Базовый» в режиме «по ссылке» создаётся только его экраном по
 		// ссылке — витрина в этом режиме намерений не создаёт вовсе.
-		if !a.periodOnSale(in.Months) || !a.planAccessibleFor(ctx, a.basePlanRow(ctx), chatID) {
+		//
+		// Выключенный «Базовый» не продаётся, как и любой другой выключенный
+		// тариф: витрина и продление его прячут, и старая кнопка из переписки
+		// не должна продавать то, что админ остановил.
+		bp := a.basePlanRow(ctx)
+		if bp != nil && !bp.Enabled {
+			return nil, nil
+		}
+		if !a.periodOnSale(in.Months) || !a.planAccessibleFor(ctx, bp, chatID) {
 			return nil, nil
 		}
 		return baseSale(in.Months), nil
@@ -156,6 +164,32 @@ func (a *App) saleCurrency(s *sale) string {
 		return a.pricing().Currency
 	}
 	return s.Plan.Currency
+}
+
+// saleGridCurrency — совпадает ли валюта продажи с валютой сетки. Баланс,
+// CryptoBot, Heleket и Platega трактуют базовую цену в валюте сетки (баланс —
+// в рублях): тариф в другой валюте этими способами не продаётся — иначе «5 $»
+// молча списались бы как «5 ₽». ЮKassa передаёт валюту тарифа явно, Stars
+// считают в звёздах — их это не касается.
+func (a *App) saleGridCurrency(s *sale) bool {
+	if s == nil || s.Plan == nil || s.Plan.Currency == "" {
+		return true
+	}
+	g := a.pricing().Currency
+	if s.Plan.Currency == g {
+		return true
+	}
+	// Разные написания рублей («₽» у тарифа, «руб» у сетки) — одна валюта.
+	return rubCurrency(s.Plan.Currency) && rubCurrency(g)
+}
+
+// ykSaleCurrencyOK — сможет ли ЮKassa честно назвать валюту продажи: либо это
+// трёхбуквенный код (уходит как есть), либо рублёвое написание (исторический
+// фолбэк «₽» → RUB). Чужой символ («$») превращался бы в RUB молча — и «5 $»
+// списались бы как 5 ₽.
+func (a *App) ykSaleCurrencyOK(s *sale) bool {
+	cur := a.saleCurrency(s)
+	return currencyCode(cur) || rubCurrency(cur)
 }
 
 // saleSnapshot — условия сделки в момент выставления счёта.

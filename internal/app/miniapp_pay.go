@@ -57,9 +57,14 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 			returnURL = "https://t.me"
 		}
 		// В прайсе валюта задаётся символом («₽» — тоже три байта), поэтому
-		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт 400.
+		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт
+		// 400. Рублёвый фолбэк допустим только для валюты сетки — чужой символ
+		// тарифа («$») списался бы как рубли.
 		currency := a.saleCurrency(s)
 		if !currencyCode(currency) {
+			if !a.ykSaleCurrencyOK(s) {
+				return "", false, errors.New("оплата картой недоступна")
+			}
 			currency = "RUB"
 		}
 		desc := miniDesc(months)
@@ -69,7 +74,9 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 	case model.PayMethodCryptoBot:
 		cfg := a.cbConfig()
 		price := a.saleBase(s)
-		if !cfg.Enabled || price == "" {
+		// Валюта тарифа ≠ валюта сетки: счёт ушёл бы с числом тарифа в чужой
+		// валюте (см. saleGridCurrency).
+		if !cfg.Enabled || price == "" || !a.saleGridCurrency(s) {
 			return "", false, errors.New("оплата криптовалютой недоступна")
 		}
 		url, _, err := a.cbCreateInvoiceSnap(ctx, tgID, months, price, web_, a.saleSnapshot(s))
@@ -78,7 +85,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 	case model.PayMethodPlatega:
 		cfg := a.plConfig()
 		value := a.saleFiat(s, model.PayMethodPlatega)
-		if !cfg.Enabled || value == "" {
+		if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) {
 			return "", false, errors.New("оплата недоступна")
 		}
 		returnURL := cfg.ReturnURL
@@ -94,7 +101,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 
 	case model.PayMethodHeleket:
 		price := a.saleBase(s)
-		if !a.hlConfig().Enabled || price == "" {
+		if !a.hlConfig().Enabled || price == "" || !a.saleGridCurrency(s) {
 			return "", false, errors.New("оплата криптовалютой недоступна")
 		}
 		url, _, err := a.hlCreateInvoiceSnap(ctx, tgID, months, price, "", 0, a.saleSnapshot(s))

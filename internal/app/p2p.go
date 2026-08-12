@@ -279,29 +279,33 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	}
 	a.mu.Unlock()
 	base := a.saleBase(s)
+	// Способы, считающие в валюте сетки (баланс, CryptoBot, Heleket, Platega),
+	// тариф в другой валюте не продают — их кнопки прячутся, счёт всё равно не
+	// выставится.
+	gridCur := a.saleGridCurrency(s)
 
 	var rows [][]models.InlineKeyboardButton
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
-	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" {
+	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" && gridCur {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
 	}
-	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" {
+	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" && a.ykSaleCurrencyOK(s) {
 		label := i18n.T(lang, "method.yk_btn", a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
 	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", a.saleStars(s)), "method:stars")})
 	}
-	if cb.Enabled && base != "" {
+	if cb.Enabled && base != "" && gridCur {
 		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
-	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" {
+	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur {
 		label := i18n.T(lang, "method.pl_btn", a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
-	if a.hlConfig().Enabled && base != "" {
+	if a.hlConfig().Enabled && base != "" && gridCur {
 		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
@@ -312,7 +316,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	}
 
 	bal := a.userBalance(ctx, chatID)
-	if k, ok := rubToKopecks(base); ok && k > 0 && bal >= k {
+	if k, ok := rubToKopecks(base); ok && k > 0 && bal >= k && gridCur {
 		payBtn := []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_pay", kopecksToRub(k)), "method:bal")}
 		rows = append([][]models.InlineKeyboardButton{payBtn}, rows...)
 	}
@@ -416,6 +420,11 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 	// Цена продажи считается до захвата замка: saleFiat сам берёт a.mu, когда
 	// продаётся «Базовый» по сетке.
 	price = a.saleFiat(s, model.PayMethodP2P)
+	// Заявка и карточка P2P подписаны рублями: тариф в другой валюте переводом
+	// не продаётся (кнопка спрятана, это защита от устаревшего экрана).
+	if !a.saleGridCurrency(s) {
+		return "", "", 0, errors.New("для этого срока не задана цена")
+	}
 	a.mu.Lock()
 	a.botCfg.NormalizePricing()
 	p2p := a.botCfg.P2P
@@ -762,12 +771,17 @@ func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnap
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
 	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap)
 	if err == nil {
+		// Доп-подписка применяется ПОСЛЕ ядра: это ещё один поход в панель, а
+		// ядро держит шардовый замок финализации — лишний HTTP-раунд под ним
+		// тормозил бы доставку соседних оплат (у предпроверки Stars дедлайн).
+		// Upsert идемпотентен, повторная доставка платежа безопасна. Оплата
+		// уже продлила подписку и сбросила трафик A — трафик B идёт следом.
+		a.syncAddSubSnap(ctx, telegramID, true, applied)
 		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
 		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
 		// владельца: деньги приняты — клиент получает то, за что платил), админ
-		// узнаёт и разбирается. Вызов ПОСЛЕ ядра: внутри держится шардовый замок
-		// финализации, и чтения базы с походом в Telegram под ним тормозили бы
-		// доставку соседних оплат.
+		// узнаёт и разбирается. Вызов ПОСЛЕ ядра — по той же причине, что и
+		// доп-подписка: чтения базы и поход в Telegram под замком не живут.
 		a.notifyPlanGateBreach(ctx, telegramID, applied)
 	}
 	return link, expireAt, err
@@ -822,9 +836,6 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
 	a.invalidateSubCache(telegramID)
-	// Paid renewal: A's traffic was just reset, so B's must follow. Продана ли
-	// опция, знает свежий снимок сделки — в базе он окажется только ниже.
-	a.syncAddSubSnap(ctx, telegramID, true, snap)
 	if a.store != nil {
 		err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,

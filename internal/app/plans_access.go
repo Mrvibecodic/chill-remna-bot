@@ -127,6 +127,11 @@ func (a *App) baseSaleAllowed(ctx context.Context, tgID int64) bool {
 		// сетке, как и раньше.
 		return true
 	}
+	// Выключенный «Базовый» с продажи снят целиком — как любой выключенный
+	// тариф.
+	if !p.Enabled {
+		return false
+	}
 	if model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
 		return false
 	}
@@ -284,7 +289,9 @@ func (a *App) notifyPlanGateBreach(ctx context.Context, tgID int64, snap *model.
 	switch {
 	case p == nil:
 		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_deleted")
-	case p.Code != model.PlanCodeBase && !p.Enabled:
+	case !p.Enabled:
+		// «Базовый» теперь тоже выключается по-настоящему: продажа, успевшая
+		// проскочить до остановки, — такой же пробой гейта.
 		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_disabled")
 	case !a.planAccessibleFor(ctx, p, tgID):
 		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_revoked")

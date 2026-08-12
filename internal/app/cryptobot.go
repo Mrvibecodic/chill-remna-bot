@@ -59,7 +59,9 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	months := s.Months
 	cfg := a.cbConfig()
 	price := a.saleBase(s)
-	if !cfg.Enabled || price == "" {
+	// Валюта тарифа ≠ валюта сетки: CryptoBot выставил бы счёт с числом тарифа
+	// в чужой валюте.
+	if !cfg.Enabled || price == "" || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "cb.no_price"))
 		return
 	}
@@ -209,13 +211,8 @@ func (a *App) onCBAdmin(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-// cbCreateInvoice creates a CryptoBot invoice + pending record and returns the
-// pay URL and invoice id. Shared by chat flow and Mini App.
-func (a *App) cbCreateInvoice(ctx context.Context, chatID int64, months int, price string, web bool) (string, int64, error) {
-	return a.cbCreateInvoiceSnap(ctx, chatID, months, price, web, nil)
-}
-
-// cbCreateInvoiceSnap — то же с явными условиями продажи; snap == nil означает
+// cbCreateInvoiceSnap creates a CryptoBot invoice + pending record and returns
+// the pay URL and invoice id. Shared by chat flow and Mini App. snap == nil означает
 // «Базовый по текущей сетке».
 func (a *App) cbCreateInvoiceSnap(ctx context.Context, chatID int64, months int, price string, web bool, snap *model.PlanSnapshot) (string, int64, error) {
 	client := a.cbClient()

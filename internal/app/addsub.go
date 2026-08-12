@@ -125,7 +125,7 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 	if !enabled || panel == nil {
 		return
 	}
-	sold := true
+	var sold bool
 	if snap != nil {
 		sold = snap.AddSubSold()
 	} else {

@@ -334,15 +334,17 @@ func TestPlanSale_StarsAmountPicksMatchingTerms(t *testing.T) {
 	}
 }
 
-// Кнопка plb — не оракул перебора кодов: негативные ветки отвечают одинаково
-// и считаются в тот же лимит, что и ссылка.
+// Кнопка plb — не оракул перебора кодов: негативные ветки отвечают одинаково,
+// но в лимит считаются только НЕИЗВЕСТНЫЕ коды. Существующий тариф, закрытый
+// покупателю, — это устаревшая кнопка витрины, его нажатия бот не считает:
+// иначе пять нажатий на старое сообщение молча выключали бы все кнопки.
 func TestPlanLink_BuyGatesAndThrottle(t *testing.T) {
 	ctx := context.Background()
 	a, fm, fs := planAdminApp(t)
 	p := vipPlan(t, fs, model.PlanAvailList) // список пуст — тариф чужой
 
 	uid := int64(715)
-	// Срок, которого у тарифа нет; выключенный тариф; чужой тариф — без
+	// Срок, которого у тарифа нет; чужой тариф; неизвестный код — без
 	// намерения и с одинаковым ответом.
 	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":7"))
 	deny1 := fm.last()
@@ -357,9 +359,22 @@ func TestPlanLink_BuyGatesAndThrottle(t *testing.T) {
 		t.Fatalf("ответы различаются: %q / %q / %q", deny1, deny2, deny3)
 	}
 
-	// Четвёртая и пятая неудачи добивают лимит, шестая — молчание.
+	// Нажатия по существующему закрытому тарифу лимит не тратят: пять подряд —
+	// и бот всё ещё отвечает.
+	for i := 0; i < 5; i++ {
+		a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":1"))
+	}
+	beforeGated := fm.joined()
+	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":1"))
+	if fm.joined() == beforeGated {
+		t.Fatal("устаревшая кнопка закрытого тарифа не должна замолкать")
+	}
+
+	// Неизвестные коды лимит добивают (zzzz уже был первым), шестой — молчание.
 	a.handleCallback(ctx, cb(uid, "plb:yyyyyyyyyyyy:1"))
 	a.handleCallback(ctx, cb(uid, "plb:xxxxxxxxxxxx:1"))
+	a.handleCallback(ctx, cb(uid, "plb:vvvvvvvvvvvv:1"))
+	a.handleCallback(ctx, cb(uid, "plb:uuuuuuuuuuuu:1"))
 	before := fm.joined()
 	a.handleCallback(ctx, cb(uid, "plb:wwwwwwwwwwww:1"))
 	if fm.joined() != before {

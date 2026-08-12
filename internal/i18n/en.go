@@ -533,6 +533,7 @@ var en = map[string]string{
 	"plans.sq_stale":             "📡 The squads screen is stale — open it again from the plan card.",
 	"plans.mirror_healed":        "⚠️ Prices in the config differed from the «Basic» plan and were restored from it. This happens after rolling back to a previous version: its pricing screen edits the config directly, while the plan is now the source of truth. Check the price list in «Sales → Plans».",
 	"plans.gone":                 "🧾 Plan not found — it may have been deleted.",
+	"plans.price_invalid":        "⚠️ Could not parse the price: enter a number, e.g. 150 or 99.90.",
 	"plans.breach_admin":         "⚠️ A plan that is currently unavailable to the buyer has been paid for.\n\nPlan: %s\nBuyer: %s\nPeriod: %d mo\nReason: %s\n\nThe subscription was provisioned on the invoiced terms — the money is already taken. If this should not have happened, sort it out with the buyer manually.",
 	"plans.breach_deleted":       "the plan was deleted after the invoice was issued",
 	"plans.breach_disabled":      "the plan was disabled after the invoice was issued",

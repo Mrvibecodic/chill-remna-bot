@@ -270,7 +270,9 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 
 	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
-	if priceStr == "" || !ok || kopecks <= 0 {
+	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
+	// иначе «5 $» молча списались бы как «5 ₽».
+	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
 		return web.MiniActionDTO{Error: "тариф недоступен"}
 	}
 	if a.store == nil {

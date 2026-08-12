@@ -67,7 +67,9 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	months := s.Months
 	cfg := a.plConfig()
 	value := a.saleFiat(s, model.PayMethodPlatega)
-	if !cfg.Enabled || value == "" {
+	// Валюта тарифа ≠ валюта сетки: Platega считает в рублях, и число тарифа
+	// в чужой валюте списалось бы как рубли.
+	if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "pl.no_price"))
 		return
 	}
@@ -250,13 +252,8 @@ func (a *App) setPlategaField(ctx context.Context, chatID int64, field, text str
 	a.showPlategaAdmin(ctx, chatID)
 }
 
-// plCreateTransaction creates a Platega transaction + pending record and
-// returns the redirect URL. Shared by chat flow and Mini App.
-func (a *App) plCreateTransaction(ctx context.Context, chatID int64, months int, amount float64, desc, returnURL string) (redirect, txID string, err error) {
-	return a.plCreateTransactionSnap(ctx, chatID, months, amount, desc, returnURL, nil)
-}
-
-// plCreateTransactionSnap — то же с явными условиями продажи; snap == nil
+// plCreateTransactionSnap creates a Platega transaction + pending record and
+// returns the redirect URL. Shared by chat flow and Mini App. snap == nil
 // означает «Базовый по текущей сетке».
 func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months int, amount float64, desc, returnURL string, snap *model.PlanSnapshot) (redirect, txID string, err error) {
 	client := a.plClient()

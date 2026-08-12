@@ -141,3 +141,62 @@ func TestMiniCheckout_StarsUsesPlanPrice(t *testing.T) {
 		t.Fatalf("условия счёта не с тарифа: %+v", snap)
 	}
 }
+
+// Выключенный «Базовый» с продажи снят целиком: витрина пустеет, а старые
+// кнопки и мини-апп не продают в обход (ветка появилась вместе с флагом).
+func TestBasePlanDisabled_NotSold(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+	base.Enabled = false
+	_ = fs.SavePlan(ctx, base)
+
+	const uid int64 = 730
+	// Мини-апп: витрина и checkout.
+	if dto := a.MiniPlans(ctx, uid); len(dto.Plans) != 0 {
+		t.Fatalf("выключенный «Базовый» виден в мини-аппе: %+v", dto.Plans)
+	}
+	if dto := a.MiniCheckout(ctx, uid, "", 1, model.PayMethodBalance, false); dto.Error == "" {
+		t.Fatalf("мини-апп продал выключенный «Базовый»: %+v", dto)
+	}
+	// Чат: старая кнопка срока из переписки не должна открывать способы оплаты.
+	a.handleCallback(ctx, cb(uid, "buy:1"))
+	a.handleCallback(ctx, cb(uid, "method:bal"))
+	if s, _ := a.saleFor(ctx, uid); s != nil {
+		t.Fatalf("saleFor продаёт выключенный «Базовый»: %+v", s)
+	}
+	_ = fm
+}
+
+// Тариф в чужой валюте не продаётся способами, считающими в валюте сетки:
+// «5 $» не должны молча списаться как «5 ₽».
+func TestPlanForeignCurrency_GridMethodsRefuse(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	p.Currency = "$"
+	_ = fs.SavePlan(ctx, p)
+
+	const uid int64 = 731
+	_ = fs.UpsertUser(ctx, uid)
+	_ = fs.AddBalance(ctx, uid, 990000)
+
+	if dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, false); dto.Error == "" {
+		t.Fatalf("баланс списал тариф в чужой валюте: %+v", dto)
+	}
+	if b := a.userBalance(ctx, uid); b != 990000 {
+		t.Fatalf("баланс тронут: %d", b)
+	}
+	a.botCfg.CryptoBot.Enabled = true
+	a.botCfg.CryptoBot.Token = "t"
+	if _, _, err := a.miniPayURL(ctx, uid, &sale{Plan: p, D: &p.Durations[0], Months: 1}, model.PayMethodCryptoBot, false); err == nil {
+		t.Fatal("CryptoBot выставил счёт в чужой валюте")
+	}
+	// ЮKassa валюту тарифа передаёт явно — её гейт не трогаем.
+	if !a.saleGridCurrency(baseSale(1)) {
+		t.Fatal("«Базовый» всегда в валюте сетки")
+	}
+}

@@ -84,10 +84,15 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 		returnURL = "https://t.me"
 	}
 	// См. currencyCode: проверка по длине пропускала символ «₽» (три байта),
-	// и ЮKassa отвечала 400 на такой код валюты.
+	// и ЮKassa отвечала 400 на такой код валюты. Рублёвый фолбэк допустим
+	// только для валюты сетки — чужой символ тарифа списался бы как рубли.
 	saleCur := a.saleCurrency(s)
 	currency := saleCur
 	if !currencyCode(currency) {
+		if !a.ykSaleCurrencyOK(s) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
+			return
+		}
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)

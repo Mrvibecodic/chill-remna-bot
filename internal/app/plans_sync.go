@@ -306,6 +306,16 @@ func (a *App) setPlanPrice(ctx context.Context, code string, months int, kind, v
 	if val == "-" {
 		val = ""
 	}
+	// Цена — число. Пробелы-разделители тысяч убираются сразу («9 900» →
+	// «9900»), а непарсимая строка не пускается в тариф: витрина её показала
+	// бы, но подсветка «выгодного», оплата с баланса и лимиты пополнения на
+	// такой цене молча ломаются.
+	val = normPriceStr(val)
+	if val != "" {
+		if k, ok := rubToKopecks(val); !ok || k <= 0 {
+			return errPlanPriceInvalid
+		}
+	}
 	return a.editPlanPricing(ctx, code, func(p *model.Plan) error {
 		d := durationFor(p, months, val != "")
 		if d == nil {
@@ -321,6 +331,17 @@ func (a *App) setPlanPrice(ctx context.Context, code string, months int, kind, v
 		}
 		return nil
 	})
+}
+
+// normPriceStr убирает из цены пробелы-разделители тысяч (обычный и
+// неразрывный): «9 900» → «9900». Разбор строки остаётся за rubToKopecks.
+func normPriceStr(val string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\u00a0' {
+			return -1
+		}
+		return r
+	}, val)
 }
 
 // setPlanStars ставит цену в звёздах (0 — убрать).

@@ -175,6 +175,18 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 		if d.Stars < 0 {
 			return nil, nil, fmt.Errorf("%w: отрицательная цена в звёздах", errPlanFile)
 		}
+		// Цены — числа, как и при вводе с экранов (setPlanPrice): импорт не
+		// должен быть обходом валидации — тариф с ценой «9 900» или «abc»
+		// висел бы в витрине, но не продавался.
+		for _, pv := range []*string{&d.Base, &d.P2P, &d.YooKassa} {
+			*pv = normPriceStr(strings.TrimSpace(*pv))
+			if *pv == "" {
+				continue
+			}
+			if k, ok := rubToKopecks(*pv); !ok || k <= 0 {
+				return nil, nil, fmt.Errorf("%w: цена %q не разобрана как число", errPlanFile, *pv)
+			}
+		}
 	}
 	p.Normalize()
 

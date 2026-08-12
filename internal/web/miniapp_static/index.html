@@ -452,7 +452,7 @@ function render(me,menu,sub,plans){
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
-    if(menu.can_renew)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
+    if(menu.can_renew&&STATE.plans.length)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
@@ -578,11 +578,12 @@ function planCardSub(p){
   var d=(p.durations||[])[0];
   return d?planSub(d):'';
 }
-// «от X ₽» — минимальная цена по срокам тарифа.
+// «от X ₽» — минимальная цена по срокам тарифа. Пробелы-разделители тысяч
+// убираются до разбора: parseFloat('9 900') вернул бы 9.
 function planMinLabel(p){
   var best=null;
   (p.durations||[]).forEach(function(d){
-    var v=parseFloat(String(d.price).replace(',','.'));
+    var v=parseFloat(String(d.price).replace(/[\s ]/g,'').replace(',','.'));
     if(!isFinite(v))return;
     if(!best||v<best.v)best={v:v,lab:d.price+' '+(d.currency||'')};
   });
@@ -628,7 +629,9 @@ function buyPlan(code,months){
   if(!p||!d){boot();return;}
   var methods=[];
   if(STATE.balanceK>0)methods.push('balance');
-  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars'))methods.push(m);});
+  // Tribute сам определяет период и цену и о тарифе не знает — кнопка только
+  // у «Базового» (сервер такой счёт всё равно не создаст).
+  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&code!=='base'))methods.push(m);});
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
   var label=d.price+' '+(d.currency||'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+

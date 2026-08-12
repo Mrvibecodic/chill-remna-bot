@@ -219,11 +219,17 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		a.mu.Unlock()
 	}
 	// Тариф «по ссылке» с витрины не открывается: список — не обладание
-	// ссылкой. Для остальных — обычный гейт доступности.
-	if p == nil || !p.Enabled || !planSellsAnything(p) ||
-		model.NormalizeAvailability(p.Availability) == model.PlanAvailLink ||
-		!a.planAccessibleFor(ctx, p, chatID) {
+	// ссылкой. Несуществующий код и скрытый «по ссылке» похожи на перебор —
+	// считаются в лимит.
+	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
 		a.planLinkFail(chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		return
+	}
+	// Существующий тариф, закрытый покупателю, — обычно устаревшая кнопка
+	// витрины, а не перебор: отказ БЕЗ счётчика, иначе пять нажатий на старое
+	// сообщение молча выключали бы все кнопки тарифов на окно троттлинга.
+	if !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
@@ -264,15 +270,16 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	}
 	// Вторая точка гейта: создание намерения. Кнопка могла пролежать в
 	// переписке сколько угодно — тариф успели выключить, срок снять с продажи,
-	// доступ отозвать.
-	if p == nil || !p.Enabled || !a.planAccessibleFor(ctx, p, chatID) {
+	// доступ отозвать. Неизвестный код — похоже на перебор, считается в лимит;
+	// существующий, но закрытый тариф — устаревшая кнопка, отказ без счётчика
+	// (см. onPlanView).
+	if p == nil {
 		a.planLinkFail(chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
 	d := p.Duration(mo)
-	if d == nil || d.Base == "" {
-		a.planLinkFail(chatID)
+	if !p.Enabled || !a.planAccessibleFor(ctx, p, chatID) || d == nil || d.Base == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}

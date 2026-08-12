@@ -140,6 +140,11 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 			if !p.Enabled {
 				continue
 			}
+			// Цены тарифа в чужой валюте — не рубли: ни в пресеты, ни в
+			// потолок (с баланса такой тариф всё равно не продаётся).
+			if p.Currency != "" && p.Currency != pr.Currency {
+				continue
+			}
 			mode := model.NormalizeAvailability(p.Availability)
 			hidden := mode == model.PlanAvailList || mode == model.PlanAvailLink
 			for j := range p.Durations {
@@ -418,7 +423,9 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	months := s.Months
 	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
-	if priceStr == "" || !ok || kopecks <= 0 {
+	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
+	// иначе «5 $» молча списались бы как «5 ₽».
+	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
 		return
 	}

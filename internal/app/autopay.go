@@ -383,6 +383,18 @@ func curSymbol(cur string) string {
 	return strings.ToUpper(cur)
 }
 
+// rubCurrency — обозначает ли строка рубли: пусто (исторический дефолт),
+// символ или привычные сокращения. Только для них честен фолбэк «RUB» при
+// отправке в ЮKassa: чужой символ («$») превращать в RUB нельзя.
+func rubCurrency(cur string) bool {
+	cur = strings.TrimSuffix(strings.TrimSpace(cur), ".")
+	switch strings.ToLower(cur) {
+	case "", "₽", "руб", "р", "rub", "rur":
+		return true
+	}
+	return false
+}
+
 // currencyCode проверяет, что валюта задана трёхбуквенным кодом (а не, скажем,
 // символом «₽», в котором тоже три байта) — иначе ЮKassa вернёт 400.
 func currencyCode(cur string) bool {
@@ -453,6 +465,14 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 	value, okPrice := ykValue(priceRaw)
 	currency := strings.ToUpper(saleCur)
 	if !currencyCode(currency) {
+		// Рублёвый фолбэк — только для рублёвых написаний: чужой символ
+		// тарифа («$») молча списался бы как рубли. Продление откладывается
+		// с причиной для админа, а не идёт по чужой цене.
+		if okPrice && !rubCurrency(saleCur) {
+			reason := "валюта тарифа " + saleCur + " — не код ISO, продление остановлено"
+			a.autoPayDefer(ctx, ap, now, autoPayRetryDelay, reason)
+			return reason
+		}
 		currency = "RUB"
 	}
 	client := a.ykClient()

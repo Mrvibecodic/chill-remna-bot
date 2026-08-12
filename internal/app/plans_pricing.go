@@ -259,6 +259,9 @@ func (a *App) askPlanValue(ctx context.Context, chatID int64, code, input, key s
 	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), key), "pln:pr:"+code)
 }
 
+// errPlanPriceInvalid — цена не разобрана как число.
+var errPlanPriceInvalid = errors.New("цена не число")
+
 // planInputFailed сообщает админу, что правка цены не применилась.
 func (a *App) planInputFailed(ctx context.Context, chatID int64, err error) {
 	lang := a.lang(chatID)
@@ -267,6 +270,10 @@ func (a *App) planInputFailed(ctx context.Context, chatID int64, err error) {
 	}
 	if errors.Is(err, errPlanGone) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.gone"))
+		return
+	}
+	if errors.Is(err, errPlanPriceInvalid) {
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.price_invalid"))
 		return
 	}
 	a.log.Warn("цена тарифа не сохранена", "err", err)
