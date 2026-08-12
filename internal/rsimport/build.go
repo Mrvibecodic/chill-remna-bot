@@ -77,9 +77,12 @@ type Payment struct {
 	TelegramID int64
 	Method     string
 	Months     int
-	Amount     string
-	ExtID      string
-	CreatedAt  string
+	// Days — исходная длительность из дампа remnashop: там сроки лежат в
+	// днях, и Months — это огрубление (дни+15)/30. 0 — источник дней не знал.
+	Days      int
+	Amount    string
+	ExtID     string
+	CreatedAt string
 }
 
 // Data — всё, что удалось вытащить из дампа.
@@ -462,10 +465,12 @@ func applyTransactions(tt *Table, b binder, d *Data) {
 		if ext == "" {
 			continue
 		}
+		months, days := monthsFromSnapshot(row, snapIdx)
 		d.Payments = append(d.Payments, Payment{
 			TelegramID: u.TelegramID,
 			Method:     method,
-			Months:     monthsFromSnapshot(row, snapIdx),
+			Months:     months,
+			Days:       days,
 			Amount:     amountString(row, priceIdx, cellStr(row, curIdx)),
 			ExtID:      "rs:" + ext,
 			CreatedAt:  cellTS(row, createdIdx),
@@ -474,19 +479,22 @@ func applyTransactions(tt *Table, b binder, d *Data) {
 	sort.SliceStable(d.Payments, func(i, j int) bool { return d.Payments[i].CreatedAt < d.Payments[j].CreatedAt })
 }
 
-func monthsFromSnapshot(row []*string, snapIdx int) int {
+// monthsFromSnapshot — срок сделки из снимка дампа: месяцы огрублением
+// (дни+15)/30 (столько понимает остальной бот) и исходные дни — они уезжают в
+// снимок сделки, чтобы округление не теряло правду об истории.
+func monthsFromSnapshot(row []*string, snapIdx int) (months, days int) {
 	if snapIdx < 0 || snapIdx >= len(row) || row[snapIdx] == nil {
-		return 0
+		return 0, 0
 	}
-	days := snapshotDuration(*row[snapIdx])
+	days = snapshotDuration(*row[snapIdx])
 	if days <= 0 {
-		return 0
+		return 0, 0
 	}
-	months := (days + 15) / 30
+	months = (days + 15) / 30
 	if months < 1 {
 		months = 1
 	}
-	return months
+	return months, days
 }
 
 // amountString достаёт итоговую сумму из JSON-поля pricing.

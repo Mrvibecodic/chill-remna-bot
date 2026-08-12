@@ -26,7 +26,11 @@ type PlanSnapshot struct {
 	Code string `json:"code,omitempty"`
 	Name string `json:"name,omitempty"`
 
-	Months      int      `json:"months"`
+	Months int `json:"months"`
+	// Days — исходная длительность сделки в днях, когда источник знал её
+	// точнее месяцев (импорт истории remnashop: месяцы там восстановлены как
+	// (дни+15)/30). Опознание сделки, а не условие — в отпечаток не входит.
+	Days        int      `json:"days,omitempty"`
 	TrafficGB   int      `json:"traffic_gb"`
 	DeviceLimit int      `json:"device_limit"`
 	Strategy    string   `json:"strategy,omitempty"`
@@ -89,6 +93,7 @@ func (s *PlanSnapshot) Fingerprint() string {
 	cond := *s
 	cond.Code = ""
 	cond.Name = ""
+	cond.Days = 0
 	// Доп-подписка «есть» канонизируется в отсутствие поля: старые снимки без
 	// поля означают ровно это, и первое обновление бота не должно рассылать
 	// «условия изменились» всем, у кого ничего не изменилось. В отпечатке

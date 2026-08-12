@@ -766,3 +766,31 @@ func TestMenuPricing_OpensBasePlanEditor(t *testing.T) {
 		t.Fatalf("ожидался редактор цен «Базового»: %q", fm.last())
 	}
 }
+
+// Экран удаления показывает, сколько людей живёт на тарифе: их условия
+// сохранятся, но продление и автосписания встанут.
+func TestPlanDelete_ShowsSubscriberCount(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+
+	// Один живёт на тарифе, у второго подписка истекла.
+	_ = fs.UpsertUser(ctx, 810)
+	_ = fs.SetUserSnapshot(ctx, 810, &model.PlanSnapshot{Code: p.Code, Months: 1})
+	_ = fs.SetSubExpiry(ctx, 810, "2099-01-01T00:00:00Z", "sub")
+	_ = fs.UpsertUser(ctx, 811)
+	_ = fs.SetUserSnapshot(ctx, 811, &model.PlanSnapshot{Code: p.Code, Months: 1})
+	_ = fs.SetSubExpiry(ctx, 811, "2001-01-01T00:00:00Z", "sub")
+
+	planTap(t, a, "pln:del:"+p.Code)
+	if !strings.Contains(fm.last(), "1 чел") {
+		t.Fatalf("нет числа подписчиков тарифа: %q", fm.last())
+	}
+
+	// Без подписчиков ноль не печатается — он читался бы как разрешение.
+	_ = fs.SetSubExpiry(ctx, 810, "2001-01-01T00:00:00Z", "sub")
+	planTap(t, a, "pln:del:"+p.Code)
+	if strings.Contains(fm.last(), "0 чел") {
+		t.Fatalf("ноль подписчиков не должен печататься: %q", fm.last())
+	}
+}

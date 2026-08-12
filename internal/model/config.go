@@ -292,6 +292,11 @@ type TrialConfig struct {
 	DeviceLimit       int      `json:"device_limit"`
 	InternalSquads    []string `json:"internal_squads"`
 	ExternalSquadUUID string   `json:"external_squad_uuid"`
+	// Strategy — своя стратегия сброса трафика триала; пусто — как у сетки
+	// «Базового» (историческое поведение). ⚠ Поле живёт в конфиге-блобе:
+	// старый образ при сохранении конфига его молча выбрасывает — триал
+	// вернётся к стратегии сетки. Потеря косметическая.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 type SubscriptionPlan struct {

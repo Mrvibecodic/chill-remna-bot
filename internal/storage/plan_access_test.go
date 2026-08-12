@@ -166,3 +166,52 @@ func TestPlanAccessInSnapshot(t *testing.T) {
 		t.Fatalf("повторный Transfer упал: %v", err)
 	}
 }
+
+// CountUsersOnPlan — поиск по подстроке в JSON-снимке: проверяем против
+// настоящей базы, что пара `"code":"..."` находится и что похожие коды и
+// истёкшие подписки не считаются.
+func TestCountUsersOnPlan(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		set := func(id int64, code, expire string) {
+			t.Helper()
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetUserSnapshot(ctx, id, &model.PlanSnapshot{Code: code, Months: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if expire != "" {
+				if err := st.SetSubExpiry(ctx, id, expire, "sub"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		const now = "2026-08-12T00:00:00Z"
+		set(1, "vip", "2027-01-01T00:00:00Z")    // живёт на тарифе
+		set(2, "vip", "2026-01-01T00:00:00Z")    // подписка истекла
+		set(3, "vipvip", "2027-01-01T00:00:00Z") // похожий код — не совпадение
+		set(4, "base", "2027-01-01T00:00:00Z")   // другой тариф
+		set(5, "vip", "")                        // подписки нет
+
+		n, err := st.CountUsersOnPlan(ctx, "vip", now)
+		if err != nil || n != 1 {
+			t.Fatalf("CountUsersOnPlan(vip) = %d, %v; ожидался 1", n, err)
+		}
+		if n, _ := st.CountUsersOnPlan(ctx, "base", now); n != 1 {
+			t.Fatalf("CountUsersOnPlan(base) = %d; ожидался 1", n)
+		}
+		if _, err := st.CountUsersOnPlan(ctx, "нет такого", now); err == nil {
+			t.Fatal("недопустимый код должен отклоняться")
+		}
+		// «_» в коде — не LIKE-джокер: my_plan не должен считать my-plan.
+		set(6, "my-plan", "2027-01-01T00:00:00Z")
+		if n, err := st.CountUsersOnPlan(ctx, "my_plan", now); err != nil || n != 0 {
+			t.Fatalf("подчёркивание сработало джокером: n=%d err=%v", n, err)
+		}
+		set(7, "my_plan", "2027-01-01T00:00:00Z")
+		if n, _ := st.CountUsersOnPlan(ctx, "my_plan", now); n != 1 {
+			t.Fatalf("код с подчёркиванием не найден: n=%d", n)
+		}
+	})
+}

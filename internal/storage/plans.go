@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"remnabot/internal/model"
 )
@@ -99,6 +100,27 @@ func (b *base) DeletePlan(ctx context.Context, code string) error {
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
 	_, err := b.db.ExecContext(ctx, "DELETE FROM plans WHERE code = "+b.ph(1), code)
 	return err
+}
+
+// CountUsersOnPlan — сколько пользователей живёт на тарифе code: последняя
+// сделка со снимком этого тарифа и подписка, не истёкшая к activeAfter
+// (RFC3339 UTC — строки сравниваются лексикографически). Снимок — JSON нашего
+// же маршалера: пара `"code":"..."` пишется без пробелов, а код тарифа валиден
+// только из [a-zA-Z0-9-_] (ValidPlanCode), поэтому поиск подстрокой точен и не
+// требует JSON-функций, различающихся у sqlite и postgres.
+func (b *base) CountUsersOnPlan(ctx context.Context, code, activeAfter string) (int, error) {
+	if !model.ValidPlanCode(code) {
+		return 0, fmt.Errorf("%w: %q", ErrPlanCode, code)
+	}
+	// «_» в LIKE — джокер «любой один символ», а ValidPlanCode его разрешает:
+	// без экранирования my_plan посчитал бы и пользователей my-plan.
+	pattern := `%"code":"` + strings.ReplaceAll(code, "_", `\_`) + `"%`
+	n := 0
+	err := b.db.QueryRowContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"SELECT COUNT(*) FROM users WHERE plan_snapshot LIKE "+b.ph(1)+" ESCAPE '\\' AND sub_expire_at > "+b.ph(2),
+		pattern, activeAfter).Scan(&n)
+	return n, err
 }
 
 // planAccessCols — единственный список колонок списка допущенных, по той же

@@ -593,7 +593,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 
 	type row struct{ date, method, user, term, amount, status string }
 	rows := make([]row, 0, len(items))
-	wMethod, wUser, wAmount := len("Method"), len("User"), len("Amount")
+	wMethod, wUser, wAmount, wTerm := len("Method"), len("User"), len("Amount"), len("Term")
 	for _, p := range items {
 		date := p.CreatedAt
 		if len(date) >= 10 {
@@ -605,6 +605,27 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		}
 		user := strconv.FormatInt(p.TelegramID, 10)
 		term := strconv.Itoa(p.Months) + "m"
+		// Голое «Nm» с тарифами стало неинформативным: одинаковые сроки у
+		// разных тарифов стоят по-разному. Тариф — из снимка сделки; сделки
+		// «Базового» и старые (без снимка) остаются как были.
+		if code := planCodeOf(p.Snapshot); code != "" && code != model.PlanCodeBase {
+			name := p.Snapshot.Name
+			if name == "" {
+				name = code
+			}
+			// Имя тарифа — свободный текст админа, а сообщение уходит с
+			// parse_mode=HTML (и внутри <pre> тоже): спецсимволы не
+			// экранируем сущностями — они ломали бы моноширинное выравнивание
+			// (&amp; — 5 рун вместо одной), — а просто выбрасываем.
+			name = strings.Map(func(r rune) rune {
+				switch r {
+				case '<', '>', '&':
+					return -1
+				}
+				return r
+			}, name)
+			term += "·" + truncRunes(name, 12)
+		}
 		method := payMethodLabel(p.Method)
 		amount := p.Amount
 		rows = append(rows, row{date, method, user, term, amount, i18n.T(lang, statusKey)})
@@ -616,6 +637,9 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		}
 		if l := visualWidth(amount); l > wAmount {
 			wAmount = l
+		}
+		if l := visualWidth(term); l > wTerm {
+			wTerm = l
 		}
 	}
 
@@ -630,7 +654,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	sb.WriteString("\n<pre>")
 	header := padRight("Date", 10) + "  " + padRight("Method", wMethod) + "  " +
-		padRight("User", wUser) + "  " + padRight("Term", 4) + "  " +
+		padRight("User", wUser) + "  " + padRight("Term", wTerm) + "  " +
 		padRight("Amount", wAmount) + "  " + "Status"
 	sb.WriteString(header)
 	sb.WriteString("\n")
@@ -643,7 +667,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		sb.WriteString("  ")
 		sb.WriteString(padRight(r.user, wUser))
 		sb.WriteString("  ")
-		sb.WriteString(padRight(r.term, 4))
+		sb.WriteString(padRight(r.term, wTerm))
 		sb.WriteString("  ")
 		sb.WriteString(padRight(r.amount, wAmount))
 		sb.WriteString("  ")
@@ -660,6 +684,16 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
 	kbRows = append(kbRows, back)
 	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
+}
+
+// truncRunes обрезает строку до n рун с «…»: имена тарифов в таблице платежей
+// не должны раздувать колонку.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func padRight(s string, w int) string {

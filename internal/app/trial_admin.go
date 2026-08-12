@@ -39,13 +39,24 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 		hwidStr = strconv.Itoa(hwid)
 	}
 	internalCSV, externalName := a.squadNames(ctx, intSq, extSq)
+	a.mu.Lock()
+	strat := ""
+	if a.botCfg != nil {
+		strat = a.botCfg.Trial.Strategy
+	}
+	a.mu.Unlock()
+	stratStr := i18n.T(lang, "trial.strat_inherit")
+	if model.ValidStrategy(strat) {
+		stratStr = strat
+	}
 	body := i18n.T(lang, "trial.title",
-		i18n.T(lang, statusKey), days, gbStr, hwidStr, internalCSV, externalName)
+		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, internalCSV, externalName)
 
 	rows := [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
+		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
@@ -99,6 +110,27 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		a.showTrialSquads(ctx, chatID)
 	case "quick":
 		a.startTrialQuick(ctx, chatID)
+	case "strategy":
+		a.sendKB(ctx, chatID, i18n.T(lang, "trial.ask_strategy"), [][]models.InlineKeyboardButton{
+			{btn("📅 MONTH", "trial:setstrat:MONTH"), btn("🔁 MONTH_ROLLING", "trial:setstrat:MONTH_ROLLING")},
+			{btn("🗓 WEEK", "trial:setstrat:WEEK"), btn("📆 DAY", "trial:setstrat:DAY")},
+			{btn("♾ NO_RESET", "trial:setstrat:NO_RESET")},
+			{btn(i18n.T(lang, "trial.strat_btn_inherit"), "trial:setstrat:-")},
+			{btn(i18n.T(lang, "btn.back"), "menu:trial"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		})
+	case "setstrat":
+		v := arg
+		if v == "-" || !model.ValidStrategy(v) {
+			// «Как у тарифа» и любой подделанный callback — сброс к наследованию.
+			v = ""
+		}
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Trial.Strategy = v
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
 	}
 }
 
@@ -268,7 +300,12 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 	// Набор сквадов уезжает в панель уже без замка, а админка правит его на
 	// месте — append идёт по тому же массиву, поэтому здесь нужна своя копия.
 	tr.InternalSquads = append([]string(nil), tr.InternalSquads...)
+	// Своя стратегия триала главнее сетки; пусто (или потерянное откатом
+	// поле) — стратегия сетки, как всегда было.
 	strategy := a.botCfg.Pricing.ResetStrategy()
+	if model.ValidStrategy(tr.Strategy) {
+		strategy = tr.Strategy
+	}
 	a.mu.Unlock()
 	if panel == nil {
 		return "", "", errors.New("panel offline")

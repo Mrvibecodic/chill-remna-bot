@@ -259,6 +259,10 @@ func TestBuildPayments(t *testing.T) {
 	if p.TelegramID != 111 || p.Method != "yookassa" || p.Months != 1 {
 		t.Fatalf("платёж разобран неверно: %+v", p)
 	}
+	// Исходные дни сохраняются: месяцы — огрубление (дни+15)/30.
+	if p.Days != 30 {
+		t.Fatalf("исходная длительность в днях потеряна: %+v", p)
+	}
 	if p.Amount != "199.00 ₽" {
 		t.Fatalf("сумма берётся из final_amount: %q", p.Amount)
 	}

@@ -210,11 +210,19 @@ func (p *Plan) Normalize() {
 	}
 }
 
+// ValidStrategy — допустимая для панели стратегия сброса трафика.
+func ValidStrategy(s string) bool {
+	switch s {
+	case "NO_RESET", "DAY", "WEEK", "MONTH", "MONTH_ROLLING":
+		return true
+	}
+	return false
+}
+
 // normalizeStrategy повторяет проверку Pricing.ResetStrategy: панель принимает
 // только этот набор, всё остальное — MONTH.
 func normalizeStrategy(s string) string {
-	switch s {
-	case "NO_RESET", "DAY", "WEEK", "MONTH", "MONTH_ROLLING":
+	if ValidStrategy(s) {
 		return s
 	}
 	return "MONTH"

@@ -835,3 +835,95 @@ func TestAutoPay_PlanPricing(t *testing.T) {
 		t.Fatalf("проблема магазина не должна наказывать пользователя: %+v", cur)
 	}
 }
+
+// Прогноз «на сколько хватит баланса» считает по тарифу покупателя, а не по
+// сетке «Базового»; без своего тарифа — по сетке, как раньше.
+func TestBalanceForecast_UsesOwnPlan(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	const uid int64 = 820
+	_ = fs.UpsertUser(ctx, uid)
+	_ = fs.SetUserSnapshot(ctx, uid, &model.PlanSnapshot{Code: p.Code, Months: 1})
+
+	table, best, title := a.balanceForecast(ctx, uid, "ru", 99000) // 990 ₽
+	if !strings.Contains(table, "990") || strings.Contains(table, "150") {
+		t.Fatalf("прогноз не по тарифу покупателя:\n%s", table)
+	}
+	if best != 1 || !strings.Contains(title, "VIP") {
+		t.Fatalf("best=%d title=%q", best, title)
+	}
+
+	// Без снимка — базовая сетка.
+	table, _, title = a.balanceForecast(ctx, 821, "ru", 99000)
+	if !strings.Contains(table, "150") || title != "" {
+		t.Fatalf("без тарифа ожидалась сетка:\n%s (title=%q)", table, title)
+	}
+
+	// Тариф удалён — прогноз честно падает на сетку.
+	_ = fs.DeletePlan(ctx, p.Code)
+	table, _, title = a.balanceForecast(ctx, uid, "ru", 99000)
+	if !strings.Contains(table, "150") || title != "" {
+		t.Fatalf("после удаления тарифа ожидалась сетка:\n%s", table)
+	}
+}
+
+// Триал использует свою стратегию сброса, если она задана; пусто — стратегия
+// сетки, как раньше (и как после отката, теряющего поле).
+func TestTrialStrategy_Own(t *testing.T) {
+	ctx := context.Background()
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	_ = fs.UpsertUser(ctx, 555)
+
+	a.botCfg.Trial = model.TrialConfig{Enabled: true, Days: 3, Strategy: "NO_RESET"}
+	if _, _, err := a.trialProvision(ctx, 555); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := patched["trafficLimitStrategy"].(string); got != "NO_RESET" {
+		t.Fatalf("стратегия триала не применена: %v", patched)
+	}
+
+	// Пустое (или потерянное откатом) поле — стратегия сетки.
+	a.botCfg.Trial.Strategy = ""
+	if _, _, err := a.trialProvision(ctx, 555); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := patched["trafficLimitStrategy"].(string); got != a.pricing().ResetStrategy() {
+		t.Fatalf("без своей стратегии ожидалась сетка: %v", patched)
+	}
+}
+
+// Список платежей показывает тариф сделки: голое «Nm» с тарифами стало
+// неинформативным. «Базовый» и платежи без снимка остаются как были.
+func TestPaymentsList_ShowsPlan(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	_ = fs.AddPayment(ctx, &model.Payment{
+		TelegramID: 840, Method: model.PayMethodCryptoBot, Months: 1, Amount: "990",
+		Status: model.PaymentPaid, ExtID: "pp-1",
+		Snapshot: &model.PlanSnapshot{Code: "vipvipvipvip", Name: "VIP", Months: 1},
+	})
+	_ = fs.AddPayment(ctx, &model.Payment{
+		TelegramID: 841, Method: model.PayMethodCryptoBot, Months: 3, Amount: "400",
+		Status: model.PaymentPaid, ExtID: "pp-2",
+	})
+	planTap(t, a, "menu:payments")
+	if !strings.Contains(fm.last(), "1m·VIP") {
+		t.Fatalf("тариф сделки не виден в списке платежей:\n%s", fm.last())
+	}
+	if !strings.Contains(fm.last(), "3m") || strings.Contains(fm.last(), "3m·") {
+		t.Fatalf("платёж без снимка должен остаться голым «3m»:\n%s", fm.last())
+	}
+}
+
+// Дни в снимке — опознание сделки, а не условие: отпечаток от них не зависит
+// (иначе история из remnashop давала бы ложное «условия изменились»).
+func TestPlanSnapshot_DaysNotInFingerprint(t *testing.T) {
+	a := &model.PlanSnapshot{Months: 1, TrafficGB: 50}
+	b := &model.PlanSnapshot{Months: 1, TrafficGB: 50, Days: 30}
+	if a.Fingerprint() != b.Fingerprint() {
+		t.Fatal("дни попали в отпечаток условий")
+	}
+}

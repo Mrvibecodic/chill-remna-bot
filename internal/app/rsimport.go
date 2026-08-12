@@ -303,6 +303,12 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 		if seen, _ := a.store.PaymentByExtID(ctx, p.ExtID); seen {
 			continue
 		}
+		// Исходная длительность в днях едет в снимок сделки: месяцы — это
+		// огрубление (дни+15)/30, и кроме истории платежей правду хранить негде.
+		var snap *model.PlanSnapshot
+		if p.Days > 0 {
+			snap = &model.PlanSnapshot{Months: p.Months, Days: p.Days}
+		}
 		if err := a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: p.TelegramID,
 			Method:     p.Method,
@@ -312,6 +318,7 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 			Comment:    "remnashop",
 			ExtID:      p.ExtID,
 			CreatedAt:  p.CreatedAt,
+			Snapshot:   snap,
 		}); err == nil {
 			rep.payments++
 		}

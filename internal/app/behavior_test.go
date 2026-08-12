@@ -1116,6 +1116,16 @@ func (s *fakeStore) PrunePlanAccess(context.Context) error {
 	return nil
 }
 
+func (s *fakeStore) CountUsersOnPlan(_ context.Context, code, activeAfter string) (int, error) {
+	n := 0
+	for _, u := range s.users {
+		if u != nil && u.Snapshot != nil && u.Snapshot.Code == code && u.SubExpireAt > activeAfter {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) CreatePromo(_ context.Context, p *model.PromoCode) error {
 	if s.promos == nil {
 		s.promos = map[string]*model.PromoCode{}

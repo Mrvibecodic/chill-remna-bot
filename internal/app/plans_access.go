@@ -255,6 +255,24 @@ func (a *App) trialLockNotice(ctx context.Context, chatID int64) bool {
 	return true
 }
 
+// usersOnPlan — сколько пользователей живёт на тарифе: снимок последней
+// сделки с этим кодом и не истёкшая подписка. Ошибка хранилища здесь не
+// повод блокировать экран — счётчик информационный, возвращаем ноль.
+func (a *App) usersOnPlan(ctx context.Context, code string) int {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return 0
+	}
+	n, err := st.CountUsersOnPlan(ctx, code, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		a.log.Warn("подписчики тарифа не посчитаны", "err", err, "plan", code)
+		return 0
+	}
+	return n
+}
+
 // prunePlanAccess убирает на старте записи списков без тарифа. Их оставляет
 // предыдущий образ бота: его DeletePlan про таблицу списков не знает, и
 // осиротевшая запись молча ожила бы, достанься код новому тарифу (импорт).

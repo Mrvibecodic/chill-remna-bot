@@ -60,10 +60,14 @@ func (a *App) userBalance(ctx context.Context, chatID int64) int64 {
 func (a *App) showBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
-	table, best := a.balanceForecast(lang, bal)
+	table, best, planLine := a.balanceForecast(ctx, chatID, lang, bal)
 	caption := i18n.T(lang, "balance.head", kopecksToRub(bal))
 	if table != "" {
-		caption += "\n\n" + i18n.T(lang, "balance.forecast_hdr") + "\n" + table
+		hdr := i18n.T(lang, "balance.forecast_hdr")
+		if planLine != "" {
+			hdr = i18n.T(lang, "balance.forecast_plan", planLine)
+		}
+		caption += "\n\n" + hdr + "\n" + table
 		if best > 0 {
 			caption += "\n" + i18n.T(lang, "balance.max_months", best)
 		}
@@ -76,26 +80,54 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 	})
 }
 
-func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
-	pr := a.pricing()
+// balanceForecast — таблица «на сколько хватит баланса». Считает по тарифу
+// покупателя (снимок последней сделки): прогноз по чужой сетке обещал бы
+// человеку не его цены. Без своего тарифа — а также для «Базового»,
+// выключенного, удалённого или тарифа в чужой валюте — по сетке, как раньше.
+// Третье значение — подпись тарифа для заголовка ("" — прогноз по сетке).
+func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, balKopecks int64) (string, int, string) {
+	type entry struct {
+		months int
+		price  string
+	}
+	var list []entry
+	title := ""
+	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
+		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
+			for i := range p.Durations {
+				d := &p.Durations[i]
+				if d.Months > 0 && d.Base != "" {
+					list = append(list, entry{d.Months, d.Base})
+				}
+			}
+			if len(list) > 0 {
+				title = planTitleHTML(lang, p)
+			}
+		}
+	}
+	if len(list) == 0 {
+		title = ""
+		pr := a.pricing()
+		for _, mo := range model.PlanMonths {
+			if base := pr.Base[mo]; base != "" {
+				list = append(list, entry{mo, base})
+			}
+		}
+	}
 	var sb strings.Builder
 	sb.WriteString("<pre>")
 	sb.WriteString(padRight("Plan", 6) + "  " + padRight("Price", 11) + "  " + i18n.T(lang, "balance.col_lasts") + "\n")
 	sb.WriteString(strings.Repeat("─", 34) + "\n")
 	best := 0
 	rows := 0
-	for _, mo := range model.PlanMonths {
-		base := pr.Base[mo]
-		if base == "" {
-			continue
-		}
-		k, ok := rubToKopecks(base)
+	for _, e := range list {
+		k, ok := rubToKopecks(e.price)
 		if !ok || k <= 0 {
 			continue
 		}
 		rows++
 		count := int(balKopecks / k)
-		total := count * mo
+		total := count * e.months
 		if total > best {
 			best = total
 		}
@@ -103,13 +135,13 @@ func (a *App) balanceForecast(lang string, balKopecks int64) (string, int) {
 		if count > 0 {
 			lasts = fmt.Sprintf("%d× ≈ %d %s", count, total, i18n.T(lang, "balance.mo"))
 		}
-		sb.WriteString(padRight(strconv.Itoa(mo)+"m", 6) + "  " + padRight(base+curSuffix(curRUB), 11) + "  " + lasts + "\n")
+		sb.WriteString(padRight(strconv.Itoa(e.months)+"m", 6) + "  " + padRight(e.price+curSuffix(curRUB), 11) + "  " + lasts + "\n")
 	}
 	sb.WriteString("</pre>")
 	if rows == 0 {
-		return "", 0
+		return "", 0, ""
 	}
-	return sb.String(), best
+	return sb.String(), best, title
 }
 
 // topUpAmounts — пресеты пополнения и потолок произвольной суммы.

@@ -81,6 +81,7 @@ type Storage interface {
 	ListAllPlanAccess(ctx context.Context) ([]model.PlanAccess, error)
 	ClearPlanAccess(ctx context.Context, code string) error
 	PrunePlanAccess(ctx context.Context) error
+	CountUsersOnPlan(ctx context.Context, code, activeAfter string) (int, error)
 
 	CreatePromo(ctx context.Context, p *model.PromoCode) error
 	CreateWebUser(ctx context.Context, u *model.WebUser) error

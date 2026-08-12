@@ -408,10 +408,15 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		}
 		// Про действующих подписчиков говорим главное: удаление тарифа никого не
 		// понижает, потому что проданные условия зафиксированы снимком сделки и
-		// от справочника не зависят. Числа подписчиков здесь нет намеренно —
-		// пока продажи идут по старой сетке, у любого удаляемого тарифа оно
-		// ноль, а ноль в предупреждении читался бы как разрешение.
+		// от справочника не зависят. Но число живущих на тарифе показываем:
+		// продажи идут по тарифам, и админ должен видеть, у скольких людей
+		// пропадёт продление (showRenew ответит «тарифа больше нет») и встанет
+		// автосписание. Ноль не печатаем — он читался бы как разрешение, а
+		// снимков нет у купивших во время отката.
 		text := i18n.T(lang, "plans.del_confirm", planTitleHTML(lang, p))
+		if n := a.usersOnPlan(ctx, p.Code); n > 0 {
+			text += "\n\n" + i18n.T(lang, "plans.del_subs_note", n)
+		}
 		if model.NormalizeAvailability(p.Availability) == model.PlanAvailList {
 			if list, lerr := a.planAccessList(ctx, p.Code); lerr == nil && len(list) > 0 {
 				text += "\n\n" + i18n.T(lang, "plans.del_list_note", len(list))
