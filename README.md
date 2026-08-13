@@ -88,7 +88,7 @@
 
 ## 2. Что нужно перед стартом
 
-1. **Сервер с Linux** (Ubuntu/Debian подойдут), на нём установлены **Docker** и **Docker Compose v2**. Проверка:
+1. **Сервер с Linux** (Ubuntu/Debian подойдут) на процессоре **x86-64 (amd64)** или **ARM64 (aarch64)** — образ собирается под обе архитектуры, `docker pull` подберёт нужную сам. На сервере установлены **Docker** и **Docker Compose v2**. Проверка:
    ```bash
    docker version
    docker compose version
