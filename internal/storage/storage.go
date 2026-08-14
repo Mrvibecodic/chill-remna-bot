@@ -33,6 +33,7 @@ type Storage interface {
 	HasApprovedPurchase(ctx context.Context, telegramID int64) (bool, error)
 
 	ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
+	SearchUsers(ctx context.Context, q string, limit, offset int) ([]model.User, int, error)
 	SetBlocked(ctx context.Context, telegramID int64, blocked bool) error
 	SetWhitelisted(ctx context.Context, telegramID int64, on bool) error
 	AddWhitelistID(ctx context.Context, telegramID int64) error
@@ -354,6 +355,71 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
 			"ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var approved, blocked int
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		u.P2PApproved = approved != 0
+		u.Blocked = blocked != 0
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
+// likePattern готовит подстроку для LIKE: джокеры из пользовательского ввода
+// экранируются, иначе «100_» нашло бы и «1001», а «%» — вообще всех.
+func likePattern(q string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + r.Replace(q) + "%"
+}
+
+// SearchUsers ищет по нику, имени, Telegram ID и почте веб-аккаунта.
+// LOWER с обеих сторон обязателен: LIKE в sqlite регистронезависим только для
+// латиницы, а в postgres регистрозависим вовсе — без этого поиск «работал бы
+// на моей машине» и молча не находил ничего на боевой базе.
+func (b *base) SearchUsers(ctx context.Context, q string, limit, offset int) ([]model.User, int, error) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, 0, nil
+	}
+	q = strings.TrimPrefix(q, "@")
+	lower, raw := likePattern(strings.ToLower(q)), likePattern(q)
+	// Сравниваем и по LOWER, и как есть: LOWER в sqlite умеет только латиницу,
+	// поэтому кириллица там нашлась бы только по «опущенному» запросу, которого
+	// в базе нет. В postgres LOWER юникодный, и там работают оба варианта.
+	cols := []string{"u.username", "u.first_name", "CAST(u.telegram_id AS TEXT)", "w.email"}
+	var parts []string
+	args := make([]any, 0, len(cols)*2+2)
+	n := 0
+	for _, c := range cols {
+		n++
+		lo := b.ph(n)
+		args = append(args, lower)
+		n++
+		rw := b.ph(n)
+		args = append(args, raw)
+		parts = append(parts, "(LOWER("+c+") LIKE "+lo+" ESCAPE '\\' OR "+c+" LIKE "+rw+" ESCAPE '\\')")
+	}
+	where := "WHERE " + strings.Join(parts, " OR ")
+	from := "FROM users u LEFT JOIN web_users w ON w.tg_id = u.telegram_id "
+
+	var total int
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT u.telegram_id) "+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT u.telegram_id, u.username, u.first_name, u.p2p_approved, u.blocked, u.created_at "+
+			from+where+" ORDER BY u.created_at DESC, u.telegram_id DESC LIMIT "+b.ph(n+1)+" OFFSET "+b.ph(n+2),
+		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}

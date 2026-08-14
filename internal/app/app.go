@@ -1130,6 +1130,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui.linkUID = 0
 	ui.inputBack = ""
 	ui.awaitPromo = false
+	ui.userQuery = ""
+	ui.userPage = 0
 	if back == "" {
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 		return

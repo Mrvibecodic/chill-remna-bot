@@ -232,3 +232,64 @@ func TestSnapshotCarriesWhitelistAndInvites(t *testing.T) {
 		}
 	})
 }
+
+// Поиск по пользователям: ник, имя, часть ID и почта веб-аккаунта. Регистр не
+// важен, а джокеры из запроса не должны расширять выборку.
+func TestSearchUsers(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, u := range []struct {
+			id    int64
+			nick  string
+			first string
+		}{
+			{5101, "PetrovIvan", "Иван"},
+			{5102, "sidorov", "Пётр"},
+			{5103, "", "Мария"},
+		} {
+			if err := st.UpsertUser(ctx, u.id); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetUserInfo(ctx, u.id, u.nick, u.first); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.UpsertUser(ctx, -777); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateWebUser(ctx, &model.WebUser{TgID: -777, Email: "client@example.com", PassHash: "hash"}); err != nil {
+			t.Fatal(err)
+		}
+
+		check := func(q string, want ...int64) {
+			t.Helper()
+			users, total, err := st.SearchUsers(ctx, q, 50, 0)
+			if err != nil {
+				t.Fatalf("%q: %v", q, err)
+			}
+			if total != len(want) || len(users) != len(want) {
+				t.Fatalf("%q: найдено %d (total %d), ожидалось %d", q, len(users), total, len(want))
+			}
+			got := map[int64]bool{}
+			for _, u := range users {
+				got[u.TelegramID] = true
+			}
+			for _, id := range want {
+				if !got[id] {
+					t.Fatalf("%q: не найден %d, получено %+v", q, id, users)
+				}
+			}
+		}
+
+		check("petrov", 5101)          // ник, другой регистр
+		check("PETROV", 5101)          // регистр запроса
+		check("Пётр", 5102)            // имя, кириллица
+		check("510", 5101, 5102, 5103) // часть Telegram ID
+		check("client@", -777)         // почта веб-аккаунта
+		check("никого")                // ничего не найдено
+
+		// Джокеры LIKE из запроса не должны находить лишнего.
+		check("%")
+		check("510_")
+	})
+}

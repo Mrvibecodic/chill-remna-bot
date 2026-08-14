@@ -84,6 +84,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 
 	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.user_search"), "usr:find")},
 		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
 		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
@@ -114,6 +115,110 @@ func (a *App) reconcileWhitelist(ctx context.Context, chatID int64) {
 		_ = a.store.SetWhitelisted(ctx, chatID, true)
 		_ = a.store.RemoveWhitelistID(ctx, chatID)
 	}
+}
+
+// backToUserList — куда ведёт «Назад» из карточки пользователя.
+func backToUserList(ui *uiState) string {
+	if ui != nil && ui.userQuery != "" {
+		return "usr:fpage:" + strconv.Itoa(ui.userPage)
+	}
+	return "usr:list"
+}
+
+// showUserSearch — выдача поиска по пользователям. Запрос берётся из состояния
+// админа: в callback_data его не положить (лимит 64 байта, а ищут в том числе
+// по кириллице).
+func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	ui := a.getUI(chatID)
+	q := ui.userQuery
+	if q == "" {
+		a.showUsers(ctx, chatID, 0)
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	users, total, err := a.store.SearchUsers(ctx, q, usersPageSize, page*usersPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	ui.userPage = page
+	pages := (total + usersPageSize - 1) / usersPageSize
+
+	var rows [][]models.InlineKeyboardButton
+	for _, u := range users {
+		label := "👤 " + a.userLabelByID(ctx, u.TelegramID)
+		if u.Blocked {
+			label += " 🚫"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
+		})
+	}
+	if nav := paginationRow("usr:fpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+
+	title := i18n.T(lang, "users.search_title", q, total, page+1, max(pages, 1))
+	if total == 0 {
+		title = i18n.T(lang, "users.search_empty", q)
+		// В боте пусто — может, человек есть в панели, но не связан с чатом.
+		if pu := a.searchPanelUser(ctx, q); pu != nil {
+			title += "\n\n" + i18n.T(lang, "users.search_panel", pu.Username)
+			if pu.TelegramID != 0 {
+				rows = append(rows, []models.InlineKeyboardButton{
+					btn("👤 "+pu.Username, "usr:view:"+strconv.FormatInt(pu.TelegramID, 10)),
+				})
+			}
+		}
+	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.user_search"), "usr:find")})
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// searchPanelUser — точное совпадение по имени учётки в панели: подстрочного
+// поиска панель не умеет, но по нику она находит и тех, кого бот ещё не видел.
+func (a *App) searchPanelUser(ctx context.Context, q string) *remnawave.PanelUser {
+	a.mu.Lock()
+	panel := a.panel
+	a.mu.Unlock()
+	if panel == nil {
+		return nil
+	}
+	u, err := panel.FindByUsername(ctx, strings.TrimPrefix(strings.TrimSpace(q), "@"))
+	if err != nil {
+		return nil
+	}
+	return u
+}
+
+// startUserSearch просит админа прислать запрос.
+func (a *App) startUserSearch(ctx context.Context, chatID int64) {
+	ui := a.getUI(chatID)
+	ui.adminInput = "user_find"
+	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "users.search_ask"), "menu:users")
+}
+
+// applyUserSearch принимает поисковый запрос от админа.
+func (a *App) applyUserSearch(ctx context.Context, chatID int64, text string) {
+	ui := a.getUI(chatID)
+	ui.adminInput = ""
+	ui.userQuery = strings.TrimSpace(text)
+	ui.userPage = 0
+	// Чистый Telegram ID — открываем карточку сразу, без промежуточной выдачи.
+	if id, err := strconv.ParseInt(ui.userQuery, 10, 64); err == nil && id != 0 && a.store != nil {
+		if u, _ := a.store.GetUser(ctx, id); u != nil {
+			a.showUser(ctx, chatID, id)
+			return
+		}
+	}
+	a.showUserSearch(ctx, chatID, 0)
 }
 
 // showWhitelist — кто на самом деле имеет доступ. Раньше этот экран показывал
@@ -319,7 +424,9 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:list"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		// «Назад» из карточки возвращает в выдачу поиска, если админ пришёл
+		// оттуда: иначе найденный человек стоил бы нового поиска.
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), backToUserList(a.getUI(chatID))), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
 	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock)+torLine, rows)
 }
@@ -409,6 +516,11 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
+	case "find":
+		a.startUserSearch(ctx, chatID)
+	case "fpage":
+		page, _ := strconv.Atoi(arg)
+		a.showUserSearch(ctx, chatID, page)
 	case "wllist":
 		a.showWhitelist(ctx, chatID, 0)
 	case "wlpage":

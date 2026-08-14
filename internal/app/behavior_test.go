@@ -767,6 +767,30 @@ func (s *fakeStore) ListUsers(_ context.Context, limit, offset int) ([]model.Use
 	}
 	return all[offset:end], total, nil
 }
+func (s *fakeStore) SearchUsers(_ context.Context, q string, limit, offset int) ([]model.User, int, error) {
+	q = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(q), "@"))
+	if q == "" {
+		return nil, 0, nil
+	}
+	var all []model.User
+	for _, u := range s.users {
+		hay := strings.ToLower(u.Username + " " + u.FirstName + " " + strconv.FormatInt(u.TelegramID, 10))
+		if strings.Contains(hay, q) {
+			all = append(all, *u)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].TelegramID < all[j].TelegramID })
+	total := len(all)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+
 func (s *fakeStore) SetBlocked(_ context.Context, id int64, blocked bool) error {
 	if s.users == nil {
 		s.users = map[int64]*model.User{}

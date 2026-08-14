@@ -1230,6 +1230,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.adminInput = ""
 		ui.linkUID = 0
 		a.adminLinkPanel(ctx, chatID, uid, text)
+	case "user_find":
+		a.applyUserSearch(ctx, chatID, text)
 	case "wl_add":
 		ui.adminInput = ""
 		raw := strings.NewReplacer(",", " ", "\n", " ", ";", " ").Replace(text)
