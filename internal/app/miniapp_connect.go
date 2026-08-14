@@ -94,14 +94,14 @@ func (n *acFlexName) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		return nil
 	}
+	// Имя платформы косметическое: что бы в нём ни лежало, ронять из-за него
+	// весь конфиг (и оставлять человека без списка приложений) нельзя.
 	switch b[0] {
 	case '"':
-		return json.Unmarshal(b, &n.Plain)
+		_ = json.Unmarshal(b, &n.Plain)
 	case '{':
-		return json.Unmarshal(b, &n.Loc)
+		_ = json.Unmarshal(b, &n.Loc)
 	}
-	// Anything else (number, array) isn't a name — ignore it rather than fail
-	// the whole config over a cosmetic field.
 	return nil
 }
 
@@ -406,9 +406,18 @@ func shortUUIDFromSub(subURL string) string {
 	return ""
 }
 
-// fetchPanelAppConfig берёт конфиг приложений из панели (3.0.0+), кэшируя его
-// на общий срок. nil означает «этим путём не вышло» — вызывающий идёт на саму
-// страницу подписки.
+// panelCfgCache — разобранные конфиги страницы подписки из панели. Ключ —
+// UUID конфига: панель умеет держать несколько и назначать разным подпискам
+// разные, поэтому одним слотом тут не обойтись — иначе человек увидит чужой
+// набор приложений.
+type panelCfgCache struct {
+	fetchedAt time.Time
+	byUUID    map[string]*connectCacheEntry
+	firstUUID string
+}
+
+// fetchPanelAppConfig берёт конфиг приложений из панели (3.0.0+). nil означает
+// «этим путём не вышло» — вызывающий идёт на саму страницу подписки.
 func (a *App) fetchPanelAppConfig(ctx context.Context, panel *remnawave.Client, shortUUID, subURL string) *connectCacheEntry {
 	if panel == nil {
 		return nil
@@ -418,18 +427,49 @@ func (a *App) fetchPanelAppConfig(ctx context.Context, panel *remnawave.Client, 
 	}
 
 	a.connectMu.Lock()
+	pc := a.panelCfgs
 	off := a.subpageOffUntil
-	ce := a.connectCache
 	a.connectMu.Unlock()
-	if !off.IsZero() && time.Now().Before(off) {
+
+	// Кэш проверяем ДО паузы: осечка панели не повод прятать конфиг, который
+	// уже разобран и лежит рядом.
+	if pc == nil || time.Since(pc.fetchedAt) >= appConfigTTL {
+		if !off.IsZero() && time.Now().Before(off) {
+			return nil
+		}
+		var err error
+		if pc, err = a.loadPanelCfgs(ctx, panel); err != nil {
+			return nil
+		}
+	}
+	if pc == nil || len(pc.byUUID) == 0 {
 		return nil
 	}
-	if ce != nil && strings.HasPrefix(ce.base, "panel:") && time.Since(ce.fetchedAt) < appConfigTTL {
+
+	// Какой конфиг назначен именно этой подписке. Маршрут необязательный: если
+	// панель на него не отвечает, берём первый (он же дефолтный).
+	uuid := ""
+	if len(pc.byUUID) > 1 {
+		if u, err := panel.SubpageConfigUUIDFor(ctx, shortUUID); err == nil {
+			uuid = u
+		}
+	}
+	if ce := pc.byUUID[uuid]; ce != nil {
 		return ce
 	}
+	return pc.byUUID[pc.firstUUID]
+}
 
-	cfg, err := panel.SubpageConfigFor(ctx, shortUUID)
+// loadPanelCfgs тянет и разбирает все конфиги страницы подписки разом: их
+// единицы, а список отдаётся одним запросом.
+func (a *App) loadPanelCfgs(ctx context.Context, panel *remnawave.Client) (*panelCfgCache, error) {
+	list, err := panel.SubpageConfigs(ctx)
 	if err != nil {
+		// Отмена запроса (человек закрыл мини-апп) — не повод объявлять панель
+		// неработающей для всех остальных.
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		// Нет такого API (панель до 3.0.0) — молча и надолго. Прочее (нет прав
 		// у токена, панель прилегла) — с записью в лог и ненадолго, но тоже с
 		// паузой: иначе каждый заход в «Подключить» бьёт в панель впустую.
@@ -441,37 +481,70 @@ func (a *App) fetchPanelAppConfig(ctx context.Context, panel *remnawave.Client, 
 		a.connectMu.Lock()
 		a.subpageOffUntil = time.Now().Add(pause)
 		a.connectMu.Unlock()
-		return nil
+		return nil, err
 	}
+
+	pc := &panelCfgCache{fetchedAt: time.Now(), byUUID: map[string]*connectCacheEntry{}}
+	for i := range list {
+		cfg := &list[i]
+		ce := parsePanelCfg(cfg)
+		if ce == nil {
+			if len(cfg.Config) > 0 {
+				a.log.Warn("miniapp connect: конфиг из панели без приложений", "config", cfg.Name, "bytes", len(cfg.Config))
+			}
+			continue
+		}
+		pc.byUUID[cfg.UUID] = ce
+		if pc.firstUUID == "" {
+			pc.firstUUID = cfg.UUID
+			a.log.Info("miniapp connect: конфиг приложений получен из панели", "config", cfg.Name, "apps", ceAppCount(ce))
+		}
+	}
+	if len(pc.byUUID) == 0 {
+		// Панель API отдала, но приложений в ней нет — не долбим её в цикле.
+		a.connectMu.Lock()
+		a.subpageOffUntil = time.Now().Add(subpageRetryIn)
+		a.connectMu.Unlock()
+		return nil, errNoPanelApps
+	}
+	a.connectMu.Lock()
+	a.panelCfgs = pc
+	a.subpageOffUntil = time.Time{}
+	a.connectMu.Unlock()
+	return pc, nil
+}
+
+var errNoPanelApps = errors.New("в панели нет конфигов страницы подписки с приложениями")
+
+// parsePanelCfg разбирает сырой конфиг панели любой из двух схем.
+func parsePanelCfg(cfg *remnawave.SubpageConfig) *connectCacheEntry {
 	if cfg == nil || len(cfg.Config) == 0 {
 		return nil
 	}
-
-	ne := &connectCacheEntry{base: "panel:" + cfg.UUID, fetchedAt: time.Now()}
+	ce := &connectCacheEntry{base: "panel:" + cfg.UUID, fetchedAt: time.Now()}
 	var v2 appConfigV2
-	errV2 := json.Unmarshal(cfg.Config, &v2)
-	if errV2 == nil && v2AppCount(&v2) > 0 {
-		ne.v2 = &v2
-	} else {
-		var std appConfig
-		errStd := json.Unmarshal(cfg.Config, &std)
-		if errStd == nil && stdAppCount(&std) > 0 {
-			ne.std = &std
-		} else {
-			a.log.Warn("miniapp connect: конфиг из панели без приложений",
-				"config", cfg.Name, "bytes", len(cfg.Config), "v2_err", errV2, "std_err", errStd)
-			return nil
-		}
+	if json.Unmarshal(cfg.Config, &v2) == nil && v2AppCount(&v2) > 0 {
+		ce.v2 = &v2
+		return ce
 	}
-	apps := v2AppCount(&v2)
-	if ne.std != nil {
-		apps = stdAppCount(ne.std)
+	var std appConfig
+	if json.Unmarshal(cfg.Config, &std) == nil && stdAppCount(&std) > 0 {
+		ce.std = &std
+		return ce
 	}
-	a.log.Info("miniapp connect: конфиг приложений получен из панели", "config", cfg.Name, "apps", apps)
-	a.connectMu.Lock()
-	a.connectCache = ne
-	a.connectMu.Unlock()
-	return ne
+	return nil
+}
+
+func ceAppCount(ce *connectCacheEntry) int {
+	switch {
+	case ce == nil:
+		return 0
+	case ce.v2 != nil:
+		return v2AppCount(ce.v2)
+	case ce.std != nil:
+		return stdAppCount(ce.std)
+	}
+	return 0
 }
 
 // acBuildStd maps standard-schema apps to DTOs, featured-first.
@@ -581,7 +654,8 @@ func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	// Keep the legacy mobile fields populated so the Telegram mini-app (iOS +
 	// Android only) works unchanged; the web cabinet uses dto.Platforms (all).
 	for _, p := range dto.Platforms {
-		switch p.Key {
+		// Ключ платформы приходит как есть: страницы пишут и "ios", и "iOS".
+		switch strings.ToLower(p.Key) {
 		case "ios":
 			dto.IOS = p.Apps
 		case "android":

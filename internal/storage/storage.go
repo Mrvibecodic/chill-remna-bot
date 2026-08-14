@@ -42,6 +42,8 @@ type Storage interface {
 	ListWhitelistIDs(ctx context.Context) ([]int64, error)
 	WhitelistAllUsers(ctx context.Context) (int64, error)
 	ClearWhitelistAll(ctx context.Context) (int64, error)
+	ClearWhitelistIDs(ctx context.Context) (int64, error)
+	BalanceHeld(ctx context.Context) (int64, int, error)
 	CountWhitelisted(ctx context.Context) (int, error)
 	ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
 
@@ -373,6 +375,10 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 	return out, total, rows.Err()
 }
 
+// usersSearchLimit — страховка на случай нулевого/отрицательного лимита:
+// sqlite на LIMIT -1 отдаст всё, postgres упадёт с ошибкой.
+const usersSearchLimit = 50
+
 // likePattern готовит подстроку для LIKE: джокеры из пользовательского ввода
 // экранируются, иначе «100_» нашло бы и «1001», а «%» — вообще всех.
 func likePattern(q string) string {
@@ -385,11 +391,18 @@ func likePattern(q string) string {
 // латиницы, а в postgres регистрозависим вовсе — без этого поиск «работал бы
 // на моей машине» и молча не находил ничего на боевой базе.
 func (b *base) SearchUsers(ctx context.Context, q string, limit, offset int) ([]model.User, int, error) {
-	q = strings.TrimSpace(q)
+	// «@» перед ником отбрасываем ДО проверки на пустоту: иначе запрос из
+	// одного символа «@» превратился бы в пустую подстроку и нашёл всю базу.
+	q = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(q), "@"))
 	if q == "" {
 		return nil, 0, nil
 	}
-	q = strings.TrimPrefix(q, "@")
+	if limit <= 0 {
+		limit = usersSearchLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	lower, raw := likePattern(strings.ToLower(q)), likePattern(q)
 	// Сравниваем и по LOWER, и как есть: LOWER в sqlite умеет только латиницу,
 	// поэтому кириллица там нашлась бы только по «опущенному» запросу, которого
@@ -2093,11 +2106,28 @@ func (b *base) ClearWhitelistAll(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := res.RowsAffected()
+	return res.RowsAffected()
+}
+
+// ClearWhitelistIDs опустошает предзаполненный список. Идёт в паре с
+// ClearWhitelistAll: иначе «снять доступ у всех» не считается — заранее
+// добавленный ID вернул бы человеку доступ при первом же входе.
+func (b *base) ClearWhitelistIDs(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "DELETE FROM whitelist")
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
-	return n, nil
+	return res.RowsAffected()
+}
+
+// BalanceHeld — сколько денег лежит на балансах и у скольких человек. Нужно
+// админу перед выключением пополнения: решать вслепую он не должен.
+func (b *base) BalanceHeld(ctx context.Context) (int64, int, error) {
+	var sum int64
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COALESCE(SUM(balance), 0), COUNT(*) FROM users WHERE balance > 0").Scan(&sum, &n)
+	return sum, n, err
 }
 
 // ListWhitelistedUsers — постранично те, у кого доступ есть на самом деле.
@@ -2105,6 +2135,12 @@ func (b *base) ClearWhitelistAll(ctx context.Context) (int64, error) {
 // устройству опустошаются при первом входе, поэтому список всегда выглядел
 // пустым, даже когда доступ был у всей базы.
 func (b *base) ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+	if limit <= 0 {
+		limit = usersSearchLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	var total int
 	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE whitelisted = 1").Scan(&total); err != nil {
 		return nil, 0, err

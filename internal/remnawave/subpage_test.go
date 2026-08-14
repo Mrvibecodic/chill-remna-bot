@@ -52,47 +52,27 @@ func TestSubpageConfigsMissingAPI(t *testing.T) {
 	}
 }
 
-func TestSubpageConfigForPicksAssigned(t *testing.T) {
+func TestSubpageConfigUUIDForReadsAssignment(t *testing.T) {
 	c := subpageClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/subscription-page-configs":
-			_, _ = io.WriteString(w, `{"response":{"total":2,"configs":[
-				{"uuid":"a","name":"Default","viewPosition":1,"config":{"platforms":{}}},
-				{"uuid":"b","name":"Second","viewPosition":2,"config":{"platforms":{}}}
-			]}}`)
-		case strings.HasPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"):
-			if got := strings.TrimPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"); got != "sh0rt" {
-				t.Errorf("shortUuid = %q", got)
-			}
-			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"b","webpageAllowed":true}}`)
-		default:
-			t.Errorf("неожиданный путь %q", r.URL.Path)
+		if got := strings.TrimPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"); got != "sh0rt" {
+			t.Errorf("shortUuid = %q", got)
 		}
+		_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"b","webpageAllowed":true}}`)
 	})
-	cfg, err := c.SubpageConfigFor(context.Background(), "sh0rt")
-	if err != nil || cfg == nil {
-		t.Fatalf("cfg = %v, err = %v", cfg, err)
-	}
-	if cfg.UUID != "b" {
-		t.Fatalf("выбран %q, want b", cfg.UUID)
+	uuid, err := c.SubpageConfigUUIDFor(context.Background(), "sh0rt")
+	if err != nil || uuid != "b" {
+		t.Fatalf("uuid = %q, err = %v", uuid, err)
 	}
 }
 
-// Персональный маршрут не обязателен: если панель на него не отвечает, берём
-// первый конфиг, он же дефолтный.
-func TestSubpageConfigForFallsBackToFirst(t *testing.T) {
+// null означает «конфиг не назначен» — берём дефолтный, а не падаем.
+func TestSubpageConfigUUIDForNull(t *testing.T) {
 	c := subpageClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/subscription-page-configs" {
-			_, _ = io.WriteString(w, `{"response":{"total":1,"configs":[
-				{"uuid":"a","name":"Default","viewPosition":1,"config":{"platforms":{}}}
-			]}}`)
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":null,"webpageAllowed":true}}`)
 	})
-	cfg, err := c.SubpageConfigFor(context.Background(), "sh0rt")
-	if err != nil || cfg == nil || cfg.UUID != "a" {
-		t.Fatalf("cfg = %v, err = %v", cfg, err)
+	uuid, err := c.SubpageConfigUUIDFor(context.Background(), "sh0rt")
+	if err != nil || uuid != "" {
+		t.Fatalf("uuid = %q, err = %v", uuid, err)
 	}
 }
 

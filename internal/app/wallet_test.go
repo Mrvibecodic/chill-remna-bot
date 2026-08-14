@@ -118,3 +118,22 @@ func TestWallet_AdminToggle(t *testing.T) {
 		t.Fatal("не-админ не должен менять настройку кошелька")
 	}
 }
+
+// Экран кошелька должен показывать РЕАЛЬНУЮ сумму на балансах: ради этого
+// числа он и нужен — выключать пополнение вслепую нельзя.
+func TestWallet_HeldAmount(t *testing.T) {
+	a, _, fs := walletApp(t, true)
+	ctx := context.Background()
+	for _, id := range []int64{801, 802} {
+		_ = fs.UpsertUser(ctx, id)
+		if err := fs.AddBalance(ctx, id, 50000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = fs.UpsertUser(ctx, 803)
+
+	sum, n := a.walletHeld(ctx)
+	if sum != 100000 || n != 2 {
+		t.Fatalf("на балансах = %d ₽ у %d чел., ожидалось 1000 у 2", sum/100, n)
+	}
+}

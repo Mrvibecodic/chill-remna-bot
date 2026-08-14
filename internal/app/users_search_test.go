@@ -112,3 +112,57 @@ func TestUserSearch_EmptyResult(t *testing.T) {
 		t.Fatalf("на пустой выдаче нет кнопки повторного поиска: %v", msg.cbData)
 	}
 }
+
+// Один символ «@» — не запрос: раньше он превращался в пустую подстроку и
+// выдавал всю базу.
+func TestUserSearch_AtSignIsNotEveryone(t *testing.T) {
+	a, msg, fs := searchApp(t)
+	ctx := context.Background()
+	for _, id := range []int64{5001, 5002} {
+		_ = fs.UpsertUser(ctx, id)
+	}
+	a.handleCallback(ctx, cb(100, "usr:find"))
+	a.handleMessage(ctx, msgText(100, "@"))
+	for _, d := range msg.cbData {
+		if strings.HasPrefix(d, "usr:view:") {
+			t.Fatalf("пустой запрос выдал пользователей: %v", msg.cbData)
+		}
+	}
+}
+
+// Запрос уходит в HTML-сообщение: спецсимволы обязаны экранироваться, иначе
+// Telegram отвергает сообщение целиком и экран не появляется.
+func TestUserSearch_QueryIsEscaped(t *testing.T) {
+	a, msg, fs := searchApp(t)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 5003)
+
+	a.handleCallback(ctx, cb(100, "usr:find"))
+	a.handleMessage(ctx, msgText(100, "R&D <тест>"))
+	var seen bool
+	for _, txt := range msg.texts {
+		if strings.Contains(txt, "R&amp;D") {
+			seen = true
+		}
+		if strings.Contains(txt, "<тест>") {
+			t.Fatalf("сырой ввод попал в HTML: %q", txt)
+		}
+	}
+	if !seen {
+		t.Fatalf("экран поиска не показан: %v", msg.texts)
+	}
+}
+
+// «Снять доступ у всех» обязано чистить и предзаполненные ID: иначе человек
+// вернёт себе доступ при первом же входе.
+func TestWhitelist_ClearAlsoDropsPrefilledIDs(t *testing.T) {
+	a, _, fs := searchApp(t)
+	ctx := context.Background()
+	if err := fs.AddWhitelistID(ctx, 6001); err != nil {
+		t.Fatal(err)
+	}
+	a.handleCallback(ctx, cb(100, "usr:wlclearok"))
+	if ok, _ := fs.IsWhitelistID(ctx, 6001); ok {
+		t.Fatal("предзаполненный ID пережил снятие доступа у всех")
+	}
+}

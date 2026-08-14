@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
@@ -189,5 +190,102 @@ func TestFetchPanelAppConfigNoAPI(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Fatalf("запросов к панели = %d, want 1", hits)
+	}
+}
+
+// Панель может держать несколько конфигов и назначать разным подпискам разные.
+// Кэш обязан различать их: иначе человек увидит чужой набор приложений.
+func TestFetchPanelAppConfigPerSubscription(t *testing.T) {
+	cfgA := strings.Replace(currentSchemaBody, `"name":"App One"`, `"name":"OnlyA"`, 1)
+	cfgB := strings.Replace(currentSchemaBody, `"name":"App One"`, `"name":"OnlyB"`, 1)
+	panelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/subscription-page-configs":
+			_, _ = io.WriteString(w, `{"response":{"total":2,"configs":[`+
+				`{"uuid":"a","name":"A","viewPosition":1,"config":`+cfgA+`},`+
+				`{"uuid":"b","name":"B","viewPosition":2,"config":`+cfgB+`}]}}`)
+		case strings.HasPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"):
+			id := strings.TrimPrefix(r.URL.Path, "/api/subscriptions/subpage-config/")
+			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"`+id+`","webpageAllowed":true}}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer panelSrv.Close()
+
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panelSrv.URL, APIToken: "t"})
+	iosName := func(short string) string {
+		ce := a.fetchPanelAppConfig(context.Background(), panel, short, "")
+		if ce == nil || ce.v2 == nil {
+			t.Fatalf("%s: конфиг не получен", short)
+		}
+		return ce.v2.Platforms["ios"].Apps[0].Name
+	}
+	if got := iosName("a"); got != "OnlyA" {
+		t.Fatalf("подписка a получила %q", got)
+	}
+	if got := iosName("b"); got != "OnlyB" {
+		t.Fatalf("подписка b получила чужой конфиг: %q", got)
+	}
+}
+
+// Человек закрыл мини-апп — запрос отменился. Это не повод на десять минут
+// отключать панельный источник для всех остальных.
+func TestFetchPanelAppConfigCancelledRequest(t *testing.T) {
+	var hits int
+	panelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.WriteString(w, `{"response":{"total":1,"configs":[{"uuid":"a","name":"A","viewPosition":1,"config":`+currentSchemaBody+`}]}}`)
+	}))
+	defer panelSrv.Close()
+
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panelSrv.URL, APIToken: "t"})
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+	if ce := a.fetchPanelAppConfig(dead, panel, "sh0rt", ""); ce != nil {
+		t.Fatal("отменённый запрос не должен давать конфиг")
+	}
+	if ce := a.fetchPanelAppConfig(context.Background(), panel, "sh0rt", ""); ce == nil {
+		t.Fatal("следующий пользователь должен получить конфиг, а не паузу")
+	}
+	if hits == 0 {
+		t.Fatal("панель не опрошена")
+	}
+}
+
+// Панель API отдала, но конфигов нет — не долбим её на каждом заходе.
+func TestFetchPanelAppConfigEmptyListPauses(t *testing.T) {
+	var hits int
+	panelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.WriteString(w, `{"response":{"total":0,"configs":[]}}`)
+	}))
+	defer panelSrv.Close()
+
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panelSrv.URL, APIToken: "t"})
+	for i := 0; i < 3; i++ {
+		if ce := a.fetchPanelAppConfig(context.Background(), panel, "sh0rt", ""); ce != nil {
+			t.Fatal("ожидался отказ")
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("запросов к панели = %d, want 1", hits)
+	}
+}
+
+// Битая локализация в имени платформы косметическая: приложения обязаны
+// остаться. Именно из-за жёсткого типа тут терялся весь конфиг.
+func TestFlexDisplayNameBrokenLocalization(t *testing.T) {
+	var c appConfigV2
+	body := `{"platforms":{"ios":{"displayName":{"en":1},"apps":[{"name":"A","featured":true,` +
+		`"blocks":[{"buttons":[{"link":"a://add/{{SUBSCRIPTION_LINK}}","type":"subscriptionLink","text":{"en":"add"}}]}]}]}}}`
+	if err := json.Unmarshal([]byte(body), &c); err != nil {
+		t.Fatalf("разбор упал: %v", err)
+	}
+	if len(c.Platforms["ios"].Apps) != 1 {
+		t.Fatalf("приложения потеряны: %+v", c.Platforms)
 	}
 }

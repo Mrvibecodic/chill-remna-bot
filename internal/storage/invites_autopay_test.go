@@ -293,3 +293,46 @@ func TestSearchUsers(t *testing.T) {
 		check("510_")
 	})
 }
+
+// Экран кошелька строится на этих числах: сумма и количество должны считаться
+// по настоящей колонке баланса, а не по выборке уведомлений.
+func TestBalanceHeld(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{6101, 6102, 6103} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.AddBalance(ctx, 6101, 50000); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AddBalance(ctx, 6102, 25000); err != nil {
+			t.Fatal(err)
+		}
+		sum, n, err := st.BalanceHeld(ctx)
+		if err != nil || sum != 75000 || n != 2 {
+			t.Fatalf("BalanceHeld = %d у %d, err=%v", sum, n, err)
+		}
+	})
+}
+
+// «Снять доступ у всех» должно опустошать и предзаполненный список.
+func TestClearWhitelistIDs(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{6201, 6202} {
+			if err := st.AddWhitelistID(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n, err := st.ClearWhitelistIDs(ctx)
+		if err != nil || n != 2 {
+			t.Fatalf("удалено = %d, err=%v", n, err)
+		}
+		ids, err := st.ListWhitelistIDs(ctx)
+		if err != nil || len(ids) != 0 {
+			t.Fatalf("список после очистки = %v, err=%v", ids, err)
+		}
+	})
+}

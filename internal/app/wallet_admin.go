@@ -36,17 +36,10 @@ func (a *App) walletHeld(ctx context.Context) (int64, int) {
 	if a.store == nil {
 		return 0, 0
 	}
-	users, err := a.store.UsersForNotify(ctx)
+	sum, n, err := a.store.BalanceHeld(ctx)
 	if err != nil {
+		a.log.Warn("кошелёк: подсчёт балансов", "err", err)
 		return 0, 0
-	}
-	var sum int64
-	n := 0
-	for _, u := range users {
-		if u.Balance > 0 {
-			sum += u.Balance
-			n++
-		}
 	}
 	return sum, n
 }

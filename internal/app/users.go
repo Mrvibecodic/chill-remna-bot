@@ -117,6 +117,13 @@ func (a *App) reconcileWhitelist(ctx context.Context, chatID int64) {
 	}
 }
 
+// clearUserSearch забывает последнюю выдачу поиска.
+func (a *App) clearUserSearch(chatID int64) {
+	ui := a.getUI(chatID)
+	ui.userQuery = ""
+	ui.userPage = 0
+}
+
 // backToUserList — куда ведёт «Назад» из карточки пользователя.
 func backToUserList(ui *uiState) string {
 	if ui != nil && ui.userQuery != "" {
@@ -164,12 +171,14 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 		rows = append(rows, nav)
 	}
 
-	title := i18n.T(lang, "users.search_title", q, total, page+1, max(pages, 1))
+	// Запрос уходит в HTML-сообщение: без экранирования «R&D» или «<тест»
+	// роняют отправку целиком, и экран просто не появляется.
+	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1))
 	if total == 0 {
-		title = i18n.T(lang, "users.search_empty", q)
+		title = i18n.T(lang, "users.search_empty", escapeName(q))
 		// В боте пусто — может, человек есть в панели, но не связан с чатом.
 		if pu := a.searchPanelUser(ctx, q); pu != nil {
-			title += "\n\n" + i18n.T(lang, "users.search_panel", pu.Username)
+			title += "\n\n" + i18n.T(lang, "users.search_panel", escapeName(pu.Username))
 			if pu.TelegramID != 0 {
 				rows = append(rows, []models.InlineKeyboardButton{
 					btn("👤 "+pu.Username, "usr:view:"+strconv.FormatInt(pu.TelegramID, 10)),
@@ -191,7 +200,16 @@ func (a *App) searchPanelUser(ctx context.Context, q string) *remnawave.PanelUse
 	if panel == nil {
 		return nil
 	}
-	u, err := panel.FindByUsername(ctx, strings.TrimPrefix(strings.TrimSpace(q), "@"))
+	q = strings.TrimPrefix(strings.TrimSpace(q), "@")
+	// Чистое число — это Telegram ID: по нику панель его не найдёт.
+	if id, err := strconv.ParseInt(q, 10, 64); err == nil && id != 0 {
+		u, err := panel.FindByTelegramID(ctx, id)
+		if err != nil {
+			return nil
+		}
+		return u
+	}
+	u, err := panel.FindByUsername(ctx, q)
 	if err != nil {
 		return nil
 	}
@@ -313,6 +331,13 @@ func (a *App) clearWhitelistAll(ctx context.Context, chatID int64) {
 	if err != nil {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
 		return
+	}
+	// Предзаполненные ID тоже: иначе заранее добавленный человек при первом
+	// же входе получил бы доступ обратно, и «снять у всех» ничего не значило.
+	if ids, err := a.store.ClearWhitelistIDs(ctx); err != nil {
+		a.log.Warn("access: очистка предзаполненного списка", "err", err)
+	} else {
+		n += ids
 	}
 	a.log.Info("access: доступ снят со всех", "count", n)
 	a.notify(ctx, chatID, i18n.T(lang, "wl.cleared", n))
@@ -453,6 +478,9 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "list":
+		// Выход в обычный список закрывает поиск: иначе «Назад» из карточки,
+		// открытой отсюда, увело бы в старую выдачу.
+		a.clearUserSearch(chatID)
 		a.showUsers(ctx, chatID, 0)
 	case "page":
 		page, _ := strconv.Atoi(arg)
@@ -522,6 +550,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		page, _ := strconv.Atoi(arg)
 		a.showUserSearch(ctx, chatID, page)
 	case "wllist":
+		a.clearUserSearch(chatID)
 		a.showWhitelist(ctx, chatID, 0)
 	case "wlpage":
 		page, _ := strconv.Atoi(arg)

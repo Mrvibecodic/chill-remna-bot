@@ -90,34 +90,3 @@ func (c *Client) SubpageConfigUUIDFor(ctx context.Context, shortUUID string) (st
 	}
 	return *env.Response.SubpageConfigUUID, nil
 }
-
-// SubpageConfigFor returns the config that applies to the given subscription:
-// the one the panel assigned to it, or the first one otherwise. A nil result
-// with a nil error means the panel has no usable config.
-func (c *Client) SubpageConfigFor(ctx context.Context, shortUUID string) (*SubpageConfig, error) {
-	list, err := c.SubpageConfigs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(list) == 0 {
-		return nil, nil
-	}
-	// Персональный конфиг — не обязателен: если панель на этот вопрос не
-	// отвечает, берём первый, он же дефолтный.
-	if uuid, err := c.SubpageConfigUUIDFor(ctx, shortUUID); err == nil && uuid != "" {
-		for i := range list {
-			if list[i].UUID == uuid {
-				if len(list[i].Config) == 0 {
-					return nil, nil
-				}
-				return &list[i], nil
-			}
-		}
-	}
-	for i := range list {
-		if len(list[i].Config) > 0 {
-			return &list[i], nil
-		}
-	}
-	return nil, nil
-}

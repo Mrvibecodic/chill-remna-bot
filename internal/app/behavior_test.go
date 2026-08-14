@@ -270,6 +270,24 @@ func (s *fakeStore) ListWhitelistedUsers(_ context.Context, limit, offset int) (
 	return all[offset:end], total, nil
 }
 
+func (s *fakeStore) ClearWhitelistIDs(context.Context) (int64, error) {
+	n := int64(len(s.wlIDs))
+	s.wlIDs = map[int64]bool{}
+	return n, nil
+}
+
+func (s *fakeStore) BalanceHeld(context.Context) (int64, int, error) {
+	var sum int64
+	n := 0
+	for _, u := range s.users {
+		if u.Balance > 0 {
+			sum += u.Balance
+			n++
+		}
+	}
+	return sum, n, nil
+}
+
 func (s *fakeStore) CountWhitelisted(context.Context) (int, error) {
 	n := 0
 	for _, u := range s.users {

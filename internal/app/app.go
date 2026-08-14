@@ -152,6 +152,8 @@ type App struct {
 
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
+	// panelCfgs — разобранные конфиги страницы подписки из панели (3.0.0+).
+	panelCfgs *panelCfgCache
 	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
 	// на панелях без такого API спрашивать его на каждый заход в «Подключить»
 	// незачем.
