@@ -175,6 +175,8 @@ type BotConfig struct {
 	MiniApp MiniAppConfig `json:"miniapp"`
 
 	Cabinet CabinetConfig `json:"cabinet"`
+
+	Wallet WalletConfig `json:"wallet"`
 }
 
 // Clone возвращает независимую копию конфига.
@@ -717,6 +719,25 @@ type TributeConfig struct {
 type MiniAppConfig struct {
 	Enabled bool `json:"enabled"`
 	Init    bool `json:"init"`
+}
+
+// WalletConfig управляет кошельком. TopUp — можно ли класть деньги на баланс:
+// у владельца бота это способ не собирать чужие деньги вперёд и не разбирать
+// потом требования вернуть неистраченное. Оплата с баланса при выключенном
+// пополнении ОСТАЁТСЯ: на баланс приходят реферальные начисления и промокоды,
+// и их надо чем-то тратить.
+type WalletConfig struct {
+	TopUp bool `json:"topup"`
+	Init  bool `json:"init"`
+}
+
+// NormalizeWallet включает пополнение для всех, кто обновился с версии без
+// этой настройки: молча заморозить чужие балансы обновлением образа нельзя.
+func (c *BotConfig) NormalizeWallet() {
+	if !c.Wallet.Init {
+		c.Wallet.TopUp = true
+		c.Wallet.Init = true
+	}
 }
 
 func (c *BotConfig) NormalizeMiniApp() {

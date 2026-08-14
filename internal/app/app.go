@@ -152,6 +152,12 @@ type App struct {
 
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
+	// panelCfgs — разобранные конфиги страницы подписки из панели (3.0.0+).
+	panelCfgs *panelCfgCache
+	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
+	// на панелях без такого API спрашивать его на каждый заход в «Подключить»
+	// незачем.
+	subpageOffUntil time.Time
 
 	flagMu       sync.RWMutex
 	flags        map[string][]byte
@@ -240,6 +246,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeUpdateCheck()
 		cfg.NormalizeAddSub()
 		cfg.NormalizeMiniApp()
+		cfg.NormalizeWallet()
 		cfg.NormalizeCabinet()
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
@@ -1126,6 +1133,8 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui.linkUID = 0
 	ui.inputBack = ""
 	ui.awaitPromo = false
+	ui.userQuery = ""
+	ui.userPage = 0
 	if back == "" {
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 		return

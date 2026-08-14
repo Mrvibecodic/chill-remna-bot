@@ -716,7 +716,8 @@ async function openMore(){
   try{ref=await api('/api/miniapp/referral');}catch(e){}
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Баланс</span></div>'+
     '<div class="title">'+rub(STATE.balanceK)+' ₽</div>'+
-    '<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button></div>';
+    (topupOn()?'<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button>':'')+
+    '<div class="hint" style="margin-top:12px">Баланс тратится только на подписку. Вывод средств невозможен.</div></div>';
   h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
     '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
   if(ref&&ref.enabled){
@@ -750,7 +751,9 @@ async function promoApply(el){
 }
 
 /* ---- top-up ---- */
+function topupOn(){return !(STATE.menu&&STATE.menu.topup_on===false);}
 async function topupOpen(){
+  if(!topupOn())return;
   haptic('tap');skSimple();setBack(openMore);
   try{var o=await api('/api/miniapp/topup/options');
     if(!o.amounts||!o.amounts.length||!o.methods||!o.methods.length){toast('Пополнение недоступно','err');openMore();return;}

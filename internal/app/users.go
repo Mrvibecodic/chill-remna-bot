@@ -84,6 +84,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 
 	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.user_search"), "usr:find")},
 		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
 		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
@@ -116,7 +117,183 @@ func (a *App) reconcileWhitelist(ctx context.Context, chatID int64) {
 	}
 }
 
-func (a *App) showWhitelist(ctx context.Context, chatID int64) {
+// clearUserSearch забывает последнюю выдачу поиска.
+func (a *App) clearUserSearch(chatID int64) {
+	ui := a.getUI(chatID)
+	ui.userQuery = ""
+	ui.userPage = 0
+}
+
+// backToUserList — куда ведёт «Назад» из карточки пользователя.
+func backToUserList(ui *uiState) string {
+	if ui != nil && ui.userQuery != "" {
+		return "usr:fpage:" + strconv.Itoa(ui.userPage)
+	}
+	return "usr:list"
+}
+
+// showUserSearch — выдача поиска по пользователям. Запрос берётся из состояния
+// админа: в callback_data его не положить (лимит 64 байта, а ищут в том числе
+// по кириллице).
+func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	ui := a.getUI(chatID)
+	q := ui.userQuery
+	if q == "" {
+		a.showUsers(ctx, chatID, 0)
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	users, total, err := a.store.SearchUsers(ctx, q, usersPageSize, page*usersPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	ui.userPage = page
+	pages := (total + usersPageSize - 1) / usersPageSize
+
+	var rows [][]models.InlineKeyboardButton
+	for _, u := range users {
+		label := "👤 " + a.userLabelByID(ctx, u.TelegramID)
+		if u.Blocked {
+			label += " 🚫"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
+		})
+	}
+	if nav := paginationRow("usr:fpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+
+	// Запрос уходит в HTML-сообщение: без экранирования «R&D» или «<тест»
+	// роняют отправку целиком, и экран просто не появляется.
+	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1))
+	if total == 0 {
+		title = i18n.T(lang, "users.search_empty", escapeName(q))
+		// В боте пусто — может, человек есть в панели, но не связан с чатом.
+		if pu := a.searchPanelUser(ctx, q); pu != nil {
+			title += "\n\n" + i18n.T(lang, "users.search_panel", escapeName(pu.Username))
+			if pu.TelegramID != 0 {
+				rows = append(rows, []models.InlineKeyboardButton{
+					btn("👤 "+pu.Username, "usr:view:"+strconv.FormatInt(pu.TelegramID, 10)),
+				})
+			}
+		}
+	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.user_search"), "usr:find")})
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// searchPanelUser — точное совпадение по имени учётки в панели: подстрочного
+// поиска панель не умеет, но по нику она находит и тех, кого бот ещё не видел.
+func (a *App) searchPanelUser(ctx context.Context, q string) *remnawave.PanelUser {
+	a.mu.Lock()
+	panel := a.panel
+	a.mu.Unlock()
+	if panel == nil {
+		return nil
+	}
+	q = strings.TrimPrefix(strings.TrimSpace(q), "@")
+	// Чистое число — это Telegram ID: по нику панель его не найдёт.
+	if id, err := strconv.ParseInt(q, 10, 64); err == nil && id != 0 {
+		u, err := panel.FindByTelegramID(ctx, id)
+		if err != nil {
+			return nil
+		}
+		return u
+	}
+	u, err := panel.FindByUsername(ctx, q)
+	if err != nil {
+		return nil
+	}
+	return u
+}
+
+// startUserSearch просит админа прислать запрос.
+func (a *App) startUserSearch(ctx context.Context, chatID int64) {
+	ui := a.getUI(chatID)
+	ui.adminInput = "user_find"
+	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "users.search_ask"), "menu:users")
+}
+
+// applyUserSearch принимает поисковый запрос от админа.
+func (a *App) applyUserSearch(ctx context.Context, chatID int64, text string) {
+	ui := a.getUI(chatID)
+	ui.adminInput = ""
+	ui.userQuery = strings.TrimSpace(text)
+	ui.userPage = 0
+	// Чистый Telegram ID — открываем карточку сразу, без промежуточной выдачи.
+	if id, err := strconv.ParseInt(ui.userQuery, 10, 64); err == nil && id != 0 && a.store != nil {
+		if u, _ := a.store.GetUser(ctx, id); u != nil {
+			a.showUser(ctx, chatID, id)
+			return
+		}
+	}
+	a.showUserSearch(ctx, chatID, 0)
+}
+
+// showWhitelist — кто на самом деле имеет доступ. Раньше этот экран показывал
+// только предзаполненные ID, а они по устройству опустошаются при первом входе
+// (см. reconcileWhitelist) — поэтому список выглядел пустым даже тогда, когда
+// доступ был выдан всей базе.
+func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	users, total, err := a.store.ListWhitelistedUsers(ctx, usersPageSize, page*usersPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	ids := 0
+	if list, err := a.store.ListWhitelistIDs(ctx); err == nil {
+		ids = len(list)
+	}
+	pages := (total + usersPageSize - 1) / usersPageSize
+
+	var rows [][]models.InlineKeyboardButton
+	for _, u := range users {
+		label := "👤 " + userLabel(&u)
+		if u.Blocked {
+			label += " 🚫"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
+		})
+	}
+	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+	rows = append(rows, []models.InlineKeyboardButton{
+		btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"),
+		btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids"),
+	})
+	if total > 0 {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_clear"), "usr:wlclear")})
+	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+
+	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1))
+	if total == 0 {
+		title = i18n.T(lang, "wl.granted_empty")
+	}
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// showWhitelistIDs — предзаполненный список: Telegram ID тех, кто ещё не
+// заходил в бота. При первом входе ID отсюда уезжает в доступ пользователя.
+func (a *App) showWhitelistIDs(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	if a.store == nil {
 		return
@@ -135,12 +312,36 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64) {
 			btn("🗑 "+sid, "usr:wldel:"+sid),
 		})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:wllist")})
 	title := i18n.T(lang, "wl.list_title", len(ids))
 	if len(ids) == 0 {
 		title = i18n.T(lang, "wl.list_empty")
 	}
-	a.sendKB(ctx, chatID, title, rows)
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// clearWhitelistAll снимает доступ со всех разом. Обратная операция к выдаче
+// доступа всей базе — без неё закрытый бот нечем закрыть на самом деле.
+func (a *App) clearWhitelistAll(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	n, err := a.store.ClearWhitelistAll(ctx)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	// Предзаполненные ID тоже: иначе заранее добавленный человек при первом
+	// же входе получил бы доступ обратно, и «снять у всех» ничего не значило.
+	if ids, err := a.store.ClearWhitelistIDs(ctx); err != nil {
+		a.log.Warn("access: очистка предзаполненного списка", "err", err)
+	} else {
+		n += ids
+	}
+	a.log.Info("access: доступ снят со всех", "count", n)
+	a.notify(ctx, chatID, i18n.T(lang, "wl.cleared", n))
+	a.showWhitelist(ctx, chatID, 0)
 }
 
 func (a *App) showUser(ctx context.Context, chatID, uid int64) {
@@ -248,7 +449,9 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:list"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		// «Назад» из карточки возвращает в выдачу поиска, если админ пришёл
+		// оттуда: иначе найденный человек стоил бы нового поиска.
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), backToUserList(a.getUI(chatID))), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
 	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock)+torLine, rows)
 }
@@ -275,6 +478,9 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "list":
+		// Выход в обычный список закрывает поиск: иначе «Назад» из карточки,
+		// открытой отсюда, увело бы в старую выдачу.
+		a.clearUserSearch(chatID)
 		a.showUsers(ctx, chatID, 0)
 	case "page":
 		page, _ := strconv.Atoi(arg)
@@ -338,15 +544,34 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
+	case "find":
+		a.startUserSearch(ctx, chatID)
+	case "fpage":
+		page, _ := strconv.Atoi(arg)
+		a.showUserSearch(ctx, chatID, page)
 	case "wllist":
-		a.showWhitelist(ctx, chatID)
+		a.clearUserSearch(chatID)
+		a.showWhitelist(ctx, chatID, 0)
+	case "wlpage":
+		page, _ := strconv.Atoi(arg)
+		a.showWhitelist(ctx, chatID, page)
+	case "wlids":
+		a.showWhitelistIDs(ctx, chatID)
+	case "wlclear":
+		lang := a.lang(chatID)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "wl.clear_ask"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.wl_clear_ok"), "usr:wlclearok")},
+			{btn(i18n.T(lang, "btn.back"), "usr:wllist")},
+		})
+	case "wlclearok":
+		a.clearWhitelistAll(ctx, chatID)
 	case "wldel":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		if a.store != nil && uid != 0 {
 			_ = a.store.RemoveWhitelistID(ctx, uid)
 			_ = a.store.SetWhitelisted(ctx, uid, false)
 		}
-		a.showWhitelist(ctx, chatID)
+		a.showWhitelistIDs(ctx, chatID)
 	case "p2pon", "p2poff":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		allow := action == "p2pon"

@@ -49,6 +49,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		HasSub:         a.userHasSub(ctx, tgID),
 		TrialAvailable: a.trialAvailable(ctx, tgID),
 		ReferralOn:     a.referralCfg().Enabled,
+		TopUpOn:        a.topUpEnabled(),
 		SupportURL:     a.supportURL(),
 	}
 	if dto.HasSub {

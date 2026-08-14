@@ -155,13 +155,16 @@ type MiniMeDTO struct {
 // MiniMenuDTO mirrors navRow predicates so the front-end shows exactly the
 // actions the chat bot would show this user.
 type MiniMenuDTO struct {
-	HasSub         bool     `json:"has_sub"`
-	CanRenew       bool     `json:"can_renew"`
-	TrialAvailable bool     `json:"trial_available"`
-	ReferralOn     bool     `json:"referral_on"`
-	PayMethods     []string `json:"pay_methods"`
-	SupportURL     string   `json:"support_url"`
-	GroupURL       string   `json:"group_url"`
+	HasSub         bool `json:"has_sub"`
+	CanRenew       bool `json:"can_renew"`
+	TrialAvailable bool `json:"trial_available"`
+	ReferralOn     bool `json:"referral_on"`
+	// TopUpOn — включено ли пополнение баланса. Кошелёк как таковой остаётся:
+	// на баланс приходят реферальные начисления, тратить их можно всегда.
+	TopUpOn    bool     `json:"topup_on"`
+	PayMethods []string `json:"pay_methods"`
+	SupportURL string   `json:"support_url"`
+	GroupURL   string   `json:"group_url"`
 }
 
 type MiniSubDTO struct {

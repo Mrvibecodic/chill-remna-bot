@@ -321,13 +321,17 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		rows = append([][]models.InlineKeyboardButton{payBtn}, rows...)
 	}
 	if len(rows) == 0 {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang),
-		})
+		empty := [][]models.InlineKeyboardButton{}
+		if a.topUpEnabled() {
+			empty = append(empty, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
+		}
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), append(empty, homeRow(lang)))
 		return
 	}
 
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
+	if a.topUpEnabled() {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
+	}
 	rows = append(rows, homeRow(lang))
 	caption := i18n.T(lang, "buy.choose_method", kopecksToRub(bal))
 	// Смена тарифа: показываем зачёт остатка теми же цифрами, которые применит
@@ -1230,6 +1234,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.adminInput = ""
 		ui.linkUID = 0
 		a.adminLinkPanel(ctx, chatID, uid, text)
+	case "user_find":
+		a.applyUserSearch(ctx, chatID, text)
 	case "wl_add":
 		ui.adminInput = ""
 		raw := strings.NewReplacer(",", " ", "\n", " ", ";", " ").Replace(text)
@@ -1246,7 +1252,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 				}
 			}
 		}
-		a.showWhitelist(ctx, chatID)
+		a.showWhitelist(ctx, chatID, 0)
 	case "wh_domain":
 		ui.adminInput = ""
 		d := strings.TrimSpace(text)

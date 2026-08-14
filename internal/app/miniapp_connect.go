@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
 )
 
@@ -79,9 +80,42 @@ type acV2App struct {
 	Blocks   []acV2Block `json:"blocks"`
 }
 
+// acFlexName is a platform's display name. Older subscription pages wrote it as
+// a plain string, the current schema writes a {lang: text} map — a struct field
+// typed as one of them makes json.Unmarshal fail on the other and drops the
+// whole config, so accept both.
+type acFlexName struct {
+	Plain string
+	Loc   acLocalized
+}
+
+func (n *acFlexName) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	// Имя платформы косметическое: что бы в нём ни лежало, ронять из-за него
+	// весь конфиг (и оставлять человека без списка приложений) нельзя.
+	switch b[0] {
+	case '"':
+		_ = json.Unmarshal(b, &n.Plain)
+	case '{':
+		_ = json.Unmarshal(b, &n.Loc)
+	}
+	return nil
+}
+
+// pick returns the display name in the user's language.
+func (n acFlexName) pick(lang string) string {
+	if n.Plain != "" {
+		return n.Plain
+	}
+	return localize(n.Loc, lang)
+}
+
 type acV2Platform struct {
-	DisplayName string    `json:"displayName"`
-	Apps        []acV2App `json:"apps"`
+	DisplayName acFlexName `json:"displayName"`
+	Apps        []acV2App  `json:"apps"`
 }
 
 type appConfigV2 struct {
@@ -120,14 +154,24 @@ func platformLabel(key, displayName string) string {
 }
 
 // orderedPlatformKeys returns the platform keys present, known ones first (per
-// platformOrder) then any extras alphabetically.
+// platformOrder) then any extras alphabetically. Matching ignores case: the
+// config spells them androidTV/appleTV while platformOrder is lowercase, and a
+// case-sensitive compare would push those platforms to the end of the list.
 func orderedPlatformKeys(present map[string]bool) []string {
+	byLower := map[string][]string{}
+	for k := range present {
+		lk := strings.ToLower(k)
+		byLower[lk] = append(byLower[lk], k)
+	}
+	for _, ks := range byLower {
+		sort.Strings(ks)
+	}
 	var out []string
 	seen := map[string]bool{}
 	for _, k := range platformOrder {
-		if present[k] {
-			out = append(out, k)
-			seen[k] = true
+		for _, orig := range byLower[k] {
+			out = append(out, orig)
+			seen[orig] = true
 		}
 	}
 	var extra []string
@@ -245,16 +289,22 @@ func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path
 		return nil, nil, false
 	}
 	var v2 appConfigV2
-	if json.Unmarshal(body, &v2) == nil && v2AppCount(&v2) > 0 {
+	errV2 := json.Unmarshal(body, &v2)
+	if errV2 == nil && v2AppCount(&v2) > 0 {
 		a.log.Info("miniapp connect: app-config loaded (v2)", "url", full, "platforms", len(v2.Platforms), "apps", v2AppCount(&v2))
 		return &v2, nil, true
 	}
 	var std appConfig
-	if json.Unmarshal(body, &std) == nil && stdAppCount(&std) > 0 {
+	errStd := json.Unmarshal(body, &std)
+	if errStd == nil && stdAppCount(&std) > 0 {
 		a.log.Info("miniapp connect: app-config loaded (standard)", "url", full, "platforms", len(std.Platforms), "apps", stdAppCount(&std))
 		return nil, &std, true
 	}
-	a.log.Warn("miniapp connect: app-config parsed but has no apps", "url", full, "bytes", len(body))
+	// Обе схемы мимо. Тексты ошибок разбора обязательны в логе: без них
+	// «нет приложений» одинаково выглядит и когда конфиг чужого формата, и
+	// когда одно поле разъехалось по типу и уронило разбор целиком.
+	a.log.Warn("miniapp connect: app-config parsed but has no apps",
+		"url", full, "bytes", len(body), "v2_err", errV2, "std_err", errStd)
 	return nil, nil, false
 }
 
@@ -329,6 +379,172 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 		return ce
 	}
 	return nil
+}
+
+// subpageOffFor — на сколько бот перестаёт спрашивать панель про конфиг
+// приложений после того, как она ответила «такого API нет».
+const subpageOffFor = time.Hour
+
+// subpageRetryIn — пауза после временной осечки панели (нет прав у токена,
+// панель недоступна): фолбэк на страницу подписки работает, а долбить панель
+// на каждый заход незачем.
+const subpageRetryIn = 10 * time.Minute
+
+// shortUUIDFromSub достаёт короткий идентификатор подписки из её ссылки —
+// на случай, если панель не положила его в карточку пользователя.
+func shortUUIDFromSub(subURL string) string {
+	u, err := url.Parse(subURL)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if p := strings.TrimSpace(parts[i]); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// panelCfgCache — разобранные конфиги страницы подписки из панели. Ключ —
+// UUID конфига: панель умеет держать несколько и назначать разным подпискам
+// разные, поэтому одним слотом тут не обойтись — иначе человек увидит чужой
+// набор приложений.
+type panelCfgCache struct {
+	fetchedAt time.Time
+	byUUID    map[string]*connectCacheEntry
+	firstUUID string
+}
+
+// fetchPanelAppConfig берёт конфиг приложений из панели (3.0.0+). nil означает
+// «этим путём не вышло» — вызывающий идёт на саму страницу подписки.
+func (a *App) fetchPanelAppConfig(ctx context.Context, panel *remnawave.Client, shortUUID, subURL string) *connectCacheEntry {
+	if panel == nil {
+		return nil
+	}
+	if shortUUID == "" {
+		shortUUID = shortUUIDFromSub(subURL)
+	}
+
+	a.connectMu.Lock()
+	pc := a.panelCfgs
+	off := a.subpageOffUntil
+	a.connectMu.Unlock()
+
+	// Кэш проверяем ДО паузы: осечка панели не повод прятать конфиг, который
+	// уже разобран и лежит рядом.
+	if pc == nil || time.Since(pc.fetchedAt) >= appConfigTTL {
+		if !off.IsZero() && time.Now().Before(off) {
+			return nil
+		}
+		var err error
+		if pc, err = a.loadPanelCfgs(ctx, panel); err != nil {
+			return nil
+		}
+	}
+	if pc == nil || len(pc.byUUID) == 0 {
+		return nil
+	}
+
+	// Какой конфиг назначен именно этой подписке. Маршрут необязательный: если
+	// панель на него не отвечает, берём первый (он же дефолтный).
+	uuid := ""
+	if len(pc.byUUID) > 1 {
+		if u, err := panel.SubpageConfigUUIDFor(ctx, shortUUID); err == nil {
+			uuid = u
+		}
+	}
+	if ce := pc.byUUID[uuid]; ce != nil {
+		return ce
+	}
+	return pc.byUUID[pc.firstUUID]
+}
+
+// loadPanelCfgs тянет и разбирает все конфиги страницы подписки разом: их
+// единицы, а список отдаётся одним запросом.
+func (a *App) loadPanelCfgs(ctx context.Context, panel *remnawave.Client) (*panelCfgCache, error) {
+	list, err := panel.SubpageConfigs(ctx)
+	if err != nil {
+		// Отмена запроса (человек закрыл мини-апп) — не повод объявлять панель
+		// неработающей для всех остальных.
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		// Нет такого API (панель до 3.0.0) — молча и надолго. Прочее (нет прав
+		// у токена, панель прилегла) — с записью в лог и ненадолго, но тоже с
+		// паузой: иначе каждый заход в «Подключить» бьёт в панель впустую.
+		pause := subpageOffFor
+		if !remnawave.ErrNoSubpageAPI(err) {
+			pause = subpageRetryIn
+			a.log.Warn("miniapp connect: конфиг приложений из панели", "err", err)
+		}
+		a.connectMu.Lock()
+		a.subpageOffUntil = time.Now().Add(pause)
+		a.connectMu.Unlock()
+		return nil, err
+	}
+
+	pc := &panelCfgCache{fetchedAt: time.Now(), byUUID: map[string]*connectCacheEntry{}}
+	for i := range list {
+		cfg := &list[i]
+		ce := parsePanelCfg(cfg)
+		if ce == nil {
+			if len(cfg.Config) > 0 {
+				a.log.Warn("miniapp connect: конфиг из панели без приложений", "config", cfg.Name, "bytes", len(cfg.Config))
+			}
+			continue
+		}
+		pc.byUUID[cfg.UUID] = ce
+		if pc.firstUUID == "" {
+			pc.firstUUID = cfg.UUID
+			a.log.Info("miniapp connect: конфиг приложений получен из панели", "config", cfg.Name, "apps", ceAppCount(ce))
+		}
+	}
+	if len(pc.byUUID) == 0 {
+		// Панель API отдала, но приложений в ней нет — не долбим её в цикле.
+		a.connectMu.Lock()
+		a.subpageOffUntil = time.Now().Add(subpageRetryIn)
+		a.connectMu.Unlock()
+		return nil, errNoPanelApps
+	}
+	a.connectMu.Lock()
+	a.panelCfgs = pc
+	a.subpageOffUntil = time.Time{}
+	a.connectMu.Unlock()
+	return pc, nil
+}
+
+var errNoPanelApps = errors.New("в панели нет конфигов страницы подписки с приложениями")
+
+// parsePanelCfg разбирает сырой конфиг панели любой из двух схем.
+func parsePanelCfg(cfg *remnawave.SubpageConfig) *connectCacheEntry {
+	if cfg == nil || len(cfg.Config) == 0 {
+		return nil
+	}
+	ce := &connectCacheEntry{base: "panel:" + cfg.UUID, fetchedAt: time.Now()}
+	var v2 appConfigV2
+	if json.Unmarshal(cfg.Config, &v2) == nil && v2AppCount(&v2) > 0 {
+		ce.v2 = &v2
+		return ce
+	}
+	var std appConfig
+	if json.Unmarshal(cfg.Config, &std) == nil && stdAppCount(&std) > 0 {
+		ce.std = &std
+		return ce
+	}
+	return nil
+}
+
+func ceAppCount(ce *connectCacheEntry) int {
+	switch {
+	case ce == nil:
+		return 0
+	case ce.v2 != nil:
+		return v2AppCount(ce.v2)
+	case ce.std != nil:
+		return stdAppCount(ce.std)
+	}
+	return 0
 }
 
 // acBuildStd maps standard-schema apps to DTOs, featured-first.
@@ -414,11 +630,17 @@ func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	subURL := a.rewriteSub(u.SubscriptionURL)
 	dto.SubURL = subURL
 	dto.Username = u.Username
-	base := appConfigBase(subURL)
-	if base == "" {
-		return dto
+	// Панель 3.x хранит конфиг страницы подписки у себя и отдаёт его по токену.
+	// Это основной источник: не нужны ни cookie-сессия страницы, ни обход её
+	// защит. На панелях без такого API остаётся поход на саму страницу.
+	ce := a.fetchPanelAppConfig(ctx, panel, u.ShortUUID, subURL)
+	if ce == nil {
+		base := appConfigBase(subURL)
+		if base == "" {
+			return dto
+		}
+		ce = a.fetchAppConfig(ctx, base, subURL)
 	}
-	ce := a.fetchAppConfig(ctx, base, subURL)
 	if ce == nil {
 		return dto
 	}
@@ -432,7 +654,8 @@ func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	// Keep the legacy mobile fields populated so the Telegram mini-app (iOS +
 	// Android only) works unchanged; the web cabinet uses dto.Platforms (all).
 	for _, p := range dto.Platforms {
-		switch p.Key {
+		// Ключ платформы приходит как есть: страницы пишут и "ios", и "iOS".
+		switch strings.ToLower(p.Key) {
 		case "ios":
 			dto.IOS = p.Apps
 		case "android":
@@ -472,7 +695,7 @@ func buildV2Platforms(c *appConfigV2, subURL, username, lang string) []web.MiniC
 		if len(apps) == 0 {
 			continue
 		}
-		out = append(out, web.MiniConnectPlatformDTO{Key: k, Label: platformLabel(k, p.DisplayName), Apps: apps})
+		out = append(out, web.MiniConnectPlatformDTO{Key: k, Label: platformLabel(k, p.DisplayName.pick(lang)), Apps: apps})
 	}
 	return out
 }

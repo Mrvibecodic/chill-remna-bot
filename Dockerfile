@@ -1,5 +1,5 @@
 # Сборка идёт на архитектуре раннера, бинарник кросс-компилируется под целевую.
-FROM --platform=$BUILDPLATFORM golang:1.25.12-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25.13-alpine AS build
 ARG COMMIT=dev
 ARG BUILD_DATE=
 ARG TARGETOS

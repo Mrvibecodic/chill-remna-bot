@@ -33,6 +33,7 @@ type Storage interface {
 	HasApprovedPurchase(ctx context.Context, telegramID int64) (bool, error)
 
 	ListUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
+	SearchUsers(ctx context.Context, q string, limit, offset int) ([]model.User, int, error)
 	SetBlocked(ctx context.Context, telegramID int64, blocked bool) error
 	SetWhitelisted(ctx context.Context, telegramID int64, on bool) error
 	AddWhitelistID(ctx context.Context, telegramID int64) error
@@ -40,7 +41,11 @@ type Storage interface {
 	IsWhitelistID(ctx context.Context, telegramID int64) (bool, error)
 	ListWhitelistIDs(ctx context.Context) ([]int64, error)
 	WhitelistAllUsers(ctx context.Context) (int64, error)
+	ClearWhitelistAll(ctx context.Context) (int64, error)
+	ClearWhitelistIDs(ctx context.Context) (int64, error)
+	BalanceHeld(ctx context.Context) (int64, int, error)
 	CountWhitelisted(ctx context.Context) (int, error)
+	ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
 
 	CreateInvite(ctx context.Context, inv *model.Invite) error
 	GetInvite(ctx context.Context, code string) (*model.Invite, error)
@@ -352,6 +357,82 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
 			"ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var approved, blocked int
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		u.P2PApproved = approved != 0
+		u.Blocked = blocked != 0
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
+// usersSearchLimit — страховка на случай нулевого/отрицательного лимита:
+// sqlite на LIMIT -1 отдаст всё, postgres упадёт с ошибкой.
+const usersSearchLimit = 50
+
+// likePattern готовит подстроку для LIKE: джокеры из пользовательского ввода
+// экранируются, иначе «100_» нашло бы и «1001», а «%» — вообще всех.
+func likePattern(q string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + r.Replace(q) + "%"
+}
+
+// SearchUsers ищет по нику, имени, Telegram ID и почте веб-аккаунта.
+// LOWER с обеих сторон обязателен: LIKE в sqlite регистронезависим только для
+// латиницы, а в postgres регистрозависим вовсе — без этого поиск «работал бы
+// на моей машине» и молча не находил ничего на боевой базе.
+func (b *base) SearchUsers(ctx context.Context, q string, limit, offset int) ([]model.User, int, error) {
+	// «@» перед ником отбрасываем ДО проверки на пустоту: иначе запрос из
+	// одного символа «@» превратился бы в пустую подстроку и нашёл всю базу.
+	q = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(q), "@"))
+	if q == "" {
+		return nil, 0, nil
+	}
+	if limit <= 0 {
+		limit = usersSearchLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	lower, raw := likePattern(strings.ToLower(q)), likePattern(q)
+	// Сравниваем и по LOWER, и как есть: LOWER в sqlite умеет только латиницу,
+	// поэтому кириллица там нашлась бы только по «опущенному» запросу, которого
+	// в базе нет. В postgres LOWER юникодный, и там работают оба варианта.
+	cols := []string{"u.username", "u.first_name", "CAST(u.telegram_id AS TEXT)", "w.email"}
+	var parts []string
+	args := make([]any, 0, len(cols)*2+2)
+	n := 0
+	for _, c := range cols {
+		n++
+		lo := b.ph(n)
+		args = append(args, lower)
+		n++
+		rw := b.ph(n)
+		args = append(args, raw)
+		parts = append(parts, "(LOWER("+c+") LIKE "+lo+" ESCAPE '\\' OR "+c+" LIKE "+rw+" ESCAPE '\\')")
+	}
+	where := "WHERE " + strings.Join(parts, " OR ")
+	from := "FROM users u LEFT JOIN web_users w ON w.tg_id = u.telegram_id "
+
+	var total int
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(DISTINCT u.telegram_id) "+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT u.telegram_id, u.username, u.first_name, u.p2p_approved, u.blocked, u.created_at "+
+			from+where+" ORDER BY u.created_at DESC, u.telegram_id DESC LIMIT "+b.ph(n+1)+" OFFSET "+b.ph(n+2),
+		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -788,6 +869,11 @@ type Snapshot struct {
 	// Intents — незавершённые намерения покупки. Переезд базы посреди покупки
 	// редок, но без них человек, выбравший год, доплачивал бы месяц.
 	Intents []model.PurchaseIntent
+	// WhitelistIDs — предзаполненный белый список, Invites — приглашения. Обе
+	// таблицы раньше в снимок не входили: переезд базы молча терял и тех, кому
+	// доступ выдали заранее, и невыданные приглашения.
+	WhitelistIDs []int64
+	Invites      []model.Invite
 	// InvoiceSnaps — условия выставленных счетов Stars: строки счёта у них
 	// нет, и без переноса оплата пришла бы на текущие условия, а не на
 	// проданные.
@@ -928,6 +1014,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	if access, err := b.ListAllPlanAccess(ctx); err == nil {
 		snap.PlanAccess = access
+	} else {
+		return nil, err
+	}
+	if ids, err := b.ListWhitelistIDs(ctx); err == nil {
+		snap.WhitelistIDs = ids
+	} else {
+		return nil, err
+	}
+	if inv, err := b.ListInvites(ctx); err == nil {
+		snap.Invites = inv
 	} else {
 		return nil, err
 	}
@@ -1104,6 +1200,16 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 			}
 			// Молчать нельзя: иначе оператор уверен, что переехало всё.
 			fmt.Printf("перенос базы: запись списка допущенных тарифа %q пропущена\n", e.PlanCode)
+		}
+	}
+	for _, id := range s.WhitelistIDs {
+		if err := b.AddWhitelistID(ctx, id); err != nil {
+			return err
+		}
+	}
+	for i := range s.Invites {
+		if err := b.CreateInvite(ctx, &s.Invites[i]); err != nil && !isUniqueViolation(err) {
+			return err
 		}
 	}
 	for i := range s.Intents {
@@ -1989,6 +2095,78 @@ func (b *base) WhitelistAllUsers(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return n, nil
+}
+
+// ClearWhitelistAll снимает доступ со всех разом — операция, обратная
+// WhitelistAllUsers. Без неё закрытый бот не закрыть: доступ выдаётся всей базе
+// одним движением, а снимается только поштучно. Админа не касается: он ходит
+// мимо проверки доступа. Возвращает число затронутых строк.
+func (b *base) ClearWhitelistAll(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "UPDATE users SET whitelisted = 0 WHERE whitelisted = 1")
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearWhitelistIDs опустошает предзаполненный список. Идёт в паре с
+// ClearWhitelistAll: иначе «снять доступ у всех» не считается — заранее
+// добавленный ID вернул бы человеку доступ при первом же входе.
+func (b *base) ClearWhitelistIDs(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "DELETE FROM whitelist")
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// BalanceHeld — сколько денег лежит на балансах и у скольких человек. Нужно
+// админу перед выключением пополнения: решать вслепую он не должен.
+func (b *base) BalanceHeld(ctx context.Context) (int64, int, error) {
+	var sum int64
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COALESCE(SUM(balance), 0), COUNT(*) FROM users WHERE balance > 0").Scan(&sum, &n)
+	return sum, n, err
+}
+
+// ListWhitelistedUsers — постранично те, у кого доступ есть на самом деле.
+// Экран «белый список» раньше показывал только предзаполненные ID, а они по
+// устройству опустошаются при первом входе, поэтому список всегда выглядел
+// пустым, даже когда доступ был у всей базы.
+func (b *base) ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+	if limit <= 0 {
+		limit = usersSearchLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE whitelisted = 1").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
+			"WHERE whitelisted = 1 ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
+		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var approved, blocked int
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		u.P2PApproved = approved != 0
+		u.Blocked = blocked != 0
+		u.Whitelisted = true
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
 }
 
 // CountWhitelisted — сколько пользователей уже имеют доступ (в т.ч. впущенные

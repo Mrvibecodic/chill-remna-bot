@@ -168,3 +168,171 @@ func TestAutoPayEnableClearsRetryPause(t *testing.T) {
 		}
 	})
 }
+
+// Массовое снятие доступа и постраничный список тех, у кого доступ есть.
+// Экран «белый список» раньше читал только предзаполненную таблицу, и на
+// закрытом боте с выданным доступом выглядел пустым.
+func TestClearWhitelistAllAndList(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{41, 42, 43} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetWhitelisted(ctx, id, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		users, total, err := st.ListWhitelistedUsers(ctx, 2, 0)
+		if err != nil || total != 3 || len(users) != 2 {
+			t.Fatalf("список = %d из %d, err=%v", len(users), total, err)
+		}
+		for _, u := range users {
+			if !u.Whitelisted {
+				t.Fatalf("в списке доступа оказался пользователь без доступа: %+v", u)
+			}
+		}
+		if _, _, err := st.ListWhitelistedUsers(ctx, 2, 2); err != nil {
+			t.Fatalf("вторая страница: %v", err)
+		}
+
+		n, err := st.ClearWhitelistAll(ctx)
+		if err != nil || n != 3 {
+			t.Fatalf("снято = %d, err=%v", n, err)
+		}
+		if cnt, err := st.CountWhitelisted(ctx); err != nil || cnt != 0 {
+			t.Fatalf("CountWhitelisted после сброса = %d, err=%v", cnt, err)
+		}
+		if _, total, err := st.ListWhitelistedUsers(ctx, 10, 0); err != nil || total != 0 {
+			t.Fatalf("список после сброса = %d, err=%v", total, err)
+		}
+	})
+}
+
+// Предзаполненный вайтлист и приглашения обязаны переезжать вместе с базой:
+// без них бэкап молча терял и выданный заранее доступ, и невыданные коды.
+func TestSnapshotCarriesWhitelistAndInvites(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		if err := st.AddWhitelistID(ctx, 4242); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateInvite(ctx, &model.Invite{Code: "snapcode", MaxUses: 3}); err != nil {
+			t.Fatal(err)
+		}
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snap.WhitelistIDs) != 1 || snap.WhitelistIDs[0] != 4242 {
+			t.Fatalf("предзаполненный вайтлист не попал в снимок: %v", snap.WhitelistIDs)
+		}
+		if len(snap.Invites) != 1 || snap.Invites[0].Code != "snapcode" {
+			t.Fatalf("приглашения не попали в снимок: %+v", snap.Invites)
+		}
+	})
+}
+
+// Поиск по пользователям: ник, имя, часть ID и почта веб-аккаунта. Регистр не
+// важен, а джокеры из запроса не должны расширять выборку.
+func TestSearchUsers(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, u := range []struct {
+			id    int64
+			nick  string
+			first string
+		}{
+			{5101, "PetrovIvan", "Иван"},
+			{5102, "sidorov", "Пётр"},
+			{5103, "", "Мария"},
+		} {
+			if err := st.UpsertUser(ctx, u.id); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetUserInfo(ctx, u.id, u.nick, u.first); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.UpsertUser(ctx, -777); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateWebUser(ctx, &model.WebUser{TgID: -777, Email: "client@example.com", PassHash: "hash"}); err != nil {
+			t.Fatal(err)
+		}
+
+		check := func(q string, want ...int64) {
+			t.Helper()
+			users, total, err := st.SearchUsers(ctx, q, 50, 0)
+			if err != nil {
+				t.Fatalf("%q: %v", q, err)
+			}
+			if total != len(want) || len(users) != len(want) {
+				t.Fatalf("%q: найдено %d (total %d), ожидалось %d", q, len(users), total, len(want))
+			}
+			got := map[int64]bool{}
+			for _, u := range users {
+				got[u.TelegramID] = true
+			}
+			for _, id := range want {
+				if !got[id] {
+					t.Fatalf("%q: не найден %d, получено %+v", q, id, users)
+				}
+			}
+		}
+
+		check("petrov", 5101)          // ник, другой регистр
+		check("PETROV", 5101)          // регистр запроса
+		check("Пётр", 5102)            // имя, кириллица
+		check("510", 5101, 5102, 5103) // часть Telegram ID
+		check("client@", -777)         // почта веб-аккаунта
+		check("никого")                // ничего не найдено
+
+		// Джокеры LIKE из запроса не должны находить лишнего.
+		check("%")
+		check("510_")
+	})
+}
+
+// Экран кошелька строится на этих числах: сумма и количество должны считаться
+// по настоящей колонке баланса, а не по выборке уведомлений.
+func TestBalanceHeld(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{6101, 6102, 6103} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.AddBalance(ctx, 6101, 50000); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AddBalance(ctx, 6102, 25000); err != nil {
+			t.Fatal(err)
+		}
+		sum, n, err := st.BalanceHeld(ctx)
+		if err != nil || sum != 75000 || n != 2 {
+			t.Fatalf("BalanceHeld = %d у %d, err=%v", sum, n, err)
+		}
+	})
+}
+
+// «Снять доступ у всех» должно опустошать и предзаполненный список.
+func TestClearWhitelistIDs(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		for _, id := range []int64{6201, 6202} {
+			if err := st.AddWhitelistID(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n, err := st.ClearWhitelistIDs(ctx)
+		if err != nil || n != 2 {
+			t.Fatalf("удалено = %d, err=%v", n, err)
+		}
+		ids, err := st.ListWhitelistIDs(ctx)
+		if err != nil || len(ids) != 0 {
+			t.Fatalf("список после очистки = %v, err=%v", ids, err)
+		}
+	})
+}
