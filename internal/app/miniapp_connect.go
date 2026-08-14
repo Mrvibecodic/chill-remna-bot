@@ -79,9 +79,42 @@ type acV2App struct {
 	Blocks   []acV2Block `json:"blocks"`
 }
 
+// acFlexName is a platform's display name. Older subscription pages wrote it as
+// a plain string, the current schema writes a {lang: text} map — a struct field
+// typed as one of them makes json.Unmarshal fail on the other and drops the
+// whole config, so accept both.
+type acFlexName struct {
+	Plain string
+	Loc   acLocalized
+}
+
+func (n *acFlexName) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	switch b[0] {
+	case '"':
+		return json.Unmarshal(b, &n.Plain)
+	case '{':
+		return json.Unmarshal(b, &n.Loc)
+	}
+	// Anything else (number, array) isn't a name — ignore it rather than fail
+	// the whole config over a cosmetic field.
+	return nil
+}
+
+// pick returns the display name in the user's language.
+func (n acFlexName) pick(lang string) string {
+	if n.Plain != "" {
+		return n.Plain
+	}
+	return localize(n.Loc, lang)
+}
+
 type acV2Platform struct {
-	DisplayName string    `json:"displayName"`
-	Apps        []acV2App `json:"apps"`
+	DisplayName acFlexName `json:"displayName"`
+	Apps        []acV2App  `json:"apps"`
 }
 
 type appConfigV2 struct {
@@ -120,14 +153,24 @@ func platformLabel(key, displayName string) string {
 }
 
 // orderedPlatformKeys returns the platform keys present, known ones first (per
-// platformOrder) then any extras alphabetically.
+// platformOrder) then any extras alphabetically. Matching ignores case: the
+// config spells them androidTV/appleTV while platformOrder is lowercase, and a
+// case-sensitive compare would push those platforms to the end of the list.
 func orderedPlatformKeys(present map[string]bool) []string {
+	byLower := map[string][]string{}
+	for k := range present {
+		lk := strings.ToLower(k)
+		byLower[lk] = append(byLower[lk], k)
+	}
+	for _, ks := range byLower {
+		sort.Strings(ks)
+	}
 	var out []string
 	seen := map[string]bool{}
 	for _, k := range platformOrder {
-		if present[k] {
-			out = append(out, k)
-			seen[k] = true
+		for _, orig := range byLower[k] {
+			out = append(out, orig)
+			seen[orig] = true
 		}
 	}
 	var extra []string
@@ -245,16 +288,22 @@ func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path
 		return nil, nil, false
 	}
 	var v2 appConfigV2
-	if json.Unmarshal(body, &v2) == nil && v2AppCount(&v2) > 0 {
+	errV2 := json.Unmarshal(body, &v2)
+	if errV2 == nil && v2AppCount(&v2) > 0 {
 		a.log.Info("miniapp connect: app-config loaded (v2)", "url", full, "platforms", len(v2.Platforms), "apps", v2AppCount(&v2))
 		return &v2, nil, true
 	}
 	var std appConfig
-	if json.Unmarshal(body, &std) == nil && stdAppCount(&std) > 0 {
+	errStd := json.Unmarshal(body, &std)
+	if errStd == nil && stdAppCount(&std) > 0 {
 		a.log.Info("miniapp connect: app-config loaded (standard)", "url", full, "platforms", len(std.Platforms), "apps", stdAppCount(&std))
 		return nil, &std, true
 	}
-	a.log.Warn("miniapp connect: app-config parsed but has no apps", "url", full, "bytes", len(body))
+	// Обе схемы мимо. Тексты ошибок разбора обязательны в логе: без них
+	// «нет приложений» одинаково выглядит и когда конфиг чужого формата, и
+	// когда одно поле разъехалось по типу и уронило разбор целиком.
+	a.log.Warn("miniapp connect: app-config parsed but has no apps",
+		"url", full, "bytes", len(body), "v2_err", errV2, "std_err", errStd)
 	return nil, nil, false
 }
 
@@ -472,7 +521,7 @@ func buildV2Platforms(c *appConfigV2, subURL, username, lang string) []web.MiniC
 		if len(apps) == 0 {
 			continue
 		}
-		out = append(out, web.MiniConnectPlatformDTO{Key: k, Label: platformLabel(k, p.DisplayName), Apps: apps})
+		out = append(out, web.MiniConnectPlatformDTO{Key: k, Label: platformLabel(k, p.DisplayName.pick(lang)), Apps: apps})
 	}
 	return out
 }
