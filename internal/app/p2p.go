@@ -1246,7 +1246,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 				}
 			}
 		}
-		a.showWhitelist(ctx, chatID)
+		a.showWhitelist(ctx, chatID, 0)
 	case "wh_domain":
 		ui.adminInput = ""
 		d := strings.TrimSpace(text)

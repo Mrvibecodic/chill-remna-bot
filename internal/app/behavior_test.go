@@ -240,6 +240,36 @@ func (s *fakeStore) WhitelistAllUsers(context.Context) (int64, error) {
 	return n, nil
 }
 
+func (s *fakeStore) ClearWhitelistAll(context.Context) (int64, error) {
+	var n int64
+	for _, u := range s.users {
+		if u.Whitelisted {
+			u.Whitelisted = false
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) ListWhitelistedUsers(_ context.Context, limit, offset int) ([]model.User, int, error) {
+	var all []model.User
+	for _, u := range s.users {
+		if u.Whitelisted {
+			all = append(all, *u)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].TelegramID < all[j].TelegramID })
+	total := len(all)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+
 func (s *fakeStore) CountWhitelisted(context.Context) (int, error) {
 	n := 0
 	for _, u := range s.users {

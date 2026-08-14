@@ -40,7 +40,9 @@ type Storage interface {
 	IsWhitelistID(ctx context.Context, telegramID int64) (bool, error)
 	ListWhitelistIDs(ctx context.Context) ([]int64, error)
 	WhitelistAllUsers(ctx context.Context) (int64, error)
+	ClearWhitelistAll(ctx context.Context) (int64, error)
 	CountWhitelisted(ctx context.Context) (int, error)
+	ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error)
 
 	CreateInvite(ctx context.Context, inv *model.Invite) error
 	GetInvite(ctx context.Context, code string) (*model.Invite, error)
@@ -788,6 +790,11 @@ type Snapshot struct {
 	// Intents — незавершённые намерения покупки. Переезд базы посреди покупки
 	// редок, но без них человек, выбравший год, доплачивал бы месяц.
 	Intents []model.PurchaseIntent
+	// WhitelistIDs — предзаполненный белый список, Invites — приглашения. Обе
+	// таблицы раньше в снимок не входили: переезд базы молча терял и тех, кому
+	// доступ выдали заранее, и невыданные приглашения.
+	WhitelistIDs []int64
+	Invites      []model.Invite
 	// InvoiceSnaps — условия выставленных счетов Stars: строки счёта у них
 	// нет, и без переноса оплата пришла бы на текущие условия, а не на
 	// проданные.
@@ -928,6 +935,16 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	if access, err := b.ListAllPlanAccess(ctx); err == nil {
 		snap.PlanAccess = access
+	} else {
+		return nil, err
+	}
+	if ids, err := b.ListWhitelistIDs(ctx); err == nil {
+		snap.WhitelistIDs = ids
+	} else {
+		return nil, err
+	}
+	if inv, err := b.ListInvites(ctx); err == nil {
+		snap.Invites = inv
 	} else {
 		return nil, err
 	}
@@ -1104,6 +1121,16 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 			}
 			// Молчать нельзя: иначе оператор уверен, что переехало всё.
 			fmt.Printf("перенос базы: запись списка допущенных тарифа %q пропущена\n", e.PlanCode)
+		}
+	}
+	for _, id := range s.WhitelistIDs {
+		if err := b.AddWhitelistID(ctx, id); err != nil {
+			return err
+		}
+	}
+	for i := range s.Invites {
+		if err := b.CreateInvite(ctx, &s.Invites[i]); err != nil && !isUniqueViolation(err) {
+			return err
 		}
 	}
 	for i := range s.Intents {
@@ -1989,6 +2016,55 @@ func (b *base) WhitelistAllUsers(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return n, nil
+}
+
+// ClearWhitelistAll снимает доступ со всех разом — операция, обратная
+// WhitelistAllUsers. Без неё закрытый бот не закрыть: доступ выдаётся всей базе
+// одним движением, а снимается только поштучно. Админа не касается: он ходит
+// мимо проверки доступа. Возвращает число затронутых строк.
+func (b *base) ClearWhitelistAll(ctx context.Context) (int64, error) {
+	res, err := b.db.ExecContext(ctx, "UPDATE users SET whitelisted = 0 WHERE whitelisted = 1")
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
+}
+
+// ListWhitelistedUsers — постранично те, у кого доступ есть на самом деле.
+// Экран «белый список» раньше показывал только предзаполненные ID, а они по
+// устройству опустошаются при первом входе, поэтому список всегда выглядел
+// пустым, даже когда доступ был у всей базы.
+func (b *base) ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+	var total int
+	if err := b.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE whitelisted = 1").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
+			"WHERE whitelisted = 1 ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
+		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var approved, blocked int
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		u.P2PApproved = approved != 0
+		u.Blocked = blocked != 0
+		u.Whitelisted = true
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
 }
 
 // CountWhitelisted — сколько пользователей уже имеют доступ (в т.ч. впущенные

@@ -340,5 +340,10 @@ func (a *App) rsReportText(lang string, d *rsimport.Data, rep rsReport) string {
 	if d.SkippedWeb > 0 {
 		text += "\n" + i18n.T(lang, "rsimp.report_web", d.SkippedWeb)
 	}
+	// Про доступ говорим прямо: импортированные приходят без него, и в закрытом
+	// боте внутрь не попадут, пока доступ им не выдадут.
+	if mode := a.accessMode(); mode != model.AccessPublic {
+		text += "\n" + i18n.T(lang, "rsimp.report_access", i18n.T(lang, "access.mode_"+mode))
+	}
 	return text + "\n\n" + i18n.T(lang, "rsimp.report_hint")
 }

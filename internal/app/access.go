@@ -45,11 +45,11 @@ func (a *App) accessMode() string {
 	return model.AccessPublic
 }
 
-// setAccessMode переключает режим публичности и сохраняет конфиг. При закрытии
-// ранее публичного бота уже зарегистрированные пользователи получают доступ
-// автоматически — иначе переключение тумблера мгновенно отрезало бы от бота
-// всех действующих (в том числе платящих) клиентов.
-func (a *App) setAccessMode(ctx context.Context, mode string) int64 {
+// setAccessMode переключает режим публичности и сохраняет конфиг. Доступ уже
+// зарегистрированным при закрытии бота сохраняется только по явному согласию
+// админа (grandfather). Раньше это делалось молча — и на базе, куда только что
+// залили импорт, закрытие бота открывало его сразу всей импортированной базе.
+func (a *App) setAccessMode(ctx context.Context, mode string, grandfather bool) int64 {
 	a.mu.Lock()
 	wasPublic := true
 	if a.botCfg != nil {
@@ -64,7 +64,7 @@ func (a *App) setAccessMode(ctx context.Context, mode string) int64 {
 	_ = a.saveBotConfig(ctx)
 
 	var granted int64
-	if wasPublic && mode != model.AccessPublic && a.store != nil {
+	if grandfather && wasPublic && mode != model.AccessPublic && a.store != nil {
 		n, err := a.store.WhitelistAllUsers(ctx)
 		if err != nil {
 			a.log.Warn("access: выдача доступа существующим пользователям", "err", err)
@@ -74,6 +74,40 @@ func (a *App) setAccessMode(ctx context.Context, mode string) int64 {
 		}
 	}
 	return granted
+}
+
+// pendingGrandfather — сколько зарегистрированных останутся без доступа, если
+// закрыть бота прямо сейчас. Это число админ и видит в вопросе при закрытии.
+func (a *App) pendingGrandfather(ctx context.Context) int {
+	if a.store == nil {
+		return 0
+	}
+	_, total, err := a.store.ListUsers(ctx, 1, 0)
+	if err != nil {
+		return 0
+	}
+	granted, err := a.store.CountWhitelisted(ctx)
+	if err != nil {
+		return 0
+	}
+	if n := total - granted; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// askCloseMode спрашивает, что делать с уже зарегистрированными, прежде чем
+// закрыть публичного бота.
+func (a *App) askCloseMode(ctx context.Context, chatID int64, mode string) {
+	lang := a.lang(chatID)
+	n := a.pendingGrandfather(ctx)
+	text := i18n.T(lang, "access.close_ask", i18n.T(lang, "access.mode_"+mode), n)
+	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "access.btn_close_keep", n), "acc:close:"+mode+":keep")},
+		{btn(i18n.T(lang, "access.btn_close_all"), "acc:close:"+mode+":all")},
+		{btn(i18n.T(lang, "btn.back"), "menu:access")},
+	}
+	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, rows)
 }
 
 // accessGranted сообщает, есть ли у пользователя персональный доступ: он в
@@ -187,16 +221,19 @@ func (a *App) showAccess(ctx context.Context, chatID int64) {
 	mode := a.accessMode()
 	modeName := i18n.T(lang, "access.mode_"+mode)
 	active, total := a.inviteStats(ctx)
-	wl := 0
+	// Два числа, а не одно: у кого доступ уже есть и сколько ID лежит
+	// предзаполненными. Раньше они складывались, и экран «список вайтлиста»
+	// (там только предзаполненные) противоречил этому счётчику.
+	granted, ids := 0, 0
 	if a.store != nil {
-		if ids, err := a.store.ListWhitelistIDs(ctx); err == nil {
-			wl = len(ids)
-		}
 		if n, err := a.store.CountWhitelisted(ctx); err == nil {
-			wl += n
+			granted = n
+		}
+		if list, err := a.store.ListWhitelistIDs(ctx); err == nil {
+			ids = len(list)
 		}
 	}
-	text := i18n.T(lang, "access.title", modeName, i18n.T(lang, "access.hint_"+mode), active, total, wl)
+	text := i18n.T(lang, "access.title", modeName, i18n.T(lang, "access.hint_"+mode), active, total, granted, ids)
 
 	pick := func(m, key string) models.InlineKeyboardButton {
 		label := i18n.T(lang, key)
@@ -366,8 +403,23 @@ func (a *App) onAccess(ctx context.Context, chatID int64, val string) {
 		a.showInvite(ctx, chatID, arg)
 	case "mode":
 		switch arg {
-		case model.AccessPublic, model.AccessInvite, model.AccessWhitelist:
-			if n := a.setAccessMode(ctx, arg); n > 0 {
+		case model.AccessInvite, model.AccessWhitelist:
+			// Закрываем публичного бота — сначала спрашиваем, сохранять ли
+			// доступ тем, кто уже зарегистрирован.
+			if a.accessMode() == model.AccessPublic {
+				a.askCloseMode(ctx, chatID, arg)
+				return
+			}
+			a.setAccessMode(ctx, arg, false)
+		case model.AccessPublic:
+			a.setAccessMode(ctx, arg, false)
+		}
+		a.showAccess(ctx, chatID)
+	case "close":
+		mode, keep, _ := strings.Cut(arg, ":")
+		switch mode {
+		case model.AccessInvite, model.AccessWhitelist:
+			if n := a.setAccessMode(ctx, mode, keep == "keep"); n > 0 {
 				a.notify(ctx, chatID, i18n.T(lang, "access.grandfathered", n))
 			}
 		}

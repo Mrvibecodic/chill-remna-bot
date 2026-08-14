@@ -116,7 +116,61 @@ func (a *App) reconcileWhitelist(ctx context.Context, chatID int64) {
 	}
 }
 
-func (a *App) showWhitelist(ctx context.Context, chatID int64) {
+// showWhitelist — кто на самом деле имеет доступ. Раньше этот экран показывал
+// только предзаполненные ID, а они по устройству опустошаются при первом входе
+// (см. reconcileWhitelist) — поэтому список выглядел пустым даже тогда, когда
+// доступ был выдан всей базе.
+func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	users, total, err := a.store.ListWhitelistedUsers(ctx, usersPageSize, page*usersPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	ids := 0
+	if list, err := a.store.ListWhitelistIDs(ctx); err == nil {
+		ids = len(list)
+	}
+	pages := (total + usersPageSize - 1) / usersPageSize
+
+	var rows [][]models.InlineKeyboardButton
+	for _, u := range users {
+		label := "👤 " + userLabel(&u)
+		if u.Blocked {
+			label += " 🚫"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
+		})
+	}
+	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+	rows = append(rows, []models.InlineKeyboardButton{
+		btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"),
+		btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids"),
+	})
+	if total > 0 {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_clear"), "usr:wlclear")})
+	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+
+	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1))
+	if total == 0 {
+		title = i18n.T(lang, "wl.granted_empty")
+	}
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// showWhitelistIDs — предзаполненный список: Telegram ID тех, кто ещё не
+// заходил в бота. При первом входе ID отсюда уезжает в доступ пользователя.
+func (a *App) showWhitelistIDs(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	if a.store == nil {
 		return
@@ -135,12 +189,29 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64) {
 			btn("🗑 "+sid, "usr:wldel:"+sid),
 		})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "usr:wllist")})
 	title := i18n.T(lang, "wl.list_title", len(ids))
 	if len(ids) == 0 {
 		title = i18n.T(lang, "wl.list_empty")
 	}
-	a.sendKB(ctx, chatID, title, rows)
+	a.sendUsrKB(ctx, chatID, title, rows)
+}
+
+// clearWhitelistAll снимает доступ со всех разом. Обратная операция к выдаче
+// доступа всей базе — без неё закрытый бот нечем закрыть на самом деле.
+func (a *App) clearWhitelistAll(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	n, err := a.store.ClearWhitelistAll(ctx)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	a.log.Info("access: доступ снят со всех", "count", n)
+	a.notify(ctx, chatID, i18n.T(lang, "wl.cleared", n))
+	a.showWhitelist(ctx, chatID, 0)
 }
 
 func (a *App) showUser(ctx context.Context, chatID, uid int64) {
@@ -339,14 +410,27 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.getUI(chatID).adminInput = "wl_add"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
 	case "wllist":
-		a.showWhitelist(ctx, chatID)
+		a.showWhitelist(ctx, chatID, 0)
+	case "wlpage":
+		page, _ := strconv.Atoi(arg)
+		a.showWhitelist(ctx, chatID, page)
+	case "wlids":
+		a.showWhitelistIDs(ctx, chatID)
+	case "wlclear":
+		lang := a.lang(chatID)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "wl.clear_ask"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.wl_clear_ok"), "usr:wlclearok")},
+			{btn(i18n.T(lang, "btn.back"), "usr:wllist")},
+		})
+	case "wlclearok":
+		a.clearWhitelistAll(ctx, chatID)
 	case "wldel":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		if a.store != nil && uid != 0 {
 			_ = a.store.RemoveWhitelistID(ctx, uid)
 			_ = a.store.SetWhitelisted(ctx, uid, false)
 		}
-		a.showWhitelist(ctx, chatID)
+		a.showWhitelistIDs(ctx, chatID)
 	case "p2pon", "p2poff":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		allow := action == "p2pon"
