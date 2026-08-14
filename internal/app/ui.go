@@ -320,6 +320,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
 		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
 		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
+		{btn(i18n.T(lang, "btn.wallet"), "menu:wallet")},
 		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
 		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		homeRow(lang),
@@ -542,6 +543,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		a.showRenew(ctx, chatID)
 	case "topup":
 		a.showTopUp(ctx, chatID)
+	case "wallet":
+		if isAdmin {
+			a.showWalletAdmin(ctx, chatID)
+		}
 	case "balance":
 		a.showBalance(ctx, chatID)
 	case "ref":

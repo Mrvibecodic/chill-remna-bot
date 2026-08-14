@@ -73,8 +73,14 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 		}
 	}
 	caption += "\n\n" + i18n.T(lang, "balance.autopay_note")
+	// Про вывод говорим прямо и всегда: баланс тратится только внутри бота.
+	caption += "\n" + i18n.T(lang, "balance.no_withdraw")
+	topRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")}
+	if a.topUpEnabled() {
+		topRow = append([]models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, topRow...)
+	}
 	a.sendPayKB(ctx, chatID, caption, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup"), btn(i18n.T(lang, "btn.buy"), "menu:buy")},
+		topRow,
 		{btn(i18n.T(lang, "btn.promo"), "pr:enter")},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
@@ -210,6 +216,10 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
+	if !a.topUpEnabled() {
+		a.showBalance(ctx, chatID)
+		return
+	}
 	bal := a.userBalance(ctx, chatID)
 	amts, _ := a.topUpAmounts(ctx)
 	var rows [][]models.InlineKeyboardButton
@@ -226,12 +236,17 @@ func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "topup.btn_custom"), "top:custom")})
 	rows = append(rows, navBack(lang, "menu:buy"))
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.title", kopecksToRub(bal)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.title", kopecksToRub(bal))+"\n\n"+i18n.T(lang, "balance.no_withdraw"), rows)
 }
 
 func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := cut3(val)
 	lang := a.lang(chatID)
+	if !a.topUpEnabled() {
+		// Кнопка могла остаться в старом сообщении: гейтим действие, а не вид.
+		a.showBalance(ctx, chatID)
+		return
+	}
 	switch action {
 	case "amt":
 		k, _ := strconv.ParseInt(arg, 10, 64)
@@ -268,6 +283,10 @@ func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
 func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 	ui := a.getUI(chatID)
 	ui.awaitTopUp = false
+	if !a.topUpEnabled() {
+		a.showBalance(ctx, chatID)
+		return
+	}
 	k, ok := rubToKopecks(text)
 	if !ok || k <= 0 {
 		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.bad_amount"),
@@ -315,6 +334,10 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 
 func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	lang := a.lang(chatID)
+	if !a.topUpEnabled() {
+		a.showBalance(ctx, chatID)
+		return
+	}
 	k := a.getUI(chatID).topUpKopecks
 	if k <= 0 {
 		a.showTopUp(ctx, chatID)
@@ -359,6 +382,10 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 // record format stays identical for the webhooks.
 func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method string) (payURL, checkExtID string, err error) {
 	lang := a.lang(chatID)
+	// Последний рубеж: сюда приходят и чат, и мини-апп, и веб-кабинет.
+	if !a.topUpEnabled() {
+		return "", "", errors.New(i18n.T(lang, "topup.disabled"))
+	}
 	rub := kopecksToRub(k)
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
@@ -473,8 +500,12 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
 	}
 	if !deducted {
-		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))),
-			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, homeRow(lang)})
+		rows := [][]models.InlineKeyboardButton{}
+		if a.topUpEnabled() {
+			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
+		}
+		rows = append(rows, homeRow(lang))
+		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
 		return
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
@@ -485,4 +516,19 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// topUpEnabled — можно ли класть деньги на баланс. Оплата с баланса от этой
+// настройки не зависит: реферальные начисления и промокоды приходят на баланс
+// и при выключенном пополнении, тратить их надо чем-то.
+func (a *App) topUpEnabled() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return true
+	}
+	if !a.botCfg.Wallet.Init {
+		return true
+	}
+	return a.botCfg.Wallet.TopUp
 }

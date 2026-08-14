@@ -62,6 +62,7 @@ const (
 	cbBuy       = "buy"
 	cbMethod    = "method"
 	cbTop       = "top"
+	cbWallet    = "wal"
 	cbP2P       = "p2p"
 	cbAdm       = "adm"
 	cbStar      = "star"
@@ -148,6 +149,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onMethod(ctx, chatID, val)
 	case cbTop:
 		a.onTopUp(ctx, chatID, val)
+	case cbWallet:
+		if isAdmin {
+			a.onWalletAdmin(ctx, chatID, val)
+		}
 	case cbP2P:
 		a.onP2PUser(ctx, chatID, val)
 	case cbAdm:

@@ -244,6 +244,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeUpdateCheck()
 		cfg.NormalizeAddSub()
 		cfg.NormalizeMiniApp()
+		cfg.NormalizeWallet()
 		cfg.NormalizeCabinet()
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
