@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
 )
 
@@ -380,6 +381,99 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 	return nil
 }
 
+// subpageOffFor — на сколько бот перестаёт спрашивать панель про конфиг
+// приложений после того, как она ответила «такого API нет».
+const subpageOffFor = time.Hour
+
+// subpageRetryIn — пауза после временной осечки панели (нет прав у токена,
+// панель недоступна): фолбэк на страницу подписки работает, а долбить панель
+// на каждый заход незачем.
+const subpageRetryIn = 10 * time.Minute
+
+// shortUUIDFromSub достаёт короткий идентификатор подписки из её ссылки —
+// на случай, если панель не положила его в карточку пользователя.
+func shortUUIDFromSub(subURL string) string {
+	u, err := url.Parse(subURL)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if p := strings.TrimSpace(parts[i]); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// fetchPanelAppConfig берёт конфиг приложений из панели (3.0.0+), кэшируя его
+// на общий срок. nil означает «этим путём не вышло» — вызывающий идёт на саму
+// страницу подписки.
+func (a *App) fetchPanelAppConfig(ctx context.Context, panel *remnawave.Client, shortUUID, subURL string) *connectCacheEntry {
+	if panel == nil {
+		return nil
+	}
+	if shortUUID == "" {
+		shortUUID = shortUUIDFromSub(subURL)
+	}
+
+	a.connectMu.Lock()
+	off := a.subpageOffUntil
+	ce := a.connectCache
+	a.connectMu.Unlock()
+	if !off.IsZero() && time.Now().Before(off) {
+		return nil
+	}
+	if ce != nil && strings.HasPrefix(ce.base, "panel:") && time.Since(ce.fetchedAt) < appConfigTTL {
+		return ce
+	}
+
+	cfg, err := panel.SubpageConfigFor(ctx, shortUUID)
+	if err != nil {
+		// Нет такого API (панель до 3.0.0) — молча и надолго. Прочее (нет прав
+		// у токена, панель прилегла) — с записью в лог и ненадолго, но тоже с
+		// паузой: иначе каждый заход в «Подключить» бьёт в панель впустую.
+		pause := subpageOffFor
+		if !remnawave.ErrNoSubpageAPI(err) {
+			pause = subpageRetryIn
+			a.log.Warn("miniapp connect: конфиг приложений из панели", "err", err)
+		}
+		a.connectMu.Lock()
+		a.subpageOffUntil = time.Now().Add(pause)
+		a.connectMu.Unlock()
+		return nil
+	}
+	if cfg == nil || len(cfg.Config) == 0 {
+		return nil
+	}
+
+	ne := &connectCacheEntry{base: "panel:" + cfg.UUID, fetchedAt: time.Now()}
+	var v2 appConfigV2
+	errV2 := json.Unmarshal(cfg.Config, &v2)
+	if errV2 == nil && v2AppCount(&v2) > 0 {
+		ne.v2 = &v2
+	} else {
+		var std appConfig
+		errStd := json.Unmarshal(cfg.Config, &std)
+		if errStd == nil && stdAppCount(&std) > 0 {
+			ne.std = &std
+		} else {
+			a.log.Warn("miniapp connect: конфиг из панели без приложений",
+				"config", cfg.Name, "bytes", len(cfg.Config), "v2_err", errV2, "std_err", errStd)
+			return nil
+		}
+	}
+	apps := v2AppCount(&v2)
+	if ne.std != nil {
+		apps = stdAppCount(ne.std)
+	}
+	a.log.Info("miniapp connect: конфиг приложений получен из панели", "config", cfg.Name, "apps", apps)
+	a.connectMu.Lock()
+	a.connectCache = ne
+	a.connectMu.Unlock()
+	return ne
+}
+
 // acBuildStd maps standard-schema apps to DTOs, featured-first.
 func acBuildStd(apps []acApp, subURL, lang string) []web.MiniConnectAppDTO {
 	var featured, rest []web.MiniConnectAppDTO
@@ -463,11 +557,17 @@ func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	subURL := a.rewriteSub(u.SubscriptionURL)
 	dto.SubURL = subURL
 	dto.Username = u.Username
-	base := appConfigBase(subURL)
-	if base == "" {
-		return dto
+	// Панель 3.x хранит конфиг страницы подписки у себя и отдаёт его по токену.
+	// Это основной источник: не нужны ни cookie-сессия страницы, ни обход её
+	// защит. На панелях без такого API остаётся поход на саму страницу.
+	ce := a.fetchPanelAppConfig(ctx, panel, u.ShortUUID, subURL)
+	if ce == nil {
+		base := appConfigBase(subURL)
+		if base == "" {
+			return dto
+		}
+		ce = a.fetchAppConfig(ctx, base, subURL)
 	}
-	ce := a.fetchAppConfig(ctx, base, subURL)
 	if ce == nil {
 		return dto
 	}

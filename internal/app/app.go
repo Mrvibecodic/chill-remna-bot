@@ -152,6 +152,10 @@ type App struct {
 
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
+	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
+	// на панелях без такого API спрашивать его на каждый заход в «Подключить»
+	// незачем.
+	subpageOffUntil time.Time
 
 	flagMu       sync.RWMutex
 	flags        map[string][]byte

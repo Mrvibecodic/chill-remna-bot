@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+
+	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 	"testing"
 )
 
@@ -126,5 +129,65 @@ func TestFetchAppConfigCurrentSchema(t *testing.T) {
 	}
 	if len(pl[1].Apps[0].Installs) != 1 {
 		t.Errorf("installs = %+v", pl[1].Apps[0].Installs)
+	}
+}
+
+func TestShortUUIDFromSub(t *testing.T) {
+	cases := map[string]string{
+		"https://sub.example.com/AbCd":      "AbCd",
+		"https://sub.example.com/sub/AbCd/": "AbCd",
+		"https://sub.example.com/AbCd?x=1":  "AbCd",
+		"https://sub.example.com":           "",
+		"":                                  "",
+	}
+	for in, want := range cases {
+		if got := shortUUIDFromSub(in); got != want {
+			t.Errorf("shortUUIDFromSub(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Панель 3.x отдаёт конфиг приложений сама — на страницу подписки ходить не
+// надо. Ходов на страницу в этом тесте быть не должно вовсе.
+func TestFetchPanelAppConfig(t *testing.T) {
+	panelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/subscription-page-configs" {
+			_, _ = io.WriteString(w, `{"response":{"total":1,"configs":[{"uuid":"a","name":"Default","viewPosition":1,"config":`+currentSchemaBody+`}]}}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer panelSrv.Close()
+
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panelSrv.URL, APIToken: "t"})
+	ce := a.fetchPanelAppConfig(context.Background(), panel, "sh0rt", "https://sub.example.com/sh0rt")
+	if ce == nil || ce.v2 == nil {
+		t.Fatal("конфиг из панели не получен")
+	}
+	if got := v2AppCount(ce.v2); got != 3 {
+		t.Fatalf("apps = %d, want 3", got)
+	}
+}
+
+// Панель без такого API отвечает 404 — бот молча уходит на страницу подписки
+// и какое-то время панель об этом больше не спрашивает.
+func TestFetchPanelAppConfigNoAPI(t *testing.T) {
+	var hits int
+	panelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer panelSrv.Close()
+
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panelSrv.URL, APIToken: "t"})
+	for i := 0; i < 3; i++ {
+		if ce := a.fetchPanelAppConfig(context.Background(), panel, "sh0rt", ""); ce != nil {
+			t.Fatal("ожидался отказ")
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("запросов к панели = %d, want 1", hits)
 	}
 }

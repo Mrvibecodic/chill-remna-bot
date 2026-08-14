@@ -474,6 +474,7 @@ func routeGone(body []byte) bool {
 type panelUser struct {
 	Uuid            string `json:"uuid"`
 	ID              int64  `json:"id"`
+	ShortUuid       string `json:"shortUuid"`
 	ExpireAt        string `json:"expireAt"`
 	SubscriptionURL string `json:"subscriptionUrl"`
 	Tag             string `json:"tag"`
@@ -526,6 +527,8 @@ type PanelUser struct {
 	Status          string
 	TrafficLimit    int64
 	TrafficUsed     int64
+	// ShortUUID identifies the user's subscription page.
+	ShortUUID string
 	// ID is the numeric identifier (panel 3.0.0+); UUID is the pre-3.0.0 one.
 	// Ref is whichever of them this panel actually understands.
 	ID  int64
@@ -538,6 +541,7 @@ func toPanelUser(u *panelUser) *PanelUser {
 	}
 	return &PanelUser{
 		UUID:            u.Uuid,
+		ShortUUID:       u.ShortUuid,
 		ID:              u.ID,
 		Ref:             u.ref(),
 		Username:        u.Username,
