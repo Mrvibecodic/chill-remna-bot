@@ -1,0 +1,57 @@
+# Dependabot: следит за свежестью зависимостей и открывает PR с обновлениями.
+# PR — это подсказка «что устарело»; мержить можно из веба или руками в dev.
+version: 2
+updates:
+  # Go-модули бота.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "зависимости"
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+
+  # npm-зависимости сайта документации (site/).
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "зависимости"
+    groups:
+      site-minor-patch:
+        update-types: [minor, patch]
+
+  # Экшены GitHub в workflow-файлах.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "зависимости"
+
+  # Базовые образы в Dockerfile (golang:… , alpine).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "зависимости"
