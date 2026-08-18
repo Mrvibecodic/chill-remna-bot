@@ -7,31 +7,42 @@ import (
 	"testing"
 )
 
-// Настройку баннера снимает только отказ Telegram на самой картинке.
-func TestBanner_BadPhotoErrorClassification(t *testing.T) {
-	bad := []string{
+// Настройку баннера снимает только отказ Telegram на самой картинке, причём
+// негодная ссылка на файл — сразу, а неудачная выкачка — после нескольких
+// отказов подряд.
+func TestBanner_PhotoErrKind(t *testing.T) {
+	perm := []string{
 		"bad request, Bad Request: wrong remote file identifier specified: Wrong string length",
+		"Bad Request: invalid file id",
+		"Bad Request: wrong padding in the string",
+	}
+	for _, m := range perm {
+		if got := photoErrKind(errors.New(m)); got != "id" {
+			t.Fatalf("негодный file_id не распознан: %q -> %q", m, got)
+		}
+	}
+	fetch := []string{
 		"Bad Request: failed to get HTTP URL content",
 		"Bad Request: wrong type of the web page content",
 		"Bad Request: IMAGE_PROCESS_FAILED",
 	}
-	for _, m := range bad {
-		if !badPhotoError(errors.New(m)) {
-			t.Fatalf("отказ на картинке не распознан: %q", m)
+	for _, m := range fetch {
+		if got := photoErrKind(errors.New(m)); got != "fetch" {
+			t.Fatalf("сбой выкачки не распознан: %q -> %q", m, got)
 		}
 	}
-	good := []string{
+	alien := []string{
 		"Forbidden: bot was blocked by the user",
 		"context deadline exceeded",
 		"Bad Request: message caption is too long",
 		"Too Many Requests: retry after 5",
 	}
-	for _, m := range good {
-		if badPhotoError(errors.New(m)) {
-			t.Fatalf("чужой сбой принят за негодную картинку: %q", m)
+	for _, m := range alien {
+		if got := photoErrKind(errors.New(m)); got != "" {
+			t.Fatalf("чужой сбой принят за негодную картинку: %q -> %q", m, got)
 		}
 	}
-	if badPhotoError(nil) {
+	if photoErrKind(nil) != "" {
 		t.Fatal("nil — не отказ")
 	}
 }
@@ -139,5 +150,50 @@ func TestBanner_SectionWaitDoesNotEatOtherInput(t *testing.T) {
 	a.handleCallback(ctx, cb(planAdmin, "menu:home"))
 	if a.getUI(planAdmin).awaitSectionBanner != "" {
 		t.Fatal("возврат на главную должен закрывать ожидание картинки")
+	}
+}
+
+// Разовая недоступность сайта с картинкой не должна стирать ссылку: настройка
+// снимается только после нескольких отказов подряд.
+func TestBanner_TransientFetchKeepsImage(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	uid := int64(603)
+	_ = fs.UpsertUser(ctx, uid)
+	a.botCfg.Welcome.ImageURL = "https://example.com/banner.jpg"
+	fm.failBanner = "https://example.com/banner.jpg"
+	fm.failBannerErr = "Bad Request: failed to get HTTP URL content"
+
+	for i := 0; i < bannerFailLimit-1; i++ {
+		a.handleMessage(ctx, msgText(uid, "/start"))
+		if a.botCfg.Welcome.ImageURL == "" {
+			t.Fatalf("ссылку сняли после %d отказа — должно быть после %d", i+1, bannerFailLimit)
+		}
+	}
+	a.handleMessage(ctx, msgText(uid, "/start"))
+	if a.botCfg.Welcome.ImageURL != "" {
+		t.Fatal("после серии отказов ссылку надо снять")
+	}
+}
+
+// Удачная отправка обнуляет счётчик: разовые сбои не копятся вечно.
+func TestBanner_SuccessResetsFailCounter(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	uid := int64(604)
+	_ = fs.UpsertUser(ctx, uid)
+	a.botCfg.Welcome.ImageURL = "https://example.com/banner.jpg"
+	fm.failBanner = "https://example.com/banner.jpg"
+	fm.failBannerErr = "Bad Request: failed to get HTTP URL content"
+
+	a.handleMessage(ctx, msgText(uid, "/start"))
+	fm.failBanner = ""
+	a.handleMessage(ctx, msgText(uid, "/start"))
+	fm.failBanner = "https://example.com/banner.jpg"
+	for i := 0; i < bannerFailLimit-1; i++ {
+		a.handleMessage(ctx, msgText(uid, "/start"))
+	}
+	if a.botCfg.Welcome.ImageURL == "" {
+		t.Fatal("счётчик не обнулился после удачной отправки")
 	}
 }

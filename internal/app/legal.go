@@ -475,7 +475,7 @@ func sanitizeLegalHTML(s string) string {
 	out := html_(s)
 	out = legalTagRe.ReplaceAllString(out, "<$1$2>")
 	out = legalLinkRe.ReplaceAllString(out, `<a href="$1" target="_blank" rel="noopener noreferrer">`)
-	out = strings.ReplaceAll(out, "&lt;/a&gt;", "</a>")
+	out = legalLinkEndRe.ReplaceAllString(out, "</a>")
 	out = strings.ReplaceAll(out, "\n", "<br>")
 	return out
 }
@@ -488,6 +488,7 @@ var (
 	// Тот же список без якоря — для поиска тегов внутри строки.
 	legalTagAny = regexp.MustCompile(`(?i)<(/?)(b|strong|i|em|u|ins|s|strike|del|code|pre|br|span|tg-spoiler|blockquote|a)((?:\s[^<>]*)?)>`)
 
-	legalTagRe  = regexp.MustCompile(`(?i)&lt;(/?)(b|strong|i|em|u|s|code|pre|br)\s*/?&gt;`)
-	legalLinkRe = regexp.MustCompile(`(?i)&lt;a\s+href=(?:&#34;|&#39;)?(https?://[^&\s]*(?:&amp;[^&\s]*)*)(?:&#34;|&#39;)?\s*&gt;`)
+	legalTagRe     = regexp.MustCompile(`(?i)&lt;(/?)(b|strong|i|em|u|s|code|pre|br)\s*/?&gt;`)
+	legalLinkEndRe = regexp.MustCompile(`(?i)&lt;/a&gt;`)
+	legalLinkRe    = regexp.MustCompile(`(?i)&lt;a\s+href=(?:&#34;|&#39;)?(https?://[^&\s]*(?:&amp;[^&\s]*)*)(?:&#34;|&#39;)?\s*&gt;`)
 )

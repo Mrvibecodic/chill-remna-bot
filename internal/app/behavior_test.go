@@ -41,6 +41,7 @@ type fakeMsg struct {
 	// failBanner — картинка (file_id/ссылка), на которой SendBanner отвечает
 	// отказом; failAllBanners — отказ на любой картинке.
 	failBanner     string
+	failBannerErr  string
 	failAllBanners bool
 	// btnText — подписи тех же кнопок. Подписи Telegram принимает обычным
 	// текстом, поэтому экранирование в них — ошибка, и проверять их надо
@@ -120,7 +121,11 @@ func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile,
 		return 0, errors.New("bad request, Bad Request: failed to send message")
 	}
 	if ref, ok := photo.(*models.InputFileString); ok && f.failBanner != "" && ref.Data == f.failBanner {
-		return 0, errors.New("bad request, Bad Request: wrong remote file identifier specified: Wrong string length")
+		msg := f.failBannerErr
+		if msg == "" {
+			msg = "bad request, Bad Request: wrong remote file identifier specified: Wrong string length"
+		}
+		return 0, errors.New(msg)
 	}
 	return f.add(caption), nil
 }

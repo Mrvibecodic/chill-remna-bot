@@ -122,6 +122,10 @@ type App struct {
 	torStrikeFail map[int64]time.Time
 	planLinkFails map[int64][]time.Time
 
+	// bannerFail — сколько отказов подряд пришло на конкретную картинку
+	// баннера (ключ — file_id или ссылка). Живёт под a.mu.
+	bannerFail map[string]int
+
 	scrMu         sync.Mutex
 	screen        map[int64][]int
 	kbSet         map[int64]bool
@@ -1046,14 +1050,13 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 	a.emit(ctx, chatID, func() int {
 		id, err := a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
+			a.noteBannerOK(photo)
 			return id
 		}
 		// Настройку снимаем ТОЛЬКО когда Telegram отверг саму картинку:
 		// сетевой сбой или заблокировавший бота пользователь не повод стирать
 		// баннер у всех.
-		if badPhotoError(err) {
-			a.dropBrokenWelcomeImage(ctx, photo)
-		}
+		a.dropBrokenWelcomeImage(ctx, photo, photoErrKind(err))
 		fallback := &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
 		if id, _ := a.msg.SendBanner(ctx, chatID, fallback, caption, ents, rm); id != 0 {
 			return id
@@ -1071,58 +1074,97 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 	})
 }
 
-// badPhotoError — Telegram отверг именно картинку (битый file_id, недоступная
-// или неподходящая ссылка). Остальные отказы (сеть, лимиты, заблокированный
-// бот) картинку не порочат.
-func badPhotoError(err error) bool {
+// photoErrKind разбирает отказ Telegram на картинке:
+//
+//	"id"    — ссылка на файл негодна навсегда (мусор вместо ссылки, битый
+//	          file_id): чинить нечего, настройку снимаем сразу;
+//	"fetch" — Telegram не смог забрать картинку по ссылке или не осилил её
+//	          (сайт оператора мог лежать минуту): снимаем только после
+//	          нескольких отказов подряд;
+//	""      — отказ не про картинку (сеть, лимиты, бот заблокирован).
+func photoErrKind(err error) string {
 	if err == nil {
-		return false
+		return ""
 	}
 	msg := strings.ToLower(err.Error())
 	for _, marker := range []string{
 		"wrong remote file identifier",
 		"wrong file identifier",
+		"invalid file id",
+		"wrong padding in the string",
+	} {
+		if strings.Contains(msg, marker) {
+			return "id"
+		}
+	}
+	for _, marker := range []string{
 		"wrong type of the web page content",
 		"failed to get http url content",
 		"webpage_curl_failed",
 		"webpage_media_empty",
 		"photo_invalid_dimensions",
 		"image_process_failed",
-		"invalid file id",
-		"wrong padding in the string",
 	} {
 		if strings.Contains(msg, marker) {
-			return true
+			return "fetch"
 		}
 	}
-	return false
+	return ""
 }
+
+// bannerFailLimit — сколько отказов подряд по одной и той же картинке считаем
+// доказательством, что дело не в разовом сбое сайта, откуда её берут.
+const bannerFailLimit = 3
 
 // dropBrokenWelcomeImage снимает картинку баннера главной, если отказ пришёл
 // именно на неё. Настройка, из-за которой не рисуется меню, не должна пережить
-// первую же неудачную отправку.
-func (a *App) dropBrokenWelcomeImage(ctx context.Context, photo models.InputFile) {
+// первую же неудачную отправку — но и разовая недоступность сайта, откуда
+// картинка берётся по ссылке, стирать её не должна: такие отказы считаются до
+// bannerFailLimit подряд.
+func (a *App) dropBrokenWelcomeImage(ctx context.Context, photo models.InputFile, kind string) {
 	ref, ok := photo.(*models.InputFileString)
-	if !ok || ref.Data == "" {
+	if !ok || ref.Data == "" || kind == "" {
 		return
 	}
 	a.mu.Lock()
 	hit := a.botCfg != nil && (a.botCfg.Welcome.ImageFileID == ref.Data || a.botCfg.Welcome.ImageURL == ref.Data)
 	if hit {
+		if a.bannerFail == nil {
+			a.bannerFail = map[string]int{}
+		}
+		a.bannerFail[ref.Data]++
+		if kind == "fetch" && a.bannerFail[ref.Data] < bannerFailLimit {
+			hit = false
+		}
+	}
+	if hit {
 		a.botCfg.Welcome.ImageFileID = ""
 		a.botCfg.Welcome.ImageURL = ""
+		delete(a.bannerFail, ref.Data)
 	}
 	a.mu.Unlock()
 	if !hit {
 		return
 	}
-	a.log.Warn("картинка баннера главной не принята Telegram, настройка снята", "ref", ref.Data)
+	a.log.Warn("картинка баннера главной не принята Telegram, настройка снята", "ref", ref.Data, "причина", kind)
 	_ = a.saveBotConfig(ctx)
 	if a.cfg != nil && a.cfg.AdminID != 0 {
 		a.msg.SendKB(ctx, a.cfg.AdminID, i18n.T(a.botLang(), "welcome.image_dropped"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(a.botLang(), "welcome.btn_image"), "wel:img")},
 		})
 	}
+}
+
+// noteBannerOK сбрасывает счётчик отказов: картинка ушла, прошлые сбои были
+// разовыми.
+func (a *App) noteBannerOK(photo models.InputFile) {
+	ref, ok := photo.(*models.InputFileString)
+	if !ok || ref.Data == "" {
+		return
+	}
+	a.mu.Lock()
+	delete(a.bannerFail, ref.Data)
+	a.mu.Unlock()
 }
 
 func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption string, rows [][]models.InlineKeyboardButton) {
