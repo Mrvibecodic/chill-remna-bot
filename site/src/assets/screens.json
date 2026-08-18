@@ -1,0 +1,405 @@
+{
+ "user": [
+  {
+   "name": "user_menu",
+   "src": "/screens/dark/user/user_menu.webp",
+   "caption": "Главное меню пользователя"
+  },
+  {
+   "name": "user_plans",
+   "src": "/screens/dark/user/user_plans.webp",
+   "caption": "Выбор тарифа"
+  },
+  {
+   "name": "user_methods",
+   "src": "/screens/dark/user/user_methods.webp",
+   "caption": "Способы оплаты"
+  },
+  {
+   "name": "user_mysubs",
+   "src": "/screens/dark/user/user_mysubs.webp",
+   "caption": "Моя подписка"
+  },
+  {
+   "name": "user_balance",
+   "src": "/screens/dark/user/user_balance.webp",
+   "caption": "Кошелёк"
+  },
+  {
+   "name": "user_topup",
+   "src": "/screens/dark/user/user_topup.webp",
+   "caption": "Пополнение баланса"
+  },
+  {
+   "name": "user_topup_methods",
+   "src": "/screens/dark/user/user_topup_methods.webp",
+   "caption": "Способы пополнения"
+  },
+  {
+   "name": "user_referral",
+   "src": "/screens/dark/user/user_referral.webp",
+   "caption": "Реферальная программа"
+  },
+  {
+   "name": "user_promo",
+   "src": "/screens/dark/user/user_promo.webp",
+   "caption": "Промокод"
+  },
+  {
+   "name": "user_squadpicker",
+   "src": "/screens/dark/user/user_squadpicker.webp",
+   "caption": "Выбор локаций"
+  },
+  {
+   "name": "user_menu_new",
+   "src": "/screens/dark/user/user_menu_new.webp",
+   "caption": "Меню нового пользователя (без подписки)"
+  },
+  {
+   "name": "user_terms",
+   "src": "/screens/dark/user/user_terms.webp",
+   "caption": "Пользовательское соглашение"
+  },
+  {
+   "name": "user_p2p_card",
+   "src": "/screens/dark/user/user_p2p_card.webp",
+   "caption": "Оплата переводом: реквизиты"
+  },
+  {
+   "name": "user_p2p_wait_shot",
+   "src": "/screens/dark/user/user_p2p_wait_shot.webp",
+   "caption": "Просьба прислать скриншот оплаты"
+  },
+  {
+   "name": "user_p2p_submitted",
+   "src": "/screens/dark/user/user_p2p_submitted.webp",
+   "caption": "Скриншот отправлен на проверку"
+  },
+  {
+   "name": "user_remind_sub",
+   "src": "/screens/dark/user/user_remind_sub.webp",
+   "caption": "Напоминание об окончании подписки"
+  },
+  {
+   "name": "user_remind_trial",
+   "src": "/screens/dark/user/user_remind_trial.webp",
+   "caption": "Напоминание об окончании триала"
+  }
+ ],
+ "admin": [
+  {
+   "name": "admin_menu",
+   "src": "/screens/dark/admin/admin_menu.webp",
+   "caption": "Главное меню админа"
+  },
+  {
+   "name": "admin_pay",
+   "src": "/screens/dark/admin/admin_pay.webp",
+   "caption": "Раздел «Продажи»"
+  },
+  {
+   "name": "admin_iface",
+   "src": "/screens/dark/admin/admin_iface.webp",
+   "caption": "Раздел «Интерфейс»"
+  },
+  {
+   "name": "admin_marketing",
+   "src": "/screens/dark/admin/admin_marketing.webp",
+   "caption": "Раздел «Маркетинг»"
+  },
+  {
+   "name": "admin_system",
+   "src": "/screens/dark/admin/admin_system.webp",
+   "caption": "Раздел «Система»"
+  },
+  {
+   "name": "admin_users",
+   "src": "/screens/dark/admin/admin_users.webp",
+   "caption": "Список пользователей"
+  },
+  {
+   "name": "admin_user_card",
+   "src": "/screens/dark/admin/admin_user_card.webp",
+   "caption": "Карточка пользователя"
+  },
+  {
+   "name": "admin_whitelist",
+   "src": "/screens/dark/admin/admin_whitelist.webp",
+   "caption": "Белый список"
+  },
+  {
+   "name": "admin_payments",
+   "src": "/screens/dark/admin/admin_payments.webp",
+   "caption": "История платежей"
+  },
+  {
+   "name": "admin_analytics",
+   "src": "/screens/dark/admin/admin_analytics.webp",
+   "caption": "Аналитика"
+  },
+  {
+   "name": "admin_pricing",
+   "src": "/screens/dark/admin/admin_pricing.webp",
+   "caption": "Тарифы и цены"
+  },
+  {
+   "name": "admin_plan_squads",
+   "src": "/screens/dark/admin/admin_plan_squads.webp",
+   "caption": "Локации тарифа"
+  },
+  {
+   "name": "admin_squads",
+   "src": "/screens/dark/admin/admin_squads.webp",
+   "caption": "Локации по умолчанию"
+  },
+  {
+   "name": "admin_p2p",
+   "src": "/screens/dark/admin/admin_p2p.webp",
+   "caption": "P2P-переводы"
+  },
+  {
+   "name": "admin_stars",
+   "src": "/screens/dark/admin/admin_stars.webp",
+   "caption": "Telegram Stars"
+  },
+  {
+   "name": "admin_yookassa",
+   "src": "/screens/dark/admin/admin_yookassa.webp",
+   "caption": "ЮKassa"
+  },
+  {
+   "name": "admin_cryptobot",
+   "src": "/screens/dark/admin/admin_cryptobot.webp",
+   "caption": "CryptoBot"
+  },
+  {
+   "name": "admin_platega",
+   "src": "/screens/dark/admin/admin_platega.webp",
+   "caption": "Platega"
+  },
+  {
+   "name": "admin_tribute",
+   "src": "/screens/dark/admin/admin_tribute.webp",
+   "caption": "Tribute"
+  },
+  {
+   "name": "admin_moynalog",
+   "src": "/screens/dark/admin/admin_moynalog.webp",
+   "caption": "МойНалог"
+  },
+  {
+   "name": "admin_trial",
+   "src": "/screens/dark/admin/admin_trial.webp",
+   "caption": "Пробный период"
+  },
+  {
+   "name": "admin_trial_squads",
+   "src": "/screens/dark/admin/admin_trial_squads.webp",
+   "caption": "Локации триала"
+  },
+  {
+   "name": "admin_referral",
+   "src": "/screens/dark/admin/admin_referral.webp",
+   "caption": "Настройки рефералки"
+  },
+  {
+   "name": "admin_promo",
+   "src": "/screens/dark/admin/admin_promo.webp",
+   "caption": "Промокоды"
+  },
+  {
+   "name": "admin_broadcast",
+   "src": "/screens/dark/admin/admin_broadcast.webp",
+   "caption": "Рассылка"
+  },
+  {
+   "name": "admin_notify",
+   "src": "/screens/dark/admin/admin_notify.webp",
+   "caption": "Напоминания"
+  },
+  {
+   "name": "admin_addsub",
+   "src": "/screens/dark/admin/admin_addsub.webp",
+   "caption": "Доп. подписка"
+  },
+  {
+   "name": "admin_addsub_squads",
+   "src": "/screens/dark/admin/admin_addsub_squads.webp",
+   "caption": "Локации доп. подписки"
+  },
+  {
+   "name": "admin_miniapp",
+   "src": "/screens/dark/admin/admin_miniapp.webp",
+   "caption": "Мини-приложение"
+  },
+  {
+   "name": "admin_cabinet",
+   "src": "/screens/dark/admin/admin_cabinet.webp",
+   "caption": "Веб-кабинет"
+  },
+  {
+   "name": "admin_webhooks",
+   "src": "/screens/dark/admin/admin_webhooks.webp",
+   "caption": "Вебхуки"
+  },
+  {
+   "name": "admin_webhook_guide",
+   "src": "/screens/dark/admin/admin_webhook_guide.webp",
+   "caption": "Инструкция по вебхукам"
+  },
+  {
+   "name": "admin_subdomain",
+   "src": "/screens/dark/admin/admin_subdomain.webp",
+   "caption": "Домен подписки"
+  },
+  {
+   "name": "admin_contacts",
+   "src": "/screens/dark/admin/admin_contacts.webp",
+   "caption": "Контакты и оферта"
+  },
+  {
+   "name": "admin_banners",
+   "src": "/screens/dark/admin/admin_banners.webp",
+   "caption": "Баннеры разделов"
+  },
+  {
+   "name": "admin_banner_one",
+   "src": "/screens/dark/admin/admin_banner_one.webp",
+   "caption": "Баннер раздела"
+  },
+  {
+   "name": "admin_welcome",
+   "src": "/screens/dark/admin/admin_welcome.webp",
+   "caption": "Приветствие"
+  },
+  {
+   "name": "admin_emoji",
+   "src": "/screens/dark/admin/admin_emoji.webp",
+   "caption": "Премиум-эмодзи"
+  },
+  {
+   "name": "admin_apilog",
+   "src": "/screens/dark/admin/admin_apilog.webp",
+   "caption": "Лог API панели"
+  },
+  {
+   "name": "admin_channel",
+   "src": "/screens/dark/admin/admin_channel.webp",
+   "caption": "Канал обновлений"
+  },
+  {
+   "name": "admin_rsimport",
+   "src": "/screens/dark/admin/admin_rsimport.webp",
+   "caption": "Импорт из remnashop"
+  },
+  {
+   "name": "admin_status",
+   "src": "/screens/dark/admin/admin_status.webp",
+   "caption": "Статус подключения к панели"
+  },
+  {
+   "name": "admin_user_request",
+   "src": "/screens/dark/admin/admin_user_request.webp",
+   "caption": "Заявка нового пользователя на P2P"
+  },
+  {
+   "name": "admin_payment_check",
+   "src": "/screens/dark/admin/admin_payment_check.webp",
+   "caption": "Проверка оплаты по скриншоту"
+  }
+ ],
+ "miniapp": [
+  {
+   "name": "miniapp_main",
+   "src": "/screens/miniapp/miniapp_main.webp",
+   "caption": "Главный экран с активной подпиской"
+  },
+  {
+   "name": "miniapp_main_new",
+   "src": "/screens/miniapp/miniapp_main_new.webp",
+   "caption": "Без подписки — доступен триал"
+  },
+  {
+   "name": "miniapp_checkout",
+   "src": "/screens/miniapp/miniapp_checkout.webp",
+   "caption": "Оплата тарифа: выбор способа"
+  },
+  {
+   "name": "miniapp_checkout_new",
+   "src": "/screens/miniapp/miniapp_checkout_new.webp",
+   "caption": "Оплата 1 месяца, новый пользователь"
+  },
+  {
+   "name": "miniapp_p2p_card",
+   "src": "/screens/miniapp/miniapp_p2p_card.webp",
+   "caption": "Перевод на карту и загрузка чека"
+  },
+  {
+   "name": "miniapp_connect",
+   "src": "/screens/miniapp/miniapp_connect.webp",
+   "caption": "Подключение: приложения, deeplink и QR"
+  },
+  {
+   "name": "miniapp_more",
+   "src": "/screens/miniapp/miniapp_more.webp",
+   "caption": "Ещё: рефералка и промокод"
+  },
+  {
+   "name": "miniapp_topup",
+   "src": "/screens/miniapp/miniapp_topup.webp",
+   "caption": "Пополнение баланса: суммы"
+  },
+  {
+   "name": "miniapp_topup_methods",
+   "src": "/screens/miniapp/miniapp_topup_methods.webp",
+   "caption": "Пополнение баланса: способы"
+  }
+ ],
+ "cabinet": [
+  {
+   "name": "cabinet_main_desktop",
+   "src": "/screens/cabinet/cabinet_main_desktop.webp",
+   "caption": "Главный экран кабинета (десктоп)"
+  },
+  {
+   "name": "cabinet_main_mobile",
+   "src": "/screens/cabinet/cabinet_main_mobile.webp",
+   "caption": "Главный экран кабинета (мобильный)"
+  },
+  {
+   "name": "cabinet_login_desktop",
+   "src": "/screens/cabinet/cabinet_login_desktop.webp",
+   "caption": "Вход: Telegram или e-mail"
+  },
+  {
+   "name": "cabinet_login_mobile",
+   "src": "/screens/cabinet/cabinet_login_mobile.webp",
+   "caption": "Вход с телефона"
+  },
+  {
+   "name": "cabinet_checkout_desktop",
+   "src": "/screens/cabinet/cabinet_checkout_desktop.webp",
+   "caption": "Оплата тарифа в браузере"
+  },
+  {
+   "name": "cabinet_connect_desktop",
+   "src": "/screens/cabinet/cabinet_connect_desktop.webp",
+   "caption": "Подключение приложений"
+  },
+  {
+   "name": "cabinet_connect_mobile",
+   "src": "/screens/cabinet/cabinet_connect_mobile.webp",
+   "caption": "Подключение с телефона"
+  },
+  {
+   "name": "cabinet_more_desktop",
+   "src": "/screens/cabinet/cabinet_more_desktop.webp",
+   "caption": "Рефералка и промокод"
+  },
+  {
+   "name": "cabinet_topup_desktop",
+   "src": "/screens/cabinet/cabinet_topup_desktop.webp",
+   "caption": "Пополнение баланса"
+  }
+ ]
+}
