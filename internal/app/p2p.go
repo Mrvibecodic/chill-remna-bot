@@ -489,7 +489,7 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 // sendAdminPhotoUpload forwards an uploaded image (bytes) to the admin chat.
 func (a *App) sendAdminPhotoUpload(ctx context.Context, filename string, data []byte, caption string, rows [][]models.InlineKeyboardButton) {
 	photo := &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)}
-	a.msg.SendBanner(ctx, a.cfg.AdminID, photo, caption, nil, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
+	_, _ = a.msg.SendBanner(ctx, a.cfg.AdminID, photo, caption, nil, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
 func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {

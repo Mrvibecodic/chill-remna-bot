@@ -38,6 +38,10 @@ type fakeMsg struct {
 	preOK []bool
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
 	cbData []string
+	// failBanner — картинка (file_id/ссылка), на которой SendBanner отвечает
+	// отказом; failAllBanners — отказ на любой картинке.
+	failBanner     string
+	failAllBanners bool
 	// btnText — подписи тех же кнопок. Подписи Telegram принимает обычным
 	// текстом, поэтому экранирование в них — ошибка, и проверять их надо
 	// отдельно от текста сообщения.
@@ -109,8 +113,16 @@ func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []b
 	f.recordKB(rows)
 	return f.add(caption), ""
 }
-func (f *fakeMsg) SendBanner(_ context.Context, _ int64, _ models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) int {
-	return f.add(caption)
+func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) (int, error) {
+	// failBanner имитирует отказ Telegram на конкретной картинке (битый
+	// file_id или недоступная ссылка), failAllBanners — отказ на любой.
+	if f.failAllBanners {
+		return 0, errors.New("bad request, Bad Request: failed to send message")
+	}
+	if ref, ok := photo.(*models.InputFileString); ok && f.failBanner != "" && ref.Data == f.failBanner {
+		return 0, errors.New("bad request, Bad Request: wrong remote file identifier specified: Wrong string length")
+	}
+	return f.add(caption), nil
 }
 func (f *fakeMsg) Delete(_ context.Context, _ int64, id int) {
 	f.mu.Lock()

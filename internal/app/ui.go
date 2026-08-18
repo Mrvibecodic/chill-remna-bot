@@ -806,11 +806,33 @@ func (a *App) onWelcome(ctx context.Context, chatID int64, val string) {
 	}
 }
 
+// setWelcomeImageURL сохраняет ссылку на баннер главной.
+//
+// Текст, который не является ссылкой, Telegram трактует как file_id и
+// отвечает «wrong remote file identifier» — баннер не уходит, а вместе с ним
+// не уходит и главное меню: со стороны это выглядит как «бот не запустился».
+// Поэтому мусор сюда не пропускаем, а пустое значение сбрасывает картинку к
+// встроенной.
 func (a *App) setWelcomeImageURL(ctx context.Context, chatID int64, url string) {
+	lang := a.lang(chatID)
+	raw := strings.TrimSpace(url)
+	if raw != "" && raw != "-" && raw != "—" {
+		norm, ok := normalizeDocURL(raw)
+		if !ok {
+			// Ввод не сбрасываем: человек дошлёт правильную ссылку или фото.
+			a.sendKB(ctx, chatID, i18n.T(lang, "welcome.bad_image"), [][]models.InlineKeyboardButton{
+				{btn(i18n.T(lang, "btn.cancel"), "wel:cancel")},
+			})
+			return
+		}
+		raw = norm
+	} else {
+		raw = ""
+	}
 	a.getUI(chatID).welcomeAwait = ""
 	a.mu.Lock()
 	if a.botCfg != nil {
-		a.botCfg.Welcome.ImageURL = strings.TrimSpace(url)
+		a.botCfg.Welcome.ImageURL = raw
 		a.botCfg.Welcome.ImageFileID = ""
 	}
 	a.mu.Unlock()

@@ -162,7 +162,10 @@ func TestBuildUsers(t *testing.T) {
 
 	alice := userByID(d, 111)
 	if alice == nil {
+		// return после Fatal — ради анализаторов: без него staticcheck
+		// временами считает дальнейшие обращения разыменованием nil.
 		t.Fatal("пользователь 111 потерялся")
+		return
 	}
 	if alice.Username != "alice" || alice.FirstName != "Alice\tA" {
 		t.Fatalf("профиль разобран неверно: %+v", alice)
@@ -181,6 +184,7 @@ func TestBuildUsers(t *testing.T) {
 	bob := userByID(d, 222)
 	if bob == nil {
 		t.Fatal("пользователь 222 потерялся")
+		return
 	}
 	if !bob.Blocked {
 		t.Fatal("блокировка не перенеслась")
