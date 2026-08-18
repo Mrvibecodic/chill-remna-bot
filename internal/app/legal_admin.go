@@ -45,13 +45,17 @@ func (a *App) showLegalAdminView(ctx context.Context, chatID int64, confirm bool
 	if !cfg.Any() {
 		body += i18n.T(lang, "legal.title_empty")
 	}
+	// Каждая кнопка — отдельной строкой: подписи длинные («Согласие перед
+	// покупкой: ✅»), и в паре на телефоне Telegram обрезает их многоточием.
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "legal.btn_terms_text"), "leg:tt"), btn(i18n.T(lang, "legal.btn_terms_url"), "leg:tu")},
-		{btn(i18n.T(lang, "legal.btn_privacy_text"), "leg:pt"), btn(i18n.T(lang, "legal.btn_privacy_url"), "leg:pu")},
-		{btn(toggleLabel(i18n.T(lang, "legal.btn_in_menu"), cfg.InMenu), "leg:menu"),
-			btn(toggleLabel(i18n.T(lang, "legal.btn_gate_buy"), cfg.GateBuy), "leg:buy")},
-		{btn(toggleLabel(i18n.T(lang, "legal.btn_gate_start"), cfg.GateStart), "leg:start"),
-			btn(toggleLabel(i18n.T(lang, "legal.btn_on_pay"), cfg.OnPay), "leg:pay")},
+		{btn(i18n.T(lang, "legal.btn_terms_text"), "leg:tt")},
+		{btn(i18n.T(lang, "legal.btn_terms_url"), "leg:tu")},
+		{btn(i18n.T(lang, "legal.btn_privacy_text"), "leg:pt")},
+		{btn(i18n.T(lang, "legal.btn_privacy_url"), "leg:pu")},
+		{btn(toggleLabel(i18n.T(lang, "legal.btn_in_menu"), cfg.InMenu), "leg:menu")},
+		{btn(toggleLabel(i18n.T(lang, "legal.btn_gate_buy"), cfg.GateBuy), "leg:buy")},
+		{btn(toggleLabel(i18n.T(lang, "legal.btn_gate_start"), cfg.GateStart), "leg:start")},
+		{btn(toggleLabel(i18n.T(lang, "legal.btn_on_pay"), cfg.OnPay), "leg:pay")},
 	}
 	if cfg.ConsentRequired() {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "legal.btn_reset"), "leg:reset")})
