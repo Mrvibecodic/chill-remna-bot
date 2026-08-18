@@ -25,8 +25,8 @@ jobs:
     env:
       TEST_POSTGRES_DSN: postgres://remnabot:remnabot@localhost:5432/remnabot?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25.13"
       - run: go vet ./...

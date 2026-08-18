@@ -38,8 +38,8 @@ func miniSource(web_ bool) string {
 func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method string, web_ bool) (string, bool, error) {
 	// Тот же гейт условий, что и в чате (showPlans): покупка из мини-аппа и
 	// веб-кабинета не должна обходить обязательное согласие с условиями.
-	if _, need := a.termsRequired(ctx, tgID); need {
-		return "", false, errors.New("сначала примите условия использования в боте — откройте бота и нажмите «Купить»")
+	if a.legalRequired(ctx, tgID) {
+		return "", false, errors.New("сначала примите документы сервиса")
 	}
 	months := s.Months
 	switch method {

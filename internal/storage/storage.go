@@ -105,6 +105,9 @@ type Storage interface {
 	DeleteP2PRequestsByUser(ctx context.Context, telegramID int64) error
 
 	SetTermsAccepted(ctx context.Context, telegramID int64, ts string) error
+	// ResetTermsAccepted снимает согласие с документами со всех пользователей:
+	// документы изменились, и согласие на прошлую редакцию не считается.
+	ResetTermsAccepted(ctx context.Context) error
 
 	SetTrialUsed(ctx context.Context, telegramID int64, ts string) error
 
@@ -501,6 +504,18 @@ func (b *base) SetTermsAccepted(ctx context.Context, telegramID int64, ts string
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE users SET terms_accepted_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		ts, telegramID)
+	return err
+}
+
+func (b *base) ResetTermsAccepted(ctx context.Context) error {
+	// Тип колонки у движков разный: в Postgres это TIMESTAMPTZ NULL, в SQLite
+	// — TEXT NOT NULL DEFAULT ''. Пустая строка в timestamptz не пишется, NULL
+	// в SQLite ломает ограничение — отсюда две формы одного сброса.
+	val := "NULL"
+	if b.kind == model.DBSQLite {
+		val = "''"
+	}
+	_, err := b.db.ExecContext(ctx, "UPDATE users SET terms_accepted_at = "+val)
 	return err
 }
 

@@ -42,7 +42,10 @@ type messenger interface {
 	SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int
 
 	SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, caption string, rows [][]models.InlineKeyboardButton) (msgID int, newFileID string)
-	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int
+	// SendBanner возвращает id сообщения и ошибку: по ней видно, отверг ли
+	// Telegram саму картинку (тогда настройку баннера снимают) или отправка не
+	// доехала по другой причине.
+	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error)
 	Delete(ctx context.Context, chatID int64, msgID int)
 	RemoveKeyboard(ctx context.Context, chatID int64)
 
@@ -118,6 +121,10 @@ type App struct {
 	torStrikeSeen map[int64]time.Time
 	torStrikeFail map[int64]time.Time
 	planLinkFails map[int64][]time.Time
+
+	// bannerFail — сколько отказов подряд пришло на конкретную картинку
+	// баннера (ключ — file_id или ссылка). Живёт под a.mu.
+	bannerFail map[string]int
 
 	scrMu         sync.Mutex
 	screen        map[int64][]int
@@ -250,6 +257,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeCabinet()
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
+		cfg.NormalizeLegal()
 		a.botCfg = cfg
 		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
@@ -601,8 +609,8 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	case strings.HasPrefix(text, "/paysupport") || strings.HasPrefix(text, "/support"):
 		a.handleSupportCmd(ctx, chatID)
 		return
-	case strings.HasPrefix(text, "/terms"):
-		a.handleTermsCmd(ctx, chatID)
+	case strings.HasPrefix(text, "/terms"), strings.HasPrefix(text, "/privacy"), strings.HasPrefix(text, "/docs"):
+		a.showLegalDocs(ctx, chatID)
 		return
 	case strings.HasPrefix(text, "/p2p"):
 		if isAdmin {
@@ -661,6 +669,17 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		a.handleWizardText(ctx, chatID, text)
 		return
 	}
+	if ui.awaitSectionBanner != "" && ui.adminInput == "" {
+		// Баннер раздела принимается только картинкой: сохранить сюда текст
+		// нельзя, а молча съесть сообщение — оставить человека в непонимании.
+		// Проверка стоит последней: ожидание живёт до отмены, и вперёд него
+		// должны идти и мастер, и ввод любого поля.
+		lang := a.lang(chatID)
+		a.sendKB(ctx, chatID, i18n.T(lang, "banners.need_photo"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.cancel"), "sec:cancel:"+ui.awaitSectionBanner)},
+		})
+		return
+	}
 	a.handleAdminText(ctx, chatID, text)
 }
 
@@ -673,21 +692,6 @@ func (a *App) handleSupportCmd(ctx context.Context, chatID int64) {
 		return
 	}
 	a.notify(ctx, chatID, i18n.T(lang, "cmd.support_none"))
-}
-
-func (a *App) handleTermsCmd(ctx context.Context, chatID int64) {
-	lang := a.lang(chatID)
-	a.mu.Lock()
-	text := ""
-	if a.botCfg != nil {
-		text = a.botCfg.Contact.TermsText
-	}
-	a.mu.Unlock()
-	if text == "" {
-		a.notify(ctx, chatID, i18n.T(lang, "cmd.terms_none"))
-		return
-	}
-	a.notify(ctx, chatID, i18n.T(lang, "terms.intro")+"\n\n"+text)
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
@@ -1037,8 +1041,130 @@ func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]mo
 	a.emit(ctx, chatID, func() int { return a.msg.SendKB(ctx, chatID, t, rows) })
 }
 
+// sendBanner отправляет экран с картинкой и НИКОГДА не оставляет человека без
+// экрана: Telegram отвергает баннер целиком, если картинка ему не понравилась
+// (битый file_id, недоступная ссылка), и главное меню тогда просто не
+// приходит. На отказе пробуем встроенный баннер, а негодную настройку снимаем
+// — иначе бот остаётся «мёртвым» до вмешательства администратора.
 func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
-	a.emit(ctx, chatID, func() int { return a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm) })
+	a.emit(ctx, chatID, func() int {
+		id, err := a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm)
+		if id != 0 {
+			a.noteBannerOK(photo)
+			return id
+		}
+		// Настройку снимаем ТОЛЬКО когда Telegram отверг саму картинку:
+		// сетевой сбой или заблокировавший бота пользователь не повод стирать
+		// баннер у всех.
+		a.dropBrokenWelcomeImage(ctx, photo, photoErrKind(err))
+		fallback := &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
+		if id, _ := a.msg.SendBanner(ctx, chatID, fallback, caption, ents, rm); id != 0 {
+			return id
+		}
+		// Не принялась и картинка по умолчанию (например, подпись длиннее
+		// лимита) — экран уходит текстом: кнопки важнее оформления.
+		rows := [][]models.InlineKeyboardButton(nil)
+		if kb, ok := rm.(models.InlineKeyboardMarkup); ok {
+			rows = kb.InlineKeyboard
+		}
+		if len(ents) > 0 {
+			return a.msg.SendEnt(ctx, chatID, caption, ents, rows)
+		}
+		return a.msg.SendKB(ctx, chatID, caption, rows)
+	})
+}
+
+// photoErrKind разбирает отказ Telegram на картинке:
+//
+//	"id"    — ссылка на файл негодна навсегда (мусор вместо ссылки, битый
+//	          file_id): чинить нечего, настройку снимаем сразу;
+//	"fetch" — Telegram не смог забрать картинку по ссылке или не осилил её
+//	          (сайт оператора мог лежать минуту): снимаем только после
+//	          нескольких отказов подряд;
+//	""      — отказ не про картинку (сеть, лимиты, бот заблокирован).
+func photoErrKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"wrong remote file identifier",
+		"wrong file identifier",
+		"invalid file id",
+		"wrong padding in the string",
+	} {
+		if strings.Contains(msg, marker) {
+			return "id"
+		}
+	}
+	for _, marker := range []string{
+		"wrong type of the web page content",
+		"failed to get http url content",
+		"webpage_curl_failed",
+		"webpage_media_empty",
+		"photo_invalid_dimensions",
+		"image_process_failed",
+	} {
+		if strings.Contains(msg, marker) {
+			return "fetch"
+		}
+	}
+	return ""
+}
+
+// bannerFailLimit — сколько отказов подряд по одной и той же картинке считаем
+// доказательством, что дело не в разовом сбое сайта, откуда её берут.
+const bannerFailLimit = 3
+
+// dropBrokenWelcomeImage снимает картинку баннера главной, если отказ пришёл
+// именно на неё. Настройка, из-за которой не рисуется меню, не должна пережить
+// первую же неудачную отправку — но и разовая недоступность сайта, откуда
+// картинка берётся по ссылке, стирать её не должна: такие отказы считаются до
+// bannerFailLimit подряд.
+func (a *App) dropBrokenWelcomeImage(ctx context.Context, photo models.InputFile, kind string) {
+	ref, ok := photo.(*models.InputFileString)
+	if !ok || ref.Data == "" || kind == "" {
+		return
+	}
+	a.mu.Lock()
+	hit := a.botCfg != nil && (a.botCfg.Welcome.ImageFileID == ref.Data || a.botCfg.Welcome.ImageURL == ref.Data)
+	if hit {
+		if a.bannerFail == nil {
+			a.bannerFail = map[string]int{}
+		}
+		a.bannerFail[ref.Data]++
+		if kind == "fetch" && a.bannerFail[ref.Data] < bannerFailLimit {
+			hit = false
+		}
+	}
+	if hit {
+		a.botCfg.Welcome.ImageFileID = ""
+		a.botCfg.Welcome.ImageURL = ""
+		delete(a.bannerFail, ref.Data)
+	}
+	a.mu.Unlock()
+	if !hit {
+		return
+	}
+	a.log.Warn("картинка баннера главной не принята Telegram, настройка снята", "ref", ref.Data, "причина", kind)
+	_ = a.saveBotConfig(ctx)
+	if a.cfg != nil && a.cfg.AdminID != 0 {
+		a.msg.SendKB(ctx, a.cfg.AdminID, i18n.T(a.botLang(), "welcome.image_dropped"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(a.botLang(), "welcome.btn_image"), "wel:img")},
+		})
+	}
+}
+
+// noteBannerOK сбрасывает счётчик отказов: картинка ушла, прошлые сбои были
+// разовыми.
+func (a *App) noteBannerOK(photo models.InputFile) {
+	ref, ok := photo.(*models.InputFileString)
+	if !ok || ref.Data == "" {
+		return
+	}
+	a.mu.Lock()
+	delete(a.bannerFail, ref.Data)
+	a.mu.Unlock()
 }
 
 func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption string, rows [][]models.InlineKeyboardButton) {
@@ -1189,6 +1315,14 @@ func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstNa
 			a.registerUser(ctx, chatID, firstName, username)
 			return
 		}
+	}
+	// Согласие на входе: оператор включил показ документов при первом входе, а
+	// человек их ещё не принял — меню он увидит после «Принимаю».
+	if a.legalStartRequired(ctx, chatID) {
+		a.ensureHomeKey(ctx, chatID)
+		a.getUI(chatID).pendingLegalHome = true
+		a.askLegal(ctx, chatID)
+		return
 	}
 	a.showMenu(ctx, chatID, false, name)
 }
@@ -1375,19 +1509,24 @@ func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, capti
 	return msg.ID
 }
 
-func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) int {
+func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
 	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: rm}
 	if len(entities) > 0 {
 		p.CaptionEntities = entities
 	} else {
 		p.ParseMode = models.ParseModeHTML
 	}
-	msg, err := m.b.SendPhoto(ctx, p)
+	var msg *models.Message
+	err := m.sendWithRetry(ctx, func() error {
+		var e error
+		msg, e = m.b.SendPhoto(ctx, p)
+		return e
+	})
 	if err != nil {
 		m.log.Error("send banner", "err", err)
-		return 0
+		return 0, err
 	}
-	return msg.ID
+	return msg.ID, nil
 }
 
 func (m botMessenger) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) {

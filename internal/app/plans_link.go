@@ -118,12 +118,12 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	if a.trialLockNotice(ctx, chatID) {
 		return
 	}
-	if text, need := a.termsRequired(ctx, chatID); need {
+	if a.legalRequired(ctx, chatID) {
 		// После «Принимаю» человека вернёт на этот же экран (см. onTerms):
 		// пришедший по ссылке на скрытый тариф не должен потерять его на
 		// витрине «Базового».
 		a.getUI(chatID).pendingPlanOffer = p.Code
-		a.askTerms(ctx, chatID, text)
+		a.askLegal(ctx, chatID)
 		return
 	}
 	a.getUI(chatID).pendingPlanOffer = ""
@@ -390,9 +390,9 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	if a.trialLockNotice(ctx, chatID) {
 		return
 	}
-	if text, need := a.termsRequired(ctx, chatID); need {
+	if a.legalRequired(ctx, chatID) {
 		a.getUI(chatID).pendingPlanOffer = p.Code
-		a.askTerms(ctx, chatID, text)
+		a.askLegal(ctx, chatID)
 		return
 	}
 	// Не записалось — дальше не идём: экран способов подписан ценами, и

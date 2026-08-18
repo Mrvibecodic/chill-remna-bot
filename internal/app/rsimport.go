@@ -105,6 +105,15 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 		return
 	}
 	ui := a.getUI(chatID)
+	// Картинку часто шлют файлом («без сжатия»), но file_id документа Telegram
+	// в sendPhoto не принимает — просим переслать фотографией, а не сохраняем
+	// заведомо негодную ссылку.
+	if m.Document != nil && strings.HasPrefix(m.Document.MimeType, "image/") &&
+		(ui.awaitSectionBanner != "" || ui.welcomeAwait == "img") {
+		lang := a.lang(chatID)
+		a.sendKB(ctx, chatID, i18n.T(lang, "banners.need_photo"), nil)
+		return
+	}
 	if ui.awaitPlanImport {
 		ui.awaitPlanImport = false
 		a.handlePlanImportDoc(ctx, m)

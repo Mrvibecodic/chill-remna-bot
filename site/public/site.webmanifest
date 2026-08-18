@@ -1,0 +1,19 @@
+{
+  "name": "Chill Remna bot",
+  "short_name": "Chill Remna bot",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "theme_color": "#0a0d15",
+  "background_color": "#0a0d15",
+  "display": "standalone"
+}

@@ -15,8 +15,8 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25.13"
       - name: Install govulncheck
@@ -29,13 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25.13"
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
-          # v8 installs golangci-lint v2, which is built with Go 1.25+ and so
+          # v9 installs golangci-lint v2, which is built with Go 1.25+ and so
           # matches this module's toolchain (v1 binaries are built with Go 1.24
           # and refuse to lint a go1.25 target). Pin the version so CI is
           # deterministic and matches what we validate against .golangci.yml.
@@ -50,8 +50,8 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25.13"
       - name: Run gosec
@@ -59,6 +59,6 @@ jobs:
         with:
           args: "-no-fail -fmt sarif -out gosec.sarif ./..."
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec.sarif

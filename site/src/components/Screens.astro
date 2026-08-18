@@ -1,0 +1,256 @@
+---
+import screens from '../data/screens.json';
+
+const groups = [
+  { key: 'user', label: 'Пользователь', themed: true },
+  { key: 'admin', label: 'Админка', themed: true },
+  { key: 'miniapp', label: 'Mini App', themed: false },
+  { key: 'cabinet', label: 'Веб-кабинет', themed: false },
+];
+---
+
+<div class="shots">
+  <div class="controls">
+    <div class="seg" id="segGroup">
+      {groups.map((g, i) => (
+        <button data-g={g.key} class={i === 0 ? 'on' : ''}>{g.label}</button>
+      ))}
+    </div>
+    <div class="seg" id="segTheme">
+      <button data-t="dark" class="on">Тёмная тема</button>
+      <button data-t="light">Светлая</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  {groups.map((g, i) => (
+    <div class:list={['gallery', { hide: i !== 0 }]} id={`g-${g.key}`} data-themed={g.themed ? '1' : '0'}>
+      {screens[g.key].map((s) => (
+        <figure class="shot" data-name={s.name} data-group={g.key}>
+          <img loading="lazy" src={s.src} alt={s.caption} />
+          <figcaption>{s.caption}</figcaption>
+        </figure>
+      ))}
+    </div>
+  ))}
+
+  <div class="lb" id="lb">
+    <button class="nav" id="lbPrev" aria-label="Предыдущий">‹</button>
+    <figure>
+      <img id="lbImg" src="" alt="" />
+      <figcaption id="lbCap"></figcaption>
+    </figure>
+    <button class="nav" id="lbNext" aria-label="Следующий">›</button>
+  </div>
+</div>
+
+<style>
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 1.25rem;
+  }
+  .seg {
+    display: inline-flex;
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 0.875rem;
+    padding: 7px 13px;
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .seg button:hover {
+    color: var(--sl-color-white);
+  }
+  .seg button.on {
+    background: var(--sl-color-accent);
+    color: #fff;
+  }
+  .count {
+    color: var(--sl-color-gray-3);
+    font-size: 0.85rem;
+  }
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 18px;
+  }
+  .gallery.hide {
+    display: none;
+  }
+  figure.shot {
+    margin: 0;
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: zoom-in;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+  }
+  figure.shot:hover {
+    transform: translateY(-2px);
+    border-color: var(--sl-color-accent);
+  }
+  figure.shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  figure.shot figcaption {
+    padding: 9px 12px 12px;
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-3);
+  }
+  .lb {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    background: rgba(6, 8, 14, 0.92);
+    backdrop-filter: blur(4px);
+  }
+  .lb.on {
+    display: flex;
+  }
+  .lb figure {
+    margin: 0;
+    max-width: min(92vw, 520px);
+    text-align: center;
+  }
+  .lb img {
+    max-width: 100%;
+    max-height: 82vh;
+    border-radius: 14px;
+    border: 1px solid var(--sl-color-hairline);
+  }
+  .lb figcaption {
+    margin-top: 10px;
+    color: var(--sl-color-gray-2);
+    font-size: 0.9rem;
+  }
+  .lb .nav {
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-hairline);
+    color: var(--sl-color-white);
+    font-size: 28px;
+    line-height: 1;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  @media (max-width: 560px) {
+    .lb .nav {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  // Переключатели группы и темы + просмотр по клику. Светлые варианты есть
+  // только у чата (user/admin) — у мини-аппа и кабинета переключатель прячется.
+  const groups = ['user', 'admin', 'miniapp', 'cabinet'];
+  let group = 'user';
+  let theme = 'dark';
+
+  const gallery = (g: string) => document.getElementById(`g-${g}`)!;
+  const segTheme = document.getElementById('segTheme')!;
+  const count = document.getElementById('count')!;
+
+  function apply() {
+    groups.forEach((g) => gallery(g).classList.toggle('hide', g !== group));
+    const themed = gallery(group).dataset.themed === '1';
+    (segTheme as HTMLElement).style.visibility = themed ? 'visible' : 'hidden';
+    if (themed) {
+      gallery(group)
+        .querySelectorAll('img')
+        .forEach((img) => {
+          const fig = img.closest('figure') as HTMLElement;
+          img.setAttribute('src', `/screens/${theme}/${fig.dataset.group}/${fig.dataset.name}.webp`);
+        });
+    }
+    count.textContent = `${gallery(group).children.length} экранов`;
+  }
+
+  document.getElementById('segGroup')?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest('button');
+    if (!b) return;
+    b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+    b.classList.add('on');
+    group = b.dataset.g!;
+    apply();
+  });
+
+  segTheme.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest('button');
+    if (!b) return;
+    segTheme.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+    b.classList.add('on');
+    theme = b.dataset.t!;
+    apply();
+  });
+
+  const lb = document.getElementById('lb')!;
+  const lbImg = document.getElementById('lbImg') as HTMLImageElement;
+  const lbCap = document.getElementById('lbCap')!;
+  let cur: HTMLElement | null = null;
+
+  function open(fig: HTMLElement) {
+    cur = fig;
+    lbImg.src = (fig.querySelector('img') as HTMLImageElement).src;
+    lbCap.textContent = fig.querySelector('figcaption')?.textContent ?? '';
+    lb.classList.add('on');
+  }
+
+  function step(d: number) {
+    if (!cur) return;
+    const items = Array.from(gallery(group).children) as HTMLElement[];
+    let i = items.indexOf(cur) + d;
+    if (i < 0) i = items.length - 1;
+    if (i >= items.length) i = 0;
+    open(items[i]);
+  }
+
+  document.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const fig = t.closest('figure.shot') as HTMLElement | null;
+    if (fig) {
+      open(fig);
+      return;
+    }
+    if (t.id === 'lbPrev') {
+      step(-1);
+      return;
+    }
+    if (t.id === 'lbNext') {
+      step(1);
+      return;
+    }
+    if (lb.classList.contains('on') && t.closest('#lb')) lb.classList.remove('on');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!lb.classList.contains('on')) return;
+    if (e.key === 'Escape') lb.classList.remove('on');
+    else if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+  });
+
+  apply();
+</script>

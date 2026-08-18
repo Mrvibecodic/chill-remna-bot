@@ -1,0 +1,111 @@
+/* Палитра сайта chill-remna-bot — та же, что была на старой странице:
+   тёмный сине-серый фон, синий акцент, зелёный «stable», сиреневый «dev». */
+:root {
+  --brand-bg: #0a0d15;
+  --brand-bg2: #121726;
+  --brand-card: #151a2a;
+  --brand-line: #232c42;
+  --brand-fg: #e8edf7;
+  --brand-muted: #97a3bb;
+  --brand-accent: #5b8cff;
+  --brand-accent2: #27d3a2;
+  --brand-dev: #b58bff;
+  --brand-warn: #ffb454;
+}
+
+/* Тёмная тема — палитра прежнего сайта. Светлую оставляем штатной Starlight,
+   иначе подсветка кода (Expressive Code) остаётся светлой на тёмном фоне. */
+[data-theme='dark'] {
+  --sl-color-accent-low: #16224a;
+  --sl-color-accent: #3f6fe0;
+  --sl-color-accent-high: #b9ccff;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e8edf7;
+  --sl-color-gray-2: #c3cbdd;
+  --sl-color-gray-3: #97a3bb;
+  --sl-color-gray-4: #5b6780;
+  --sl-color-gray-5: #2a3452;
+  --sl-color-gray-6: #192035;
+  --sl-color-black: #0a0d15;
+  --sl-color-bg: #0a0d15;
+  --sl-color-bg-nav: rgba(10, 13, 21, 0.85);
+  --sl-color-bg-sidebar: #0c1019;
+  --sl-color-hairline: #232c42;
+  --sl-color-hairline-light: #2a3452;
+  --sl-color-text-accent: #8fb0ff;
+}
+
+[data-theme='light'] {
+  --sl-color-accent-low: #d8e2ff;
+  --sl-color-accent: #2f5fd0;
+  --sl-color-accent-high: #16306e;
+  --sl-color-text-accent: #2f5fd0;
+}
+
+/* Фоновое свечение, как на прежней главной. */
+[data-theme='dark'] body {
+  background-image:
+    radial-gradient(1100px 520px at 78% -8%, rgba(91, 140, 255, 0.1), transparent),
+    radial-gradient(900px 480px at 8% 4%, rgba(39, 211, 162, 0.07), transparent);
+  background-attachment: fixed;
+}
+
+/* Заголовок страницы — тот же градиентный текст, что был в шапке сайта. */
+[data-theme='dark'] .content-panel h1#_top {
+  background: linear-gradient(180deg, #fff, #b9c6e6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.02em;
+}
+
+/* Таблицы: компактнее и с полосами — их в доке много. */
+.sl-markdown-content table {
+  font-size: 0.94em;
+}
+.sl-markdown-content tbody tr:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.02);
+}
+.sl-markdown-content th {
+  color: var(--sl-color-white);
+  white-space: nowrap;
+}
+
+/* Значки каналов релиза (stable / dev) — как на прежней главной. */
+.tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--brand-line);
+  vertical-align: middle;
+}
+.tag.stable {
+  color: var(--brand-accent2);
+  background: rgba(39, 211, 162, 0.1);
+}
+.tag.dev {
+  color: var(--brand-dev);
+  background: rgba(181, 139, 255, 0.12);
+}
+
+/* Главная: чипы под заголовком и аккуратные карточки. */
+.hero-chips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.hero-chips span {
+  font-size: 13px;
+  color: var(--brand-muted);
+  background: rgba(18, 23, 38, 0.55);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+  padding: 7px 13px;
+}
+.hero-chips b {
+  color: var(--sl-color-white);
+}

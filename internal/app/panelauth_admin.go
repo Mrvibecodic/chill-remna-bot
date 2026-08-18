@@ -149,6 +149,9 @@ func (a *App) onPanelAuth(ctx context.Context, chatID int64, val string) {
 // применилось к живому клиенту, то есть отрезало бы бота от панели.
 func (a *App) clearPanelInput(chatID int64) {
 	ui := a.getUI(chatID)
+	// Возврат на главную закрывает и ожидание картинки баннера раздела: иначе
+	// оно живёт до отмены и перехватывает следующий админский текст.
+	ui.awaitSectionBanner = ""
 	switch ui.adminInput {
 	case "panel_apikey", "panel_cookie":
 		ui.adminInput = ""

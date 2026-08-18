@@ -164,6 +164,8 @@ type BotConfig struct {
 
 	Contact ContactConfig `json:"contact"`
 
+	Legal LegalConfig `json:"legal"`
+
 	Plan SubscriptionPlan `json:"plan"`
 
 	Trial TrialConfig `json:"trial"`
@@ -309,7 +311,108 @@ type SubscriptionPlan struct {
 type ContactConfig struct {
 	GroupURL   string `json:"group_url"`
 	SupportURL string `json:"support_url"`
-	TermsText  string `json:"terms_text"`
+	// TermsText — легаси-поле «текст соглашения». Актуальное хранилище —
+	// LegalConfig; поле остаётся зеркалом текста соглашения, чтобы откат на
+	// старый образ не потерял документ (см. NormalizeLegal).
+	TermsText string `json:"terms_text"`
+}
+
+// Виды юридических документов бота.
+const (
+	LegalTerms   = "terms"
+	LegalPrivacy = "privacy"
+)
+
+// LegalDoc — один документ: текст в боте и/или ссылка на внешнюю страницу.
+// Заданными считаются оба варианта: текст показывается сообщением, ссылка —
+// кнопкой. Платёжные провайдеры (Platega, ЮKassa) требуют, чтобы документы
+// были доступны покупателю до оплаты, а не только в момент покупки.
+type LegalDoc struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+// Set — задан ли документ хоть как-нибудь.
+func (d LegalDoc) Set() bool { return d.Text != "" || d.URL != "" }
+
+// LegalConfig — документы сервиса и места их показа. Каждое место включается
+// отдельно: гейт перед покупкой не заменяет кнопку в меню, а требование
+// провайдера «документы доступны всегда» не должно вынуждать включать гейт.
+type LegalConfig struct {
+	Terms   LegalDoc `json:"terms"`
+	Privacy LegalDoc `json:"privacy"`
+
+	// InMenu — кнопка «Документы» в главном меню пользователя.
+	InMenu bool `json:"in_menu"`
+	// GateBuy — экран согласия перед первой покупкой (старое поведение).
+	GateBuy bool `json:"gate_buy"`
+	// GateStart — экран согласия при первом входе в бота.
+	GateStart bool `json:"gate_start"`
+	// OnPay — приписка со ссылками на экране способов оплаты.
+	OnPay bool `json:"on_pay"`
+
+	// Migrated — легаси-соглашение из ContactConfig уже перенесено. Без флага
+	// перенос повторялся бы после каждой очистки документа и воскрешал бы его
+	// на следующем запуске (см. NormalizeLegal).
+	Migrated bool `json:"migrated"`
+	// Mirror — значение, которое мы сами записали в легаси-поле в прошлый раз.
+	// По расхождению видно, что текст правили СТАРЫМ образом после отката, и
+	// такую правку надо принять, а не затереть.
+	Mirror string `json:"mirror"`
+}
+
+// LegalItem — документ вместе с его видом (terms/privacy).
+type LegalItem struct {
+	Kind string
+	Doc  LegalDoc
+}
+
+// Docs возвращает заданные документы в порядке показа.
+func (l LegalConfig) Docs() []LegalItem {
+	var out []LegalItem
+	if l.Terms.Set() {
+		out = append(out, LegalItem{Kind: LegalTerms, Doc: l.Terms})
+	}
+	if l.Privacy.Set() {
+		out = append(out, LegalItem{Kind: LegalPrivacy, Doc: l.Privacy})
+	}
+	return out
+}
+
+// Any — задан ли хоть один документ.
+func (l LegalConfig) Any() bool { return l.Terms.Set() || l.Privacy.Set() }
+
+// ConsentRequired — нужно ли вообще спрашивать согласие: без документов
+// спрашивать нечего, а без включённого гейта — незачем.
+func (l LegalConfig) ConsentRequired() bool { return l.Any() && (l.GateBuy || l.GateStart) }
+
+// NormalizeLegal переносит легаси-соглашение из ContactConfig в LegalConfig и
+// держит легаси-поле зеркалом текста соглашения.
+//
+// Перенос: старый конфиг знал единственный текст, который показывался перед
+// первой покупкой, — ровно это поведение и восстанавливается (GateBuy), плюс
+// кнопка в меню, раз документ у оператора уже есть.
+//
+// Зеркало: старый образ читает только Contact.TermsText, и после отката бот
+// обязан продолжить показывать соглашение. Обратное направление — текст
+// правили старым образом — видно по расхождению с Mirror: такую правку
+// принимаем, а не затираем своим значением.
+func (c *BotConfig) NormalizeLegal() {
+	switch {
+	case !c.Legal.Migrated:
+		c.Legal.Migrated = true
+		if c.Contact.TermsText != "" && c.Legal.Terms.Text == "" {
+			c.Legal.Terms.Text = c.Contact.TermsText
+			if !c.Legal.GateBuy && !c.Legal.GateStart && !c.Legal.InMenu && !c.Legal.OnPay {
+				c.Legal.GateBuy = true
+				c.Legal.InMenu = true
+			}
+		}
+	case c.Contact.TermsText != c.Legal.Mirror:
+		c.Legal.Terms.Text = c.Contact.TermsText
+	}
+	c.Contact.TermsText = c.Legal.Terms.Text
+	c.Legal.Mirror = c.Legal.Terms.Text
 }
 
 type WelcomeConfig struct {

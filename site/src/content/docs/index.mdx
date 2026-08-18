@@ -1,0 +1,81 @@
+---
+title: Chill Remna bot
+description: Телеграм-бот «магазин + админка» для панели Remnawave — тарифы, оплаты, триал, рефералка, мини-апп и веб-кабинет.
+template: splash
+hero:
+  tagline: Магазин подписок и админка для панели Remnawave прямо в Telegram. Пользователь выбирает тариф, оплачивает и за пару минут получает ключ — вся настройка в чате, без правки конфигов на сервере.
+  image:
+    file: ../../assets/hero.svg
+  actions:
+    - text: Установка за 4 шага
+      link: /start/install/
+      icon: right-arrow
+      variant: primary
+    - text: Что умеет бот
+      link: /start/features/
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/Mrvibecodic/chill-remna-bot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+<div class="hero-chips">
+  <span>⚙️ Один бинарь на <b>Go</b></span>
+  <span>🐳 Запуск в <b>Docker</b></span>
+  <span>💳 <b>7</b> способов оплаты</span>
+  <span>🗄 SQLite / <b>PostgreSQL</b></span>
+  <span>🖥 amd64 + <b>ARM64</b></span>
+</div>
+
+## Что внутри
+
+<CardGrid stagger>
+  <Card title="Тарифы и витрина" icon="document">
+    Тарифов сколько угодно: у каждого свои имя, значок, описание, сроки и цены, трафик и лимит устройств. Смена тарифа не сжигает остаток — дни зачитываются по соотношению цен, условия покупки фиксируются снимком в момент оплаты.
+  </Card>
+  <Card title="Семь способов оплаты" icon="seti:shell">
+    P2P, Telegram Stars, ЮKassa (с автопродлением), CryptoBot, Platega, Heleket и Tribute. Каждый включается отдельно, платежи идемпотентны, вебхуки проверяются подписью или перезапросом статуса.
+  </Card>
+  <Card title="Mini App и веб-кабинет" icon="laptop">
+    То же самое приложением внутри Telegram и отдельным сайтом в браузере: покупка, продление, кошелёк, промокоды, рефералка и экран «Подключить» с приложениями под все платформы.
+  </Card>
+  <Card title="Кошелёк, промокоды, рефералка" icon="star">
+    Баланс в рублях с автосписанием при покупке, промокоды на деньги или дни, реферальная программа с бонусом другу и процентом с его платежей.
+  </Card>
+  <Card title="Всё настраивается в чате" icon="setting">
+    Тарифы, цены, платёжки, тексты, баннеры, документы сервиса и доступ в бота — прямо в Telegram. Конфигурация лежит в базе зашифрованной и переживает перезапуск.
+  </Card>
+  <Card title="Самообслуживание сервера" icon="rocket">
+    Бот стартует без базы, сам поднимает PostgreSQL в Docker, обновляется командой `/update` с выбором канала и предупреждает админа о новых версиях.
+  </Card>
+</CardGrid>
+
+## Установка за 4 шага
+
+<Steps>
+
+1. Возьмите `docker-compose.yml` в пустую папку на сервере.
+
+2. Впишите в него два значения: токен бота от [@BotFather](https://t.me/BotFather) и свой Telegram ID.
+
+3. Запустите `docker compose up -d`.
+
+4. Откройте бота в Telegram и пройдите мастер настройки.
+
+</Steps>
+
+Подробно, с командами и разбором каждого шага — [Установка за 4 шага](/start/install/).
+
+## Куда дальше
+
+<CardGrid>
+  <LinkCard title="Что нужно перед стартом" description="Сервер, Docker, панель Remnawave, токены и права API." href="/start/requirements/" />
+  <LinkCard title="Админка" description="Продажи, маркетинг, интерфейс, пользователи, система." href="/admin/overview/" />
+  <LinkCard title="Вебхуки платёжек" description="Встроенный HTTPS или reverse-proxy: что и куда проксировать." href="/payments/webhooks/" />
+  <LinkCard title="Скриншоты" description="Как это выглядит: чат-бот, мини-апп и веб-кабинет." href="/screens/" />
+  <LinkCard title="Переменные окружения" description="Все переменные и свой дизайн мини-аппа и кабинета." href="/reference/env/" />
+  <LinkCard title="FAQ" description="Короткие ответы на частые вопросы." href="/ops/faq/" />
+</CardGrid>
