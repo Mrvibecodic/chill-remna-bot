@@ -38,8 +38,8 @@ var botEmojis = []struct{ E, Use string }{
 	{"📲", "кнопка «Мои подписки»"},
 	{"👥", "кнопка «Группа» на главной у юзера"},
 	{"🛟", "кнопка «Поддержка» на главной у юзера"},
-	{"📜", "пользовательское соглашение перед первой покупкой"},
-	{"🚪", "кнопка «Не сейчас» в соглашении"},
+	{"📜", "документы сервиса: соглашение и политика конфиденциальности"},
+	{"🚪", "кнопка «Не сейчас» на экране согласия"},
 }
 
 func (a *App) botLang() string {
@@ -488,6 +488,13 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 
 func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name string) {
 	a.ensureHomeKey(ctx, chatID)
+	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
+	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
+	if !isAdmin && a.legalStartRequired(ctx, chatID) {
+		a.getUI(chatID).pendingLegalHome = true
+		a.askLegal(ctx, chatID)
+		return
+	}
 	lang := a.botLang()
 	photo, caption, ents := a.welcomeContent(name)
 	var rows [][]models.InlineKeyboardButton
@@ -503,6 +510,9 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		}
 		if a.referralCfg().Enabled {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.referral"), "menu:ref")})
+		}
+		if row := a.legalMenuRow(lang); row != nil {
+			rows = append(rows, row)
 		}
 		rows = append(rows, a.contactRows()...)
 	}
@@ -526,6 +536,13 @@ func (a *App) registerUser(ctx context.Context, chatID int64, firstName, usernam
 			lang := a.lang(chatID)
 			a.notify(ctx, chatID, i18n.T(lang, "sync.linked", formatExpire(u.SubExpireAt, lang)))
 		}
+	}
+	// Согласие при первом входе: новичок — как раз тот, кому документы и
+	// показывают, поэтому гейт стоит и здесь, а не только в enterHome.
+	if a.legalStartRequired(ctx, chatID) {
+		a.getUI(chatID).pendingLegalHome = true
+		a.askLegal(ctx, chatID)
+		return
 	}
 	a.showMenu(ctx, chatID, false, displayName(firstName, username))
 }

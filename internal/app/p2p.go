@@ -105,8 +105,8 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		return
 	}
 
-	if text, need := a.termsRequired(ctx, chatID); need {
-		a.askTerms(ctx, chatID, text)
+	if a.legalRequired(ctx, chatID) {
+		a.askLegal(ctx, chatID)
 		return
 	}
 	// Первая точка гейта доступности — сама витрина: она строится только из
@@ -342,10 +342,28 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	if line := a.saleCountriesLine(ctx, lang, s); line != "" {
 		caption = line + "\n\n" + caption
 	}
+	// Документы сервиса на экране оплаты: платёжные провайдеры требуют, чтобы
+	// покупатель видел их ДО оплаты, а не только один раз при согласии.
+	if foot := a.legalPayFooter(lang); foot != "" {
+		caption += "\n\n" + foot
+		// У документа без ссылки в приписке остаётся одно название — открыть
+		// его должно быть чем. Кнопка встаёт перед «На главную», а не поверх
+		// способов оплаты.
+		if row := a.legalPayRow(lang); row != nil {
+			rows = append(rows[:len(rows)-1], row, rows[len(rows)-1])
+		}
+	}
 	a.sendPayKB(ctx, chatID, caption, rows)
 }
 
 func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
+	// Вторая точка гейта документов: кнопка способа оплаты могла пролежать в
+	// переписке с прошлого раза, а согласие за это время могли сбросить или
+	// гейт включить (тот же порядок, что у гейта доступности тарифа).
+	if a.legalRequired(ctx, chatID) {
+		a.askLegal(ctx, chatID)
+		return
+	}
 	switch val {
 	case "bal":
 		a.payFromBalance(ctx, chatID)
@@ -1175,8 +1193,14 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setContact(ctx, chatID, "group", text)
 	case "ctc_support":
 		a.setContact(ctx, chatID, "support", text)
-	case "ctc_terms":
-		a.setContact(ctx, chatID, "terms", text)
+	case "leg_terms_text":
+		a.setLegalDoc(ctx, chatID, model.LegalTerms, "text", text)
+	case "leg_terms_url":
+		a.setLegalDoc(ctx, chatID, model.LegalTerms, "url", text)
+	case "leg_privacy_text":
+		a.setLegalDoc(ctx, chatID, model.LegalPrivacy, "text", text)
+	case "leg_privacy_url":
+		a.setLegalDoc(ctx, chatID, model.LegalPrivacy, "url", text)
 	case "traffic_gb":
 		mo := ui.priceMonths
 		code := ui.planCode

@@ -417,7 +417,7 @@ func TestBasePlanLinkMode_SellsViaLink(t *testing.T) {
 func TestPlanLink_TermsReturnToOffer(t *testing.T) {
 	ctx := context.Background()
 	a, fm, fs := planAdminApp(t)
-	a.botCfg.Contact.TermsText = "правила"
+	a.botCfg.Legal = model.LegalConfig{Terms: model.LegalDoc{Text: "правила"}, GateBuy: true}
 	p := vipPlan(t, fs, model.PlanAvailLink)
 
 	uid := int64(765)

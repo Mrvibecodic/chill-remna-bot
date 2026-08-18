@@ -94,6 +94,7 @@ const (
 	cbTrial     = "trial"
 	cbSquads    = "sqd"
 	cbTerms     = "terms"
+	cbLegal     = "leg"
 	cbInput     = "inp"
 	cbClose     = "x"
 	cbAddSub    = "addsub"
@@ -297,6 +298,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbTerms:
 
 		a.onTerms(ctx, chatID, val, cq.From.FirstName, cq.From.Username)
+	case cbLegal:
+		if isAdmin {
+			a.onLegalAdmin(ctx, chatID, val)
+		}
 	case cbInput:
 		if val == "cancel" {
 			a.cancelInput(ctx, chatID, isAdmin, cq.From.FirstName, cq.From.Username)

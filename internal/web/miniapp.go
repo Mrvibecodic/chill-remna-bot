@@ -53,6 +53,10 @@ type MiniProvider interface {
 	// sourced from their subscription page (iOS + Android only).
 	MiniConnect(ctx context.Context, tgID int64) MiniConnectDTO
 
+	// MiniAcceptLegal records the user's consent to the service documents
+	// (same acceptance the chat bot writes).
+	MiniAcceptLegal(ctx context.Context, tgID int64) MiniActionDTO
+
 	// MiniResetDevices rotates the user's credentials and clears all their HWID
 	// devices (mirrors the chat "reset devices" flow). Available in the cabinet too.
 	MiniResetDevices(ctx context.Context, tgID int64) MiniActionDTO
@@ -165,6 +169,30 @@ type MiniMenuDTO struct {
 	PayMethods []string `json:"pay_methods"`
 	SupportURL string   `json:"support_url"`
 	GroupURL   string   `json:"group_url"`
+
+	// Legal — документы сервиса (соглашение, политика конфиденциальности) в
+	// том же составе, что показывает чат-бот.
+	Legal []MiniLegalDTO `json:"legal,omitempty"`
+	// LegalAccept — требуется согласие с документами перед покупкой. В
+	// кабинете принять его больше негде: у e-mail-аккаунта чата нет.
+	LegalAccept bool `json:"legal_accept,omitempty"`
+	// LegalOnPay — показывать ссылки на документы на экране оплаты.
+	LegalOnPay bool `json:"legal_on_pay,omitempty"`
+	// LegalInMenu — показывать документы отдельным разделом (тот же тумблер,
+	// что рисует кнопку «Документы» в меню чата).
+	LegalInMenu bool `json:"legal_in_menu,omitempty"`
+	// LegalGateStart — согласие спрашивается на входе, а не только перед
+	// оплатой: мини-апп и кабинет держат тот же гейт, что и чат.
+	LegalGateStart bool `json:"legal_gate_start,omitempty"`
+}
+
+// MiniLegalDTO — один документ сервиса: ссылка на страницу и/или текст,
+// приведённый к безопасной разметке.
+type MiniLegalDTO struct {
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	URL   string `json:"url,omitempty"`
+	HTML  string `json:"html,omitempty"`
 }
 
 type MiniSubDTO struct {
@@ -363,6 +391,16 @@ func (s *Server) handleMiniMenu(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniMenu(ctx, id, web))
+}
+
+func (s *Server) handleMiniAcceptLegal(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniAcceptLegal(ctx, id))
 }
 
 func (s *Server) handleMiniSubscription(w http.ResponseWriter, r *http.Request) {

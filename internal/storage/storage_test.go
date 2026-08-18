@@ -1066,3 +1066,31 @@ func TestImportSkipsInvalidPlan(t *testing.T) {
 		t.Fatal("нормальный тариф не импортировался")
 	}
 }
+
+// Сброс согласий с документами: в SQLite колонка NOT NULL, в Postgres —
+// nullable, поэтому запрос у движков разный, и проверять его надо на живой БД.
+func TestSQLite_ResetTermsAccepted(t *testing.T) {
+	ctx := context.Background()
+	st := openSQLiteTest(t)
+
+	for _, id := range []int64{11, 22} {
+		if err := st.UpsertUser(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetTermsAccepted(ctx, id, "2026-08-18T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.ResetTermsAccepted(ctx); err != nil {
+		t.Fatalf("сброс согласий: %v", err)
+	}
+	for _, id := range []int64{11, 22} {
+		u, err := st.GetUser(ctx, id)
+		if err != nil || u == nil {
+			t.Fatalf("пользователь %d: %v", id, err)
+		}
+		if u.TermsAcceptedAt != "" {
+			t.Fatalf("согласие не снято у %d: %q", id, u.TermsAcceptedAt)
+		}
+	}
+}

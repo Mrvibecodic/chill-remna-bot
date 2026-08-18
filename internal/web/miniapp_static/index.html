@@ -152,6 +152,8 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .field::placeholder{color:var(--muted-2)}
 
 .hint{color:var(--muted);font-size:13.5px}
+.legal{font-size:14px;line-height:1.6;word-wrap:break-word;overflow-wrap:anywhere}
+.legal a{color:var(--acc)}
 .hint.center{text-align:center;margin-top:10px}
 .err{color:var(--bad);font-size:14.5px;font-weight:500}
 /* plan feature list */
@@ -429,6 +431,8 @@ function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px">
 /* ---- main screen ---- */
 function render(me,menu,sub,plans){
   STATE.plans=(plans&&plans.plans)||[];
+  // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
+  if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
   var ub='';
   if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
   let h='<div class="stagger">';
@@ -633,6 +637,9 @@ function buyPlan(code,months){
   // у «Базового» (сервер такой счёт всё равно не создаст).
   (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&code!=='base'))methods.push(m);});
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
+  // Согласие с документами: тот же гейт, что в чате (сервер всё равно откажет
+  // в счёте, поэтому спрашиваем до выбора способа).
+  if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalGate(code,months);return;}
   var label=d.price+' '+(d.currency||'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+
     '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+monthsWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
@@ -664,6 +671,10 @@ function buyPlan(code,months){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
   });
+  if(STATE.menu&&STATE.menu.legal_on_pay&&legalDocs().length){
+    STATE.legalBack=function(){buyPlan(code,months);};
+    h+='<div class="hint" style="margin-top:12px">Оплачивая, вы принимаете '+legalLinks()+'.</div>';
+  }
   h+='<button class="btn ghost" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
@@ -735,6 +746,10 @@ async function openMore(){
       '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
     h+='</div>';
   }
+  if(legalDocs().length&&STATE.menu&&STATE.menu.legal_in_menu){
+    STATE.legalBack=openMore;
+    h+='<div class="sec-title">📜 Документы</div>'+legalRows();
+  }
   if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
   h+='<button class="btn ghost" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
@@ -748,6 +763,63 @@ async function promoApply(el){
     haptic('err');toast(r.message||'Не удалось','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{busy(el,false);}
+}
+
+/* ---- документы сервиса ---- */
+function legalDocs(){return (STATE.menu&&STATE.menu.legal)||[];}
+function legalBack(){var f=STATE.legalBack||openMore;f();}
+function legalRows(){
+  var d=legalDocs(),h='';
+  d.forEach(function(x,i){
+    if(x.html)h+='<button class="btn sec" onclick="legalOpen('+i+')">📄 '+esc(x.title)+'</button>';
+    else h+='<button class="btn sec" onclick="openSmart(\''+jsq(x.url)+'\')">📄 '+esc(x.title)+'</button>';
+  });
+  return h;
+}
+function legalLinks(){
+  var d=legalDocs(),parts=[];
+  d.forEach(function(x,i){
+    if(x.html)parts.push('<a href="#" onclick="legalOpen('+i+');return false">'+esc(x.title)+'</a>');
+    else parts.push('<a href="#" onclick="openSmart(\''+jsq(x.url)+'\');return false">'+esc(x.title)+'</a>');
+  });
+  return parts.join(' и ');
+}
+function legalOpen(i){
+  var x=legalDocs()[i];if(!x)return;haptic('tap');
+  var h='<div class="stagger"><div class="card hero glow"><div class="title">'+esc(x.title)+'</div></div>'+
+    '<div class="card legal">'+(x.html||'')+'</div>';
+  if(x.url)h+='<button class="btn sec" style="margin-top:12px" onclick="openSmart(\''+jsq(x.url)+'\')">🔗 Открыть полностью</button>';
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="legalBack()">← Назад</button></div>';
+  view(h,legalBack);
+}
+async function legalAccept(el,then){
+  haptic('tap');busy(el,true);
+  try{var r=await post('/api/miniapp/legal/accept',{});
+    if(r.ok){if(STATE.menu)STATE.menu.legal_accept=false;haptic('ok');if(then)then();return;}
+    haptic('err');toast(r.error||'Не удалось','err');
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  finally{busy(el,false);}
+}
+function legalStartGate(){
+  STATE.legalBack=legalStartGate;
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
+    '<div class="title">Документы сервиса</div>'+
+    '<div class="hint" style="margin-top:8px">Ознакомьтесь и подтвердите согласие — это нужно сделать один раз.</div></div>';
+  h+=legalRows();
+  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,boot)">✅ Принимаю</button>';
+  if(WEB)h+='<button class="btn ghost" style="margin-top:10px" onclick="cabLogout()">Выйти</button>';
+  h+='</div>';
+  view(h,null);
+}
+function legalGate(code,months){
+  STATE.legalBack=function(){buyPlan(code,months);};
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
+    '<div class="title">Перед оплатой</div>'+
+    '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз.</div></div>';
+  h+=legalRows();
+  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){buyPlan(\''+jsq(code)+'\','+months+');})">✅ Принимаю</button>';
+  h+='<button class="btn ghost" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 
 /* ---- top-up ---- */

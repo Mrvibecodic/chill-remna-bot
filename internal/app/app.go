@@ -250,6 +250,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeCabinet()
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
+		cfg.NormalizeLegal()
 		a.botCfg = cfg
 		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
@@ -601,8 +602,8 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	case strings.HasPrefix(text, "/paysupport") || strings.HasPrefix(text, "/support"):
 		a.handleSupportCmd(ctx, chatID)
 		return
-	case strings.HasPrefix(text, "/terms"):
-		a.handleTermsCmd(ctx, chatID)
+	case strings.HasPrefix(text, "/terms"), strings.HasPrefix(text, "/privacy"), strings.HasPrefix(text, "/docs"):
+		a.showLegalDocs(ctx, chatID)
 		return
 	case strings.HasPrefix(text, "/p2p"):
 		if isAdmin {
@@ -673,21 +674,6 @@ func (a *App) handleSupportCmd(ctx context.Context, chatID int64) {
 		return
 	}
 	a.notify(ctx, chatID, i18n.T(lang, "cmd.support_none"))
-}
-
-func (a *App) handleTermsCmd(ctx context.Context, chatID int64) {
-	lang := a.lang(chatID)
-	a.mu.Lock()
-	text := ""
-	if a.botCfg != nil {
-		text = a.botCfg.Contact.TermsText
-	}
-	a.mu.Unlock()
-	if text == "" {
-		a.notify(ctx, chatID, i18n.T(lang, "cmd.terms_none"))
-		return
-	}
-	a.notify(ctx, chatID, i18n.T(lang, "terms.intro")+"\n\n"+text)
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
@@ -1189,6 +1175,14 @@ func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstNa
 			a.registerUser(ctx, chatID, firstName, username)
 			return
 		}
+	}
+	// Согласие на входе: оператор включил показ документов при первом входе, а
+	// человек их ещё не принял — меню он увидит после «Принимаю».
+	if a.legalStartRequired(ctx, chatID) {
+		a.ensureHomeKey(ctx, chatID)
+		a.getUI(chatID).pendingLegalHome = true
+		a.askLegal(ctx, chatID)
+		return
 	}
 	a.showMenu(ctx, chatID, false, name)
 }

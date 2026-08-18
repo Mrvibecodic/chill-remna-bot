@@ -849,6 +849,13 @@ func (s *fakeStore) SetTermsAccepted(_ context.Context, telegramID int64, ts str
 	return nil
 }
 
+func (s *fakeStore) ResetTermsAccepted(_ context.Context) error {
+	for _, u := range s.users {
+		u.TermsAcceptedAt = ""
+	}
+	return nil
+}
+
 func (s *fakeStore) SetTrialUsed(_ context.Context, telegramID int64, ts string) error {
 	if u, ok := s.users[telegramID]; ok {
 		u.TrialUsedAt = ts

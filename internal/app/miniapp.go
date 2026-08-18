@@ -55,6 +55,14 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 	if dto.HasSub {
 		dto.CanRenew = a.renewEligible(ctx, tgID)
 	}
+	dto.Legal = a.miniLegalDocs(tgID)
+	if len(dto.Legal) > 0 {
+		cfgLegal := a.legalCfg()
+		dto.LegalOnPay = cfgLegal.OnPay
+		dto.LegalInMenu = cfgLegal.InMenu
+		dto.LegalGateStart = cfgLegal.GateStart
+		dto.LegalAccept = a.legalRequired(ctx, tgID)
+	}
 	a.mu.Lock()
 	if a.botCfg != nil {
 		c := a.botCfg
@@ -267,6 +275,11 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if s == nil {
 		return web.MiniActionDTO{Error: "тариф недоступен"}
 	}
+	// Гейт документов — до выбора способа: оплата с баланса и P2P идут мимо
+	// miniPayURLCore, и проверка только там оставляла их без согласия.
+	if a.legalRequired(ctx, tgID) {
+		return web.MiniActionDTO{Error: "сначала примите документы сервиса"}
+	}
 	if method == model.PayMethodP2P {
 		if web_ {
 			return a.MiniP2PWeb(ctx, tgID, s)
@@ -307,4 +320,35 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		return web.MiniActionDTO{Error: err.Error()}
 	}
 	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
+}
+
+// miniLegalDocs — документы сервиса для мини-аппа и кабинета: тот же состав,
+// что показывает чат-бот, но текст приведён к безопасной разметке (страницу
+// рисует браузер, а текст задаёт админ).
+func (a *App) miniLegalDocs(tgID int64) []web.MiniLegalDTO {
+	lang := a.lang(tgID)
+	var out []web.MiniLegalDTO
+	for _, it := range a.legalCfg().Docs() {
+		d := web.MiniLegalDTO{Kind: it.Kind, Title: legalDocTitle(lang, it.Kind), URL: it.Doc.URL}
+		if it.Doc.Text != "" {
+			d.HTML = sanitizeLegalHTML(it.Doc.Text)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// MiniAcceptLegal записывает согласие с документами. Из кабинета это
+// единственный способ его дать: у e-mail-аккаунта чата с ботом нет.
+func (a *App) MiniAcceptLegal(ctx context.Context, tgID int64) web.MiniActionDTO {
+	if !a.legalCfg().Any() {
+		return web.MiniActionDTO{OK: true}
+	}
+	if a.store != nil {
+		if err := a.store.SetTermsAccepted(ctx, tgID, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			a.log.Warn("согласие с документами не записано", "err", err, "user", tgID)
+			return web.MiniActionDTO{Error: "не удалось сохранить согласие"}
+		}
+	}
+	return web.MiniActionDTO{OK: true}
 }

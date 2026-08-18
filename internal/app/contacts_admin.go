@@ -26,18 +26,18 @@ func (a *App) showContacts(ctx context.Context, chatID int64) {
 		}
 		return v
 	}
-	termsStatus := i18n.T(lang, "contacts.terms_off")
-	if c.T != "" {
-		termsStatus = i18n.T(lang, "contacts.terms_on")
+	legalStatus := i18n.T(lang, "contacts.legal_off")
+	if names := a.legalNames(lang); names != "" {
+		legalStatus = i18n.T(lang, "contacts.legal_on", names)
 	}
-	body := i18n.T(lang, "contacts.title", display(c.G), display(c.S), termsStatus)
+	body := i18n.T(lang, "contacts.title", display(c.G), display(c.S), legalStatus)
 
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "contacts.btn_group"), "ctc:group"), btn(i18n.T(lang, "contacts.btn_support"), "ctc:support")},
-		{btn(i18n.T(lang, "contacts.btn_terms"), "ctc:terms")},
+		{btn(i18n.T(lang, "contacts.btn_legal"), "leg:open")},
 	}
 
-	if c.G != "" || c.S != "" || c.T != "" {
+	if c.G != "" || c.S != "" || c.T != "" || a.legalCfg().Any() {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "contacts.btn_clear"), "ctc:clear"),
 		})
@@ -63,20 +63,24 @@ func (a *App) onContacts(ctx context.Context, chatID int64, val string) {
 	case "support":
 		ui.adminInput = "ctc_support"
 		a.sendKB(ctx, chatID, i18n.T(lang, "contacts.ask_support"), cancel)
-	case "terms":
-		ui.adminInput = "ctc_terms"
-		a.sendKB(ctx, chatID, i18n.T(lang, "contacts.ask_terms"), cancel)
 	case "clear":
 
 		a.mu.Lock()
 		if a.botCfg != nil {
-			a.botCfg.Contact = model.ContactConfig{}
+			// Документы живут на своём экране и своей кнопкой не чистятся; в
+			// легаси-поле остаётся зеркало соглашения (см. NormalizeLegal) —
+			// обнулить его здесь значит стереть сам документ.
+			a.botCfg.Contact = model.ContactConfig{TermsText: a.botCfg.Legal.Terms.Text}
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showContacts(ctx, chatID)
 	case "cancel":
 		ui.adminInput = ""
+		a.showContacts(ctx, chatID)
+	default:
+		// Кнопка со старого экрана, оставшегося в переписке (например,
+		// «Изменить текст соглашения» до появления документов).
 		a.showContacts(ctx, chatID)
 	}
 }
@@ -93,8 +97,6 @@ func (a *App) setContact(ctx context.Context, chatID int64, field, raw string) {
 			a.botCfg.Contact.GroupURL = normalizeContactURL(raw)
 		case "support":
 			a.botCfg.Contact.SupportURL = normalizeContactURL(raw)
-		case "terms":
-			a.botCfg.Contact.TermsText = raw
 		}
 	}
 	a.mu.Unlock()
