@@ -16,6 +16,11 @@ export default defineConfig({
       defaultLocale: 'root',
       locales: { root: { label: 'Русский', lang: 'ru' } },
       customCss: ['./src/styles/theme.css'],
+      // Длинные команды (curl с URL) переносим по словам, чтобы блок кода не
+      // уезжал в горизонтальный скролл — особенно на телефоне.
+      expressiveCode: {
+        defaultProps: { wrap: true, preserveIndent: true },
+      },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/Mrvibecodic/chill-remna-bot' },
       ],
