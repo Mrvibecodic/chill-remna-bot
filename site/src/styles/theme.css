@@ -100,12 +100,75 @@
 }
 .hero-chips span {
   font-size: 13px;
-  color: var(--brand-muted);
-  background: rgba(18, 23, 38, 0.55);
-  border: 1px solid var(--brand-line);
+  /* цвета от темы Starlight, иначе в светлой теме чипы остаются тёмными */
+  color: var(--sl-color-gray-2);
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-5);
   border-radius: 10px;
   padding: 7px 13px;
 }
 .hero-chips b {
   color: var(--sl-color-white);
+}
+
+/* ── Пропорции колонок ───────────────────────────────────────────────────────
+   У Starlight обе боковые колонки по 18.75rem, а текст жёстко ограничен 45rem.
+   На ноутбучных 1150–1400px текст из-за этого сжимается до ~630px, а на 2K+
+   между меню и текстом остаётся пустая полоса, зато «На этой странице»
+   растягивается на четверть экрана. Пересчитываем: оглавление — узкая колонка
+   по своему содержимому, текст занимает остальное место и растёт вместе с
+   экраном. */
+/* Планшеты и небольшие ноутбуки: меню 18.75rem съедало место у текста. */
+@media (min-width: 50rem) {
+  :root {
+    --sl-sidebar-width: 16rem;
+  }
+}
+
+@media (min-width: 72rem) {
+  :root {
+    --sl-sidebar-width: 14.5rem;
+    --toc-width: 13.5rem;
+    /* шапка выравнивает поиск по той же сетке */
+    --__toc-width: var(--toc-width);
+    --sl-content-width: 45rem;
+  }
+  .right-sidebar-container {
+    width: var(--toc-width);
+  }
+  .right-sidebar {
+    width: var(--toc-width);
+  }
+  .right-sidebar-panel .sl-container {
+    width: 100%;
+    max-width: none;
+  }
+  [data-has-sidebar][data-has-toc] .main-pane {
+    width: calc(100% - var(--toc-width));
+    --sl-content-margin-inline: auto;
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --sl-sidebar-width: 15.5rem;
+    --toc-width: 14.5rem;
+    --sl-content-width: 48rem;
+  }
+}
+
+@media (min-width: 90rem) {
+  :root {
+    --sl-sidebar-width: 17rem;
+    --toc-width: 15.5rem;
+    --sl-content-width: 52rem;
+  }
+}
+
+@media (min-width: 120rem) {
+  :root {
+    --sl-sidebar-width: 18rem;
+    --toc-width: 17rem;
+    --sl-content-width: 58rem;
+  }
 }
