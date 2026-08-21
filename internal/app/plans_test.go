@@ -401,6 +401,9 @@ func TestPaidWithoutPeriod_CallsAdmin(t *testing.T) {
 	if !strings.Contains(joined, "Администратор уведомлён") {
 		t.Fatalf("пользователь не уведомлён:\n%s", joined)
 	}
+	if !strings.Contains(joined, "Покупатель:") {
+		t.Fatalf("в уведомлении админа нет покупателя:\n%s", joined)
+	}
 }
 
 // «0 = безлимит» из админки обязан доезжать до панели нулём. Раньше нулевые

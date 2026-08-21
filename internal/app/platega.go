@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -43,16 +44,22 @@ func plPayload(chatID int64, months int) string {
 }
 
 func parsePlPayload(payload string) (telegramID int64, months int) {
-	for _, part := range strings.Split(payload, "&") {
+	payload = strings.ReplaceAll(payload, "&amp;", "&")
+	if !strings.Contains(payload, "=") && strings.Contains(payload, "%3D") {
+		if dec, err := url.QueryUnescape(payload); err == nil {
+			payload = dec
+		}
+	}
+	for _, part := range strings.FieldsFunc(payload, func(r rune) bool { return r == '&' || r == ';' }) {
 		k, v, ok := strings.Cut(part, "=")
 		if !ok {
 			continue
 		}
-		switch k {
+		switch strings.TrimSpace(k) {
 		case "telegram_id":
-			telegramID, _ = strconv.ParseInt(v, 10, 64)
+			telegramID, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		case "months":
-			months, _ = strconv.Atoi(v)
+			months, _ = strconv.Atoi(strings.TrimSpace(v))
 		}
 	}
 	return
@@ -146,9 +153,14 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 		return
 	}
 	chatID, months := parsePlPayload(tx.Payload)
-	if chatID == 0 {
+	if chatID == 0 || months == 0 {
 		if p, _ := a.store.PendingByExtID(ctx, txID); p != nil {
-			chatID, months = p.TelegramID, p.Months
+			if chatID == 0 {
+				chatID = p.TelegramID
+			}
+			if months == 0 {
+				months = p.Months
+			}
 		}
 	}
 	if chatID == 0 {
@@ -156,6 +168,7 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 		return
 	}
 	if months == 0 {
+		a.payLog(ctx, model.PayMethodPlatega, txID, chatID, "error", "срок не восстановлен ни из payload, ни из строки счёта; payload=%q", tx.Payload)
 		a.noPeriodForPayment(ctx, model.PayMethodPlatega, txID, chatID)
 		return
 	}

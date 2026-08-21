@@ -106,7 +106,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		// оплаченного. Деньги приняты — случай разбирает админ.
 		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "error", "оплаченная сумма %d⭐ не совпала с условиями счетов — выдача не проводится", sp.TotalAmount)
 		alang := a.lang(a.cfg.AdminID)
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodStars+" "+sp.TelegramPaymentChargeID))
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodStars+" "+sp.TelegramPaymentChargeID, a.userLabelByID(ctx, chatID)))
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
 		return
 	}

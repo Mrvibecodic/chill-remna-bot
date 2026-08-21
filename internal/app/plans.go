@@ -443,13 +443,22 @@ func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *mode
 // noPeriodForPayment вызывается, когда деньги уже приняты, а срок подписки
 // определить не удалось: ни payload, ни строка счёта, ни намерение покупки его
 // не дали. Выдавать «срок по умолчанию» здесь нельзя — это выдача не того, за
-// что заплатили. Поэтому пишем в журнал, зовём админа и говорим человеку, что
-// им занимаются.
+// что заплатили. Поэтому пишем в журнал и зовём админа.
 func (a *App) noPeriodForPayment(ctx context.Context, method, extID string, chatID int64) {
 	a.payLog(ctx, method, extID, chatID, "error", "оплата принята, но срок подписки неизвестен — выдача не проводится")
 	alang := a.lang(a.cfg.AdminID)
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", method+" "+extID))
-	if chatID != 0 {
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", method+" "+extID, a.userLabelByID(ctx, chatID)))
+	if chatID != 0 && !methodSelfHeals(method) {
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
 	}
+}
+
+// methodSelfHeals — способ оплаты с фоновой сверкой счетов: такому покупателю
+// отсюда не пишем, выдачу добьёт реконсилятор. У Stars сверки нет — там пишем.
+func methodSelfHeals(method string) bool {
+	switch method {
+	case model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodPlatega, model.PayMethodHeleket:
+		return true
+	}
+	return false
 }
