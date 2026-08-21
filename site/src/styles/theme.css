@@ -167,8 +167,9 @@
 
 @media (min-width: 120rem) {
   :root {
+    font-size: 17px;
     --sl-sidebar-width: 18rem;
     --toc-width: 17rem;
-    --sl-content-width: 58rem;
+    --sl-content-width: 60rem;
   }
 }
