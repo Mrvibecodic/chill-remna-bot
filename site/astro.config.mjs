@@ -22,6 +22,8 @@ export default defineConfig({
         defaultProps: { wrap: true, preserveIndent: true },
       },
       social: [
+        { icon: 'telegram', label: 'Группа в Telegram', href: 'https://t.me/+2lmP1yhxpCE3MDcy' },
+        { icon: 'comment-alt', label: 'Чат в Telegram', href: 'https://t.me/+8BJQXYXYLqM4YWYy' },
         { icon: 'github', label: 'GitHub', href: 'https://github.com/Mrvibecodic/chill-remna-bot' },
       ],
       editLink: {

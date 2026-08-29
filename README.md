@@ -1,5 +1,11 @@
 # Chill Remna bot
 
+[![Telegram — группа](https://img.shields.io/badge/Telegram-%D0%93%D1%80%D1%83%D0%BF%D0%BF%D0%B0-2AABEE?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+2lmP1yhxpCE3MDcy)
+[![Telegram — чат](https://img.shields.io/badge/Telegram-%D0%A7%D0%B0%D1%82-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+8BJQXYXYLqM4YWYy)
+
+> 📣 **[Группа](https://t.me/+2lmP1yhxpCE3MDcy)** — новости, релизы и анонсы.
+> 💬 **[Чат](https://t.me/+8BJQXYXYLqM4YWYy)** — вопросы, помощь с установкой и общение.
+
 Телеграм-бот «магазин + админка» для панели **Remnawave**. Пользователь выбирает тариф, оплачивает и за пару минут получает ключ. Вся настройка — прямо в Telegram: на сервере вы вписываете два значения и запускаете одну команду.
 
 Один бинарь на Go, запуск в Docker (amd64 и ARM64). База данных — SQLite или PostgreSQL (бот поднимает Postgres сам). Конфигурация хранится в БД в зашифрованном виде, поэтому переживает перезапуск.
@@ -86,6 +92,12 @@ cd site
 npm ci
 npm run dev     # http://localhost:4321
 ```
+
+## Связь
+
+- 📣 **Группа:** https://t.me/+2lmP1yhxpCE3MDcy — новости, релизы и анонсы.
+- 💬 **Чат:** https://t.me/+8BJQXYXYLqM4YWYy — вопросы по установке и настройке, помощь и обсуждение.
+- 🐞 **Ошибки и предложения:** [Issues](https://github.com/Mrvibecodic/chill-remna-bot/issues).
 
 ## Лицензия
 
