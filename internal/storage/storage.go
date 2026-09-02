@@ -128,6 +128,9 @@ type Storage interface {
 
 	CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
+	// LastAwaitingP2PRequest — последняя заявка пользователя, ждущая чек.
+	// Нужна, когда ожидание чека в памяти потеряно (перезапуск бота).
+	LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 
 	AddPayment(ctx context.Context, p *model.Payment) error
@@ -610,6 +613,23 @@ func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, 
 	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE id = "+b.ph(1), id).
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.Snapshot = model.DecodePlanSnapshot(snapRaw)
+	return r, nil
+}
+
+func (b *base) LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error) {
+	r := &model.P2PRequest{}
+	var snapRaw string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT "+p2pCols+" FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+
+			" ORDER BY created_at DESC, id DESC LIMIT 1", telegramID, model.P2PAwaiting).
 		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

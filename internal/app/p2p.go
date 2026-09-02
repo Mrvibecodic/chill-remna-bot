@@ -535,6 +535,9 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
 		return
 	}
+	if !a.awaitingReceipt(ctx, chatID) {
+		return
+	}
 	a.submitP2PReceipt(ctx, m, m.Photo[len(m.Photo)-1].FileID, false)
 }
 
@@ -546,7 +549,7 @@ func (a *App) handleP2PDoc(ctx context.Context, m *models.Message) bool {
 		return false
 	}
 	chatID := m.Chat.ID
-	if a.getUI(chatID).awaitShotReq == 0 {
+	if !a.awaitingReceipt(ctx, chatID) {
 		return false
 	}
 	mime := strings.ToLower(m.Document.MimeType)
@@ -570,6 +573,36 @@ func hasImageExt(name string) bool {
 		}
 	}
 	return false
+}
+
+// receiptFallback — окно, в котором чек принимается по последней заявке
+// пользователя, даже если ожидание в памяти потеряно.
+const receiptFallback = 24 * time.Hour
+
+// awaitingReceipt отвечает, ждём ли мы от пользователя чек об оплате, и при
+// необходимости восстанавливает ожидание по базе. Флаг живёт в памяти, поэтому
+// перезапуск бота между «✅ Я оплатил» и присланным чеком иначе съедал бы чек
+// молча: заявка так и висела бы в ожидании, а админ ничего не получал.
+func (a *App) awaitingReceipt(ctx context.Context, chatID int64) bool {
+	ui := a.getUI(chatID)
+	if ui.awaitShotReq != 0 {
+		return true
+	}
+	if a.store == nil {
+		return false
+	}
+	req, err := a.store.LastAwaitingP2PRequest(ctx, chatID)
+	if err != nil || req == nil {
+		return false
+	}
+	// Только свежая заявка: случайное фото через неделю после отменённой
+	// покупки не должно уходить админу как оплата.
+	t, perr := time.Parse(time.RFC3339, req.CreatedAt)
+	if perr != nil || time.Since(t) > receiptFallback {
+		return false
+	}
+	ui.awaitShotReq = req.ID
+	return true
 }
 
 // submitP2PReceipt закрывает ожидание чека: сохраняет file_id, помечает заявку

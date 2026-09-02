@@ -1342,10 +1342,33 @@ func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) err
 		s.seq++
 		r.ID = s.seq
 	}
+	if r.CreatedAt == "" {
+		r.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	cp := *r
 	s.reqs[r.ID] = &cp
 	return nil
 }
+
+// LastAwaitingP2PRequest повторяет запрос хранилища: самая свежая заявка
+// пользователя, которая всё ещё ждёт чек.
+func (s *fakeStore) LastAwaitingP2PRequest(_ context.Context, tgID int64) (*model.P2PRequest, error) {
+	var best *model.P2PRequest
+	for _, r := range s.reqs {
+		if r.TelegramID != tgID || r.Status != model.P2PAwaiting {
+			continue
+		}
+		if best == nil || r.CreatedAt > best.CreatedAt || (r.CreatedAt == best.CreatedAt && r.ID > best.ID) {
+			best = r
+		}
+	}
+	if best == nil {
+		return nil, nil
+	}
+	cp := *best
+	return &cp, nil
+}
+
 func (s *fakeStore) GetP2PRequest(_ context.Context, id int64) (*model.P2PRequest, error) {
 	if s.reqs == nil || s.reqs[id] == nil {
 		return nil, nil
@@ -2238,6 +2261,70 @@ func TestP2P_ReceiptAsDocument(t *testing.T) {
 		a.handleDocument(ctx, p2pDocMsg(user, "doc_ok", "check.pdf", "application/pdf"))
 		if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PSubmitted {
 			t.Fatalf("повторная отправка чека не сработала: %+v", r)
+		}
+	})
+}
+
+// Ожидание чека живёт в памяти: перезапуск бота между «✅ Я оплатил» и
+// присланным чеком раньше съедал чек молча. Подхватываем последнюю заявку,
+// которая всё ещё ждёт оплату, — но только свежую.
+func TestP2P_ReceiptAfterRestart(t *testing.T) {
+	newApp := func() (*App, *fakeMsg, *fakeStore) {
+		fm := &fakeMsg{}
+		fs := &fakeStore{}
+		a := &App{
+			cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+			log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+			msg:   fm,
+			wiz:   map[int64]*wizard{},
+			ui:    map[int64]*uiState{},
+			store: fs,
+		}
+		a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+		return a, fm, fs
+	}
+	const user int64 = 555
+
+	t.Run("свежая заявка", func(t *testing.T) {
+		a, fm, fs := newApp()
+		ctx := context.Background()
+		req := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting,
+			CreatedAt: time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)}
+		if err := fs.CreateP2PRequest(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		// Кнопку «Я оплатил» не нажимаем — имитируем потерянное состояние.
+		a.handleDocument(ctx, p2pDocMsg(user, "doc_after_restart", "check.pdf", "application/pdf"))
+		if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PSubmitted || r.Screenshot != "doc_after_restart" {
+			t.Fatalf("чек после перезапуска не принят: %+v\n%s", r, fm.joined())
+		}
+		// Фотографией — тот же путь.
+		a2, _, fs2 := newApp()
+		req2 := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting,
+			CreatedAt: time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)}
+		if err := fs2.CreateP2PRequest(ctx, req2); err != nil {
+			t.Fatal(err)
+		}
+		a2.handlePhoto(ctx, photoMsg(user, "file_after_restart"))
+		if r, _ := fs2.GetP2PRequest(ctx, req2.ID); r == nil || r.Status != model.P2PSubmitted {
+			t.Fatalf("скриншот после перезапуска не принят: %+v", r)
+		}
+	})
+
+	t.Run("протухшая заявка", func(t *testing.T) {
+		a, fm, fs := newApp()
+		ctx := context.Background()
+		req := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting,
+			CreatedAt: time.Now().UTC().Add(-30 * time.Hour).Format(time.RFC3339)}
+		if err := fs.CreateP2PRequest(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		a.handlePhoto(ctx, photoMsg(user, "random_photo"))
+		if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PAwaiting {
+			t.Fatalf("случайное фото не должно закрывать старую заявку: %+v", r)
+		}
+		if len(fm.texts) != 0 {
+			t.Fatalf("бот не должен был ничего отправлять:\n%s", fm.joined())
 		}
 	})
 }
