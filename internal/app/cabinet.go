@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -234,6 +236,10 @@ func (a *App) CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filen
 	if len(data) == 0 {
 		return errors.New("пустой файл")
 	}
+	kind := receiptKind(filename, data)
+	if kind == receiptOther {
+		return errors.New("нужен скриншот (JPG, PNG) или PDF-чек")
+	}
 	req.Screenshot = "web"
 	req.Status = model.P2PSubmitted
 	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
@@ -243,9 +249,37 @@ func (a *App) CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filen
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
-	a.sendAdminPhotoUpload(ctx, filename, data, caption, [][]models.InlineKeyboardButton{{
+	rows := [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
 		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+id),
-	}})
+	}}
+	// PDF картинкой не отправишь — уводим админу файлом.
+	if kind == receiptPDF {
+		a.sendAdminDocUpload(ctx, filename, data, caption, rows)
+	} else {
+		a.sendAdminPhotoUpload(ctx, filename, data, caption, rows)
+	}
 	return nil
+}
+
+type receiptType int
+
+const (
+	receiptOther receiptType = iota
+	receiptImage
+	receiptPDF
+)
+
+// receiptKind определяет, чем прислан чек: картинкой или PDF. Смотрим и на
+// содержимое, и на расширение — браузеры и мобильные клиенты присылают
+// осмысленное имя не всегда.
+func receiptKind(filename string, data []byte) receiptType {
+	name := strings.ToLower(filename)
+	if bytes.HasPrefix(data, []byte("%PDF-")) || strings.HasSuffix(name, ".pdf") {
+		return receiptPDF
+	}
+	if strings.HasPrefix(http.DetectContentType(data), "image/") || hasImageExt(name) {
+		return receiptImage
+	}
+	return receiptOther
 }

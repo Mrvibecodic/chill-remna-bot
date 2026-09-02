@@ -97,10 +97,15 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-// handleDocument принимает файл дампа remnashop или файл тарифа. Другие
-// документы боту не нужны.
+// handleDocument принимает чек об оплате переводом, файл дампа remnashop или
+// файл тарифа. Другие документы боту не нужны.
 func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
+	// Чек об оплате присылает обычный пользователь — эта ветка идёт до
+	// админской проверки ниже.
+	if a.handleP2PDoc(ctx, m) {
+		return
+	}
 	if m.From == nil || m.From.ID != a.cfg.AdminID {
 		return
 	}

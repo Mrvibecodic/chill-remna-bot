@@ -681,23 +681,23 @@ function buyPlan(code,months){
 function renderP2PCard(card,amount,reqID){
   haptic('tap');setBack(boot);
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+' Оплата переводом</span>'+IC.wallet+'</div>'+
-    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите скриншот оплаты — админ проверит вручную.</div></div>';
+    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
-    '<input id="p2pfile" type="file" accept="image/*" class="field" style="padding:10px">'+
-    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+reqID+',this)">'+IC.check+'Отправить скриншот</button></div>';
+    '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
+    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+reqID+',this)">'+IC.check+'Отправить подтверждение</button></div>';
   h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function p2pUpload(reqID,el){
   var inp=document.getElementById('p2pfile');var f=inp&&inp.files&&inp.files[0];
-  if(!f){toast('Выберите скриншот оплаты','err');return;}
+  if(!f){toast('Выберите скриншот или PDF-чек','err');return;}
   haptic('tap');busy(el,true);
   try{
     var fd=new FormData();fd.append('req_id',String(reqID));fd.append('photo',f);
     var r=await fetch('/api/cabinet/p2p/screenshot',{method:'POST',headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{},body:fd});
-    if(r.ok){haptic('ok');toast('Скриншот отправлен на проверку','ok');boot();return;}
+    if(r.ok){haptic('ok');toast('Подтверждение отправлено на проверку','ok');boot();return;}
     var j={};try{j=await r.json();}catch(e){}haptic('err');toast(j.error||'Ошибка загрузки','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   busy(el,false);

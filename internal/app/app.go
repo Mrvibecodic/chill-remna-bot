@@ -59,6 +59,9 @@ type messenger interface {
 	AnswerPreCheckout(ctx context.Context, id string, ok bool, errMsg string)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
+	// SendDocumentKB отправляет файл (по file_id или загрузкой) с подписью и
+	// кнопками — так уходят чеки об оплате, которые пришли не картинкой.
+	SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int
 	Download(ctx context.Context, fileID string) ([]byte, error)
 }
 
@@ -1229,6 +1232,13 @@ func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption str
 	a.msg.SendPhoto(ctx, chatID, fileID, a.applyPremium(caption), withClose)
 }
 
+// notifyDoc — то же, что notifyPhoto, но для чека, пришедшего файлом (PDF или
+// картинка «без сжатия»): такие Telegram отдаёт только как документ.
+func (a *App) notifyDoc(ctx context.Context, chatID int64, doc models.InputFile, caption string, rows [][]models.InlineKeyboardButton) {
+	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
+	a.msg.SendDocumentKB(ctx, chatID, doc, a.applyPremium(caption), &models.InlineKeyboardMarkup{InlineKeyboard: withClose})
+}
+
 func backHomeRow(lang string) []models.InlineKeyboardButton {
 	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 }
@@ -1538,6 +1548,21 @@ func (m botMessenger) SendDocument(ctx context.Context, chatID int64, filename s
 	if err != nil {
 		m.log.Error("send document", "err", err)
 	}
+}
+
+func (m botMessenger) SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int {
+	msg, err := m.b.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:      chatID,
+		Document:    doc,
+		Caption:     caption,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: rm,
+	})
+	if err != nil {
+		m.log.Error("send document kb", "err", err)
+		return 0
+	}
+	return msg.ID
 }
 
 // Download скачивает файл, присланный в чат. Telegram отдаёт боту файлы не

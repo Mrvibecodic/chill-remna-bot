@@ -116,3 +116,55 @@ func TestCabinetDeniedGate(t *testing.T) {
 		t.Fatalf("после одобрения вход должен пройти: lid=%d err=%v", lid, err)
 	}
 }
+
+// Из кабинета чек тоже приходит и PDF-файлом: картинку уводим админу фото,
+// PDF — документом (sendPhoto его не примет), посторонний файл отклоняем.
+func TestCabinetP2PScreenshot_PDFAndImage(t *testing.T) {
+	pdf := append([]byte("%PDF-1.7\n"), make([]byte, 64)...)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+
+	cases := []struct {
+		name, file string
+		data       []byte
+		wantDoc    bool
+		wantErr    bool
+	}{
+		{name: "pdf", file: "check.pdf", data: pdf, wantDoc: true},
+		{name: "картинка", file: "shot.png", data: png},
+		{name: "имя без расширения", file: "blob", data: pdf, wantDoc: true},
+		{name: "посторонний файл", file: "report.xlsx", data: []byte("PK\x03\x04 zip"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, fm, fs := newTestApp(t)
+			a.store = fs
+			a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+			ctx := context.Background()
+			const user int64 = 555
+			req := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting}
+			if err := fs.CreateP2PRequest(ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			err := a.CabinetP2PScreenshot(ctx, user, req.ID, tc.file, tc.data)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("посторонний файл должен быть отклонён")
+				}
+				if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PAwaiting {
+					t.Fatalf("заявка не должна была уйти на проверку: %+v", r)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("чек не принят: %v", err)
+			}
+			if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PSubmitted {
+				t.Fatalf("заявка не помечена отправленной: %+v", r)
+			}
+			gotDoc := len(fm.sentDocIDs) == 1 && fm.sentDocIDs[0] == tc.file
+			if gotDoc != tc.wantDoc {
+				t.Fatalf("способ отправки админу неверный: документы=%v\n%s", fm.sentDocIDs, fm.joined())
+			}
+		})
+	}
+}

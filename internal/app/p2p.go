@@ -492,6 +492,12 @@ func (a *App) sendAdminPhotoUpload(ctx context.Context, filename string, data []
 	_, _ = a.msg.SendBanner(ctx, a.cfg.AdminID, photo, caption, nil, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
 }
 
+// sendAdminDocUpload уводит админу загруженный из кабинета чек-файл (PDF).
+func (a *App) sendAdminDocUpload(ctx context.Context, filename string, data []byte, caption string, rows [][]models.InlineKeyboardButton) {
+	doc := &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)}
+	a.msg.SendDocumentKB(ctx, a.cfg.AdminID, doc, caption, &models.InlineKeyboardMarkup{InlineKeyboard: rows})
+}
+
 func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	id, _ := strconv.ParseInt(arg, 10, 64)
@@ -529,11 +535,53 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
 		return
 	}
+	a.submitP2PReceipt(ctx, m, m.Photo[len(m.Photo)-1].FileID, false)
+}
+
+// handleP2PDoc принимает чек об оплате, присланный файлом, а не фотографией:
+// PDF из банковского приложения или ту же картинку, отправленную «без сжатия».
+// Возвращает true, если сообщение разобрано здесь и дальше его вести не нужно.
+func (a *App) handleP2PDoc(ctx context.Context, m *models.Message) bool {
+	if m.Document == nil {
+		return false
+	}
+	chatID := m.Chat.ID
+	if a.getUI(chatID).awaitShotReq == 0 {
+		return false
+	}
+	mime := strings.ToLower(m.Document.MimeType)
+	name := strings.ToLower(m.Document.FileName)
+	ok := mime == "application/pdf" || strings.HasSuffix(name, ".pdf") ||
+		strings.HasPrefix(mime, "image/") || hasImageExt(name)
+	if !ok {
+		a.send(ctx, chatID, i18n.T(a.lang(chatID), "p2p.bad_receipt"))
+		return true
+	}
+	// Даже картинку-файлом пересылаем админу документом: file_id документа
+	// Telegram в sendPhoto не принимает.
+	a.submitP2PReceipt(ctx, m, m.Document.FileID, true)
+	return true
+}
+
+func hasImageExt(name string) bool {
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".gif"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// submitP2PReceipt закрывает ожидание чека: сохраняет file_id, помечает заявку
+// отправленной и уводит её админу. asDoc — чек пришёл файлом (PDF или картинка
+// без сжатия), такой отправляем админу документом.
+func (a *App) submitP2PReceipt(ctx context.Context, m *models.Message, fileID string, asDoc bool) {
+	chatID := m.Chat.ID
+	ui := a.getUI(chatID)
 	if ui.awaitShotReq == 0 || a.store == nil {
 		return
 	}
 	reqID := ui.awaitShotReq
-	fileID := m.Photo[len(m.Photo)-1].FileID
 	req, err := a.store.GetP2PRequest(ctx, reqID)
 	if err != nil || req == nil {
 		return
@@ -553,17 +601,22 @@ func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	ui.p2pSubmitMsgID = a.msg.SendKB(ctx, chatID,
 		a.applyPremium(i18n.T(lang, "p2p.submitted")),
 		[][]models.InlineKeyboardButton{backHomeRow(lang)})
-	a.notifyAdminPayment(ctx, req, fileID)
+	a.notifyAdminPayment(ctx, req, fileID, asDoc)
 }
 
-func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fileID string) {
+func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fileID string, asDoc bool) {
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 	id := strconv.FormatInt(req.ID, 10)
-	a.notifyPhoto(ctx, a.cfg.AdminID, fileID, caption, [][]models.InlineKeyboardButton{{
+	rows := [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
 		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+id),
-	}})
+	}}
+	if asDoc {
+		a.notifyDoc(ctx, a.cfg.AdminID, &models.InputFileString{Data: fileID}, caption, rows)
+		return
+	}
+	a.notifyPhoto(ctx, a.cfg.AdminID, fileID, caption, rows)
 }
 
 func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {

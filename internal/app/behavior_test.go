@@ -17,6 +17,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/config"
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 	"remnabot/internal/storage"
@@ -34,6 +35,9 @@ type fakeMsg struct {
 	downloads map[string][]byte
 	// docs — документы, отправленные ботом: ключ — имя файла.
 	docs map[string][]byte
+	// sentDocIDs — file_id (или имя файла при загрузке) документов, ушедших
+	// через SendDocumentKB: так проверяется пересылка чека-файла админу.
+	sentDocIDs []string
 	// preOK — ответы предпроверок Stars по порядку.
 	preOK []bool
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
@@ -159,6 +163,23 @@ func (f *fakeMsg) lastPreOK() bool {
 		return false
 	}
 	return f.preOK[len(f.preOK)-1]
+}
+
+func (f *fakeMsg) SendDocumentKB(_ context.Context, _ int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int {
+	if kb, ok := rm.(*models.InlineKeyboardMarkup); ok && kb != nil {
+		f.recordKB(kb.InlineKeyboard)
+	}
+	switch d := doc.(type) {
+	case *models.InputFileString:
+		f.mu.Lock()
+		f.sentDocIDs = append(f.sentDocIDs, d.Data)
+		f.mu.Unlock()
+	case *models.InputFileUpload:
+		f.mu.Lock()
+		f.sentDocIDs = append(f.sentDocIDs, d.Filename)
+		f.mu.Unlock()
+	}
+	return f.add("DOCKB:" + caption)
 }
 
 func (f *fakeMsg) SendDocument(_ context.Context, _ int64, filename string, data []byte, _ string) {
@@ -2127,4 +2148,96 @@ func TestReconciler_SkipsFresh(t *testing.T) {
 	if len(left) != 1 {
 		t.Fatalf("свежий инвойс не должен трогаться реконсилятором, осталось: %d", len(left))
 	}
+}
+
+func p2pDocMsg(uid int64, fileID, name, mime string) *models.Message {
+	return &models.Message{
+		From:     &models.User{ID: uid},
+		Chat:     models.Chat{ID: uid},
+		Document: &models.Document{FileID: fileID, FileName: name, MimeType: mime},
+	}
+}
+
+// Пользователь часто присылает чек не скриншотом, а файлом: PDF из банковского
+// приложения или ту же картинку «без сжатия». Раньше такое сообщение молча
+// терялось — заявка висела, а админ ничего не получал.
+func TestP2P_ReceiptAsDocument(t *testing.T) {
+	newApp := func() (*App, *fakeMsg, *fakeStore) {
+		fm := &fakeMsg{}
+		fs := &fakeStore{}
+		a := &App{
+			cfg:   &config.Config{AdminID: 100, DataDir: t.TempDir()},
+			log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+			msg:   fm,
+			wiz:   map[int64]*wizard{},
+			ui:    map[int64]*uiState{},
+			store: fs,
+		}
+		a.botCfg = &model.BotConfig{Installed: true, Language: "ru",
+			P2P: model.P2PConfig{Enabled: true, Cards: []string{"CARD-1"}, Prices: map[int]string{1: "100"}}}
+		return a, fm, fs
+	}
+
+	cases := []struct {
+		name, file, mime string
+	}{
+		{"pdf по mime", "check.pdf", "application/pdf"},
+		{"pdf по расширению", "check.PDF", ""},
+		{"картинка файлом", "IMG_0001.jpg", "image/jpeg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, fm, fs := newApp()
+			ctx := context.Background()
+			const user int64 = 555
+			req := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting}
+			if err := fs.CreateP2PRequest(ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			a.handleCallback(ctx, cb(user, "p2p:paid:"+strconv.FormatInt(req.ID, 10)))
+			a.handleDocument(ctx, p2pDocMsg(user, "doc_777", tc.file, tc.mime))
+
+			r, _ := fs.GetP2PRequest(ctx, req.ID)
+			if r == nil || r.Status != model.P2PSubmitted || r.Screenshot != "doc_777" {
+				t.Fatalf("чек не принят: %+v", r)
+			}
+			// Админу такой чек уходит документом: file_id документа Telegram
+			// в sendPhoto не принимает.
+			if len(fm.sentDocIDs) != 1 || fm.sentDocIDs[0] != "doc_777" {
+				t.Fatalf("чек не ушёл админу документом: %v\n%s", fm.sentDocIDs, fm.joined())
+			}
+			if !strings.Contains(fm.joined(), i18n.T("ru", "p2p.submitted")) {
+				t.Fatalf("пользователю не подтвердили приём:\n%s", fm.joined())
+			}
+		})
+	}
+
+	t.Run("посторонний файл", func(t *testing.T) {
+		a, fm, fs := newApp()
+		ctx := context.Background()
+		const user int64 = 555
+		req := &model.P2PRequest{TelegramID: user, Months: 1, Price: "100", Status: model.P2PAwaiting}
+		if err := fs.CreateP2PRequest(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		a.handleCallback(ctx, cb(user, "p2p:paid:"+strconv.FormatInt(req.ID, 10)))
+		a.handleDocument(ctx, p2pDocMsg(user, "doc_bad", "report.xlsx",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+
+		r, _ := fs.GetP2PRequest(ctx, req.ID)
+		if r == nil || r.Status != model.P2PAwaiting {
+			t.Fatalf("заявка не должна была уйти на проверку: %+v", r)
+		}
+		if len(fm.sentDocIDs) != 0 {
+			t.Fatalf("админу ушёл посторонний файл: %v", fm.sentDocIDs)
+		}
+		if !strings.Contains(fm.joined(), i18n.T("ru", "p2p.bad_receipt")) {
+			t.Fatalf("пользователю не объяснили, что нужен другой файл:\n%s", fm.joined())
+		}
+		// Ожидание чека сохраняется — можно сразу прислать правильный файл.
+		a.handleDocument(ctx, p2pDocMsg(user, "doc_ok", "check.pdf", "application/pdf"))
+		if r, _ := fs.GetP2PRequest(ctx, req.ID); r == nil || r.Status != model.P2PSubmitted {
+			t.Fatalf("повторная отправка чека не сработала: %+v", r)
+		}
+	})
 }
