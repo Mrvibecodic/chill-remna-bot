@@ -171,6 +171,60 @@ func TestWebAccountFirstPurchaseCreates(t *testing.T) {
 	if got, _ := p.posts[0]["username"].(string); got != botUsername(webTgID) {
 		t.Fatalf("имя созданного аккаунта %q != %q", got, botUsername(webTgID))
 	}
+	// Отрицательный идентификатор в панель не уходит: панель разбирает JSON
+	// числом с плавающей точкой и сохранила бы округлённое значение.
+	if _, ok := p.posts[0]["telegramId"]; ok {
+		t.Fatalf("синтетический id ушёл в панель: %v", p.posts[0]["telegramId"])
+	}
+}
+
+// У обычного telegram-аккаунта идентификатор в панель уходит по-прежнему.
+func TestTelegramAccountKeepsID(t *testing.T) {
+	p := newWebPanel()
+	c := p.start(t)
+
+	if _, _, err := c.CreateOrUpdateUser(context.Background(), 42, 1, 0, UserLimits{}); err != nil {
+		t.Fatalf("покупка обычного пользователя: %v", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.posts) != 1 {
+		t.Fatalf("ожидали одно создание, получили %d", len(p.posts))
+	}
+	if got, _ := p.posts[0]["telegramId"].(float64); int64(got) != 42 {
+		t.Fatalf("telegramId не ушёл в панель: %v", p.posts[0]["telegramId"])
+	}
+}
+
+// «Нет такого маршрута» (отвечает не панель, а что-то перед ней) не должно
+// выглядеть как «нет такого пользователя»: иначе продление заведёт второй
+// аккаунт и оплаченная подписка потеряется.
+func TestWebAccountRouteGoneIsNotMissingUser(t *testing.T) {
+	mux := http.NewServeMux()
+	var posts int
+	mux.HandleFunc("/api/users/by-username/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Cannot GET ` + r.URL.Path + `","error":"Not Found","statusCode":404}`))
+	})
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"response":{"id":78,"username":"x","status":"ACTIVE","subscriptionUrl":"https://example.test/n"}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+
+	if _, _, err := c.CreateOrUpdateUser(context.Background(), webTgID, 1, 0, UserLimits{}); err == nil {
+		t.Fatal("пропавший маршрут принят за отсутствие пользователя")
+	}
+	if posts != 0 {
+		t.Fatalf("на пропавшем маршруте создан аккаунт (%d раз)", posts)
+	}
 }
 
 // Остальные операции такого аккаунта тоже идут через поиск по telegram id —

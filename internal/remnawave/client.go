@@ -564,6 +564,25 @@ func botUsername(telegramID int64) string {
 	return fmt.Sprintf("tg_%d", telegramID)
 }
 
+// newUserBody — тело создания аккаунта в панели.
+//
+// telegramId уходит только у настоящих telegram-аккаунтов. Синтетический
+// отрицательный идентификатор кабинетного аккаунта туда слать нельзя: панель
+// разбирает JSON числом с плавающей точкой, а такие значения выходят за
+// пределы точного диапазона и сохраняются округлёнными — обратно приходит уже
+// другое число. Владение аккаунтом и так определяется по имени.
+func newUserBody(telegramID int64, expire string) map[string]any {
+	body := map[string]any{
+		"username": botUsername(telegramID),
+		"expireAt": expire,
+		"tag":      BotTag,
+	}
+	if telegramID > 0 {
+		body["telegramId"] = telegramID
+	}
+	return body
+}
+
 func ownedByBot(u *panelUser, telegramID int64) bool {
 	if u == nil || telegramID == 0 {
 		return false
@@ -984,12 +1003,7 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 		return link, expireAt, err
 	}
 
-	body := map[string]any{
-		"username":   botUsername(telegramID),
-		"telegramId": telegramID,
-		"expireAt":   expire,
-		"tag":        BotTag,
-	}
+	body := newUserBody(telegramID, expire)
 	applyLimits(body, limits)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
@@ -1015,12 +1029,7 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 		applyLimits(patch, limits)
 		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
-	body := map[string]any{
-		"username":   botUsername(telegramID),
-		"telegramId": telegramID,
-		"expireAt":   expire,
-		"tag":        BotTag,
-	}
+	body := newUserBody(telegramID, expire)
 	applyLimits(body, limits)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
@@ -1191,11 +1200,15 @@ func (h Host) ServesAny(squads map[string]bool) bool {
 			}
 		}
 		return false
-	case SquadsModeExclude:
-		return notAllListed(h.Squads, squads)
+	case "":
+		// Панель до 3.4.0: плоский список исключений, смысл тот же, что у
+		// EXCLUDE.
+		return notAllListed(h.ExcludedSquads, squads)
 	}
-	// Панель до 3.4.0: тот же смысл, что у EXCLUDE.
-	return notAllListed(h.ExcludedSquads, squads)
+	// EXCLUDE и любой режим, которого мы ещё не знаем: считаем по списку так
+	// же, как EXCLUDE — этот режим панель ставит по умолчанию, а молча
+	// раздавать хост всем на незнакомом режиме опаснее.
+	return notAllListed(h.Squads, squads)
 }
 
 // notAllListed — есть ли в наборе сквад, которого нет в списке.
@@ -1718,34 +1731,49 @@ func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) 
 // fetchOneRaw — тот же одиночный запрос, но во внутреннем виде: он нужен там,
 // где ответ идёт дальше по внутренним путям (поиск по имени вместо telegramId).
 func (c *Client) fetchOneRaw(ctx context.Context, path string) (*panelUser, error) {
+	u, _, err := c.fetchOneRawGone(ctx, path)
+	return u, err
+}
+
+// fetchOneRawGone дополнительно отличает «нет такого маршрута» от «нет такого
+// пользователя»: обе беды панель отдаёт кодом 404, а различаются они телом.
+func (c *Client) fetchOneRawGone(ctx context.Context, path string) (*panelUser, bool, error) {
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+		return nil, false, fmt.Errorf("нет связи с панелью: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, routeGone(body), nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, classifyHTTP(resp)
+		return nil, false, classifyHTTP(resp)
 	}
 	var env struct {
 		Response panelUser `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, fmt.Errorf("разбор ответа панели: %w", err)
+		return nil, false, fmt.Errorf("разбор ответа панели: %w", err)
 	}
 	c.noteUser(&env.Response)
-	return &env.Response, nil
+	return &env.Response, false, nil
 }
 
 // findByBotUsername ищет аккаунт по имени, которое бот сам ему дал. Нужен для
 // личностей без Telegram (см. findByTelegram), где фильтр по telegramId
 // неприменим.
 func (c *Client) findByBotUsername(ctx context.Context, telegramID int64) (*panelUser, error) {
-	u, err := c.fetchOneRaw(ctx, "/api/users/by-username/"+url.PathEscape(botUsername(telegramID)))
+	u, gone, err := c.fetchOneRawGone(ctx, "/api/users/by-username/"+url.PathEscape(botUsername(telegramID)))
 	if err != nil {
 		return nil, err
+	}
+	if gone {
+		// Отвечает не панель, а что-то перед ней: маршрут by-username есть во
+		// всех поддерживаемых версиях. Принять это за «нет пользователя»
+		// значило бы завести человеку второй аккаунт и потерять оплаченную
+		// подписку — ровно то, от чего бережётся поиск по telegramId.
+		return nil, errPanelDialect
 	}
 	// Пустой конверт равнозначен «нет такого пользователя» — так же, как в
 	// поиске по telegramId: иначе продление ушло бы патчить пустую ссылку.

@@ -104,28 +104,50 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		return nil, 0
 	}
 	squads, hosts := a.infra(ctx)
-	want := map[string]bool{}
 	squadSet := map[string]bool{}
 	for _, id := range squadIDs {
 		squadSet[id] = true
 	}
+	// Инбаунды считаются ПО КАЖДОМУ скваду отдельно: панель отдаёт хост
+	// подписке, только если один и тот же сквад и содержит инбаунд хоста, и
+	// имеет к этому хосту доступ. Общий набор инбаундов всех сквадов тарифа
+	// давал бы страну, которой у человека на деле нет: инбаунд от одного
+	// сквада, разрешение — от другого.
+	inboundsBySquad := map[string]map[string]bool{}
 	for _, s := range squads {
-		if squadSet[s.UUID] {
-			inbounds += s.InboundsCount
-			for _, ib := range s.InboundUUIDs {
-				want[ib] = true
-			}
+		if !squadSet[s.UUID] {
+			continue
 		}
+		inbounds += s.InboundsCount
+		set := make(map[string]bool, len(s.InboundUUIDs))
+		for _, ib := range s.InboundUUIDs {
+			set[ib] = true
+		}
+		inboundsBySquad[s.UUID] = set
 	}
-	if len(want) == 0 {
+	if len(inboundsBySquad) == 0 {
 		return nil, inbounds
+	}
+	served := func(h remnawave.Host) bool {
+		one := map[string]bool{}
+		for uuid, set := range inboundsBySquad {
+			if !set[h.InboundUUID] {
+				continue
+			}
+			one[uuid] = true
+			if h.ServesAny(one) {
+				return true
+			}
+			delete(one, uuid)
+		}
+		return false
 	}
 	seen := map[string]bool{}
 	for _, h := range hosts {
-		if h.Disabled || h.Hidden || !want[h.InboundUUID] {
+		if h.Disabled || h.Hidden {
 			continue
 		}
-		if !h.ServesAny(squadSet) {
+		if !served(h) {
 			continue
 		}
 		flag, name := splitFlag(h.Remark)
