@@ -559,11 +559,16 @@ func toPanelUser(u *panelUser) *PanelUser {
 
 const BotTag = "CHILLBOT"
 
+// botUsername — имя, под которым бот заводит пользователя в панели.
+func botUsername(telegramID int64) string {
+	return fmt.Sprintf("tg_%d", telegramID)
+}
+
 func ownedByBot(u *panelUser, telegramID int64) bool {
 	if u == nil || telegramID == 0 {
 		return false
 	}
-	return u.TelegramID == telegramID || u.Username == fmt.Sprintf("tg_%d", telegramID)
+	return u.TelegramID == telegramID || u.Username == botUsername(telegramID)
 }
 
 const BotTagAdd = "CHILLBOT_ADD"
@@ -980,7 +985,7 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 	}
 
 	body := map[string]any{
-		"username":   fmt.Sprintf("tg_%d", telegramID),
+		"username":   botUsername(telegramID),
 		"telegramId": telegramID,
 		"expireAt":   expire,
 		"tag":        BotTag,
@@ -1011,7 +1016,7 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
 	body := map[string]any{
-		"username":   fmt.Sprintf("tg_%d", telegramID),
+		"username":   botUsername(telegramID),
 		"telegramId": telegramID,
 		"expireAt":   expire,
 		"tag":        BotTag,
@@ -1491,6 +1496,15 @@ var errPanelDialect = errors.New("не удалось определить ве�
 // findByTelegram resolves a user by telegram id in whichever dialect the panel
 // speaks (see panelGen).
 func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUser, error) {
+	if telegramID < 0 {
+		// Синтетическая личность аккаунта веб-кабинета, заведённого по почте.
+		// Фильтр панели принимает только неотрицательный telegramId
+		// (в контракте z.number().nonnegative(), проверка глобальная), поэтому
+		// отрицательное значение — это HTTP 400, а не «никого не нашли», и
+		// поиск по нему обрывает всю выдачу. Такие аккаунты ищем по имени:
+		// маршрут by-username есть и до 3.0.0, и после.
+		return c.findByBotUsername(ctx, telegramID)
+	}
 	if c.generation() == genV3 {
 		u, gone, err := c.findByTelegramStream(ctx, telegramID)
 		if err != nil {
@@ -1637,6 +1651,16 @@ func (c *Client) FindByRef(ctx context.Context, ref string) (*PanelUser, error) 
 }
 
 func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) {
+	u, err := c.fetchOneRaw(ctx, path)
+	if err != nil || u == nil {
+		return nil, err
+	}
+	return toPanelUser(u), nil
+}
+
+// fetchOneRaw — тот же одиночный запрос, но во внутреннем виде: он нужен там,
+// где ответ идёт дальше по внутренним путям (поиск по имени вместо telegramId).
+func (c *Client) fetchOneRaw(ctx context.Context, path string) (*panelUser, error) {
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("нет связи с панелью: %w", err)
@@ -1655,7 +1679,23 @@ func (c *Client) fetchOne(ctx context.Context, path string) (*PanelUser, error) 
 		return nil, fmt.Errorf("разбор ответа панели: %w", err)
 	}
 	c.noteUser(&env.Response)
-	return toPanelUser(&env.Response), nil
+	return &env.Response, nil
+}
+
+// findByBotUsername ищет аккаунт по имени, которое бот сам ему дал. Нужен для
+// личностей без Telegram (см. findByTelegram), где фильтр по telegramId
+// неприменим.
+func (c *Client) findByBotUsername(ctx context.Context, telegramID int64) (*panelUser, error) {
+	u, err := c.fetchOneRaw(ctx, "/api/users/by-username/"+url.PathEscape(botUsername(telegramID)))
+	if err != nil {
+		return nil, err
+	}
+	// Пустой конверт равнозначен «нет такого пользователя» — так же, как в
+	// поиске по telegramId: иначе продление ушло бы патчить пустую ссылку.
+	if u == nil || u.ref().Empty() {
+		return nil, nil
+	}
+	return u, nil
 }
 
 func (c *Client) ListUsersPage(ctx context.Context, start, size int) ([]PanelUser, int, error) {
