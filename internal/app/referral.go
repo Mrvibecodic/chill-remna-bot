@@ -177,11 +177,15 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 	// на общий — в том числе внутри самой покупки, сразу после применения
 	// условий оплаченного срока.
 	limits := remnawave.UserLimits{}
+	// found=false означает «у человека точно нет учётки на панели»: только с
+	// ним промокод на дни отвечает «сначала оформите подписку». Недоступная
+	// панель — это не отсутствие подписки, поэтому found=true.
 	if panel == nil {
-		return false, false
+		return false, true
 	}
 	pu, err := panel.FindByTelegramID(ctx, ref)
 	if err != nil {
+		a.log.Warn("бонусные дни: поиск в панели", "tg_id", ref, "err", err)
 		return false, true
 	}
 	if pu == nil {
@@ -189,13 +193,19 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 	}
 	_, expireAt, err := panel.CreateOrUpdateUserDays(ctx, ref, days, limits)
 	if err != nil {
+		a.log.Warn("бонусные дни: начисление", "tg_id", ref, "err", err)
 		return false, true
 	}
 	a.invalidateSubCache(ref)
 	// Bonus days only extend the expiry — A's traffic is not reset, so B's isn't either.
 	a.syncAddSub(ctx, ref, false)
 	if a.store != nil {
-		_ = a.store.SetSubExpiry(ctx, ref, expireAt, "paid")
+		// Вид подписки не меняем: бонусные дни продлевают триал как триал.
+		kind := "paid"
+		if u, _ := a.store.GetUser(ctx, ref); u != nil && u.NotifyKind != "" {
+			kind = u.NotifyKind
+		}
+		_ = a.store.SetSubExpiry(ctx, ref, expireAt, kind)
 	}
 	return true, true
 }
