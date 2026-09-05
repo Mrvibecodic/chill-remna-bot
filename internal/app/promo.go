@@ -58,22 +58,40 @@ func (a *App) redeemPromo(ctx context.Context, chatID int64, raw string) (string
 	if done, _ := a.store.PromoRedeemedBy(ctx, code, chatID); done {
 		return i18n.T(lang, "promo.already"), false
 	}
+	// Код закрепляется за пользователем ДО начисления: одновременные
+	// активации не пробьют лимит. Если начислить не удалось — закрепление
+	// снимается и код остаётся доступным.
+	reserved, err := a.store.RedeemPromo(ctx, code, chatID)
+	if err != nil {
+		a.log.Warn("промокод: закрепление", "tg_id", chatID, "err", err)
+		return i18n.T(lang, "promo.grant_fail"), false
+	}
+	if !reserved {
+		if done, _ := a.store.PromoRedeemedBy(ctx, code, chatID); done {
+			return i18n.T(lang, "promo.already"), false
+		}
+		return i18n.T(lang, "promo.exhausted"), false
+	}
 	switch p.Kind {
 	case model.PromoKindDays:
 		ok, found := a.addReferralDays(ctx, chatID, p.Value)
-		if !found {
-			return i18n.T(lang, "promo.need_sub"), false
-		}
 		if !ok {
+			if err := a.store.ReleasePromo(ctx, code, chatID); err != nil {
+				a.log.Warn("промокод: откат закрепления", "tg_id", chatID, "err", err)
+			}
+			if !found {
+				return i18n.T(lang, "promo.need_sub"), false
+			}
 			return i18n.T(lang, "promo.grant_fail"), false
 		}
-		_ = a.store.RedeemPromo(ctx, code, chatID)
 		return i18n.T(lang, "promo.ok_days", p.Value), true
 	default:
 		if err := a.store.AddBalance(ctx, chatID, int64(p.Value)*100); err != nil {
+			if err := a.store.ReleasePromo(ctx, code, chatID); err != nil {
+				a.log.Warn("промокод: откат закрепления", "tg_id", chatID, "err", err)
+			}
 			return i18n.T(lang, "promo.grant_fail"), false
 		}
-		_ = a.store.RedeemPromo(ctx, code, chatID)
 		return i18n.T(lang, "promo.ok_balance", p.Value), true
 	}
 }

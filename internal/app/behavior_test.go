@@ -1279,13 +1279,28 @@ func (s *fakeStore) DeletePromo(_ context.Context, code string) error {
 func (s *fakeStore) PromoRedeemedBy(_ context.Context, code string, id int64) (bool, error) {
 	return s.promoUses[code+"|"+itoa64(id)], nil
 }
-func (s *fakeStore) RedeemPromo(_ context.Context, code string, id int64) error {
+func (s *fakeStore) RedeemPromo(_ context.Context, code string, id int64) (bool, error) {
 	if s.promoUses == nil {
 		s.promoUses = map[string]bool{}
 	}
-	s.promoUses[code+"|"+itoa64(id)] = true
-	if s.promos != nil && s.promos[code] != nil {
-		s.promos[code].Used++
+	key := code + "|" + itoa64(id)
+	if s.promoUses[key] {
+		return false, nil
+	}
+	p := s.promos[code]
+	if p != nil && p.MaxUses > 0 && p.Used >= p.MaxUses {
+		return false, nil
+	}
+	s.promoUses[key] = true
+	if p != nil {
+		p.Used++
+	}
+	return true, nil
+}
+func (s *fakeStore) ReleasePromo(_ context.Context, code string, id int64) error {
+	delete(s.promoUses, code+"|"+itoa64(id))
+	if p := s.promos[code]; p != nil && p.Used > 0 {
+		p.Used--
 	}
 	return nil
 }

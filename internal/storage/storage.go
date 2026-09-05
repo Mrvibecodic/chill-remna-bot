@@ -99,7 +99,8 @@ type Storage interface {
 	ListPromos(ctx context.Context) ([]model.PromoCode, error)
 	DeletePromo(ctx context.Context, code string) error
 	PromoRedeemedBy(ctx context.Context, code string, telegramID int64) (bool, error)
-	RedeemPromo(ctx context.Context, code string, telegramID int64) error
+	RedeemPromo(ctx context.Context, code string, telegramID int64) (bool, error)
+	ReleasePromo(ctx context.Context, code string, telegramID int64) error
 
 	DeletePaymentsByUser(ctx context.Context, telegramID int64) error
 	DeleteP2PRequestsByUser(ctx context.Context, telegramID int64) error
@@ -1846,15 +1847,43 @@ func (b *base) PromoRedeemedBy(ctx context.Context, code string, telegramID int6
 	return n > 0, err
 }
 
-func (b *base) RedeemPromo(ctx context.Context, code string, telegramID int64) error {
+// RedeemPromo закрепляет код за пользователем: первичный ключ
+// promo_redemptions не даёт активировать дважды, условный UPDATE — превысить
+// лимит активаций. false без ошибки — код уже активирован этим пользователем
+// либо лимит исчерпан.
+func (b *base) RedeemPromo(ctx context.Context, code string, telegramID int64) (bool, error) {
 	if _, err := b.db.ExecContext(ctx,
 		"INSERT INTO promo_redemptions (code, telegram_id, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+")",
 		code, telegramID, nowStr()); err != nil {
-		return err
+		if isUniqueViolation(err) {
+			return false, nil
+		}
+		return false, err
 	}
+	res, err := b.db.ExecContext(ctx,
+		"UPDATE promo_codes SET used = used + 1 WHERE code = "+b.ph(1)+" AND (max_uses = 0 OR used < max_uses)", code)
+	if err == nil {
+		var n int64
+		if n, err = res.RowsAffected(); err == nil && n > 0 {
+			return true, nil
+		}
+	}
+	b.dropRedemption(ctx, code, telegramID)
+	return false, err
+}
+
+// ReleasePromo снимает закрепление, если начислить бонус не удалось.
+func (b *base) ReleasePromo(ctx context.Context, code string, telegramID int64) error {
+	b.dropRedemption(ctx, code, telegramID)
 	_, err := b.db.ExecContext(ctx,
-		"UPDATE promo_codes SET used = used + 1 WHERE code = "+b.ph(1), code)
+		"UPDATE promo_codes SET used = used - 1 WHERE code = "+b.ph(1)+" AND used > 0", code)
 	return err
+}
+
+func (b *base) dropRedemption(ctx context.Context, code string, telegramID int64) {
+	_, _ = b.db.ExecContext(ctx,
+		"DELETE FROM promo_redemptions WHERE code = "+b.ph(1)+" AND telegram_id = "+b.ph(2),
+		code, telegramID)
 }
 
 func (b *base) SetWhitelisted(ctx context.Context, telegramID int64, on bool) error {

@@ -48,3 +48,20 @@ func TestPromo_Exhausted(t *testing.T) {
 		t.Fatalf("лимит исчерпан — второму не начисляем: %d", u.Balance)
 	}
 }
+
+func TestPromo_DaysFailureKeepsCode(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 300)
+	_ = fs.CreatePromo(ctx, &model.PromoCode{Code: "DNI", Kind: model.PromoKindDays, Value: 10, MaxUses: 1})
+
+	if _, ok := a.redeemPromo(ctx, 300, "DNI"); ok {
+		t.Fatal("без панели дни начислять нечем")
+	}
+	if p, _ := fs.GetPromo(ctx, "DNI"); p.Used != 0 {
+		t.Fatalf("неудачная активация не должна тратить код: used=%d", p.Used)
+	}
+	if done, _ := fs.PromoRedeemedBy(ctx, "DNI", 300); done {
+		t.Fatal("код остался закреплён за юзером после неудачи")
+	}
+}

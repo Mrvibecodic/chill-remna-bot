@@ -308,7 +308,7 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 		if p, _ := a.store.GetPromo(ctx, use.Code); p == nil {
 			continue
 		}
-		if err := a.store.RedeemPromo(ctx, use.Code, use.TelegramID); err == nil {
+		if ok, err := a.store.RedeemPromo(ctx, use.Code, use.TelegramID); err == nil && ok {
 			rep.promoUses++
 		}
 	}
