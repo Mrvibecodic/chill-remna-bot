@@ -51,14 +51,6 @@ func switchCredit(old *model.PlanSnapshot, subExpireAt string, newSnap *model.Pl
 	// (Paid), иначе базовая цена снимка. Иначе покупка со скидочным
 	// переопределением способа оплаты зачлась бы по полной цене — печатала бы
 	// дни из скидки.
-	oldPrice := old.Paid
-	if oldPrice == "" {
-		oldPrice = old.Price
-	}
-	oldK, ok := rubToKopecks(oldPrice)
-	if !ok || oldK <= 0 {
-		return 0
-	}
 	newK, ok := rubToKopecks(newSnap.Price)
 	if !ok || newK <= 0 {
 		return 0
@@ -68,30 +60,28 @@ func switchCredit(old *model.PlanSnapshot, subExpireAt string, newSnap *model.Pl
 	if !(old.Currency == newSnap.Currency || (rubCurrency(old.Currency) && rubCurrency(newSnap.Currency))) {
 		return 0
 	}
-	oldPeriod := paidWindowDays(old)
 	newPeriod := newSnap.Months * 30
-	if oldPeriod <= 0 || newPeriod <= 0 {
+	if newPeriod <= 0 {
+		return 0
+	}
+	// Цена дня старого окна считается по СТОИМОСТИ ВСЕГО ОКНА, а не по цене
+	// последней сделки. Окно копится продлениями, у тарифа своя цена на каждый
+	// срок, и месяц в пересчёте на день всегда дороже года — пересчёт всего
+	// накопленного окна по цене последней сделки печатал дни: год, купленный
+	// по годовой цене, после докупки одного месяца пересчитывался по месячной,
+	// и разница выдавалась бесплатными днями.
+	oldValueK, oldPeriod := windowValueK(old)
+	if oldValueK <= 0 || oldPeriod <= 0 {
 		return 0
 	}
 	// Конвертируется не больше оплаченного окна: бесплатные дни (рефералки,
 	// промокоды, подарки) двигают конец срока, не меняя снимок, — они
-	// переезжают один к одному, а не по цене старого тарифа. Оплаченные
-	// продления в окне НАКОПЛЕНЫ (BoughtDays), иначе стопка месячных продлений
-	// зачитывалась бы как один месяц.
+	// переезжают один к одному, а не по цене старого тарифа.
 	if remaining > float64(oldPeriod) {
 		remaining = float64(oldPeriod)
 	}
-	// Цена дня старой сделки — по цене ОДНОЙ сделки (Days или Months×30):
-	// оплаченное окно может состоять из нескольких продлений по этой цене.
-	oneDeal := old.Days
-	if oneDeal <= 0 {
-		oneDeal = old.Months * 30
-	}
-	if oneDeal <= 0 {
-		return 0
-	}
-	// Стоимость остатка по цене дня старой сделки, поделённая на цену дня новой.
-	converted := remaining * (float64(oldK) / float64(oneDeal)) / (float64(newK) / float64(newPeriod))
+	// Стоимость остатка по цене дня старого окна, поделённая на цену дня нового.
+	converted := remaining * (float64(oldValueK) / float64(oldPeriod)) / (float64(newK) / float64(newPeriod))
 	extra := int(math.Round(converted - remaining))
 	if extra > switchCreditCap {
 		extra = switchCreditCap
@@ -112,6 +102,78 @@ func paidWindowDays(s *model.PlanSnapshot) int {
 		return s.Days
 	}
 	return s.Months * 30
+}
+
+// windowValueK — во сколько обошлось оплаченное окно снимка и сколько в нём
+// дней. Копейки берутся из WindowPaidK, который копится при каждой покупке.
+//
+// Снимки, снятые до появления этого поля (и снимки после отката версии), поля
+// не имеют: для них окно оценивается по цене ОДНОЙ сделки, растянутой на всё
+// окно, — ровно так считалось раньше, чтобы старые подписки не потеряли зачёт.
+func windowValueK(s *model.PlanSnapshot) (int64, int) {
+	if s == nil {
+		return 0, 0
+	}
+	window := paidWindowDays(s)
+	if window <= 0 {
+		return 0, 0
+	}
+	if s.WindowPaidK > 0 {
+		return s.WindowPaidK, window
+	}
+	dealK, oneDeal := dealValueK(s)
+	if dealK <= 0 || oneDeal <= 0 {
+		return 0, 0
+	}
+	return int64(float64(dealK) * float64(window) / float64(oneDeal)), window
+}
+
+// dealValueK — цена одной сделки снимка в копейках и её длительность в днях.
+// Фактически уплаченное (Paid) главнее базовой цены: покупка со скидочным
+// переопределением способа иначе зачлась бы по полной цене.
+func dealValueK(s *model.PlanSnapshot) (int64, int) {
+	if s == nil {
+		return 0, 0
+	}
+	price := s.Paid
+	if price == "" {
+		price = s.Price
+	}
+	k, ok := rubToKopecks(price)
+	if !ok || k <= 0 {
+		return 0, 0
+	}
+	days := s.Days
+	if days <= 0 {
+		days = s.Months * 30
+	}
+	if days <= 0 {
+		return 0, 0
+	}
+	return k, days
+}
+
+// windowPaidAfter — во сколько обошлось оплаченное окно НОВОГО снимка:
+// перенесённая доля стоимости старого окна плюс уплаченное за эту покупку.
+// Дни при смене тарифа пересчитываются, деньги — нет, поэтому переносится
+// стоимость ровно того куска окна, который дожил до покупки.
+func windowPaidAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model.PlanSnapshot) int64 {
+	paidNow, _ := dealValueK(newSnap)
+	var carried int64
+	if old != nil && newSnap != nil {
+		if exp, err := time.Parse(time.RFC3339, subExpireAt); err == nil {
+			if remaining := time.Until(exp).Hours() / 24; remaining > 0 {
+				if valK, window := windowValueK(old); valK > 0 && window > 0 {
+					keep := math.Min(remaining, float64(window))
+					// Округление, а не отсечение: остаток дней всегда чуть
+					// меньше целого, и отсечение копейки на каждом продлении
+					// медленно съедало бы стоимость окна.
+					carried = int64(math.Round(float64(valK) * keep / float64(window)))
+				}
+			}
+		}
+	}
+	return paidNow + carried
 }
 
 // boughtDaysAfter — оплаченное окно НОВОГО снимка после покупки months месяцев

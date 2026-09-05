@@ -18,10 +18,19 @@ import (
 // snapPanel — панель, запоминающая тело последнего PATCH/POST по пользователю.
 func snapPanel(t *testing.T, got *map[string]any) *httptest.Server {
 	t.Helper()
+	return snapPanelExpiry(t, got, "2030-01-01T00:00:00Z")
+}
+
+// snapPanelExpiry — та же панель, но с заданным концом срока в ответе поиска
+// по telegram-id. Финализация берёт остаток из ПАНЕЛИ (зеркало могло отстать),
+// поэтому тестам про зачёт остатка нужен свой конец срока, а не общий 2030-01-01.
+func snapPanelExpiry(t *testing.T, got *map[string]any, expireAt string) *httptest.Server {
+	t.Helper()
+	found := `{"response":[{"uuid":"u1","tag":"CHILLBOT","username":"tg_555","subscriptionUrl":"https://sub/x","expireAt":"` + expireAt + `"}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
-			_, _ = w.Write([]byte(`{"response":[{"uuid":"u1","tag":"CHILLBOT","username":"tg_555","subscriptionUrl":"https://sub/x","expireAt":"2030-01-01T00:00:00Z"}]}`))
+			_, _ = w.Write([]byte(found))
 			return
 		}
 		// Ловим только апдейт пользователя: следом идёт POST на сброс трафика

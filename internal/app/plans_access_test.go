@@ -370,15 +370,21 @@ func TestPlanLink_BuyGatesAndThrottle(t *testing.T) {
 		t.Fatal("устаревшая кнопка закрытого тарифа не должна замолкать")
 	}
 
-	// Неизвестные коды лимит добивают (zzzz уже был первым), шестой — молчание.
+	// Неизвестные коды лимит добивают (zzzz уже был первым). Молчание после
+	// лимита само было бы оракулом: закрытый существующий тариф отвечает
+	// всегда, а неизвестный — замолкал бы, и перебор различал бы их по тишине.
+	// Поэтому лимит режет работу (поиск тарифа, намерение), а ответ остаётся
+	// тем же самым.
 	a.handleCallback(ctx, cb(uid, "plb:yyyyyyyyyyyy:1"))
 	a.handleCallback(ctx, cb(uid, "plb:xxxxxxxxxxxx:1"))
 	a.handleCallback(ctx, cb(uid, "plb:vvvvvvvvvvvv:1"))
 	a.handleCallback(ctx, cb(uid, "plb:uuuuuuuuuuuu:1"))
-	before := fm.joined()
 	a.handleCallback(ctx, cb(uid, "plb:wwwwwwwwwwww:1"))
-	if fm.joined() != before {
-		t.Fatalf("после лимита ответа быть не должно: %q", fm.last())
+	if fm.last() != deny1 {
+		t.Fatalf("после лимита ответ должен совпадать с обычным отказом: %q вместо %q", fm.last(), deny1)
+	}
+	if in, _ := fs.PurchaseIntent(ctx, uid); in != nil {
+		t.Fatalf("намерение не должно создаваться и после лимита: %+v", in)
 	}
 }
 

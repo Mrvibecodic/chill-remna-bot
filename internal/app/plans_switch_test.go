@@ -139,7 +139,10 @@ func TestPaidRub(t *testing.T) {
 // продления, а экран способов показывает те же цифры до оплаты.
 func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	var patched map[string]any
-	srv := snapPanel(t, &patched)
+	// Пользователь живёт на «Базовом» (150₽/мес по сетке), осталось 15 дней —
+	// и панель, и зеркало держат один и тот же конец срока.
+	in15 := time.Now().UTC().Add(15 * 24 * time.Hour).Format(time.RFC3339)
+	srv := snapPanelExpiry(t, &patched, in15)
 	a, fs := snapApp(t, srv.URL)
 	ctx := context.Background()
 	const uid int64 = 555
@@ -147,8 +150,6 @@ func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	_ = fs.AddBalance(ctx, uid, 99000)
 	p := vipPlan(t, fs, model.PlanAvailAll)
 
-	// Пользователь живёт на «Базовом» (150₽/мес по сетке), осталось 15 дней.
-	in15 := time.Now().UTC().Add(15 * 24 * time.Hour).Format(time.RFC3339)
 	_ = fs.SetUserSnapshot(ctx, uid, &model.PlanSnapshot{Code: model.PlanCodeBase, Months: 1, Price: "150"})
 	_ = fs.SetSubExpiry(ctx, uid, in15, "sub")
 
@@ -162,15 +163,72 @@ func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	}
 
 	// Покупка применяет поправку: 15 дней по 5₽/д = 75₽ → 75/33 = 2.27 дня
-	// нового (990₽/30д) → поправка −13. Панель в стабе держит конец
-	// 2030-01-01: ожидание = 2030-02-01 (месяц) минус 13 дней.
+	// нового (990₽/30д) → поправка −13. Ожидание: конец срока плюс месяц
+	// минус 13 дней.
 	dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, false)
 	if !dto.OK {
 		t.Fatalf("покупка не прошла: %+v", dto)
 	}
 	got, _ := patched["expireAt"].(string)
-	want := time.Date(2030, 2, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -13).Format(time.RFC3339)
+	exp, err := time.Parse(time.RFC3339, in15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := exp.AddDate(0, 1, 0).AddDate(0, 0, -13).Format(time.RFC3339)
 	if got != want {
 		t.Fatalf("конец срока: получено %s, ожидалось %s", got, want)
+	}
+}
+
+// Зачёт считает цену дня по стоимости ВСЕГО окна, а не по цене последней
+// сделки: иначе год, купленный по годовой цене, после докупки одного месяца
+// пересчитывался бы по месячной — а месяц в пересчёте на день дороже года, и
+// разница выдавалась бы бесплатными днями.
+func TestSwitchCredit_WindowValueNotLastDeal(t *testing.T) {
+	in390 := time.Now().UTC().Add(390 * 24 * time.Hour).Format(time.RFC3339)
+	// Окно: год за 1500₽ (360 дней) плюс месяц за 150₽ (30 дней) = 1650₽/390д.
+	old := &model.PlanSnapshot{
+		Code: model.PlanCodeBase, Months: 1, Price: "150",
+		BoughtDays: 390, WindowPaidK: 165000,
+	}
+	vip := &model.PlanSnapshot{Code: "vip", Months: 1, Price: "990"}
+
+	// 390 д × (165000/390) = 165000 коп. → /3300 коп. за день нового = 50 дней.
+	if got := switchCredit(old, in390, vip); got != -340 {
+		t.Fatalf("зачёт по стоимости окна: получено %d, ожидалось -340", got)
+	}
+	// Тот же снимок без накопленной стоимости (старый снимок, откат версии)
+	// считается по цене одной сделки — это и есть та самая печать дней, ради
+	// совместимости оставленная только там, где стоимости окна попросту нет.
+	legacy := *old
+	legacy.WindowPaidK = 0
+	if got := switchCredit(&legacy, in390, vip); got <= -340 {
+		t.Fatalf("запасной путь должен быть щедрее: получено %d", got)
+	}
+}
+
+// Стоимость окна копится: перенесённая доля старого окна плюс уплаченное за
+// эту покупку. Бесплатные дни сверх оплаченного окна стоимости не добавляют.
+func TestWindowPaidAfter(t *testing.T) {
+	in30 := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	base := &model.PlanSnapshot{Code: model.PlanCodeBase, Months: 1, Price: "150"}
+
+	// Первая покупка: только цена сделки.
+	if got := windowPaidAfter(nil, "", base); got != 15000 {
+		t.Fatalf("первая покупка: получено %d, ожидалось 15000", got)
+	}
+	// Продление: перенесено всё старое окно (30 из 30) плюс новая сделка.
+	if got := windowPaidAfter(base, in30, base); got != 30000 {
+		t.Fatalf("продление: получено %d, ожидалось 30000", got)
+	}
+	// Бонусные дни сверх окна стоимости не приносят: остаток 90, окно 30.
+	in90 := time.Now().UTC().Add(90 * 24 * time.Hour).Format(time.RFC3339)
+	if got := windowPaidAfter(base, in90, base); got != 30000 {
+		t.Fatalf("бонусные дни добавили стоимость: %d", got)
+	}
+	// Истёкшая подписка: переносить нечего.
+	past := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	if got := windowPaidAfter(base, past, base); got != 15000 {
+		t.Fatalf("истёкшее окно: получено %d, ожидалось 15000", got)
 	}
 }

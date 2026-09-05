@@ -304,7 +304,11 @@ func devicesValue(lang string, n int) string {
 func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
 	if a.planLinkThrottled(chatID) {
+		// Ответ тот же, что у обычного отказа. Молчание отличало бы
+		// «кода не существует» (попытка считается) от «тариф закрыт» (не
+		// считается) — и лимит сам становился оракулом существования тарифа.
 		a.log.Warn("карточка тарифа: лимит попыток", "user", chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
 	if !model.ValidPlanCode(code) {
@@ -349,7 +353,9 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
 	if a.planLinkThrottled(chatID) {
+		// См. onPlanView: единый ответ, иначе лимит выдаёт существование кода.
 		a.log.Warn("кнопка тарифа: лимит попыток", "user", chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
 	code, moStr, _ := strings.Cut(val, ":")

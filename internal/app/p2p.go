@@ -967,6 +967,16 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 			prevSnap, prevExpire = u.Snapshot, u.SubExpireAt
 		}
 	}
+	// Зачёт обязан считаться по тому же концу срока, к которому его применит
+	// панель. Зеркало бота с ней расходится (админ правил срок в панели, был
+	// импорт, бонусные дни легли мимо бота) — и тогда «зачёт по соотношению
+	// цен» превращался в подарок или в потерю. Панель спрашиваем только когда
+	// зачёт вообще возможен; её отказ оставляет прежнее поведение.
+	if prevSnap != nil && prevSnap.Code != "" && snap != nil && prevSnap.Code != snap.Code {
+		if pu, perr := panel.FindByTelegramID(ctx, telegramID); perr == nil && pu != nil && pu.ExpireAt != "" {
+			prevExpire = pu.ExpireAt
+		}
+	}
 	extraDays := switchCredit(prevSnap, prevExpire, snap)
 	if extraDays != 0 {
 		a.payLog(ctx, method, extID, telegramID, "switch_credit", "plan=%s days=%+d", snap.Code, extraDays)
@@ -974,6 +984,7 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// Оплаченное окно: остаток прежнего окна (при смене тарифа —
 	// конвертированный) плюс купленные месяцы. Бонусные дни сюда не входят.
 	snap.BoughtDays = boughtDaysAfter(prevSnap, prevExpire, snap, months, extraDays)
+	snap.WindowPaidK = windowPaidAfter(prevSnap, prevExpire, snap)
 	link, expireAt, err := panel.CreateOrUpdateUser(ctx, telegramID, months, extraDays, limits)
 	if err != nil {
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)

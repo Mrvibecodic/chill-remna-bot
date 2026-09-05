@@ -292,16 +292,33 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 			a.notify(ctx, chatID, i18n.T(lang, "sync.linked", formatExpire(u.SubExpireAt, lang)))
 		}
 	}
-	if !a.trialAvailable(ctx, chatID) {
+	link, expireAt, ok, err := a.trialOnce(ctx, chatID)
+	if !ok {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trial.not_available"))
 		return
 	}
-	link, expireAt, err := a.trialProvision(ctx, chatID)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", err.Error()))
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// trialOnce — проверка доступности и выдача под пер-пользовательским замком.
+//
+// Порознь они не работают: чат и веб-поверхности живут в разных горутинах, и
+// два одновременных запроса успевали пройти проверку оба — триал выдавался
+// дважды, а дни складывались. Замок тот же, что сериализует выдачу подписки по
+// пользователю. ok=false — триал недоступен (выдачи не было).
+func (a *App) trialOnce(ctx context.Context, chatID int64) (link, expireAt string, ok bool, err error) {
+	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(chatID, 10))]
+	lk.Lock()
+	defer lk.Unlock()
+	if !a.trialAvailable(ctx, chatID) {
+		return "", "", false, nil
+	}
+	link, expireAt, err = a.trialProvision(ctx, chatID)
+	return link, expireAt, true, err
 }
 
 // trialProvision performs the panel-side trial provisioning and bookkeeping
@@ -338,12 +355,22 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 	}
 	link = a.rewriteSub(link)
 	if a.store != nil {
-		_ = a.store.SetTrialUsed(ctx, chatID, time.Now().UTC().Format(time.RFC3339))
+		// Триал уже выдан в панели. Если отметка об использовании не запишется,
+		// проверка доступности снова скажет «можно» — и триал будет выдаваться
+		// сколько угодно раз. Молчать тут нельзя: зовём админа.
+		markErr := a.store.SetTrialUsed(ctx, chatID, time.Now().UTC().Format(time.RFC3339))
 		_ = a.store.AddPayment(ctx, &model.Payment{
 			TelegramID: chatID, Method: "trial", Months: 0, Amount: "—",
 			Status: model.PaymentPaid,
 		})
-		_ = a.store.SetSubExpiry(ctx, chatID, expireAt, "trial")
+		if err := a.store.SetSubExpiry(ctx, chatID, expireAt, "trial"); err != nil && markErr == nil {
+			markErr = err
+		}
+		if markErr != nil {
+			a.log.Error("триал выдан, но не записан", "tg_id", chatID, "err", markErr)
+			alang := a.lang(a.cfg.AdminID)
+			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.trial_unrecorded", a.userLabelByID(ctx, chatID)))
+		}
 	}
 	a.invalidateSubCache(chatID)
 	// Триал не сбрасывает трафик основной подписки — значит и доп-подписке нельзя.

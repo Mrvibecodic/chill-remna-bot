@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -473,6 +474,50 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 	return nil
 }
 
+// refundBalance возвращает списанные деньги после неудачной выдачи.
+//
+// Контекст берётся фоновый, а не тот, в котором провалилась выдача: запрос из
+// мини-аппа или кабинета мог уже отмениться по таймауту, и возврат тем же
+// контекстом молча не выполнился бы — деньги остались бы списанными. Неудача
+// возврата не проглатывается: она идёт в журнал ошибкой и уходит админу.
+func (a *App) refundBalance(chatID int64, kopecks int64, cause error) {
+	if a.store == nil || kopecks <= 0 {
+		return
+	}
+	ctx := a.bgContext()
+	err := a.store.AddBalance(ctx, chatID, kopecks)
+	for i := 0; i < 2 && err != nil; i++ {
+		time.Sleep(200 * time.Millisecond)
+		err = a.store.AddBalance(ctx, chatID, kopecks)
+	}
+	alang := a.lang(a.cfg.AdminID)
+	if err != nil {
+		a.payLog(ctx, "balance", "", chatID, "error", "возврат не прошёл: %d коп. списаны и не возвращены: %v", kopecks, err)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.refund_failed", a.userLabelByID(ctx, chatID), kopecksToRub(kopecks)))
+		return
+	}
+	a.payLog(ctx, "balance", "", chatID, "balance_refund", "kopecks=%d возвращены после ошибки выдачи", kopecks)
+	// Отказ мог прийти уже ПОСЛЕ того, как панель применила продление — обрыв
+	// или таймаут на чтении ответа выглядят так же, как честный отказ. Деньги
+	// вернули, а подписка могла остаться: отличить это по ответу панели нельзя,
+	// поэтому зовём админа сверить вручную.
+	if panelStateUnknown(cause) {
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.refund_unclear", a.userLabelByID(ctx, chatID), kopecksToRub(kopecks)))
+	}
+}
+
+// panelStateUnknown — отказ, после которого нельзя утверждать, что панель
+// ничего не изменила: обрыв связи или истёкший срок ожидания ответа.
+func panelStateUnknown(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	return strings.Contains(err.Error(), "нет связи с панелью")
+}
+
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	s := a.saleOrAsk(ctx, chatID)
@@ -510,8 +555,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
 	if err != nil {
-		_ = a.store.AddBalance(ctx, chatID, kopecks)
-		a.payLog(ctx, "balance", "", chatID, "balance_refund", "kopecks=%d возвращены после ошибки выдачи", kopecks)
+		a.refundBalance(chatID, kopecks, err)
 		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", err.Error()))
 		return
 	}

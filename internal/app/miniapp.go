@@ -224,10 +224,10 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 // MiniTrial activates the free trial (mirrors activateTrial's core). Read of
 // availability uses the same predicate as the chat bot.
 func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
-	if !a.trialAvailable(ctx, tgID) {
+	link, expireAt, ok, err := a.trialOnce(ctx, tgID)
+	if !ok {
 		return web.MiniActionDTO{Error: "триал недоступен"}
 	}
-	link, expireAt, err := a.trialProvision(ctx, tgID)
 	if err != nil {
 		return web.MiniActionDTO{Error: err.Error()}
 	}
@@ -328,7 +328,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
 	if err != nil {
-		_ = a.store.AddBalance(ctx, tgID, kopecks) // refund on provisioning failure
+		a.refundBalance(tgID, kopecks, err)
 		return web.MiniActionDTO{Error: err.Error()}
 	}
 	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
