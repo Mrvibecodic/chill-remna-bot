@@ -125,7 +125,7 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		if h.Disabled || h.Hidden || !want[h.InboundUUID] {
 			continue
 		}
-		if anyInSet(h.ExcludedSquads, squadSet) {
+		if !h.ServesAny(squadSet) {
 			continue
 		}
 		flag, name := splitFlag(h.Remark)
@@ -146,15 +146,6 @@ func flagToISO(flag string) string {
 		return ""
 	}
 	return string([]byte{byte('a' + (rs[0] - 0x1F1E6)), byte('a' + (rs[1] - 0x1F1E6))}) //#nosec G115 -- regional-indicator runes are guarded, offset maps to a..z
-}
-
-func anyInSet(list []string, set map[string]bool) bool {
-	for _, x := range list {
-		if set[x] {
-			return true
-		}
-	}
-	return false
 }
 
 func isRegionalIndicator(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }

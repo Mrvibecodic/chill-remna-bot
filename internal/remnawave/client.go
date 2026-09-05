@@ -1154,14 +1154,62 @@ func (c *Client) ListSquadsFull(ctx context.Context) ([]SquadFull, error) {
 }
 
 // Host is the subset of a panel host needed to derive available countries: its
-// human-readable remark (often "🇩🇪 Germany"), the inbound it exposes, and the
-// internal squads explicitly excluded from it.
+// human-readable remark (the flag emoji plus the country name), the inbound it
+// exposes, and which internal squads the panel serves it to.
 type Host struct {
-	Remark         string
-	InboundUUID    string
+	Remark      string
+	InboundUUID string
+	// ExcludedSquads — список исключённых сквадов панелей до 3.4.0.
 	ExcludedSquads []string
-	Disabled       bool
-	Hidden         bool
+	// SquadsMode и Squads — как то же самое устроено с 3.4.0: панель отдаёт
+	// режим (EXCLUDE — сквады из списка хост не получают, ALLOW_ONLY — хост
+	// получают ТОЛЬКО они) и сам список. Пустой режим = панель старее 3.4.0.
+	SquadsMode string
+	Squads     []string
+	Disabled   bool
+	Hidden     bool
+}
+
+// Режимы доступа хоста к внутренним сквадам (панель 3.4.0+).
+const (
+	SquadsModeExclude   = "EXCLUDE"
+	SquadsModeAllowOnly = "ALLOW_ONLY"
+)
+
+// ServesAny сообщает, достанется ли хост подписке с этими сквадами. Достаточно
+// одного подходящего сквада: пользователю выдаются все сквады тарифа сразу, и
+// хост, доступный хотя бы через один из них, у пользователя будет.
+func (h Host) ServesAny(squads map[string]bool) bool {
+	if len(squads) == 0 {
+		return false
+	}
+	switch h.SquadsMode {
+	case SquadsModeAllowOnly:
+		for _, s := range h.Squads {
+			if squads[s] {
+				return true
+			}
+		}
+		return false
+	case SquadsModeExclude:
+		return notAllListed(h.Squads, squads)
+	}
+	// Панель до 3.4.0: тот же смысл, что у EXCLUDE.
+	return notAllListed(h.ExcludedSquads, squads)
+}
+
+// notAllListed — есть ли в наборе сквад, которого нет в списке.
+func notAllListed(list []string, squads map[string]bool) bool {
+	listed := make(map[string]bool, len(list))
+	for _, x := range list {
+		listed[x] = true
+	}
+	for s := range squads {
+		if !listed[s] {
+			return true
+		}
+	}
+	return false
 }
 
 // ListHosts returns all panel hosts (GET /api/hosts).
@@ -1180,9 +1228,16 @@ func (c *Client) ListHosts(ctx context.Context) ([]Host, error) {
 			Inbound struct {
 				ConfigProfileInboundUUID string `json:"configProfileInboundUuid"`
 			} `json:"inbound"`
+			// До 3.4.0 — плоский список исключений.
 			ExcludedInternalSquads []string `json:"excludedInternalSquads"`
-			IsDisabled             bool     `json:"isDisabled"`
-			IsHidden               bool     `json:"isHidden"`
+			// С 3.4.0 список заменён объектом с режимом; старое поле панель
+			// больше не отдаёт, поэтому читаем оба вида.
+			InternalSquads struct {
+				Mode   string   `json:"mode"`
+				Squads []string `json:"squads"`
+			} `json:"internalSquads"`
+			IsDisabled bool `json:"isDisabled"`
+			IsHidden   bool `json:"isHidden"`
 		} `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
@@ -1194,6 +1249,8 @@ func (c *Client) ListHosts(ctx context.Context) ([]Host, error) {
 			Remark:         h.Remark,
 			InboundUUID:    h.Inbound.ConfigProfileInboundUUID,
 			ExcludedSquads: h.ExcludedInternalSquads,
+			SquadsMode:     h.InternalSquads.Mode,
+			Squads:         h.InternalSquads.Squads,
 			Disabled:       h.IsDisabled,
 			Hidden:         h.IsHidden,
 		})
