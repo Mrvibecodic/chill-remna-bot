@@ -232,3 +232,38 @@ func TestWindowPaidAfter(t *testing.T) {
 		t.Fatalf("истёкшее окно: получено %d, ожидалось 15000", got)
 	}
 }
+
+// Цикл накрутки из перепроверки: год → месяц того же тарифа → год другого
+// тарифа. До правки он печатал 1151 день за 13 000 ₽ и повторялся бесконечно.
+// Здесь фиксируется, что выданное совпадает с оплаченным.
+func TestSwitchCredit_NoDayPrintingCycle(t *testing.T) {
+	now := time.Now().UTC()
+	// Шаг 1: год за 6000 на тарифе A.
+	sA1 := &model.PlanSnapshot{Code: "a", Months: 12, Price: "6000", Currency: "₽"}
+	sA1.BoughtDays = boughtDaysAfter(nil, "", sA1, 12, 0)
+	sA1.WindowPaidK = windowPaidAfter(nil, "", sA1)
+	exp := now.AddDate(0, 12, 0)
+	t.Logf("шаг1: дни=%d стоимость=%d конец=%s", sA1.BoughtDays, sA1.WindowPaidK, exp.Format("2006-01-02"))
+
+	// Шаг 2: месяц за 1000 на том же тарифе A.
+	sA2 := &model.PlanSnapshot{Code: "a", Months: 1, Price: "1000", Currency: "₽"}
+	cr := switchCredit(sA1, exp.Format(time.RFC3339), sA2)
+	sA2.BoughtDays = boughtDaysAfter(sA1, exp.Format(time.RFC3339), sA2, 1, cr)
+	sA2.WindowPaidK = windowPaidAfter(sA1, exp.Format(time.RFC3339), sA2)
+	exp = exp.AddDate(0, 1, 0).AddDate(0, 0, cr)
+	t.Logf("шаг2: зачёт=%+d дни=%d стоимость=%d конец=%s", cr, sA2.BoughtDays, sA2.WindowPaidK, exp.Format("2006-01-02"))
+
+	// Шаг 3: год за 6000 на тарифе B.
+	sB := &model.PlanSnapshot{Code: "b", Months: 12, Price: "6000", Currency: "₽"}
+	cr = switchCredit(sA2, exp.Format(time.RFC3339), sB)
+	sB.BoughtDays = boughtDaysAfter(sA2, exp.Format(time.RFC3339), sB, 12, cr)
+	sB.WindowPaidK = windowPaidAfter(sA2, exp.Format(time.RFC3339), sB)
+	exp = exp.AddDate(0, 12, 0).AddDate(0, 0, cr)
+	total := int(time.Until(exp).Hours() / 24)
+	t.Logf("шаг3: зачёт=%+d дни=%d стоимость=%d конец=%s ВСЕГО ДНЕЙ=%d за 13000₽", cr, sB.BoughtDays, sB.WindowPaidK, exp.Format("2006-01-02"), total)
+
+	// Честно: 13000₽ по 6000/год = 2.17 года ≈ 790 дней.
+	if total > 830 {
+		t.Fatalf("напечатано дней: %d при честных ~790", total)
+	}
+}
