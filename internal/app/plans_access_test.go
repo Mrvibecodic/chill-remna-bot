@@ -927,3 +927,20 @@ func TestPlanSnapshot_DaysNotInFingerprint(t *testing.T) {
 		t.Fatal("дни попали в отпечаток условий")
 	}
 }
+
+func TestTrialLockNotice_AllowBuy(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, 400)
+	_ = fs.SetSubExpiry(ctx, 400, time.Now().UTC().Add(72*time.Hour).Format(time.RFC3339), "trial")
+
+	if !a.trialLockNotice(ctx, 400) {
+		t.Fatal("по умолчанию витрина во время триала закрыта")
+	}
+	a.mu.Lock()
+	a.botCfg.Trial.AllowBuy = true
+	a.mu.Unlock()
+	if a.trialLockNotice(ctx, 400) {
+		t.Fatal("админ разрешил покупку — гейта быть не должно")
+	}
+}

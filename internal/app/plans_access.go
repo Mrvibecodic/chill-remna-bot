@@ -237,8 +237,9 @@ func (a *App) userSnapshot(ctx context.Context, tgID int64) *model.PlanSnapshot 
 func (a *App) trialLockNotice(ctx context.Context, chatID int64) bool {
 	a.mu.Lock()
 	st := a.store
+	allowBuy := a.botCfg != nil && a.botCfg.Trial.AllowBuy
 	a.mu.Unlock()
-	if st == nil {
+	if st == nil || allowBuy {
 		return false
 	}
 	u, _ := st.GetUser(ctx, chatID)

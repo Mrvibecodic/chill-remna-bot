@@ -41,22 +41,28 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	internalCSV, externalName := a.squadNames(ctx, intSq, extSq)
 	a.mu.Lock()
 	strat := ""
+	allowBuy := false
 	if a.botCfg != nil {
 		strat = a.botCfg.Trial.Strategy
+		allowBuy = a.botCfg.Trial.AllowBuy
 	}
 	a.mu.Unlock()
 	stratStr := i18n.T(lang, "trial.strat_inherit")
 	if model.ValidStrategy(strat) {
 		stratStr = strat
 	}
+	buyKey := "admin.off"
+	if allowBuy {
+		buyKey = "admin.on"
+	}
 	body := i18n.T(lang, "trial.title",
-		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, internalCSV, externalName)
+		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), internalCSV, externalName)
 
 	rows := [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
-		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy")},
+		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
@@ -70,6 +76,14 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.Trial.Enabled = !a.botCfg.Trial.Enabled
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "allowbuy":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Trial.AllowBuy = !a.botCfg.Trial.AllowBuy
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
