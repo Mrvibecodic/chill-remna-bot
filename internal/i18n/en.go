@@ -94,6 +94,7 @@ var en = map[string]string{
 	"renew.plan_gone":         "ℹ️ The plan you were on is no longer available. Pick a new one — your current subscription is unaffected: the paid terms are locked until it ends.",
 	"renew.terms_changed":     "⚠️ <b>The plan's terms have changed</b> since your last payment — check the price and contents before renewing.",
 	"buy.trial_locked":        "🎁 Your free trial is active until <b>%s</b>.\n\nYou can buy a paid plan on the trial expiry day — this way you won't lose paid days (time stacks on top of current).",
+	"buy.trial_locked_plain":  "🎁 Trial is active until %s. A paid plan can be purchased on the trial expiry day — this way you won't lose paid days.",
 	"buy.plan_btn":            "%d mo — %s",
 	"buy.choose_method":       "💳 <b>How would you like to pay?</b>\n\n💼 Balance: %s ₽\n\nPick a method below — the bot will show instructions.",
 	"buy.countries":           "🌍 <b>Countries available: %d</b>\n%s",

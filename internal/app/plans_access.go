@@ -235,25 +235,35 @@ func (a *App) userSnapshot(ctx context.Context, tgID int64) *model.PlanSnapshot 
 // (общий гейт витрины и экрана тарифа по ссылке): дни триала не должны
 // сгорать.
 func (a *App) trialLockNotice(ctx context.Context, chatID int64) bool {
+	expireAt, locked := a.trialBuyLock(ctx, chatID)
+	if !locked {
+		return false
+	}
+	lang := a.lang(chatID)
+	a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(expireAt, lang)),
+		[][]models.InlineKeyboardButton{homeRow(lang)})
+	return true
+}
+
+// trialBuyLock — один ответ на вопрос «покупать ещё рано»: тот же гейт для
+// чата, мини-аппа и кабинета. Возвращает конец триала и признак блокировки.
+func (a *App) trialBuyLock(ctx context.Context, chatID int64) (string, bool) {
 	a.mu.Lock()
 	st := a.store
 	allowBuy := a.botCfg != nil && a.botCfg.Trial.AllowBuy
 	a.mu.Unlock()
 	if st == nil || allowBuy {
-		return false
+		return "", false
 	}
 	u, _ := st.GetUser(ctx, chatID)
 	if u == nil || u.NotifyKind != "trial" || u.SubExpireAt == "" {
-		return false
+		return "", false
 	}
 	exp, err := time.Parse(time.RFC3339, u.SubExpireAt)
 	if err != nil || daysUntil(exp, time.Now().UTC()) <= 1 {
-		return false
+		return "", false
 	}
-	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(u.SubExpireAt, lang)),
-		[][]models.InlineKeyboardButton{homeRow(lang)})
-	return true
+	return u.SubExpireAt, true
 }
 
 // usersOnPlan — сколько пользователей живёт на тарифе: снимок последней

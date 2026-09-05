@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
@@ -138,6 +139,13 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 // покупателю, каждый со своими сроками и условиями.
 func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 	var dto web.MiniPlansDTO
+	// Гейт триала — тот же, что в чате: пока триал идёт, витрина закрыта,
+	// чтобы его дни не сгорали (админ может разрешить покупку тумблером).
+	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
+		lang := a.lang(tgID)
+		dto.Notice = i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))
+		return dto
+	}
 	// Первая точка гейта доступности — сама витрина: тарифы фильтруются по
 	// покупателю, скрытые «по ссылке» не показываются.
 	plans, _, err := a.storefrontPlans(ctx, tgID)
@@ -268,6 +276,10 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 // completes in-app (reuses finalizePurchase, the same provisioning core as
 // the chat flow); other methods return a payment URL or Redirect=true.
 func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, web_ bool) web.MiniActionDTO {
+	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
+		lang := a.lang(tgID)
+		return web.MiniActionDTO{Error: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
+	}
 	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
 	// пользователь покупал бы тариф, недоступный ему по режиму, прямым
 	// запросом мимо витрины.

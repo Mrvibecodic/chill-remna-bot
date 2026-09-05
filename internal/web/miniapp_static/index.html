@@ -431,6 +431,7 @@ function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px">
 /* ---- main screen ---- */
 function render(me,menu,sub,plans){
   STATE.plans=(plans&&plans.plans)||[];
+  STATE.plansNotice=(plans&&plans.notice)||'';
   // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
   if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
   var ub='';
@@ -477,6 +478,8 @@ function render(me,menu,sub,plans){
         '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';
+  }else if(STATE.plansNotice){
+    h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice)+'</div></div>';
   }
   var acts='';
   if(menu.support_url)acts+='<button class="btn sec" onclick="openSmart(\''+jsq(menu.support_url)+'\')">'+IC.life+'Поддержка</button>';

@@ -269,6 +269,8 @@ type MiniCountryDTO struct {
 
 type MiniPlansDTO struct {
 	Plans []MiniPlanDTO `json:"plans"`
+	// Notice — почему витрина пуста (активный триал), текст для экрана.
+	Notice string `json:"notice,omitempty"`
 }
 
 // MiniConnectButtonDTO is one install button (store link) for an app.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"remnabot/internal/model"
 	"remnabot/internal/web"
@@ -198,5 +199,31 @@ func TestPlanForeignCurrency_GridMethodsRefuse(t *testing.T) {
 	// ЮKassa валюту тарифа передаёт явно — её гейт не трогаем.
 	if !a.saleGridCurrency(baseSale(1)) {
 		t.Fatal("«Базовый» всегда в валюте сетки")
+	}
+}
+
+// Гейт триала: пока триал идёт, витрина и чекаут закрыты в мини-аппе и
+// кабинете так же, как в чате — если админ не разрешил покупку.
+func TestMiniPlans_TrialLock(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	const u int64 = 555
+	_ = fs.UpsertUser(ctx, u)
+	_ = fs.SetSubExpiry(ctx, u, time.Now().UTC().Add(72*time.Hour).Format(time.RFC3339), "trial")
+
+	dto := a.MiniPlans(ctx, u)
+	if len(dto.Plans) != 0 || dto.Notice == "" {
+		t.Fatalf("во время триала витрина закрыта: %+v", dto)
+	}
+	if res := a.MiniCheckout(ctx, u, p.Code, 1, model.PayMethodBalance, false); res.Error == "" {
+		t.Fatal("чекаут во время триала должен отказывать")
+	}
+
+	a.mu.Lock()
+	a.botCfg.Trial.AllowBuy = true
+	a.mu.Unlock()
+	if dto := a.MiniPlans(ctx, u); len(dto.Plans) == 0 || dto.Notice != "" {
+		t.Fatalf("админ разрешил покупку — витрина открыта: %+v", dto)
 	}
 }
