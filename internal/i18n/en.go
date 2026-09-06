@@ -4,7 +4,8 @@ var en = map[string]string{
 	"setup.welcome": "👋 Hi! This is the Remnawave bot setup wizard.\n\n" +
 		"I'll ask a few questions with explanations — after each answer we move to the next step.\n\n" +
 		"<b>Step 1.</b> Which language should we use?",
-	"setup.not_admin": "The bot is not configured yet. Only the administrator can run the setup wizard.",
+	"setup.not_admin":         "The bot is not configured yet. Only the administrator can run the setup wizard.",
+	"setup.already_installed": "♻️ The bot is already configured, so this is a RECONFIGURE: current settings are used as the base and nothing is wiped. Use Cancel to exit without changes.",
 
 	"step.db.title": "🗄 <b>Step 2. Database</b>\n\n" +
 		"Where should the bot store its data? You can switch later — migration is built in.",
@@ -84,6 +85,7 @@ var en = map[string]string{
 	"update.not_available":    "Self-update is unavailable: the bot runs without docker.sock access.",
 	"buy.choose_plan":         "📦 <b>Pick a subscription period</b>\n\nLonger plans cost less per month. The subscription activates right after payment — the link arrives in this chat.",
 	"buy.no_plans":            "📭 No plans are configured yet. Check back a bit later — or ping support, we will help.",
+	"buy.price_changed":       "⚠️ The price changed while this screen was open: it was %s, now it is %s. Nothing was charged — check the new price and confirm again.",
 	"buy.not_available":       "🔒 Purchasing is currently unavailable for your account. If you believe this is a mistake, contact support.",
 	"buy.choose_tariff":       "📦 <b>Pick a plan</b>\n\nEach plan has its own terms and periods — tap one to see the details.",
 	"buy.from_price":          "from %s",

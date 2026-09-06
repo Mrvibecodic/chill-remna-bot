@@ -10,7 +10,7 @@ import (
 
 // intentCols — единственный список колонок намерения покупки (см. пояснение к
 // planCols).
-const intentCols = "telegram_id, plan_code, months, days, created_at"
+const intentCols = "telegram_id, plan_code, months, days, created_at, shown_price"
 
 // SetPurchaseIntent запоминает выбор пользователя на экране «выбор срока».
 // Намерение одно на пользователя: новый выбор вытесняет предыдущий.
@@ -24,10 +24,11 @@ func (b *base) SetPurchaseIntent(ctx context.Context, in *model.PurchaseIntent) 
 	_, err := b.db.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 		"INSERT INTO purchase_intents ("+intentCols+") VALUES ("+
-			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+") "+
+			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET plan_code = excluded.plan_code, "+
-			"months = excluded.months, days = excluded.days, created_at = excluded.created_at",
-		in.TelegramID, in.PlanCode, in.Months, in.Days, in.CreatedAt)
+			"months = excluded.months, days = excluded.days, created_at = excluded.created_at, "+
+			"shown_price = excluded.shown_price",
+		in.TelegramID, in.PlanCode, in.Months, in.Days, in.CreatedAt, in.ShownPrice)
 	return err
 }
 
@@ -37,7 +38,7 @@ func (b *base) PurchaseIntent(ctx context.Context, telegramID int64) (*model.Pur
 	err := b.db.QueryRowContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
 		"SELECT "+intentCols+" FROM purchase_intents WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt)
+		Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt, &in.ShownPrice)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

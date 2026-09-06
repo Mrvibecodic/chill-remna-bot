@@ -165,7 +165,7 @@ func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	// Покупка применяет поправку: 15 дней по 5₽/д = 75₽ → 75/33 = 2.27 дня
 	// нового (990₽/30д) → поправка −13. Ожидание: конец срока плюс месяц
 	// минус 13 дней.
-	dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, false)
+	dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false)
 	if !dto.OK {
 		t.Fatalf("покупка не прошла: %+v", dto)
 	}
@@ -314,5 +314,71 @@ func TestWindowPaidAfter_NoCrossCurrencyCarry(t *testing.T) {
 	in30 := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
 	if got := windowPaidAfter(usdOld, in30, usd2); got != 10000 {
 		t.Fatalf("перенос внутри валюты: получено %d, ожидалось 10000", got)
+	}
+}
+
+// Цена с кнопки: если админ поднял прайс, пока экран висел в переписке,
+// нажатие не списывает молча новую сумму, а говорит об изменении.
+func TestPriceChanged_NoSilentCharge(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	const uid int64 = 555
+	_ = fs.UpsertUser(ctx, uid)
+	_ = fs.AddBalance(ctx, uid, 500000)
+
+	// Человек увидел экран способов по цене 150 ₽.
+	a.handleCallback(ctx, cb(uid, "buy:1"))
+	in, _ := fs.PurchaseIntent(ctx, uid)
+	if in == nil || in.ShownPrice == "" {
+		t.Fatalf("показанная цена не записана в намерение: %+v", in)
+	}
+	shown := in.ShownPrice
+
+	// Админ поднял цену вшестеро.
+	a.mu.Lock()
+	a.botCfg.Pricing.Base[1] = "900"
+	a.mu.Unlock()
+
+	before, _ := fs.GetUser(ctx, uid)
+	mark := len(fm.joined())
+	a.handleCallback(ctx, cb(uid, "method:bal"))
+
+	after, _ := fs.GetUser(ctx, uid)
+	if after.Balance != before.Balance {
+		t.Fatalf("списано молча: было %d, стало %d", before.Balance, after.Balance)
+	}
+	if !strings.Contains(fm.joined()[mark:], "изменилась") {
+		t.Fatalf("про смену цены не сказано:\n%s", fm.joined()[mark:])
+	}
+	// Намерение переписано новой ценой — второе нажатие проходит.
+	in2, _ := fs.PurchaseIntent(ctx, uid)
+	if in2 == nil || in2.ShownPrice != "900" {
+		t.Fatalf("намерение не обновлено: %+v", in2)
+	}
+	if in2.ShownPrice == shown {
+		t.Fatal("показанная цена должна была смениться")
+	}
+	// Второе нажатие уже не блокируется: показанная и текущая цена совпали.
+	// (Довести до списания в этом харнессе нельзя — панели нет.)
+	if s := a.saleOrAsk(ctx, uid); s == nil {
+		t.Fatal("после подтверждения новой цены продажа должна проходить")
+	}
+}
+
+func TestPriceMoved(t *testing.T) {
+	for _, c := range []struct {
+		shown, now string
+		want       bool
+	}{
+		{"150", "150", false},
+		{"150", "150.00", false}, // та же сумма в копейках
+		{"150", "900", true},
+		{"", "900", false}, // сверять не с чем — старое намерение
+		{"150", "", false}, // продажи нет, решает другой гейт
+		{"5 $", "5 $", false},
+	} {
+		if got := priceMoved(c.shown, c.now); got != c.want {
+			t.Fatalf("priceMoved(%q,%q) = %v, ожидалось %v", c.shown, c.now, got, c.want)
+		}
 	}
 }

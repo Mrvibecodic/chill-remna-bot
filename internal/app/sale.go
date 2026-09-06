@@ -26,6 +26,10 @@ type sale struct {
 	// D — длительность тарифа на Months (для Plan != nil).
 	D      *model.PlanDuration
 	Months int
+	// ShownPrice — цена, напечатанная на кнопках экрана способов оплаты в
+	// момент показа. Пусто — сверять не с чем (старое намерение, продажа не из
+	// намерения). См. priceMoved.
+	ShownPrice string
 }
 
 // planCodeOf — код тарифа из снимка сделки ("" — снимка нет).
@@ -81,7 +85,9 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 		if !a.periodOnSale(in.Months) || !a.planAccessibleFor(ctx, bp, chatID) {
 			return nil, nil
 		}
-		return baseSale(in.Months), nil
+		bs := baseSale(in.Months)
+		bs.ShownPrice = in.ShownPrice
+		return bs, nil
 	}
 	p, err := a.planByCode(ctx, in.PlanCode)
 	if err != nil {
@@ -99,7 +105,7 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 	if !a.planAccessibleFor(ctx, p, chatID) {
 		return nil, nil
 	}
-	return &sale{Plan: p, D: d, Months: in.Months}, nil
+	return &sale{Plan: p, D: d, Months: in.Months, ShownPrice: in.ShownPrice}, nil
 }
 
 // saleOrAsk — продажа из намерения; если продавать нечего, показывает витрину
@@ -118,7 +124,59 @@ func (a *App) saleOrAsk(ctx context.Context, chatID int64) *sale {
 		a.showPlans(ctx, chatID)
 		return nil
 	}
+	// Единственная точка, через которую идут ВСЕ способы оплаты в чате, —
+	// здесь и стоит сверка показанной цены с текущей.
+	if a.askPriceMoved(ctx, chatID, s) {
+		return nil
+	}
 	return s
+}
+
+// priceMoved — разошлась ли цена, показанная на кнопке, с сегодняшней.
+//
+// Подпись кнопки рисуется при показе экрана, а сумма списания перечитывается
+// в момент нажатия: между этими моментами админ мог поменять прайс, а экран со
+// способами живёт в переписке сколько угодно. Раньше это означало молчаливое
+// списание другой суммы — человек нажимал «оплатить 150 ₽» и получал
+// «подписка активна», не узнав про 900 ₽.
+//
+// Пустая показанная цена означает «сверять не с чем» (намерение снято до
+// появления поля): тогда поведение прежнее.
+func priceMoved(shown, now string) bool {
+	if shown == "" || now == "" || shown == now {
+		return false
+	}
+	sk, sok := rubToKopecks(shown)
+	nk, nok := rubToKopecks(now)
+	if sok && nok {
+		return sk != nk
+	}
+	// Нерублёвые цены сравниваем как строки: единственная задача — заметить,
+	// что подпись кнопки больше не соответствует продаже.
+	return true
+}
+
+// askPriceMoved — при расхождении цены не списывает молча, а перерисовывает
+// экран способов с новой ценой и говорит, что изменилось. true — продажу надо
+// прервать.
+func (a *App) askPriceMoved(ctx context.Context, chatID int64, s *sale) bool {
+	now := a.saleBase(s)
+	if !priceMoved(s.ShownPrice, now) {
+		return false
+	}
+	lang := a.lang(chatID)
+	cur := curSuffix(curSymbol(a.pricing().Currency))
+	a.payLog(ctx, "", "", chatID, "price_changed", "было %s стало %s plan=%s months=%d",
+		s.ShownPrice, now, s.planCode(), s.Months)
+	a.notify(ctx, chatID, i18n.T(lang, "buy.price_changed", s.ShownPrice+cur, now+cur))
+	// Намерение переписываем новой ценой, чтобы следующее нажатие прошло.
+	if err := a.setBuyIntent(ctx, chatID, s.planCode(), s.Months, now); err != nil {
+		a.log.Warn("намерение покупки не обновлено после смены цены", "err", err, "user", chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
+		return true
+	}
+	a.showMethodsSale(ctx, chatID, s)
+	return true
 }
 
 // saleBase — базовая цена продажи (признак «продаётся» и цена CryptoBot,

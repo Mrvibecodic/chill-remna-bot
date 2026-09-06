@@ -412,7 +412,16 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		return
 	}
 
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, a.pendingSnapshot(ctx, extID))
+	// В запись платежа идёт РУБЛЁВАЯ цена сделки, а не уплаченная крипта: по
+	// сумме платежа считается процент рефереру (parseAmountRubOnly принимает
+	// только рубли), выручка в статистике и Paid в снимке. С «5.90 USDT»
+	// реферер не получал процент НИКОГДА, а покупка не попадала в выручку.
+	// Фактическая крипта остаётся в журнале платежей и уведомлениях админа —
+	// там она и нужна, например при недоплате. Ровно так же сделано у
+	// CryptoBot, функция общая.
+	pSnap := a.pendingSnapshot(ctx, extID)
+	amount = a.cryptoAmount(pSnap, months, amount)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, pSnap)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			return

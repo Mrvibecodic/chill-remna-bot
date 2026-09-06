@@ -33,7 +33,10 @@ type MiniProvider interface {
 	MiniTrial(ctx context.Context, tgID int64) MiniActionDTO
 	// MiniCheckout performs an in-app purchase of the given plan (empty plan
 	// code = «Базовый», как слали старые фронты) for the period+method.
-	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, web bool) MiniActionDTO
+	// shownPrice — цена, которую фронт НАРИСОВАЛ человеку. Список тарифов
+	// кэшируется до перезагрузки страницы, поэтому показанная цена может
+	// отстать от прайса на часы; списание сверяется с ней.
+	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web bool) MiniActionDTO
 
 	// MiniAutoPay reports the user's automatic-renewal state.
 	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
@@ -454,6 +457,9 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		Plan   string `json:"plan"`
 		Months int    `json:"months"`
 		Method string `json:"method"`
+		// Price — цена, показанная на экране оформления. Пусто у старого
+		// фронта из кэша: тогда сверять не с чем и поведение прежнее.
+		Price string `json:"price"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -461,7 +467,7 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, web))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web))
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.

@@ -161,7 +161,9 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActio
 	// ручного одобрения — иначе карты вытягиваются регистрацией на любой ящик.
 	allowed := a.p2pAllowed(u)
 	if tgID < 0 {
-		allowed = u != nil && u.P2PApproved
+		// Выключенный способ остаётся выключенным и здесь: проверка одобрения
+		// заменяет только ветку «открыт всем», а не сам тумблер.
+		allowed = a.p2pConfig().Enabled && u != nil && u.P2PApproved
 	}
 	if !allowed {
 		a.notifyAdminUserRequest(ctx, tgID)

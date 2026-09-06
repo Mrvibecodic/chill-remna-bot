@@ -58,7 +58,7 @@ func TestMiniCheckout_SellsPlanByCode(t *testing.T) {
 	_ = fs.AddBalance(ctx, u, 99000)
 	p := vipPlan(t, fs, model.PlanAvailAll)
 
-	dto := a.MiniCheckout(ctx, u, p.Code, 1, model.PayMethodBalance, false)
+	dto := a.MiniCheckout(ctx, u, p.Code, 1, model.PayMethodBalance, "", false)
 	if !dto.OK {
 		t.Fatalf("покупка тарифа с баланса не прошла: %+v", dto)
 	}
@@ -85,7 +85,7 @@ func TestMiniCheckout_EmptyPlanIsBase(t *testing.T) {
 	_ = fs.UpsertUser(ctx, u)
 	_ = fs.AddBalance(ctx, u, 15000)
 
-	dto := a.MiniCheckout(ctx, u, "", 1, model.PayMethodBalance, false)
+	dto := a.MiniCheckout(ctx, u, "", 1, model.PayMethodBalance, "", false)
 	if !dto.OK {
 		t.Fatalf("покупка «Базового» не прошла: %+v", dto)
 	}
@@ -107,17 +107,17 @@ func TestMiniCheckout_HiddenAndUnknownPlansRefused(t *testing.T) {
 			t.Fatalf("тариф «по ссылке» виден в витрине мини-аппа: %+v", pd)
 		}
 	}
-	if dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodBalance, "", false); dto.Error == "" {
 		t.Fatalf("тариф «по ссылке» продан через мини-апп: %+v", dto)
 	}
-	if dto := a.MiniCheckout(ctx, 555, "nosuchplan", 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, 555, "nosuchplan", 1, model.PayMethodBalance, "", false); dto.Error == "" {
 		t.Fatalf("неизвестный код продан: %+v", dto)
 	}
 	// Выключенный тариф тоже не продаётся.
 	p.Availability = model.PlanAvailAll
 	p.Enabled = false
 	_ = fs.SavePlan(ctx, p)
-	if dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodBalance, "", false); dto.Error == "" {
 		t.Fatalf("выключенный тариф продан: %+v", dto)
 	}
 }
@@ -129,7 +129,7 @@ func TestMiniCheckout_StarsUsesPlanPrice(t *testing.T) {
 	a.botCfg.Stars = model.StarsConfig{Enabled: true, Prices: map[int]int{1: 99}}
 	p := vipPlan(t, fs, model.PlanAvailAll) // 1 мес = 55⭐
 
-	dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodStars, false)
+	dto := a.MiniCheckout(ctx, 555, p.Code, 1, model.PayMethodStars, "", false)
 	if !dto.OK || !dto.Invoice {
 		t.Fatalf("счёт Stars не создан: %+v", dto)
 	}
@@ -160,7 +160,7 @@ func TestBasePlanDisabled_NotSold(t *testing.T) {
 	if dto := a.MiniPlans(ctx, uid); len(dto.Plans) != 0 {
 		t.Fatalf("выключенный «Базовый» виден в мини-аппе: %+v", dto.Plans)
 	}
-	if dto := a.MiniCheckout(ctx, uid, "", 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, uid, "", 1, model.PayMethodBalance, "", false); dto.Error == "" {
 		t.Fatalf("мини-апп продал выключенный «Базовый»: %+v", dto)
 	}
 	// Чат: старая кнопка срока из переписки не должна открывать способы оплаты.
@@ -185,7 +185,7 @@ func TestPlanForeignCurrency_GridMethodsRefuse(t *testing.T) {
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddBalance(ctx, uid, 990000)
 
-	if dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, false); dto.Error == "" {
+	if dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false); dto.Error == "" {
 		t.Fatalf("баланс списал тариф в чужой валюте: %+v", dto)
 	}
 	if b := a.userBalance(ctx, uid); b != 990000 {
@@ -216,7 +216,7 @@ func TestMiniPlans_TrialLock(t *testing.T) {
 	if len(dto.Plans) != 0 || dto.Notice == "" {
 		t.Fatalf("во время триала витрина закрыта: %+v", dto)
 	}
-	if res := a.MiniCheckout(ctx, u, p.Code, 1, model.PayMethodBalance, false); res.Error == "" {
+	if res := a.MiniCheckout(ctx, u, p.Code, 1, model.PayMethodBalance, "", false); res.Error == "" {
 		t.Fatal("чекаут во время триала должен отказывать")
 	}
 

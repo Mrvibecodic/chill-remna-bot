@@ -577,6 +577,10 @@ type P2PRequest struct {
 	Comment    string
 	CreatedAt  string
 	DecidedAt  string
+	// Card — выданные по заявке реквизиты. Пусто у заявок, созданных до
+	// появления поля: для них повторный показ выдаёт карту по ротации, как
+	// раньше.
+	Card string
 
 	Snapshot *PlanSnapshot
 }

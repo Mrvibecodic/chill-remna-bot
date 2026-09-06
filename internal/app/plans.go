@@ -294,7 +294,10 @@ func (a *App) periodOnSale(months int) bool {
 }
 
 // setBuyIntent запоминает выбранный тариф и срок.
-func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, months int) error {
+// setBuyIntent запоминает выбор срока. shownPrice — цена, которая печатается
+// на кнопках экрана способов: по ней списание сверяется с тем, что человек
+// видел (см. priceMoved).
+func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, months int, shownPrice string) error {
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
@@ -308,6 +311,7 @@ func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, m
 		TelegramID: chatID,
 		PlanCode:   planCode,
 		Months:     months,
+		ShownPrice: shownPrice,
 	})
 }
 

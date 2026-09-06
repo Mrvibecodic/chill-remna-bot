@@ -242,6 +242,11 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
+	// mu защищает ДЕНЕЖНЫЕ пути фейка: реальное хранилище — база, и параллельные
+	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
+	// триал) без этого ловили бы гонку самого двойника, а не проверяемого кода.
+	// Остальные методы не заперты намеренно: они вызываются последовательно.
+	mu         sync.Mutex
 	cfg        *model.BotConfig
 	users      map[int64]*model.User
 	reqs       map[int64]*model.P2PRequest
@@ -455,6 +460,8 @@ func (s *fakeStore) GetScreenMsg(context.Context, int64) (int, error) { return 0
 func (s *fakeStore) SetScreenMsg(context.Context, int64, int) error   { return nil }
 
 func (s *fakeStore) AddPayLog(_ context.Context, e *model.PayLogEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.paylogs = append(s.paylogs, *e)
 	return nil
 }
@@ -637,6 +644,8 @@ func (s *fakeStore) SaveConfig(_ context.Context, c *model.BotConfig) error {
 	return nil
 }
 func (s *fakeStore) UpsertUser(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
 	}
@@ -646,6 +655,8 @@ func (s *fakeStore) UpsertUser(_ context.Context, id int64) error {
 	return nil
 }
 func (s *fakeStore) GetUser(_ context.Context, id int64) (*model.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.users == nil || s.users[id] == nil {
 		return nil, nil
 	}
@@ -687,6 +698,8 @@ func (s *fakeStore) SetPaymentSnapshot(_ context.Context, id int64, snap *model.
 }
 
 func (s *fakeStore) SetUserSnapshot(_ context.Context, id int64, snap *model.PlanSnapshot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
 	}
@@ -714,7 +727,25 @@ func (s *fakeStore) HasApprovedPurchase(_ context.Context, id int64) (bool, erro
 	}
 	return false, nil
 }
+
+// AddPaymentAndBalance — фейк той же атомарности: барьер по ext_id срабатывает
+// ДО денег, и при дубле баланс не трогается вовсе.
+func (s *fakeStore) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error {
+	// Своего замка нет намеренно: обе половины запирают его сами, а он не
+	// реентерабельный. Для теста важно, что барьер по ext_id внутри AddPayment
+	// атомарен — при гонке дубль получает ровно один из двух вызовов.
+	if err := s.AddPayment(ctx, p); err != nil {
+		return err
+	}
+	if kopecks != 0 {
+		return s.AddBalance(ctx, p.TelegramID, kopecks)
+	}
+	return nil
+}
+
 func (s *fakeStore) AddPayment(_ context.Context, p *model.Payment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.pays == nil {
 		s.pays = map[int64]*model.Payment{}
 	}
@@ -787,6 +818,8 @@ func (s *fakeStore) MostPopularPlan(_ context.Context) (int, int, error) {
 	return best, total, nil
 }
 func (s *fakeStore) PaymentByExtID(_ context.Context, extID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if extID == "" {
 		return false, nil
 	}
@@ -895,12 +928,16 @@ func (s *fakeStore) ResetTermsAccepted(_ context.Context) error {
 }
 
 func (s *fakeStore) SetTrialUsed(_ context.Context, telegramID int64, ts string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if u, ok := s.users[telegramID]; ok {
 		u.TrialUsedAt = ts
 	}
 	return nil
 }
 func (s *fakeStore) SetSubExpiry(_ context.Context, telegramID int64, expireAt, kind string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
 	}
@@ -928,6 +965,8 @@ func (s *fakeStore) UsersForNotify(_ context.Context) ([]model.User, error) {
 	return out, nil
 }
 func (s *fakeStore) AddBalance(_ context.Context, id int64, kopecks int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.users == nil {
 		s.users = map[int64]*model.User{}
 	}
@@ -938,6 +977,8 @@ func (s *fakeStore) AddBalance(_ context.Context, id int64, kopecks int64) error
 	return nil
 }
 func (s *fakeStore) DeductBalance(_ context.Context, id int64, kopecks int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	u := s.users[id]
 	if u == nil || u.Balance < kopecks || kopecks <= 0 {
 		return false, nil
@@ -1012,6 +1053,8 @@ func (s *fakeStore) GetWebUserByEmail(_ context.Context, email string) (*model.W
 	return nil, nil
 }
 func (s *fakeStore) SetPurchaseIntent(_ context.Context, in *model.PurchaseIntent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if in == nil {
 		return nil
 	}
@@ -1055,6 +1098,8 @@ func (s *fakeStore) SetInvoiceSnapshot(_ context.Context, telegramID int64, meth
 }
 
 func (s *fakeStore) InvoiceSnapshot(_ context.Context, telegramID int64, method string, months int) (*model.PlanSnapshot, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	k := invSnapKey(telegramID, method, months)
 	v := s.invSnaps[k]
 	if v == nil {
@@ -1082,6 +1127,8 @@ func (s *fakeStore) DeleteInvoiceSnapshot(_ context.Context, telegramID int64, m
 }
 
 func (s *fakeStore) PurchaseIntent(_ context.Context, telegramID int64) (*model.PurchaseIntent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.intents == nil || s.intents[telegramID] == nil {
 		return nil, nil
 	}
@@ -1090,6 +1137,8 @@ func (s *fakeStore) PurchaseIntent(_ context.Context, telegramID int64) (*model.
 }
 
 func (s *fakeStore) DeletePurchaseIntent(_ context.Context, telegramID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.intents, telegramID)
 	return nil
 }
@@ -1115,6 +1164,8 @@ func (s *fakeStore) SavePlan(_ context.Context, p *model.Plan) error {
 }
 
 func (s *fakeStore) GetPlan(_ context.Context, code string) (*model.Plan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.plans == nil || s.plans[code] == nil {
 		return nil, nil
 	}
@@ -1350,6 +1401,8 @@ func (s *fakeStore) CountReferrals(_ context.Context, ref int64) (int, error) {
 	return n, nil
 }
 func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}
 	}
@@ -1367,7 +1420,28 @@ func (s *fakeStore) CreateP2PRequest(_ context.Context, r *model.P2PRequest) err
 
 // LastAwaitingP2PRequest повторяет запрос хранилища: самая свежая заявка
 // пользователя, которая всё ещё ждёт чек.
+func (s *fakeStore) OpenP2PRequest(_ context.Context, tgID int64) (*model.P2PRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var best *model.P2PRequest
+	for _, r := range s.reqs {
+		if r.TelegramID != tgID || (r.Status != model.P2PAwaiting && r.Status != model.P2PSubmitted) {
+			continue
+		}
+		if best == nil || r.CreatedAt > best.CreatedAt || (r.CreatedAt == best.CreatedAt && r.ID > best.ID) {
+			best = r
+		}
+	}
+	if best == nil {
+		return nil, nil
+	}
+	cp := *best
+	return &cp, nil
+}
+
 func (s *fakeStore) LastAwaitingP2PRequest(_ context.Context, tgID int64) (*model.P2PRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var best *model.P2PRequest
 	for _, r := range s.reqs {
 		if r.TelegramID != tgID || r.Status != model.P2PAwaiting {
@@ -1385,6 +1459,8 @@ func (s *fakeStore) LastAwaitingP2PRequest(_ context.Context, tgID int64) (*mode
 }
 
 func (s *fakeStore) GetP2PRequest(_ context.Context, id int64) (*model.P2PRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reqs == nil || s.reqs[id] == nil {
 		return nil, nil
 	}
@@ -1392,6 +1468,8 @@ func (s *fakeStore) GetP2PRequest(_ context.Context, id int64) (*model.P2PReques
 	return &cp, nil
 }
 func (s *fakeStore) UpdateP2PRequest(_ context.Context, r *model.P2PRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}
 	}

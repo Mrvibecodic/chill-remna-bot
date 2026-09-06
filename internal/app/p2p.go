@@ -86,9 +86,19 @@ func (a *App) p2pOpenForAll() bool {
 	return cfg.Enabled && cfg.OpenForAll
 }
 
-// p2pAllowed сообщает, можно ли этому пользователю выдать реквизиты: либо
-// перевод открыт всем, либо админ одобрил конкретного пользователя.
+// p2pAllowed сообщает, можно ли этому пользователю выдать реквизиты: способ
+// включён И (перевод открыт всем ИЛИ админ одобрил конкретного пользователя).
+//
+// Проверка включённости стоит именно здесь, а не только при отрисовке кнопок:
+// одобрение выдаётся навсегда, а выключают способ как раз тогда, когда карты
+// сменились или направление закрылось. Без неё любой ранее одобренный по
+// кнопке из старой переписки, из мини-аппа или из кабинета продолжал получать
+// АКТУАЛЬНЫЕ реквизиты и заводить заявки — деньги уходили на карту, которую
+// уже не смотрят.
 func (a *App) p2pAllowed(u *model.User) bool {
+	if !a.p2pConfig().Enabled {
+		return false
+	}
 	if a.p2pOpenForAll() {
 		return true
 	}
@@ -246,7 +256,7 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 	// Не записалось — дальше не идём. Экран способов подписан ценами, и
 	// показать его после несостоявшейся записи значит предложить оплату по
 	// прошлому выбору: человек нажал «1 месяц», а счёт выставился бы на год.
-	if err := a.setBuyIntent(ctx, chatID, model.PlanCodeBase, mo); err != nil {
+	if err := a.setBuyIntent(ctx, chatID, model.PlanCodeBase, mo, a.saleBase(baseSale(mo))); err != nil {
 		a.log.Warn("намерение покупки не сохранено", "err", err, "user", chatID)
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "err.storage"))
 		return
@@ -435,6 +445,28 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 		}})
 }
 
+// nextP2PCardIdx — индекс следующей карты. Счётчик живёт в памяти процесса и
+// на диск не пишется.
+//
+// Раньше он лежал в конфиге, и каждая выдача реквизитов переписывала ВЕСЬ
+// конфиг: три сериализации, шифрование и UPSERT — на горячем пути платежа, да
+// ещё и безусловно, даже когда ротация выключена и индекс не менялся. Заодно
+// это тянуло за собой синхронизацию тарифа с сеткой цен.
+//
+// Цена решения: после перезапуска ротация начинается сначала, а не продолжает
+// круг. Ротация нужна, чтобы размазывать поток по картам в пределах дня, — на
+// этом рестарты не сказываются. Мультиинстанса у бота нет по конструкции:
+// длинный опрос Telegram не переживёт двух процессов на одном токене.
+//
+// Вызывать под a.mu (читает cfg, полученный под тем же замком).
+func (a *App) nextP2PCardIdx(p2p model.P2PConfig) int {
+	if !p2p.Rotate || len(p2p.Cards) < 2 {
+		return 0
+	}
+	n := a.p2pRotate.Add(1) - 1
+	return int(n % uint64(len(p2p.Cards)))
+}
+
 // prepareP2PCard picks the next card, creates an awaiting P2P request and
 // returns the card + price + request id, without messaging the user (shared by
 // the chat flow and the web cabinet).
@@ -453,7 +485,6 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 		return "", "", 0, errors.New("для этого срока не задана цена")
 	}
 	a.mu.Lock()
-	a.botCfg.NormalizePricing()
 	p2p := a.botCfg.P2P
 	if len(p2p.Cards) == 0 {
 		a.mu.Unlock()
@@ -466,19 +497,38 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 		a.mu.Unlock()
 		return "", "", 0, errors.New("для этого срока не задана цена")
 	}
-	idx := 0
-	if p2p.Rotate && len(p2p.Cards) > 1 {
-		idx = p2p.RotateIdx % len(p2p.Cards)
-		a.botCfg.P2P.RotateIdx = idx + 1
-	}
-	card = p2p.Cards[idx]
 	a.mu.Unlock()
-	_ = a.saveBotConfig(ctx)
 
 	if a.store == nil {
 		return "", "", 0, errors.New("storage unavailable")
 	}
-	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Snapshot: a.saleSnapshot(s)}
+	// Одна незакрытая заявка на человека. Повторное нажатие возвращает ТУ ЖЕ
+	// заявку и ТЕ ЖЕ реквизиты: человек мог уже перевести деньги на выданную
+	// карту, и подсовывать ему следующую по ротации нельзя. Заодно это снимает
+	// весь класс злоупотребления — раньше каждое нажатие плодило строку в базе
+	// и отдельное сообщение админу с кнопками, без всякого ограничения.
+	//
+	// Автоматически старую заявку НЕ отменяем: деньги по ней могли уже уйти.
+	// Захотел другую сумму — на карточке есть кнопка отмены.
+	if open, oerr := a.store.OpenP2PRequest(ctx, chatID); oerr == nil && open != nil {
+		if open.Card != "" {
+			a.payLog(ctx, model.PayMethodP2P, p2pExt(open.ID), chatID, "request_reused", "months=%d price=%s", open.Months, open.Price)
+			return open.Card, open.Price, open.ID, nil
+		}
+		// Заявка из времён без сохранённых реквизитов: карту не знаем, поэтому
+		// выдаём по ротации, но заявку всё равно переиспользуем.
+		a.mu.Lock()
+		card = p2p.Cards[a.nextP2PCardIdx(p2p)]
+		a.mu.Unlock()
+		a.payLog(ctx, model.PayMethodP2P, p2pExt(open.ID), chatID, "request_reused", "months=%d price=%s (карта не сохранена)", open.Months, open.Price)
+		return card, open.Price, open.ID, nil
+	}
+
+	a.mu.Lock()
+	card = p2p.Cards[a.nextP2PCardIdx(p2p)]
+	a.mu.Unlock()
+
+	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Card: card, Snapshot: a.saleSnapshot(s)}
 	if err = a.store.CreateP2PRequest(ctx, req); err != nil {
 		return "", "", 0, err
 	}

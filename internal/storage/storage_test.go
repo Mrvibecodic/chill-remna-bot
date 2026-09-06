@@ -1094,3 +1094,54 @@ func TestSQLite_ResetTermsAccepted(t *testing.T) {
 		}
 	}
 }
+
+// Зачисление пополнения — одна транзакция: барьер по ext_id срабатывает до
+// денег, дубль баланса не касается, а откат не оставляет платёж без баланса.
+func TestAddPaymentAndBalanceAtomic(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const uid int64 = 4242
+		if err := st.UpsertUser(ctx, uid); err != nil {
+			t.Fatal(err)
+		}
+
+		pay := &model.Payment{TelegramID: uid, Method: "yookassa", Amount: "1000 ₽", Status: model.PaymentPaid, ExtID: "yk-1", Comment: "topup"}
+		if err := st.AddPaymentAndBalance(ctx, pay, 100000); err != nil {
+			t.Fatalf("первое зачисление: %v", err)
+		}
+		if u, _ := st.GetUser(ctx, uid); u == nil || u.Balance != 100000 {
+			t.Fatalf("баланс после зачисления: %+v", u)
+		}
+
+		// Повтор доставки: дубль по ext_id, баланс НЕ меняется.
+		dup := &model.Payment{TelegramID: uid, Method: "yookassa", Amount: "1000 ₽", Status: model.PaymentPaid, ExtID: "yk-1", Comment: "topup"}
+		if err := st.AddPaymentAndBalance(ctx, dup, 100000); !errors.Is(err, ErrDuplicateExtID) {
+			t.Fatalf("повтор должен быть дублем, получено: %v", err)
+		}
+		if u, _ := st.GetUser(ctx, uid); u == nil || u.Balance != 100000 {
+			t.Fatalf("дубль изменил баланс: %+v", u)
+		}
+		if done, _ := st.PaymentByExtID(ctx, "yk-1"); !done {
+			t.Fatal("платёж не записан")
+		}
+
+		// Другой ext_id проходит и складывается.
+		p2 := &model.Payment{TelegramID: uid, Method: "yookassa", Amount: "500 ₽", Status: model.PaymentPaid, ExtID: "yk-2", Comment: "topup"}
+		if err := st.AddPaymentAndBalance(ctx, p2, 50000); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, uid); u == nil || u.Balance != 150000 {
+			t.Fatalf("баланс после второго зачисления: %+v", u)
+		}
+
+		// Пользователя может не быть вовсе — зачисление его заводит.
+		const fresh int64 = 4343
+		p3 := &model.Payment{TelegramID: fresh, Method: "cryptobot", Amount: "10 USDT", Status: model.PaymentPaid, ExtID: "cb-1", Comment: "topup"}
+		if err := st.AddPaymentAndBalance(ctx, p3, 70000); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, fresh); u == nil || u.Balance != 70000 {
+			t.Fatalf("новый пользователь: %+v", u)
+		}
+	})
+}

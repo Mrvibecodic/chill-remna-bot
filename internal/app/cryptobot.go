@@ -126,8 +126,12 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 				})
 				return
 			}
-			_ = a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodCryptoBot,
-				cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat), extID)
+			// Гасим счёт только при успехе — см. finalizeTopUp.
+			if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodCryptoBot,
+				cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat), extID); err != nil {
+				a.log.Error("cryptobot topup finalize", "err", err, "ext_id", extID)
+				return
+			}
 			_ = a.store.ResolvePending(ctx, p.ID)
 			return
 		}

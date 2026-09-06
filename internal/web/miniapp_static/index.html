@@ -669,7 +669,10 @@ function buyPlan(code,months){
   h+='<div class="sec-title">Способ оплаты</div>';
   var apOn=STATE.ap&&STATE.ap.available;
   methods.forEach(function(m){
-    h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this)">'+(METHOD_LABELS[m]||m)+'</button>';
+    // Цена уходит на сервер ровно та, что нарисована выше в bigprice: список
+    // тарифов кэшируется до перезагрузки, и сервер обязан отличить показанную
+    // цену от сегодняшней, а не списать молча другую сумму.
+    h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this,\''+jsq(String(d.price||''))+'\')">'+(METHOD_LABELS[m]||m)+'</button>';
     if(m==='yookassa'&&apOn){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
@@ -705,9 +708,9 @@ async function p2pUpload(reqID,el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   busy(el,false);
 }
-async function pay(plan,months,method,el){
+async function pay(plan,months,method,el,shownPrice){
   haptic('tap');busy(el,true);
-  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method});
+  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){

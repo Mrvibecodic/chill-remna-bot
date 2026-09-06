@@ -411,7 +411,7 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	}
 	// Не записалось — дальше не идём: экран способов подписан ценами, и
 	// показать его после несостоявшейся записи значит продать прошлый выбор.
-	if err := a.setBuyIntent(ctx, chatID, p.Code, mo); err != nil {
+	if err := a.setBuyIntent(ctx, chatID, p.Code, mo, a.saleBase(&sale{Plan: p, D: d, Months: mo})); err != nil {
 		a.log.Warn("намерение покупки не сохранено", "err", err, "user", chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return

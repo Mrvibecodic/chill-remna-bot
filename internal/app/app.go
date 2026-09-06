@@ -152,6 +152,10 @@ type App struct {
 	// зачёт остатка при смене тарифа от одного и того же снимка — и остаток
 	// конвертировался бы дважды. Берётся ПОСЛЕ finalizeLk, порядок строгий.
 	finalizeUserLk [finalizeLockShards]sync.Mutex
+
+	// p2pRotate — очередь реквизитов перевода. В памяти, а не в конфиге:
+	// см. nextP2PCardIdx.
+	p2pRotate atomic.Uint64
 	// finalizeLk serializes finalizePurchase per ext_id (striped) so a payment
 	// delivered twice concurrently (webhook redelivery vs reconciler vs manual
 	// check) can't extend the panel subscription more than once.
@@ -557,6 +561,17 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	case strings.HasPrefix(text, "/setup"):
 		if !isAdmin {
 			a.send(ctx, chatID, i18n.T(i18n.Fallback, "setup.not_admin"))
+			return
+		}
+		// На настроенном боте /setup ведёт в ПЕРЕустановку, а не в первичную
+		// установку. Первичная стартует с пустого конфига и в конце пишет его
+		// поверх боевого полной заменой: обнулялись бы ключи всех платёжек,
+		// документы, контакты, триал и рефералка, а закрытый бот становился бы
+		// публичным (AccessMode пустой = публичный). Переустановка делает то
+		// же самое, но от копии живого конфига, — она и есть правильный вход.
+		if a.installed() {
+			a.send(ctx, chatID, i18n.T(a.lang(chatID), "setup.already_installed"))
+			a.startReconfigure(ctx, chatID)
 			return
 		}
 		a.startWizard(ctx, chatID)

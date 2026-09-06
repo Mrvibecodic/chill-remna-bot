@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/storage"
 	"remnabot/internal/web"
 )
 
@@ -275,7 +277,7 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 // MiniCheckout buys/renews a plan duration. Only the "balance" method
 // completes in-app (reuses finalizePurchase, the same provisioning core as
 // the chat flow); other methods return a payment URL or Redirect=true.
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, web_ bool) web.MiniActionDTO {
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_ bool) web.MiniActionDTO {
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
 		return web.MiniActionDTO{Error: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
@@ -291,6 +293,16 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// miniPayURLCore, и проверка только там оставляла их без согласия.
 	if a.legalRequired(ctx, tgID) {
 		return web.MiniActionDTO{Error: "сначала примите документы сервиса"}
+	}
+	// Сверка показанной цены с сегодняшней — до всех способов. Список тарифов
+	// фронт кэширует до перезагрузки страницы, поэтому здесь окно расхождения
+	// шире, чем в чате: не секунды, а часы. Молча выставлять другую сумму
+	// нельзя; фронт по этой ошибке перечитывает тарифы.
+	if now := a.saleBase(s); priceMoved(shownPrice, now) {
+		cur := curSuffix(curSymbol(a.pricing().Currency))
+		a.payLog(ctx, "", "", tgID, "price_changed", "было %s стало %s plan=%s months=%d",
+			shownPrice, now, s.planCode(), s.Months)
+		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur)}
 	}
 	if method == model.PayMethodP2P {
 		if web_ {
@@ -316,6 +328,24 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	}
+	// Ключ сделки против двойного нажатия. Намерения покупки здесь нет (счёт
+	// из мини-аппа намеренно не перебивает выбор в чате), поэтому момент
+	// различается концом срока ДО покупки: он сдвигается каждой выдачей, а два
+	// одновременных запроса видят один и тот же.
+	//
+	// Запросы веб-сервера конкурентны, в отличие от чата, где апдейты идут по
+	// очереди, — здесь двойное списание воспроизводится уверенно.
+	discr := "none"
+	if u, uerr := a.store.GetUser(ctx, tgID); uerr == nil && u != nil {
+		discr = "exp:" + u.SubExpireAt
+	}
+	extID := balanceExtID(tgID, s.planCode(), months, discr)
+	if extID != "" {
+		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
+			a.payLog(ctx, "balance", extID, tgID, "duplicate", "повторный запрос: покупка уже выполнена")
+			return web.MiniActionDTO{Error: "покупка уже выполнена"}
+		}
+	}
 	// Снимок — до списания (как в чате): после DeductBalance любой отказ
 	// означает возврат денег, и лишних причин отказа быть не должно.
 	snap := a.saleSnapshot(s)
@@ -326,8 +356,12 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if !deducted {
 		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
+	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
 	if err != nil {
+		if errors.Is(err, storage.ErrDuplicateExtID) {
+			a.refundBalance(tgID, kopecks, nil)
+			return web.MiniActionDTO{Error: "покупка уже выполнена"}
+		}
 		a.refundBalance(tgID, kopecks, err)
 		return web.MiniActionDTO{Error: err.Error()}
 	}

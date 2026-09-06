@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -448,18 +449,18 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 	if a.store == nil {
 		return nil
 	}
-	if err := a.store.AddPayment(ctx, &model.Payment{
+	// Запись платежа и зачисление — одной транзакцией. Порознь сбой между
+	// ними оставлял барьер повтора стоять при нулевом балансе, и пополнение
+	// пропадало навсегда: повторную доставку гасил тот же барьер, а сверка
+	// закрывала счёт.
+	if err := a.store.AddPaymentAndBalance(ctx, &model.Payment{
 		TelegramID: chatID, Method: method, Amount: amount, Status: model.PaymentPaid, ExtID: extID, Comment: "topup",
-	}); err != nil {
+	}, kopecks); err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.payLog(ctx, method, extID, chatID, "duplicate", "пополнение уже зачислено")
 			return nil
 		}
-		a.payLog(ctx, method, extID, chatID, "error", "запись пополнения: %v", err)
-		return err
-	}
-	if err := a.store.AddBalance(ctx, chatID, kopecks); err != nil {
-		a.payLog(ctx, method, extID, chatID, "error", "зачисление баланса: %v", err)
+		a.payLog(ctx, method, extID, chatID, "error", "зачисление пополнения: %v", err)
 		return err
 	}
 	a.payLog(ctx, method, extID, chatID, "topup_credited", "kopecks=%d amount=%s", kopecks, amount)
@@ -542,6 +543,32 @@ func panelStateUnknown(err error) bool {
 	return false
 }
 
+// balanceExtID — ключ сделки для оплаты с баланса.
+//
+// У внешних платёжек ключ приходит от провайдера, и по нему ядро выдачи
+// отсекает повторы. У баланса ключа не было (передавалась пустая строка), а
+// пустой ключ выключает барьер целиком: и шардовый замок, и проверку
+// «уже выдано», и частичный уникальный индекс (он покрывает только ext_id <> ”).
+// Поэтому два одновременных нажатия списывали дважды и дважды продлевали.
+//
+// Ключ обязан быть стабильным для ПОВТОРА ОДНОГО нажатия и разным для разных
+// покупок, иначе законная «ещё месяц через минуту» упёрлась бы в барьер
+// навсегда. Различителем служит отпечаток момента выбора: время создания
+// намерения покупки (оно перезаписывается при каждом новом выборе срока и
+// удаляется после успешной сделки), а где намерения нет (мини-апп, кабинет) —
+// конец срока ДО покупки: он сдвигается каждой выдачей.
+//
+// Пустой различитель означает «различить нечем» — тогда ключ не выдаётся и
+// поведение остаётся прежним, без барьера, но и без риска заблокировать
+// законную покупку.
+func balanceExtID(tgID int64, planCode string, months int, discriminator string) string {
+	if discriminator == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(discriminator))
+	return fmt.Sprintf("bal:%d:%s:%d:%x", tgID, planCode, months, sum[:6])
+}
+
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	s := a.saleOrAsk(ctx, chatID)
@@ -557,6 +584,24 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
 		return
 	}
+	// Ключ сделки — до списания: по нему отсекается двойное нажатие. Момент
+	// выбора берётся из намерения покупки; ошибку чтения игнорируем — тогда
+	// ключа не будет и поведение останется прежним.
+	discr := ""
+	if in, ierr := a.buyIntent(ctx, chatID); ierr == nil && in != nil {
+		discr = in.CreatedAt
+	}
+	extID := balanceExtID(chatID, s.planCode(), months, discr)
+	if extID != "" {
+		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
+			// Первое нажатие уже выдало подписку. Денег не трогаем вовсе —
+			// иначе списали бы и тут же вернули, оставив в журнале пугающий
+			// откат вместо честного «уже куплено».
+			a.payLog(ctx, "balance", extID, chatID, "duplicate", "повторное нажатие: покупка уже выполнена")
+			a.showMySubs(ctx, chatID)
+			return
+		}
+	}
 	// Снимок — до списания: после DeductBalance отказ по любой причине означает
 	// возврат денег, и лишних причин отказа быть не должно.
 	snap := a.saleSnapshot(s)
@@ -566,7 +611,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		return
 	}
 	if deducted {
-		a.payLog(ctx, "balance", "", chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
+		a.payLog(ctx, "balance", extID, chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
 	}
 	if !deducted {
 		rows := [][]models.InlineKeyboardButton{}
@@ -577,8 +622,16 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), "", snap)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
 	if err != nil {
+		// Дубль поймало ядро выдачи (второе нажатие прошло проверку выше, пока
+		// первое ещё не записало платёж): деньги вернуть, но это не сбой —
+		// подписка выдана первым нажатием.
+		if errors.Is(err, storage.ErrDuplicateExtID) {
+			a.refundBalance(chatID, kopecks, nil)
+			a.showMySubs(ctx, chatID)
+			return
+		}
 		a.refundBalance(chatID, kopecks, err)
 		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", err.Error()))
 		return

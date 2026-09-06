@@ -143,7 +143,12 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	if a.store != nil {
 		if p, _ := a.store.PendingByExtID(ctx, payID); p != nil && p.Purpose == "topup" {
 			amount := pay.Amount.Value + " " + pay.Amount.Currency
-			_ = a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodYooKassa, amount, payID)
+			// Гасим счёт только при успехе — см. finalizeTopUp: иначе
+			// неудачное зачисление уносит пополнение вместе со страховкой.
+			if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodYooKassa, amount, payID); err != nil {
+				a.log.Error("yookassa topup finalize", "err", err, "ext_id", payID)
+				return
+			}
 			_ = a.store.ResolvePending(ctx, p.ID)
 			return
 		}

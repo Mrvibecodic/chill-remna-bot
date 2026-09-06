@@ -131,10 +131,12 @@ type Storage interface {
 	GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, error)
 	// LastAwaitingP2PRequest — последняя заявка пользователя, ждущая чек.
 	// Нужна, когда ожидание чека в памяти потеряно (перезапуск бота).
+	OpenP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 
 	AddPayment(ctx context.Context, p *model.Payment) error
+	AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
@@ -603,9 +605,9 @@ func (b *base) CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error 
 		r.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
-		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt, r.Snapshot.Encode())
+		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+")",
+		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt, r.Snapshot.Encode(), r.Card)
 	return err
 }
 
@@ -614,7 +616,29 @@ func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, 
 	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE id = "+b.ph(1), id).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw)
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.Snapshot = model.DecodePlanSnapshot(snapRaw)
+	return r, nil
+}
+
+// OpenP2PRequest — незакрытая заявка пользователя: ожидающая чека или уже
+// приславшая его. Одна на человека: без этого каждое нажатие «Перевод на
+// карту» плодило новую строку, новый набор кнопок админу и (раньше) новую
+// перезапись конфига, а обслуживалась всё равно только последняя.
+func (b *base) OpenP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error) {
+	r := &model.P2PRequest{}
+	var snapRaw string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT "+p2pCols+" FROM p2p_requests WHERE telegram_id = "+b.ph(1)+
+			" AND status IN ("+b.ph(2)+", "+b.ph(3)+") ORDER BY created_at DESC, id DESC LIMIT 1",
+		telegramID, model.P2PAwaiting, model.P2PSubmitted).
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -631,7 +655,7 @@ func (b *base) LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*m
 	err := b.db.QueryRowContext(ctx,
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+
 			" ORDER BY created_at DESC, id DESC LIMIT 1", telegramID, model.P2PAwaiting).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw)
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -665,6 +689,64 @@ func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
 		return ErrDuplicateExtID
 	}
 	return err
+}
+
+// AddPaymentAndBalance записывает платёж и зачисляет баланс ОДНОЙ транзакцией.
+//
+// Порознь это теряло пополнения навсегда: запись платежа — она же барьер
+// повторной обработки по ext_id, — ставилась первой, и сбой между двумя
+// запросами оставлял барьер стоять при нулевом балансе. Повторная доставка от
+// платёжки упиралась в этот барьер и уходила ни с чем, а сверка гасила счёт.
+// Деньги у эквайера есть, на балансе ноль, восстановить нечем.
+//
+// Порядок внутри транзакции обязателен: сначала вставка платежа. На Postgres
+// ошибка уникальности переводит транзакцию в аварийное состояние, и любой
+// следующий запрос в ней отказал бы; к тому же логически барьер и должен
+// срабатывать до денег. Дубль отдаётся как ErrDuplicateExtID и баланса не
+// касается.
+//
+// Потерянный ответ на успешный COMMIT транзакция не лечит — его лечит повтор:
+// платёж уже виден, finalizeTopUp выходит через дубль, баланс уже зачислен.
+func (b *base) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error {
+	if p == nil {
+		return errors.New("payment is nil")
+	}
+	if p.ID == 0 {
+		p.ID = time.Now().UnixNano()
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = nowStr()
+	}
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	// Откат после успешного Commit безвреден (sql.ErrTxDone) — это штатный
+	// способ не потерять откат ни на одной из веток выхода.
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
+		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt, p.Snapshot.Encode()); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateExtID
+		}
+		return err
+	}
+	if kopecks != 0 {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO users (telegram_id, p2p_approved, created_at) VALUES ("+b.ph(1)+", 0, "+b.ph(2)+") ON CONFLICT (telegram_id) DO NOTHING",
+			p.TelegramID, nowStr()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE users SET balance = balance + "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
+			kopecks, p.TelegramID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func isUniqueViolation(err error) bool {
@@ -806,7 +888,7 @@ func (b *base) DeleteMediaFileID(ctx context.Context, section string) error {
 // рантайме.
 const (
 	paymentCols = "id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot"
-	p2pCols     = "id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot"
+	p2pCols     = "id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card"
 	autoPayCols = "telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, " +
 		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
 )
@@ -1007,7 +1089,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for rrows.Next() {
 		var r model.P2PRequest
 		var snapRaw string
-		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw); err != nil {
+		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card); err != nil {
 			_ = rrows.Close()
 			return nil, err
 		}
@@ -1069,7 +1151,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	for intentRows.Next() {
 		var in model.PurchaseIntent
-		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt); err != nil {
+		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt, &in.ShownPrice); err != nil {
 			_ = intentRows.Close()
 			return nil, err
 		}

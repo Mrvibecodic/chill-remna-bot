@@ -37,16 +37,33 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 	}
 	if n.Event == "payment.canceled" && n.Object.ID != "" {
 		// Платёж отменён: выдача не нужна, но pending-запись надо снять, иначе
-		// реконсилятор сутки опрашивает мёртвый счёт. Причину пишем в журнал.
-		if a.store != nil {
-			if p, _ := a.store.PendingByExtID(ctx, n.Object.ID); p != nil {
-				_ = a.store.ResolvePending(ctx, p.ID)
-			}
-		}
-		reason := ""
+		// реконсилятор сутки опрашивает мёртвый счёт.
+		//
+		// Снимаем ТОЛЬКО по ответу API, как и выдачу ниже. Этот колбэк ничем
+		// не аутентифицирован (ни подписи, ни секрета в адресе), а номер
+		// платежа виден самому покупателю в ссылке на оплату. Решение по телу
+		// запроса означало бы: кто угодно шлёт «отменено» по своему счёту, тот
+		// уходит из очереди сверки — и настоящая оплата, чей колбэк потерялся,
+		// уже никогда не будет добита. Сверка существует ровно ради этого
+		// случая, гасить её чужим словом нельзя.
+		reason, canceled := "", false
 		if client := a.ykClient(); client != nil {
 			if pay, err := client.GetPayment(ctx, n.Object.ID); err == nil {
 				reason = pay.CancellationDetails.Reason
+				canceled = pay.Status == "canceled"
+			}
+		}
+		if !canceled {
+			// Не подтвердилось (подделка, недоступный API, другой статус) —
+			// счёт остаётся сверке: она сама погасит его по ответу панели или
+			// по сроку. Тихая деградация вместо потери страховки.
+			a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "canceled_unconfirmed",
+				"отмена не подтверждена ответом API — счёт оставлен сверке")
+			return true, nil
+		}
+		if a.store != nil {
+			if p, _ := a.store.PendingByExtID(ctx, n.Object.ID); p != nil {
+				_ = a.store.ResolvePending(ctx, p.ID)
 			}
 		}
 		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "canceled", "платёж отменён (причина: %s)", reason)

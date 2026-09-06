@@ -308,7 +308,7 @@ func TestLegal_MiniCheckoutGate(t *testing.T) {
 	_ = fs.AddBalance(ctx, uid, 100000)
 	a.botCfg.Legal = model.LegalConfig{Terms: model.LegalDoc{Text: "правила"}, GateBuy: true}
 
-	res := a.MiniCheckout(ctx, uid, model.PlanCodeBase, 1, model.PayMethodBalance, false)
+	res := a.MiniCheckout(ctx, uid, model.PlanCodeBase, 1, model.PayMethodBalance, "", false)
 	if res.OK || res.Error == "" {
 		t.Fatalf("покупка с баланса без согласия должна отбиваться: %+v", res)
 	}

@@ -148,7 +148,13 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 	}
 	amount := fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency)
 	if p, _ := a.store.PendingByExtID(ctx, txID); p != nil && p.Purpose == "topup" {
-		_ = a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodPlatega, amount, txID)
+		// Счёт гасится ТОЛЬКО после успешного зачисления. Иначе неудача
+		// зачисления снимала страховку: сверка больше не увидела бы этот счёт,
+		// и деньги, принятые эквайером, не попали бы на баланс никогда.
+		if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodPlatega, amount, txID); err != nil {
+			a.log.Error("platega topup finalize", "err", err, "ext_id", txID)
+			return
+		}
 		_ = a.store.ResolvePending(ctx, p.ID)
 		return
 	}
