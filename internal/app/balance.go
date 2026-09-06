@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -485,11 +484,13 @@ func (a *App) refundBalance(chatID int64, kopecks int64, cause error) {
 		return
 	}
 	ctx := a.bgContext()
+	// Ровно одна попытка, без повторов. Начисление баланса не идемпотентно
+	// (balance = balance + N) и не прикрыто барьером по ключу сделки, а самый
+	// частый способ получить ошибку — потерянный ОТВЕТ на уже применённую
+	// запись. Повтор в этом случае вернул бы деньги дважды, то есть менял бы
+	// потерю на кражу. Неудачу зовём разбирать руками — это и надёжнее, и
+	// честнее.
 	err := a.store.AddBalance(ctx, chatID, kopecks)
-	for i := 0; i < 2 && err != nil; i++ {
-		time.Sleep(200 * time.Millisecond)
-		err = a.store.AddBalance(ctx, chatID, kopecks)
-	}
 	alang := a.lang(a.cfg.AdminID)
 	if err != nil {
 		a.payLog(ctx, "balance", "", chatID, "error", "возврат не прошёл: %d коп. списаны и не возвращены: %v", kopecks, err)
@@ -515,7 +516,30 @@ func panelStateUnknown(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return true
 	}
-	return strings.Contains(err.Error(), "нет связи с панелью")
+	msg := err.Error()
+	// Обрыв на ЧТЕНИИ ответа — тот самый случай, ради которого всё это: PATCH
+	// панель применила, а ответ не доехал. Такая ошибка приходит от декодера
+	// и слова «нет связи с панелью» не содержит.
+	for _, s := range []string{
+		"нет связи с панелью",
+		"unexpected EOF",
+		"connection reset",
+		"broken pipe",
+		"EOF",
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	// Шлюзовые коды: запрос до панели мог дойти и примениться, а ответ
+	// подменил прокси. 5xx самой панели сюда не входит — она отвечает сама,
+	// значит про своё состояние знает.
+	for _, s := range []string{"HTTP 502", "HTTP 503", "HTTP 504"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) payFromBalance(ctx context.Context, chatID int64) {

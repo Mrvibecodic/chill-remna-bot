@@ -386,6 +386,19 @@ func TestPlanLink_BuyGatesAndThrottle(t *testing.T) {
 	if in, _ := fs.PurchaseIntent(ctx, uid); in != nil {
 		t.Fatalf("намерение не должно создаваться и после лимита: %+v", in)
 	}
+
+	// Кривой код тоже отвечает единым отказом, а не витриной. Иначе по нему
+	// читается состояние счётчика: витрина = «счётчик не вырос» = пробный код
+	// существует. Пробуем до лимита и после — ответ обязан быть один и тот же.
+	fresh := uid + 1
+	_ = fs.UpsertUser(ctx, fresh)
+	a.handleCallback(ctx, cb(fresh, "plb:!!:1"))
+	malformedFresh := fm.last()
+	a.handleCallback(ctx, cb(uid, "plb:!!:1"))
+	if malformedFresh != deny1 || fm.last() != deny1 {
+		t.Fatalf("кривой код различает состояние лимита: до=%q после=%q, обычный отказ=%q",
+			malformedFresh, fm.last(), deny1)
+	}
 }
 
 // «Базовый» в режиме «по ссылке»: витрина закрыта, но ссылка продаёт до конца —

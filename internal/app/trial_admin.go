@@ -368,8 +368,11 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 		}
 		if markErr != nil {
 			a.log.Error("триал выдан, но не записан", "tg_id", chatID, "err", markErr)
+			// Фоновый контекст: запрос из мини-аппа мог уже отмениться, а это
+			// единственный сигнал о том, что триал стал бесконечным.
+			bg := a.bgContext()
 			alang := a.lang(a.cfg.AdminID)
-			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.trial_unrecorded", a.userLabelByID(ctx, chatID)))
+			a.notify(bg, a.cfg.AdminID, i18n.T(alang, "admin.trial_unrecorded", a.userLabelByID(bg, chatID)))
 		}
 	}
 	a.invalidateSubCache(chatID)

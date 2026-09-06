@@ -178,6 +178,21 @@ func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	if got != want {
 		t.Fatalf("конец срока: получено %s, ожидалось %s", got, want)
 	}
+
+	// Снимок сохранённой сделки обязан нести стоимость окна: без неё
+	// следующая смена тарифа снова считает цену дня по одной сделке и печатает
+	// дни. Юнит-тесты на формулу этого не ловят — проводку проверяем здесь.
+	u, err := fs.GetUser(ctx, uid)
+	if err != nil || u == nil || u.Snapshot == nil {
+		t.Fatalf("снимок не сохранён: %v %+v", err, u)
+	}
+	// 15 дней старого окна (150₽/30д = 75₽) плюс сделка 990₽.
+	if want := int64(7500 + 99000); u.Snapshot.WindowPaidK != want {
+		t.Fatalf("стоимость окна в снимке: получено %d, ожидалось %d", u.Snapshot.WindowPaidK, want)
+	}
+	if u.Snapshot.BoughtDays <= 30 {
+		t.Fatalf("оплаченное окно в снимке не накопилось: %d", u.Snapshot.BoughtDays)
+	}
 }
 
 // Зачёт считает цену дня по стоимости ВСЕГО окна, а не по цене последней
@@ -265,5 +280,39 @@ func TestSwitchCredit_NoDayPrintingCycle(t *testing.T) {
 	// Честно: 13000₽ по 6000/год = 2.17 года ≈ 790 дней.
 	if total > 830 {
 		t.Fatalf("напечатано дней: %d при честных ~790", total)
+	}
+}
+
+// Стоимость окна НЕ входит в отпечаток условий. Она меняется при каждой
+// покупке, а по расхождению отпечатка рассылается «условия изменились» —
+// без этого исключения одно продление разослало бы уведомление всем.
+func TestPlanSnapshot_WindowPaidNotInFingerprint(t *testing.T) {
+	a := &model.PlanSnapshot{Code: model.PlanCodeBase, Months: 1, Price: "150"}
+	b := *a
+	b.WindowPaidK = 987654
+	if a.Fingerprint() != b.Fingerprint() {
+		t.Fatalf("стоимость окна попала в отпечаток: %q против %q", a.Fingerprint(), b.Fingerprint())
+	}
+}
+
+// Деньги разных валют не складываются. Окно рублёвого тарифа, перенесённое в
+// долларовый, иначе превращало бы рубли в центы — и следующая смена внутри
+// долларов печатала бы дни.
+func TestWindowPaidAfter_NoCrossCurrencyCarry(t *testing.T) {
+	in300 := time.Now().UTC().Add(300 * 24 * time.Hour).Format(time.RFC3339)
+	rub := &model.PlanSnapshot{Code: "a", Months: 12, Price: "6000", Currency: "₽", BoughtDays: 360, WindowPaidK: 600000}
+	usd := &model.PlanSnapshot{Code: "d", Months: 1, Price: "50", Currency: "$"}
+
+	// Перенос запрещён: в окне только цена самой сделки.
+	own, _ := dealValueK(usd)
+	if got := windowPaidAfter(rub, in300, usd); got != own {
+		t.Fatalf("рубли перетекли в долларовое окно: получено %d, ожидалось %d", got, own)
+	}
+	// Внутри одной валюты перенос работает как обычно.
+	usd2 := &model.PlanSnapshot{Code: "d2", Months: 1, Price: "50", Currency: "$"}
+	usdOld := &model.PlanSnapshot{Code: "d", Months: 1, Price: "50", Currency: "$", BoughtDays: 30, WindowPaidK: 5000}
+	in30 := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	if got := windowPaidAfter(usdOld, in30, usd2); got != 10000 {
+		t.Fatalf("перенос внутри валюты: получено %d, ожидалось 10000", got)
 	}
 }

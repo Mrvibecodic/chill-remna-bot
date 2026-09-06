@@ -311,9 +311,15 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
+	// Кривой код — тот же единый отказ, а не витрина. Свои кнопки бот всегда
+	// пишет корректно, так что сюда попадает только подделанный callback; а
+	// расхождение ответа ДО лимита и ПОСЛЕ него давало читать сам счётчик:
+	// пробуем код, потом шлём заведомо кривой — витрина значит «счётчик не
+	// вырос», то есть пробный код существует. Все отказы обязаны быть
+	// неотличимы, иначе лимит остаётся оракулом.
 	if !model.ValidPlanCode(code) {
 		a.planLinkFail(chatID)
-		a.showPlans(ctx, chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
 	p, err := a.planByCode(ctx, code)
@@ -361,8 +367,10 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	code, moStr, _ := strings.Cut(val, ":")
 	mo, err := strconv.Atoi(moStr)
 	if err != nil || mo <= 0 || !model.ValidPlanCode(code) {
+		// См. onPlanView: единый отказ вместо витрины, иначе по нему читается
+		// состояние счётчика, а по нему — существование пробного кода.
 		a.planLinkFail(chatID)
-		a.showPlans(ctx, chatID)
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
 	p, perr := a.planByCode(ctx, code)

@@ -57,7 +57,7 @@ func switchCredit(old *model.PlanSnapshot, subExpireAt string, newSnap *model.Pl
 	}
 	// Сравнивать цены можно только в одной валюте; разные написания рублей —
 	// одна валюта (см. rubCurrency).
-	if !(old.Currency == newSnap.Currency || (rubCurrency(old.Currency) && rubCurrency(newSnap.Currency))) {
+	if !sameCurrency(old, newSnap) {
 		return 0
 	}
 	newPeriod := newSnap.Months * 30
@@ -87,6 +87,20 @@ func switchCredit(old *model.PlanSnapshot, subExpireAt string, newSnap *model.Pl
 		extra = switchCreditCap
 	}
 	return extra
+}
+
+// sameCurrency — сопоставимы ли цены двух снимков. Разные написания рублей —
+// одна валюта (см. rubCurrency).
+//
+// Проверка нужна не только зачёту, но и накоплению стоимости окна: копейки
+// разных валют нельзя складывать в одно число. Без неё окно рублёвого тарифа,
+// перенесённое в долларовый, превращало бы шеститысячные рубли в шесть тысяч
+// центов — и следующая смена внутри долларов печатала бы дни.
+func sameCurrency(a, b *model.PlanSnapshot) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Currency == b.Currency || (rubCurrency(a.Currency) && rubCurrency(b.Currency))
 }
 
 // paidWindowDays — оплаченное окно снимка: накопленные купленные дни, а для
@@ -125,7 +139,7 @@ func windowValueK(s *model.PlanSnapshot) (int64, int) {
 	if dealK <= 0 || oneDeal <= 0 {
 		return 0, 0
 	}
-	return int64(float64(dealK) * float64(window) / float64(oneDeal)), window
+	return int64(math.Round(float64(dealK) * float64(window) / float64(oneDeal))), window
 }
 
 // dealValueK — цена одной сделки снимка в копейках и её длительность в днях.
@@ -160,7 +174,7 @@ func dealValueK(s *model.PlanSnapshot) (int64, int) {
 func windowPaidAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model.PlanSnapshot) int64 {
 	paidNow, _ := dealValueK(newSnap)
 	var carried int64
-	if old != nil && newSnap != nil {
+	if old != nil && newSnap != nil && sameCurrency(old, newSnap) {
 		if exp, err := time.Parse(time.RFC3339, subExpireAt); err == nil {
 			if remaining := time.Until(exp).Hours() / 24; remaining > 0 {
 				if valK, window := windowValueK(old); valK > 0 && window > 0 {
