@@ -3,6 +3,7 @@ package web
 import (
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -70,7 +71,60 @@ func peerAddr(r *http.Request) string {
 // прямой клиент подставит в них что угодно.
 func fromTrustedProxy(r *http.Request) bool {
 	p := net.ParseIP(peerAddr(r))
-	return p != nil && (p.IsLoopback() || p.IsPrivate())
+	if p == nil {
+		return false
+	}
+	if p.IsLoopback() || p.IsPrivate() {
+		return true
+	}
+	// Прокси может стоять и на другой машине с публичным адресом (отдельный
+	// сервер, туннель). Такой адрес по умолчанию НЕ доверенный — иначе
+	// заголовки подделает кто угодно, — но владелец установки может назвать
+	// его сам переменной TRUSTED_PROXIES.
+	for _, n := range trustedProxyNets() {
+		if n.Contains(p) {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	trustedProxyOnce sync.Once
+	trustedProxyList []*net.IPNet
+)
+
+// trustedProxyNets — сети из TRUSTED_PROXIES: список адресов или CIDR через
+// запятую («203.0.113.9, 2001:db8::/32»). Разбирается один раз.
+// resetTrustedProxies сбрасывает разбор — нужен тестам, которые подменяют
+// переменную окружения.
+func resetTrustedProxies() {
+	trustedProxyOnce = sync.Once{}
+	trustedProxyList = nil
+}
+
+func trustedProxyNets() []*net.IPNet {
+	trustedProxyOnce.Do(func() {
+		for _, part := range strings.Split(os.Getenv("TRUSTED_PROXIES"), ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if _, n, err := net.ParseCIDR(part); err == nil {
+				trustedProxyList = append(trustedProxyList, n)
+				continue
+			}
+			if ip := net.ParseIP(part); ip != nil {
+				bits := 32
+				if ip.To4() == nil {
+					bits = 128
+				}
+				trustedProxyList = append(trustedProxyList,
+					&net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			}
+		}
+	})
+	return trustedProxyList
 }
 
 func clientIP(r *http.Request) string {

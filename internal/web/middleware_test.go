@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -135,4 +136,37 @@ func TestWrap_RateLimits(t *testing.T) {
 			t.Fatal("вебхук платёжки попал под лимит — провайдер уйдёт в суточные повторы")
 		}
 	}
+}
+
+// Прокси на другой машине (публичный адрес) по умолчанию не доверенный —
+// иначе заголовки подделает кто угодно. Но владелец установки может назвать
+// его сам, иначе кабинет уходит в цикл редиректов, а все посетители
+// сваливаются в одну корзину ограничителя.
+func TestTrustedProxiesFromEnv(t *testing.T) {
+	req := func(peer string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/api/cabinet/me", nil)
+		r.RemoteAddr = net.JoinHostPort(peer, "40000")
+		r.Header.Set("X-Forwarded-Proto", "https")
+		return r
+	}
+	resetTrustedProxies()
+	if isSecure(req("203.0.113.9")) {
+		t.Fatal("чужому публичному адресу поверили без настройки")
+	}
+	if !isSecure(req("172.18.0.5")) {
+		t.Fatal("прокси в docker-сети должен быть доверенным")
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "203.0.113.9, 2001:db8::/32")
+	resetTrustedProxies()
+	if !isSecure(req("203.0.113.9")) {
+		t.Fatal("названный в TRUSTED_PROXIES адрес не доверен")
+	}
+	if !isSecure(req("2001:db8::7")) {
+		t.Fatal("сеть из TRUSTED_PROXIES не доверена")
+	}
+	if isSecure(req("203.0.113.10")) {
+		t.Fatal("доверие расползлось на соседний адрес")
+	}
+	resetTrustedProxies()
 }
