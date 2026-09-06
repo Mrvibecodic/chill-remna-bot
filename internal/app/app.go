@@ -262,6 +262,8 @@ type App struct {
 	moneyCtx    context.Context
 	moneyCancel context.CancelFunc
 	moneyWG     sync.WaitGroup
+	// draining — Drain уже ждёт: новые задачи в очередь ожидания не ставятся.
+	draining bool
 
 	// runInline выполняет фоновые задачи синхронно — нужно тестам, чтобы
 	// проверять результат сразу после вызова обработчика.
@@ -561,9 +563,21 @@ func (a *App) moneyContext() context.Context {
 // доиграть (см. Drain).
 func (a *App) trackMoney(name string, f func(context.Context)) {
 	ctx := a.moneyContext()
-	a.moneyWG.Add(1)
+	// Счётчик нельзя увеличивать одновременно с ожиданием: обработчик может
+	// дожить до остановки и запустить задачу ровно тогда, когда Drain уже
+	// ждёт, а это ломает WaitGroup вплоть до паники. Начали останавливаться —
+	// задачу запускаем, но в очередь ожидания не ставим: ждать её всё равно
+	// уже некому.
+	a.mu.Lock()
+	counted := !a.draining
+	if counted {
+		a.moneyWG.Add(1)
+	}
+	a.mu.Unlock()
 	go func() {
-		defer a.moneyWG.Done()
+		if counted {
+			defer a.moneyWG.Done()
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				a.log.Error("паника в фоновой задаче", "task", name, "panic", r, "stack", string(debug.Stack()))
@@ -577,6 +591,9 @@ func (a *App) trackMoney(name string, f func(context.Context)) {
 // ли она. По истечении бюджета контекст отменяется: держать процесс дольше
 // бессмысленно — docker всё равно убьёт контейнер.
 func (a *App) Drain(d time.Duration) bool {
+	a.mu.Lock()
+	a.draining = true
+	a.mu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		a.moneyWG.Wait()

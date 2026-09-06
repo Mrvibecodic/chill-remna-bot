@@ -48,7 +48,10 @@ func normalizeListenAddr(in string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return host + ":" + strconv.Itoa(port), true
+	// JoinHostPort, а не склейка: IPv6-адрес обязан остаться в скобках.
+	// Голая склейка давала «:::8080» из «[::]:8080», и веб-сервер не
+	// поднимался вовсе — «too many colons in address».
+	return net.JoinHostPort(host, strconv.Itoa(port)), true
 }
 
 // splitListenAddr разбирает «18080», «:18080», «0.0.0.0:18080».

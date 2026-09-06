@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,6 +242,11 @@ func TestListenAddr_Validation(t *testing.T) {
 		{"70000", "", false},
 		{"", "", false},
 		{"8080 ", ":8080", true},
+		// IPv6: скобки обязаны сохраниться, иначе net.Listen отвечает
+		// «too many colons in address» и веб-сервер не поднимается.
+		{"[::]:8080", "[::]:8080", true},
+		{"[::1]:18080", "[::1]:18080", true},
+		{"localhost:8080", "localhost:8080", true},
 	}
 	for _, c := range cases {
 		got, ok := normalizeListenAddr(c.in)
@@ -514,4 +520,60 @@ func TestReconcile_DeletedUserIsNotResurrected(t *testing.T) {
 	if p := fs.pending[5]; p == nil || !p.Resolved {
 		t.Fatal("счёт остался незакрытым — сверка будет крутить его сутки")
 	}
+}
+
+// Незавершённое ожидание ввода из другого раздела не должно гасить мастер
+// переустановки: админ мог нажать «изменить цену», передумать и уйти в
+// переустановку — первый же текст в мастере погасил бы его на середине.
+func TestReconfigure_StaleAdminInputDoesNotKillWizard(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	a.store = fs
+	a.mu.Lock()
+	if a.wiz == nil {
+		a.wiz = map[int64]*wizard{}
+	}
+	a.botCfg.Installed = true
+	a.mu.Unlock()
+
+	// Админ нажал «изменить значение» в другом разделе и не ответил.
+	a.getUI(planAdmin).adminInput = "currency"
+
+	a.handleMessage(ctx, msgText(planAdmin, "/setup"))
+	if got := a.getUI(planAdmin).adminInput; got != "" {
+		t.Fatalf("брошенное ожидание не снято: %q", got)
+	}
+
+	// Теперь текст в мастере остаётся в мастере.
+	a.handleMessage(ctx, msgText(planAdmin, "что-то"))
+	a.mu.Lock()
+	alive := a.wiz[planAdmin] != nil
+	a.mu.Unlock()
+	if !alive {
+		t.Fatal("мастер погашен текстом, адресованным ему самому")
+	}
+}
+
+// Обработчик может дожить до остановки и запустить денежную задачу ровно
+// тогда, когда её уже ждут. Увеличение счётчика рядом с ожиданием ломает
+// WaitGroup вплоть до паники.
+func TestDrain_TaskStartedWhileDraining(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	release := make(chan struct{})
+	a.trackMoney("держит", func(ctx context.Context) { <-release })
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.trackMoney("поздняя", func(ctx context.Context) {})
+		}()
+	}
+	go func() { time.Sleep(20 * time.Millisecond); close(release) }()
+	if a.Drain(2*time.Second) == false && len(release) == 0 {
+		// Не успели — это допустимо; паники быть не должно, её проверяет сам факт возврата.
+		t.Log("дренаж не уложился в бюджет")
+	}
+	wg.Wait()
 }

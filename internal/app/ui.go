@@ -481,6 +481,11 @@ func (a *App) startReconfigure(ctx context.Context, chatID int64) {
 	w := &wizard{step: stepDB, cfg: base, reconfig: true}
 	a.wiz[chatID] = w
 	a.mu.Unlock()
+	// Незавершённое ожидание ввода из другого раздела снимаем: админ ушёл
+	// сюда, значит тот ввод брошен. Иначе первый же текст в мастере будет
+	// принят за ответ тому разделу — мастер погаснет на середине, а текст
+	// уедет не туда.
+	a.getUI(chatID).adminInput = ""
 	a.gotoDB(ctx, chatID, w)
 }
 
