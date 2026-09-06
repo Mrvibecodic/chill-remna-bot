@@ -66,7 +66,7 @@ func main() {
 	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
-	wg.Add(9)
+	wg.Add(10)
 	var botErr, webErr error
 
 	go func() {
@@ -122,6 +122,10 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunTrialReset(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.RunBonusTrafficSweep(ctx)
 	}()
 	wg.Wait()
 	// Даём доиграть недоделанному: выдаче по звёздам, возврату на баланс.

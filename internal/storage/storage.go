@@ -152,6 +152,8 @@ type Storage interface {
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
 	ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error)
 	ListTrialResetTargets(ctx context.Context, maxResets, limit int) ([]TrialResetTarget, error)
+	SetTrafficBonus(ctx context.Context, telegramID int64, b *model.TrafficBonus) error
+	ListTrafficBonuses(ctx context.Context, limit int) ([]TrafficBonusTarget, error)
 	ResetTrialForRepeat(ctx context.Context, telegramID int64, expectExpire string) (bool, error)
 	TrialResets(ctx context.Context, telegramID int64) (int, error)
 	SetPaymentSnapshot(ctx context.Context, id int64, snap *model.PlanSnapshot) error
@@ -351,18 +353,18 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	var refBonusPaid, whitelisted int
 	var refEarned int64
 	var webApproved, webDenied int
-	var snapRaw string
+	var snapRaw, bonusRaw string
 	var trialResets int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets, &bonusRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets, TrafficBonus: model.DecodeTrafficBonus(bonusRaw)}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -1049,6 +1051,51 @@ func (b *base) trialUsedEmpty() string {
 	return "''"
 }
 
+// TrafficBonusTarget — человек с накинутым разовым подарком трафика.
+type TrafficBonusTarget struct {
+	TelegramID int64
+	Bonus      *model.TrafficBonus
+}
+
+// SetTrafficBonus запоминает (или снимает, если b пустой) разовый подарок.
+func (b *base) SetTrafficBonus(ctx context.Context, telegramID int64, bonus *model.TrafficBonus) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET traffic_bonus = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
+		bonus.Encode(), telegramID)
+	return err
+}
+
+// ListTrafficBonuses отдаёт тех, у кого подарок ещё накинут.
+//
+// Порядок случайный и отсечка в SQL — по той же причине, что и у возврата
+// триала: подарок при стратегии NO_RESET живёт до конца подписки, такие люди
+// остаются в выборке надолго, и при стабильном порядке первые же двести
+// закрывали бы собой всех остальных.
+func (b *base) ListTrafficBonuses(ctx context.Context, limit int) ([]TrafficBonusTarget, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, traffic_bonus FROM users WHERE traffic_bonus <> '' "+
+			"ORDER BY random() LIMIT "+b.ph(1), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrafficBonusTarget
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return nil, err
+		}
+		if bonus := model.DecodeTrafficBonus(raw); bonus != nil {
+			out = append(out, TrafficBonusTarget{TelegramID: id, Bonus: bonus})
+		}
+	}
+	return out, rows.Err()
+}
+
 // TrialResetTarget — кандидат на повторную выдачу пробного периода.
 type TrialResetTarget struct {
 	TelegramID  int64
@@ -1271,7 +1318,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 
 	urows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets FROM users")
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -1281,8 +1328,8 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		var refEarned int64
 		var webApproved, webDenied int
 		var terms, trial sql.NullString
-		var snapRaw string
-		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets); err != nil {
+		var snapRaw, bonusRaw string
+		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets, &bonusRaw); err != nil {
 			_ = urows.Close()
 			return nil, err
 		}
@@ -1296,6 +1343,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		u.TermsAcceptedAt = terms.String
 		u.TrialUsedAt = trial.String
 		u.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		u.TrafficBonus = model.DecodeTrafficBonus(bonusRaw)
 		snap.Users = append(snap.Users, u)
 	}
 	if err := urows.Err(); err != nil {
@@ -1641,6 +1689,11 @@ func (b *base) importUser(ctx context.Context, u *model.User) error {
 	}
 	if u.TrialUsedAt != "" {
 		if err := b.SetTrialUsed(ctx, u.TelegramID, u.TrialUsedAt); err != nil {
+			return err
+		}
+	}
+	if u.TrafficBonus != nil {
+		if err := b.SetTrafficBonus(ctx, u.TelegramID, u.TrafficBonus); err != nil {
 			return err
 		}
 	}

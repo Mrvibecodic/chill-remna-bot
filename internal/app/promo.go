@@ -12,6 +12,7 @@ import (
 	"remnabot/internal/assets"
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func (a *App) showPromoUser(ctx context.Context, chatID int64) {
@@ -73,8 +74,9 @@ func (a *App) redeemPromo(ctx context.Context, chatID int64, raw string) (string
 		return i18n.T(lang, "promo.exhausted"), false
 	}
 	switch p.Kind {
-	case model.PromoKindTraffic:
-		ok, reason := a.addBonusTraffic(ctx, chatID, p.Value)
+	case model.PromoKindTraffic, model.PromoKindTrafficPeriod:
+		oneTime := p.Kind == model.PromoKindTraffic
+		ok, reason := a.addBonusTraffic(ctx, chatID, p.Value, oneTime)
 		if !ok {
 			a.releasePromo(code, chatID)
 			switch reason {
@@ -85,7 +87,10 @@ func (a *App) redeemPromo(ctx context.Context, chatID int64, raw string) (string
 			}
 			return i18n.T(lang, "promo.grant_fail"), false
 		}
-		return i18n.T(lang, "promo.ok_traffic", p.Value), true
+		if oneTime {
+			return i18n.T(lang, "promo.ok_traffic", p.Value), true
+		}
+		return i18n.T(lang, "promo.ok_traffic_period", p.Value), true
 	case model.PromoKindDays:
 		ok, found := a.addReferralDays(ctx, chatID, p.Value)
 		if !ok {
@@ -120,6 +125,8 @@ func (a *App) showPromoAdmin(ctx context.Context, chatID int64) {
 			kind = i18n.T(lang, "promoadm.kind_days")
 		case model.PromoKindTraffic:
 			kind = i18n.T(lang, "promoadm.kind_traffic")
+		case model.PromoKindTrafficPeriod:
+			kind = i18n.T(lang, "promoadm.kind_traffic_period")
 		}
 		limit := "∞"
 		if p.MaxUses > 0 {
@@ -163,7 +170,8 @@ func (a *App) createPromoFromText(ctx context.Context, chatID int64, text string
 		return
 	}
 	kind := strings.ToLower(f[1])
-	if kind != model.PromoKindBalance && kind != model.PromoKindDays && kind != model.PromoKindTraffic {
+	if kind != model.PromoKindBalance && kind != model.PromoKindDays &&
+		kind != model.PromoKindTraffic && kind != model.PromoKindTrafficPeriod {
 		a.sendHome(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
 		return
 	}
@@ -174,7 +182,7 @@ func (a *App) createPromoFromText(ctx context.Context, chatID int64, text string
 	}
 	// Гигабайты уезжают в панель байтами: без верхней границы опечатка в
 	// значении переполняет int64 и превращает подарок в отрицательный потолок.
-	if kind == model.PromoKindTraffic && value > maxPromoTrafficGB {
+	if isTrafficKind(kind) && value > maxPromoTrafficGB {
 		a.sendHome(ctx, chatID, i18n.T(lang, "promoadm.bad_format"))
 		return
 	}
@@ -228,7 +236,7 @@ const bytesPerGB = int64(1024 * 1024 * 1024)
 // Срок, сквады и лимит устройств не трогаются — ровно как у бонусных дней:
 // подарок обязан быть подарком, а не переприменкой чужих условий. Бонус живёт
 // до следующей оплаты: покупка перезаписывает потолок трафиком тарифа.
-func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int) (bool, string) {
+func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime bool) (bool, string) {
 	if gb <= 0 || gb > maxPromoTrafficGB {
 		return false, ""
 	}
@@ -266,10 +274,18 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int) (bool, st
 	if pu.TrafficLimit <= 0 {
 		return false, promoNoLimit
 	}
-	want := pu.TrafficLimit + int64(gb)*bytesPerGB
-	if want < pu.TrafficLimit {
+	add := int64(gb) * bytesPerGB
+	// База — потолок без прежнего подарка, если тот уже отработал: иначе
+	// отработавшая прибавка молча становилась бы постоянной, а следующая
+	// запись про неё уже не помнила.
+	base, carry := a.trafficBonusBase(ctx, tgID, pu)
+	want := base + add
+	if want < base {
 		return false, ""
 	}
+	// Запись о разовом подарке готовится ДО похода в панель: она же нужна и в
+	// ветке потерянного ответа, где патч мог примениться.
+	bonus := nextTrafficBonus(pu, add, carry, want, oneTime)
 	if err := panel.SetTrafficLimit(ctx, pu.Ref, want); err != nil {
 		// Ошибка не означает, что панель НЕ применила патч: оборванный ответ,
 		// таймаут запроса и 502 от прокси выглядят одинаково. Отдать код
@@ -278,12 +294,14 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int) (bool, st
 		// моменту чаще всего и кончился.
 		if a.bonusTrafficApplied(tgID, want) {
 			a.log.Warn("бонусный трафик: ответ панели потерян, потолок применён", "tg_id", tgID, "err", err)
+			a.saveTrafficBonus(tgID, bonus)
 			a.invalidateSubCache(tgID)
 			return true, ""
 		}
 		a.log.Warn("бонусный трафик: начисление", "tg_id", tgID, "err", err)
 		return false, ""
 	}
+	a.saveTrafficBonus(tgID, bonus)
 	a.invalidateSubCache(tgID)
 	return true, ""
 }
@@ -302,4 +320,76 @@ func (a *App) bonusTrafficApplied(tgID int64, want int64) bool {
 		return false
 	}
 	return pu.TrafficLimit >= want
+}
+
+func isTrafficKind(kind string) bool {
+	return kind == model.PromoKindTraffic || kind == model.PromoKindTrafficPeriod
+}
+
+// trafficBonusBase — от какого потолка считать новую прибавку и сколько
+// подарочных байтов переносится в новую запись.
+//
+// Прежний подарок бывает трёх видов. Учётку переписали (покупка, рука админа)
+// — подарка в потолке нет, база это текущий потолок, переносить нечего.
+// Подарок жив, период тот же — прибавки складываются. Период сменился, а
+// потолок наш — подарок отработал: вычитаем его прямо сейчас, иначе он так и
+// останется в потолке навсегда.
+func (a *App) trafficBonusBase(ctx context.Context, tgID int64, pu *remnawave.PanelUser) (int64, int64) {
+	prev := a.storedTrafficBonus(ctx, tgID)
+	if prev == nil || !prev.SameAccount(pu.TrafficLimit, pu.ExpireAt) {
+		return pu.TrafficLimit, 0
+	}
+	if prev.Spent(pu.TrafficResetAt) {
+		base := pu.TrafficLimit - prev.Bytes
+		if base <= 0 {
+			return pu.TrafficLimit, 0
+		}
+		return base, 0
+	}
+	return pu.TrafficLimit, prev.Bytes
+}
+
+func (a *App) storedTrafficBonus(ctx context.Context, tgID int64) *model.TrafficBonus {
+	if a.store == nil {
+		return nil
+	}
+	u, err := a.store.GetUser(ctx, tgID)
+	if err != nil || u == nil {
+		return nil
+	}
+	return u.TrafficBonus
+}
+
+// nextTrafficBonus — что записать о подарке после этой выдачи.
+//
+// Постоянная прибавка своей записи не заводит, но потолок она меняет — и
+// прежняя запись о разовом подарке обязана узнать про новый потолок, иначе
+// проход решит, что подарка в панели больше нет, и тихо его забудет.
+func nextTrafficBonus(pu *remnawave.PanelUser, add, carry, want int64, oneTime bool) *model.TrafficBonus {
+	bytes := carry
+	if oneTime {
+		bytes += add
+	}
+	if bytes <= 0 {
+		return nil
+	}
+	return &model.TrafficBonus{
+		Bytes:   bytes,
+		Limit:   want,
+		Expire:  pu.ExpireAt,
+		ResetAt: pu.TrafficResetAt,
+	}
+}
+
+// saveTrafficBonus пишет запись о подарке. Контекст фоновый: выдача уже
+// состоялась в панели, и дедлайн запроса тут ни при чём. Незаписанный подарок
+// останется у человека навсегда — это подарок сверх обещанного, а не потеря,
+// поэтому падать некуда, но в журнал сказать надо.
+func (a *App) saveTrafficBonus(tgID int64, bonus *model.TrafficBonus) {
+	if a.store == nil {
+		return
+	}
+	if err := a.store.SetTrafficBonus(a.bgContext(), tgID, bonus); err != nil {
+		a.log.Error("подарочный трафик не записан — останется постоянным", "tg_id", tgID, "err", err)
+	}
 }

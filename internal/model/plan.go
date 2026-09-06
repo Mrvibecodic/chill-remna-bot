@@ -143,3 +143,62 @@ func DecodePlanSnapshot(raw string) *PlanSnapshot {
 	}
 	return &s
 }
+
+// TrafficBonus — разовый подарочный трафик (промокод вида traffic).
+//
+// Панель умеет только потолок НА ПЕРИОД: при стратегии MONTH/WEEK/DAY поднятый
+// потолок щедро повторяется каждый период. Чтобы подарок остался разовым, бот
+// помнит, что именно он накинул и в каком состоянии была учётка, и забирает
+// прибавку, когда панель сменит период.
+//
+// Три поля-приметы нужны вместе. Забирать прибавку можно ТОЛЬКО если учётка
+// осталась ровно той же, какой её оставил бот: иначе потолок успела
+// переписать покупка (у неё свой лимит тарифа) или рука админа, и вычитание
+// отняло бы у человека оплаченное. Любое расхождение — повод запись просто
+// закрыть: подарок сверх обещанного дешевле, чем отобранный трафик.
+type TrafficBonus struct {
+	// Bytes — сколько накинуто сверх того, что было.
+	Bytes int64 `json:"bytes"`
+	// Limit — потолок, который бот записал, выдавая подарок.
+	Limit int64 `json:"limit"`
+	// Expire — срок подписки на тот момент. Покупка и продление его меняют.
+	Expire string `json:"expire,omitempty"`
+	// ResetAt — отметка последнего обнуления периода (lastTrafficResetAt).
+	// Её смена и есть «период кончился, подарок отработал». Сам счётчик
+	// израсходованного для этого не годится: сразу после покупки он равен
+	// нулю, и «упал ниже записанного» не наступает никогда.
+	ResetAt string `json:"reset_at,omitempty"`
+}
+
+// SameAccount — учётка в панели в том же состоянии, в каком её оставил бот
+// (не считая отметки о сбросе периода, которая как раз и обязана меняться).
+func (b *TrafficBonus) SameAccount(limit int64, expire string) bool {
+	return b != nil && b.Limit == limit && b.Expire == expire
+}
+
+// Spent — период сменился: подарок отработал.
+func (b *TrafficBonus) Spent(resetAt string) bool {
+	return b != nil && b.ResetAt != resetAt
+}
+
+func (b *TrafficBonus) Encode() string {
+	if b == nil || b.Bytes <= 0 {
+		return ""
+	}
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func DecodeTrafficBonus(raw string) *TrafficBonus {
+	if raw == "" {
+		return nil
+	}
+	var b TrafficBonus
+	if err := json.Unmarshal([]byte(raw), &b); err != nil || b.Bytes <= 0 {
+		return nil
+	}
+	return &b
+}

@@ -489,9 +489,18 @@ type panelUser struct {
 	// Used traffic moved into the nested userTraffic object in the panel
 	// contract; the flat field is still read as a fallback for older payloads.
 	UsedTrafficBytes int64 `json:"usedTrafficBytes"`
-	UserTraffic      struct {
-		UsedTrafficBytes int64 `json:"usedTrafficBytes"`
+	// LifetimeUsedTrafficBytes — счётчик, который панель НЕ обнуляет на
+	// границе периода. Плоское поле — фолбэк для старых полезных нагрузок,
+	// как и у usedTrafficBytes.
+	LifetimeUsedTrafficBytes int64 `json:"lifetimeUsedTrafficBytes"`
+	UserTraffic              struct {
+		UsedTrafficBytes         int64 `json:"usedTrafficBytes"`
+		LifetimeUsedTrafficBytes int64 `json:"lifetimeUsedTrafficBytes"`
 	} `json:"userTraffic"`
+	// LastTrafficResetAt — момент, когда панель в последний раз обнулила
+	// счётчик периода. Единственный ТОЧНЫЙ признак того, что период
+	// сменился: сравнивать сам счётчик бесполезно, он и так бывает нулём.
+	LastTrafficResetAt string `json:"lastTrafficResetAt"`
 }
 
 // ref is how this user is addressed by this panel: uuid before 3.0.0, numeric
@@ -515,6 +524,17 @@ func (u *panelUser) usedBytes() int64 {
 	return u.UsedTrafficBytes
 }
 
+// lifetimeBytes — израсходованное за всё время, без обнулений по периодам.
+func (u *panelUser) lifetimeBytes() int64 {
+	if u == nil {
+		return 0
+	}
+	if u.UserTraffic.LifetimeUsedTrafficBytes > 0 {
+		return u.UserTraffic.LifetimeUsedTrafficBytes
+	}
+	return u.LifetimeUsedTrafficBytes
+}
+
 type PanelUser struct {
 	UUID            string
 	Username        string
@@ -527,6 +547,11 @@ type PanelUser struct {
 	Status          string
 	TrafficLimit    int64
 	TrafficUsed     int64
+	// TrafficLifetime — израсходованное за всё время: панель не обнуляет его
+	// на границе периода, в отличие от TrafficUsed.
+	TrafficLifetime int64
+	// TrafficResetAt — когда панель в последний раз обнулила счётчик периода.
+	TrafficResetAt string
 	// ShortUUID identifies the user's subscription page.
 	ShortUUID string
 	// ID is the numeric identifier (panel 3.0.0+); UUID is the pre-3.0.0 one.
@@ -554,6 +579,8 @@ func toPanelUser(u *panelUser) *PanelUser {
 		Status:          u.Status,
 		TrafficLimit:    u.TrafficLimitBytes,
 		TrafficUsed:     u.usedBytes(),
+		TrafficLifetime: u.lifetimeBytes(),
+		TrafficResetAt:  u.LastTrafficResetAt,
 	}
 }
 

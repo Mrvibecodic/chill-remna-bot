@@ -161,3 +161,64 @@ func TestTrialResetTargets(t *testing.T) {
 		}
 	})
 }
+
+// Подарочный трафик обязан переживать выгрузку: смена движка БД идёт через
+// Export/Import, и потерянная запись делает разовый подарок постоянным.
+func TestTrafficBonusRoundTrip(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		if err := st.UpsertUser(ctx, 9200); err != nil {
+			t.Fatal(err)
+		}
+		want := &model.TrafficBonus{Bytes: 25 << 30, Limit: 75 << 30, Expire: "2099-01-01T00:00:00Z", ResetAt: "2026-09-01T00:00:00Z"}
+		if err := st.SetTrafficBonus(ctx, 9200, want); err != nil {
+			t.Fatal(err)
+		}
+		u, err := st.GetUser(ctx, 9200)
+		if err != nil || u.TrafficBonus == nil || *u.TrafficBonus != *want {
+			t.Fatalf("запись не прочиталась: %+v %v", u.TrafficBonus, err)
+		}
+		list, err := st.ListTrafficBonuses(ctx, 10)
+		if err != nil || len(list) != 1 || list[0].TelegramID != 9200 {
+			t.Fatalf("выборка подарков: %+v %v", list, err)
+		}
+
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *model.TrafficBonus
+		for i := range snap.Users {
+			if snap.Users[i].TelegramID == 9200 {
+				found = snap.Users[i].TrafficBonus
+			}
+		}
+		if found == nil || *found != *want {
+			t.Fatalf("подарок не попал в выгрузку: %+v", found)
+		}
+
+		// И переживает загрузку: смена движка БД идёт именно через Import, и
+		// потерянная там запись делает разовый подарок постоянным.
+		if err := st.SetTrafficBonus(ctx, 9200, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Import(ctx, snap); err != nil {
+			t.Fatal(err)
+		}
+		back, err := st.GetUser(ctx, 9200)
+		if err != nil || back.TrafficBonus == nil || *back.TrafficBonus != *want {
+			t.Fatalf("подарок не пережил загрузку: %+v %v", back.TrafficBonus, err)
+		}
+
+		// Снятие записи.
+		if err := st.SetTrafficBonus(ctx, 9200, nil); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, 9200); u.TrafficBonus != nil {
+			t.Fatalf("запись не снялась: %+v", u.TrafficBonus)
+		}
+		if list, _ := st.ListTrafficBonuses(ctx, 10); len(list) != 0 {
+			t.Fatalf("снятая запись осталась в выборке: %+v", list)
+		}
+	})
+}

@@ -30,7 +30,9 @@ func trialPanel(t *testing.T, limit, used int64, expireAt string, resets *int) *
 				"uuid": "u1", "tag": "CHILLBOT", "username": "tg_555",
 				"subscriptionUrl": "https://sub/x", "expireAt": expireAt,
 				"trafficLimitBytes": limit, "usedTrafficBytes": used,
-				"trafficLimitStrategy": "NO_RESET",
+				"userTraffic": map[string]any{
+					"usedTrafficBytes": used, "lifetimeUsedTrafficBytes": used,
+				},
 			}}})
 		default:
 			_, _ = w.Write([]byte(`{"response":{"uuid":"u1","subscriptionUrl":"https://sub/x","expireAt":"2099-01-01T00:00:00Z"}}`))
@@ -222,14 +224,14 @@ func TestTrialReset_DisabledInPanelSkipped(t *testing.T) {
 	}
 }
 
-// Счётчик израсходованного в панели периодный: после границы периода «ноль
-// потрачено» больше ничего не значит, и такого кандидата трогать нельзя.
-func TestTrialReset_StaleCounterNotTrusted(t *testing.T) {
+// Порог считается по ПОЖИЗНЕННОМУ счётчику: обычный панель обнуляет на
+// границе периода, и выкачавший весь триал выглядел бы как нетронувший.
+func TestTrialReset_CountsLifetimeTraffic(t *testing.T) {
 	long := time.Now().UTC().Add(-45 * 24 * time.Hour).Format(time.RFC3339)
 	resets := 0
-	// Стратегия MONTH: панель обнуляет счётчик каждый месяц, а подписка
-	// кончилась 45 дней назад — «ноль потрачено» уже ничего не доказывает.
-	srv := strategyPanel(t, long, "MONTH", &resets)
+	// Период уже обнулён (usedTrafficBytes = 0), но за всё время выкачано
+	// больше половины триала.
+	srv := lifetimePanel(t, long, 0, trialGB/2, &resets)
 	a, fs := snapApp(t, srv.URL)
 	a.botCfg.Trial = model.TrialConfig{Enabled: true, Days: 3, TrafficGB: 10,
 		ResetUnused: true, ResetUnusedPct: 5, ResetUnusedMax: 1}
@@ -237,45 +239,73 @@ func TestTrialReset_StaleCounterNotTrusted(t *testing.T) {
 	seedTrialUser(t, fs, long)
 
 	if n := a.resetTrialsOnce(ctx); n != 0 {
-		t.Fatalf("поверили счётчику за границей периода сброса: %d", n)
+		t.Fatalf("поверили обнулённому счётчику периода: %d", n)
 	}
 	if resets != 0 {
 		t.Fatalf("трафик обнулили зря: %d", resets)
 	}
-	// Тот же кандидат при NO_RESET возвращается: дело именно в стратегии.
+	// Контроль: тот же кандидат с нетронутым пожизненным счётчиком.
 	r2 := 0
-	srv2 := strategyPanel(t, long, "NO_RESET", &r2)
+	srv2 := lifetimePanel(t, long, 0, 0, &r2)
 	a2, fs2 := snapApp(t, srv2.URL)
 	a2.botCfg.Trial = a.botCfg.Trial
 	seedTrialUser(t, fs2, long)
 	if n := a2.resetTrialsOnce(ctx); n != 1 {
-		t.Fatalf("контроль: при NO_RESET возврат обязан сработать, got %d", n)
+		t.Fatalf("контроль: нетронутый триал обязан вернуться, got %d", n)
 	}
 }
 
-func TestTrafficWindow(t *testing.T) {
-	if trafficWindow("NO_RESET") != 0 {
-		t.Fatal("при NO_RESET счётчику можно верить всегда")
+// Подарочный трафик не смягчает порог: он раздувает потолок в панели, а
+// считать надо от лимита из настроек триала.
+func TestTrialReset_BonusDoesNotLoosenThreshold(t *testing.T) {
+	long := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
+	resets := 0
+	// Потолок раздут подарком до 100 ГБ, лимит триала — 10 ГБ, порог 10%.
+	// Выкачано 2 ГБ: это 20% триала и всего 2% раздутого потолка.
+	srv := lifetimePanelLimit(t, long, 10*trialGB, 0, trialGB/5, &resets)
+	a, fs := snapApp(t, srv.URL)
+	a.botCfg.Trial = model.TrialConfig{Enabled: true, Days: 3, TrafficGB: 10,
+		ResetUnused: true, ResetUnusedPct: 10, ResetUnusedMax: 1}
+	ctx := context.Background()
+	seedTrialUser(t, fs, long)
+
+	if n := a.resetTrialsOnce(ctx); n != 0 {
+		t.Fatalf("порог смягчился подарочным трафиком: %d", n)
 	}
-	if trafficWindow("DAY") != 24*time.Hour {
-		t.Fatal("окно для DAY")
-	}
-	if trafficWindow("") != 31*24*time.Hour {
-		t.Fatal("пустая стратегия — умолчание панели, берём месяц")
-	}
+}
+
+// lifetimePanel — учётка с раздельными счётчиками периода и «за всё время».
+func lifetimePanel(t *testing.T, expireAt string, used, lifetime int64, resets *int) *httptest.Server {
+	return lifetimePanelLimit(t, expireAt, trialGB, used, lifetime, resets)
+}
+
+func lifetimePanelLimit(t *testing.T, expireAt string, limit, used, lifetime int64, resets *int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/actions/reset-traffic") {
+			*resets++
+			_, _ = w.Write([]byte(`{"response":{"uuid":"u1"}}`))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"response": []map[string]any{{
+				"uuid": "u1", "tag": "CHILLBOT", "username": "tg_555",
+				"expireAt": expireAt, "trafficLimitBytes": limit,
+				"userTraffic": map[string]any{
+					"usedTrafficBytes": used, "lifetimeUsedTrafficBytes": lifetime,
+				},
+			}}})
+			return
+		}
+		_, _ = w.Write([]byte(`{"response":{"uuid":"u1"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // statusPanel — учётка с заданным статусом и нетронутым трафиком.
 func statusPanel(t *testing.T, expireAt, status string, resets *int) *httptest.Server {
-	return panelWith(t, expireAt, status, "NO_RESET", resets)
-}
-
-// strategyPanel — живая учётка с заданной стратегией сброса трафика.
-func strategyPanel(t *testing.T, expireAt, strategy string, resets *int) *httptest.Server {
-	return panelWith(t, expireAt, "", strategy, resets)
-}
-
-func panelWith(t *testing.T, expireAt, status, strategy string, resets *int) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -288,7 +318,6 @@ func panelWith(t *testing.T, expireAt, status, strategy string, resets *int) *ht
 			_ = json.NewEncoder(w).Encode(map[string]any{"response": []map[string]any{{
 				"uuid": "u1", "tag": "CHILLBOT", "username": "tg_555", "status": status,
 				"expireAt": expireAt, "trafficLimitBytes": trialGB, "usedTrafficBytes": 0,
-				"trafficLimitStrategy": strategy,
 			}}})
 			return
 		}

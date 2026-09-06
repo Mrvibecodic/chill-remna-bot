@@ -726,6 +726,41 @@ func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepair
 	return out, nil
 }
 
+func (s *fakeStore) SetTrafficBonus(_ context.Context, id int64, b *model.TrafficBonus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.users == nil || s.users[id] == nil {
+		return nil
+	}
+	if b.Encode() == "" {
+		s.users[id].TrafficBonus = nil
+		return nil
+	}
+	cp := *b
+	s.users[id].TrafficBonus = &cp
+	return nil
+}
+
+func (s *fakeStore) ListTrafficBonuses(_ context.Context, limit int) ([]storage.TrafficBonusTarget, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []storage.TrafficBonusTarget
+	for id, u := range s.users {
+		if u == nil || u.TrafficBonus == nil {
+			continue
+		}
+		cp := *u.TrafficBonus
+		out = append(out, storage.TrafficBonusTarget{TelegramID: id, Bonus: &cp})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeStore) TrialResets(_ context.Context, id int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -97,8 +97,7 @@ func (a *App) resetTrialsOnce(ctx context.Context) int {
 
 func (a *App) resetTrialOne(ctx context.Context, st storage.Storage, panel *remnawave.Client,
 	tr model.TrialConfig, t storage.TrialResetTarget, now time.Time) bool {
-	exp, err := time.Parse(time.RFC3339, t.SubExpireAt)
-	if err != nil || exp.After(now) {
+	if exp, err := time.Parse(time.RFC3339, t.SubExpireAt); err != nil || exp.After(now) {
 		return false
 	}
 	// Тот же замок, что сериализует выдачу подписки и триала по человеку:
@@ -134,16 +133,14 @@ func (a *App) resetTrialOne(ctx context.Context, st storage.Storage, panel *remn
 	if strings.EqualFold(pu.Status, remnawave.StatusDisabled) {
 		return false
 	}
-	// Счётчик израсходованного в панели — ПЕРИОДНЫЙ: при стратегии MONTH/WEEK/
-	// DAY панель обнуляет его на границе периода. После такой границы «ноль
-	// потрачено» перестаёт означать «не пользовался»: человек, выкачавший весь
-	// триал, выглядит точно как тот, кто ни разу не подключился. Поэтому
-	// счётчику верим только внутри его собственного периода после окончания
-	// подписки, а тех, кто провисел дольше, не трогаем вовсе.
-	if window := trafficWindow(pu.Strategy); window > 0 && now.Sub(exp) > window {
-		return false
-	}
-	if !trialUnused(pu.TrafficLimit, pu.TrafficUsed, tr.ResetUnusedPct) {
+	// Считаем по ПОЖИЗНЕННОМУ счётчику и по лимиту из настроек триала.
+	//
+	// Обычный счётчик панель обнуляет на границе периода, и после неё
+	// «ноль потрачено» перестаёт означать «не пользовался»: выкачавший весь
+	// триал выглядит как тот, кто ни разу не подключился. Потолок в панели
+	// тоже брать нельзя — его раздувает подарочный трафик, и порог в
+	// процентах молча смягчался бы на величину подарка.
+	if !trialUnused(int64(tr.TrafficGB)*bytesPerGB, pu.TrafficLifetime, tr.ResetUnusedPct) {
 		return false
 	}
 	// Сначала запись со сверкой срока, и только потом панель. Обратный
@@ -194,20 +191,4 @@ func trialUnused(limit, used int64, pct int) bool {
 		return false
 	}
 	return used*100 <= limit*int64(pct)
-}
-
-// trafficWindow — как долго после окончания подписки счётчику израсходованного
-// ещё можно верить. Ноль — верить можно всегда (панель его не обнуляет).
-func trafficWindow(strategy string) time.Duration {
-	switch strings.ToUpper(strings.TrimSpace(strategy)) {
-	case "NO_RESET":
-		return 0
-	case "DAY":
-		return 24 * time.Hour
-	case "WEEK":
-		return 7 * 24 * time.Hour
-	}
-	// MONTH, MONTH_ROLLING и пустое значение (панель применила своё
-	// умолчание): берём самый длинный месяц.
-	return 31 * 24 * time.Hour
 }

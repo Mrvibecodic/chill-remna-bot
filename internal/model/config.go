@@ -568,6 +568,8 @@ type User struct {
 	// (SQLite↔Postgres идёт через Export/Import) обнуляла бы потолок повторов
 	// и раздавала всем ещё круг бесплатных триалов.
 	TrialResets int
+	// TrafficBonus — разовый подарочный трафик, если он сейчас накинут.
+	TrafficBonus *TrafficBonus
 
 	SubExpireAt string
 
@@ -776,11 +778,18 @@ type PromoCode struct {
 const (
 	PromoKindBalance = "balance"
 	PromoKindDays    = "days"
-	// PromoKindTraffic — прибавка к потолку трафика в панели, значение в ГБ.
-	// Старый образ бота такой код не знает и уводит его в ветку баланса:
+	// PromoKindTraffic — РАЗОВЫЙ подарок трафика, значение в ГБ. Потолок в
+	// панели поднимается, и бот забирает прибавку обратно, как только панель
+	// обнулит счётчик расхода: иначе при стратегии MONTH подарок «+100 ГБ»
+	// повторялся бы каждый месяц оплаченного года.
+	PromoKindTraffic = "traffic"
+	// PromoKindTrafficPeriod — ПОСТОЯННАЯ прибавка к потолку: те же гигабайты
+	// сверх тарифа в каждом периоде, пока человек не оплатит следующий срок.
+	//
+	// Старый образ бота обоих видов не знает и уводит их в ветку баланса:
 	// человек получит рубли вместо гигабайтов. Поэтому коды на трафик заводить
 	// только после того, как обновление прижилось.
-	PromoKindTraffic = "traffic"
+	PromoKindTrafficPeriod = "traffic_period"
 )
 
 type MoyNalogConfig struct {
