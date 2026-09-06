@@ -144,7 +144,9 @@ func (a *App) MiniAccessDenied(ctx context.Context, tgID int64) bool {
 	// очередь на одобрение.
 	if tgID < 0 {
 		u, _ := a.store.GetUser(ctx, tgID)
-		return u == nil || !u.WebApproved
+		// Отказ учитывается наравне с отсутствием одобрения — иначе отозванный
+		// доступ действовал бы до истечения выданного пропуска.
+		return u == nil || u.WebDenied || !u.WebApproved
 	}
 	return !a.accessGranted(ctx, tgID)
 }

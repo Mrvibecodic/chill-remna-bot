@@ -413,7 +413,39 @@ func (a *App) startP2P(ctx context.Context, chatID int64) {
 	a.issueCard(ctx, chatID)
 }
 
+// p2pRequestNotifyGap — как часто один и тот же человек может дозваться до
+// админа. Совсем запрещать повтор нельзя: если админ пропустил заявку, человек
+// должен иметь возможность напомнить о себе.
+const p2pRequestNotifyGap = 24 * time.Hour
+
+// notifyAdminUserRequest зовёт админа одобрить доступ к переводу.
+//
+// Уведомление шлётся ДО создания заявки — у неодобренного заявки нет по
+// определению, поэтому ограничение «одна открытая заявка на человека» этот
+// путь не закрывает. Без дедупликации каждое нажатие «Перевод на карту»
+// давало админу отдельное сообщение с кнопками: чат забивался, а бот упирался
+// в лимиты Telegram и переставал доставлять обычные уведомления всем.
 func (a *App) notifyAdminUserRequest(ctx context.Context, userID int64) {
+	now := time.Now()
+	a.thrMu.Lock()
+	if a.p2pReqNotified == nil {
+		a.p2pReqNotified = map[int64]time.Time{}
+	}
+	// Карта копится всю жизнь процесса — подрезаем протухшее, чтобы
+	// долгоживущий бот не тёк памятью.
+	for k, t := range a.p2pReqNotified {
+		if now.Sub(t) > p2pRequestNotifyGap {
+			delete(a.p2pReqNotified, k)
+		}
+	}
+	last, seen := a.p2pReqNotified[userID]
+	if seen && now.Sub(last) < p2pRequestNotifyGap {
+		a.thrMu.Unlock()
+		return
+	}
+	a.p2pReqNotified[userID] = now
+	a.thrMu.Unlock()
+
 	lang := a.lang(a.cfg.AdminID)
 	id := strconv.FormatInt(userID, 10)
 	a.notifyKB(ctx, a.cfg.AdminID, i18n.T(lang, "admin.user_request", a.userLabelByID(ctx, userID)), [][]models.InlineKeyboardButton{{
@@ -808,8 +840,22 @@ func (a *App) adminApproveUser(ctx context.Context, adminChat int64, arg string,
 	if err != nil {
 		return
 	}
+	// Решение принято — снимаем дедупликацию: следующая заявка этого человека
+	// снова дозовётся до админа сразу.
+	a.thrMu.Lock()
+	delete(a.p2pReqNotified, uid)
+	a.thrMu.Unlock()
 	alang := a.lang(adminChat)
 	if !ok {
+		// Отказ обязан СНИМАТЬ доступ, а не только рисовать админу «отклонено».
+		// Раньше здесь стоял ранний выход до всякой записи: одобренный когда-то
+		// человек продолжал получать реквизиты, а отозвать их штатной кнопкой
+		// было нельзя вовсе — работала только полная блокировка.
+		if a.store != nil {
+			if err := a.store.SetP2PApproved(ctx, uid, false); err != nil {
+				a.log.Warn("доступ к переводу не отозван", "err", err, "user", uid)
+			}
+		}
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_denied"))
 		return
 	}

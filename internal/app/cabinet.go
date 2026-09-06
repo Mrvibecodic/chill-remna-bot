@@ -120,11 +120,13 @@ func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
 	}
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
-			if u.WebApproved {
-				return nil
-			}
+			// Отказ проверяется ПЕРВЫМ: если пара флагов уже разъехалась в
+			// живой базе, безопаснее не пустить, чем пустить.
 			if u.WebDenied {
 				return errCabinetDenied
+			}
+			if u.WebApproved {
+				return nil
 			}
 		}
 	}

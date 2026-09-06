@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
@@ -32,14 +33,20 @@ type Handlers interface {
 }
 
 type Server struct {
-	log         *slog.Logger
-	handlers    Handlers
-	srv         *http.Server
-	domain      string
-	cacheDir    string
-	mini        MiniProvider
-	authLimiter *rateLimiter
-	staticDir   string
+	log          *slog.Logger
+	handlers     Handlers
+	srv          *http.Server
+	domain       string
+	cacheDir     string
+	mini         MiniProvider
+	authLimiter  *rateLimiter
+	moneyLimiter *rateLimiter
+	readLimiter  *rateLimiter
+	staticDir    string
+	// allowPlainHTTP снимает требование HTTPS целиком. Нужен установкам, чей
+	// прокси не выставляет X-Forwarded-Proto: до этой правки у них всё
+	// работало по открытому HTTP молча, и апдейт не должен их ронять.
+	allowPlainHTTP bool
 }
 
 // SetMiniApp wires the Mini App data provider. Routes read it live, so it may
@@ -92,19 +99,34 @@ func applyTimeouts(srv *http.Server) {
 	srv.IdleTimeout = 60 * time.Second
 }
 
+// newServer — общая часть обоих конструкторов: лимитеры и признак «разрешено
+// без HTTPS» (переменная окружения для установок, чей прокси не выставляет
+// X-Forwarded-Proto).
+func newServer(log *slog.Logger, h Handlers) *Server {
+	return &Server{
+		log:            log,
+		handlers:       h,
+		authLimiter:    newRateLimiter(authLimitHits, authLimitWindow),
+		moneyLimiter:   newRateLimiter(moneyLimitHits, moneyLimitWindow),
+		readLimiter:    newRateLimiter(readLimitHits, readLimitWindow),
+		allowPlainHTTP: os.Getenv("ALLOW_PLAIN_HTTP") == "1",
+	}
+}
+
 func New(addr string, h Handlers, log *slog.Logger) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
-	s := &Server{log: log, handlers: h, authLimiter: newRateLimiter(15, 5*time.Minute)}
-	s.srv = &http.Server{Addr: addr, Handler: s.mux()}
+	s := newServer(log, h)
+	s.srv = &http.Server{Addr: addr, Handler: s.wrap(s.mux())}
 	applyTimeouts(s.srv)
 	return s
 }
 
 func NewAutocert(domain, cacheDir string, h Handlers, log *slog.Logger) *Server {
-	s := &Server{log: log, handlers: h, domain: domain, cacheDir: cacheDir, authLimiter: newRateLimiter(15, 5*time.Minute)}
-	s.srv = &http.Server{Addr: ":443", Handler: s.mux()}
+	s := newServer(log, h)
+	s.domain, s.cacheDir = domain, cacheDir
+	s.srv = &http.Server{Addr: ":443", Handler: s.wrap(s.mux())}
 	applyTimeouts(s.srv)
 	return s
 }

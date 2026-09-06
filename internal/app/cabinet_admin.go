@@ -91,6 +91,7 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath"), btn(i18n.T(lang, "cabinet.btn_approval"), "menu:cabapprove")},
 		{btn(i18n.T(lang, "cabinet.btn_title"), "menu:cabtitle"), btn(i18n.T(lang, "cabinet.btn_desc"), "menu:cabdesc")},
 		{btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav"), btn(fpLabel, "menu:cabfp")},
+		{btn(i18n.T(lang, "cabinet.btn_logout_all"), "menu:cablogout")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, text, rows)
@@ -108,6 +109,29 @@ func (a *App) toggleCabinet(ctx context.Context, chatID int64) {
 		a.ensureFlagsAsync(a.bgContext())
 	}
 	_ = a.saveBotConfig(ctx)
+	a.showCabinetAdmin(ctx, chatID)
+}
+
+// logoutAllSessions поднимает поколение пропусков: все выданные перестают
+// приниматься немедленно.
+//
+// Другого способа отозвать сессию нет: ключ подписи выведен из токена бота и
+// не меняется даже при перезапуске, а в самом пропуске нет ни идентификатора,
+// ни признака отзыва. Пропуск кабинета живёт семь суток — до этой кнопки
+// украденный работал всю неделю.
+func (a *App) logoutAllSessions(ctx context.Context, chatID int64) {
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.Cabinet.SessionVer++
+	}
+	ver := 0
+	if a.botCfg != nil {
+		ver = a.botCfg.Cabinet.SessionVer
+	}
+	a.mu.Unlock()
+	_ = a.saveBotConfig(ctx)
+	a.log.Info("все сессии кабинета и мини-аппа отозваны", "session_ver", ver)
+	a.notify(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.logout_done"))
 	a.showCabinetAdmin(ctx, chatID)
 }
 
@@ -154,7 +178,10 @@ func (a *App) adminApproveWebUser(ctx context.Context, adminChat int64, arg stri
 		// Отказ персистентный: юзер при повторном входе увидит «доступ
 		// отклонён», а новые заявки админу слаться не будут (см. CabinetGate).
 		if a.store != nil {
+			// Симметрично одобрению, которое снимает отказ: иначе пара флагов
+			// разъезжается в «одобрен И отклонён», и гейт пускает.
 			_ = a.store.SetWebDenied(ctx, uid, true)
+			_ = a.store.SetWebApproved(ctx, uid, false)
 		}
 		if uid > 0 {
 			a.notify(ctx, uid, i18n.T(a.lang(uid), "cabinet.denied"))

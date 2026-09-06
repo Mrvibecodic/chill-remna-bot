@@ -30,6 +30,34 @@ const (
 )
 
 // planLinkThrottled — превышен ли лимит неудачных попыток.
+// planLinkGlobalLimit — потолок неудачных попыток по всему боту.
+//
+// Лимит на человека обходится новым аккаунтом: регистрация бесплатна, а
+// сгенерированный ботом код перебрать нереально — но заданный админом вручную
+// может быть коротким (минимум три знака), и распределённый перебор словарных
+// «vip», «pro», «max» занимал часы. Порог заведомо выше честного трафика:
+// обычный человек по чужим ссылкам не ходит вовсе.
+const planLinkGlobalLimit = 60
+
+// planLinkGlobalThrottled — перебор идёт сразу с многих аккаунтов.
+//
+// Осознанная цена: выжигая этот счётчик, можно на время закрыть открытие
+// ссылок всем. Поэтому порог высокий, окно короткое, а срабатывание пишется в
+// журнал отдельной строкой — это сигнал атаки, а не рядовой отказ.
+func (a *App) planLinkGlobalThrottled() bool {
+	now := time.Now()
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	kept := a.planLinkGlobalFails[:0]
+	for _, t := range a.planLinkGlobalFails {
+		if now.Sub(t) < planLinkFailWindow {
+			kept = append(kept, t)
+		}
+	}
+	a.planLinkGlobalFails = kept
+	return len(kept) >= planLinkGlobalLimit
+}
+
 func (a *App) planLinkThrottled(chatID int64) bool {
 	now := time.Now()
 	a.thrMu.Lock()
@@ -54,7 +82,9 @@ func (a *App) planLinkFail(chatID int64) {
 	if a.planLinkFails == nil {
 		a.planLinkFails = map[int64][]time.Time{}
 	}
-	a.planLinkFails[chatID] = append(a.planLinkFails[chatID], time.Now())
+	now := time.Now()
+	a.planLinkFails[chatID] = append(a.planLinkFails[chatID], now)
+	a.planLinkGlobalFails = append(a.planLinkGlobalFails, now)
 }
 
 // planLink — прямая ссылка на тариф ("" — имя бота неизвестно).
@@ -73,7 +103,7 @@ func (a *App) planLink(ctx context.Context, code string) string {
 // одинаково, иначе ссылки перебором подтверждали бы существование тарифов.
 func (a *App) openPlanLink(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
-	if a.planLinkThrottled(chatID) {
+	if a.planLinkThrottled(chatID) || a.planLinkGlobalBlocked(ctx, chatID) {
 		// Лимит перебора: молчим. Легитимный человек с опечаткой уже пять раз
 		// видел «тариф недоступен» — тишина здесь понятнее, чем шестое.
 		a.log.Warn("ссылка на тариф: лимит попыток", "user", chatID)
@@ -303,7 +333,7 @@ func devicesValue(lang string, n int) string {
 // допуск к скрытому.
 func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
-	if a.planLinkThrottled(chatID) {
+	if a.planLinkThrottled(chatID) || a.planLinkGlobalBlocked(ctx, chatID) {
 		// Ответ тот же, что у обычного отказа. Молчание отличало бы
 		// «кода не существует» (попытка считается) от «тариф закрыт» (не
 		// считается) — и лимит сам становился оракулом существования тарифа.
@@ -358,7 +388,7 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 // сгенерированный).
 func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
-	if a.planLinkThrottled(chatID) {
+	if a.planLinkThrottled(chatID) || a.planLinkGlobalBlocked(ctx, chatID) {
 		// См. onPlanView: единый ответ, иначе лимит выдаёт существование кода.
 		a.log.Warn("кнопка тарифа: лимит попыток", "user", chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
@@ -417,4 +447,14 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 		return
 	}
 	a.showMethodsSale(ctx, chatID, &sale{Plan: p, D: d, Months: mo})
+}
+
+// planLinkGlobalBlocked — проверка глобального лимита с записью в журнал.
+func (a *App) planLinkGlobalBlocked(ctx context.Context, chatID int64) bool {
+	if !a.planLinkGlobalThrottled() {
+		return false
+	}
+	a.payLogThrottled(ctx, "plan-link-global", "", "", chatID, "error",
+		"перебор кодов тарифов по всему боту: открытие ссылок временно закрыто")
+	return true
 }

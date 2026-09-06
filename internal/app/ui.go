@@ -559,6 +559,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		// «Базового» продала бы чужие условия (или отказала бы вовсе).
 		a.showRenew(ctx, chatID)
 	case "topup":
+		if a.legalGateOrAsk(ctx, chatID) {
+			return
+		}
 		a.showTopUp(ctx, chatID)
 	case "wallet":
 		if isAdmin {
@@ -577,6 +580,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 			a.showBroadcast(ctx, chatID)
 		}
 	case "promo":
+		if a.legalGateOrAsk(ctx, chatID) {
+			return
+		}
 		a.showPromoUser(ctx, chatID)
 	case "promoadmin":
 		if isAdmin {
@@ -666,6 +672,9 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.showTrialAdmin(ctx, chatID)
 		} else {
+			if a.legalGateOrAsk(ctx, chatID) {
+				return
+			}
 			a.activateTrial(ctx, chatID)
 		}
 	case "contacts":
@@ -747,6 +756,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "cabfp":
 		if isAdmin {
 			a.toggleCabinetAntiFP(ctx, chatID)
+		}
+	case "cablogout":
+		if isAdmin {
+			a.logoutAllSessions(ctx, chatID)
 		}
 	case "reconf":
 		if isAdmin {

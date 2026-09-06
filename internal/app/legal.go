@@ -261,6 +261,20 @@ func legalDocRows(lang string, docs []model.LegalItem) [][]models.InlineKeyboard
 
 // askLegal — экран согласия: тексты документов целиком, если влезают, иначе
 // кнопки на каждый документ. Одна кнопка «Принимаю» на все документы сразу.
+// legalGateOrAsk — общий гейт документов для действий чата. true означает
+// «показан экран согласия, действие выполнять нельзя».
+//
+// Раньше гейт стоял только на покупке, и триал, промокод и пополнение
+// проходили мимо согласия целиком: человек получал платную по сути услугу, не
+// приняв ни оферту, ни политику.
+func (a *App) legalGateOrAsk(ctx context.Context, chatID int64) bool {
+	if !a.legalRequired(ctx, chatID) {
+		return false
+	}
+	a.askLegal(ctx, chatID)
+	return true
+}
+
 func (a *App) askLegal(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	docs := a.legalCfg().Docs()

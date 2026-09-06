@@ -361,6 +361,8 @@ var en = map[string]string{
 	"cabinet.btn_desc":         "✏️ Description",
 	"cabinet.btn_favicon":      "🖼 Favicon",
 	"cabinet.btn_antifp":       "🕵️ Anti-fingerprint",
+	"cabinet.btn_logout_all":   "🚪 Sign out everyone",
+	"cabinet.logout_done":      "🚪 All cabinet and Mini App sessions are revoked. Existing passes are no longer accepted — people need to sign in again.",
 	"cabinet.ask_title":        "Enter the cabinet page title (send a dash to clear):",
 	"cabinet.ask_desc":         "Enter the page meta description (send a dash to clear):",
 	"cabinet.ask_favicon":      "Paste a favicon URL or data: URI (send a dash to clear):",

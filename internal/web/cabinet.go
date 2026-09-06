@@ -21,7 +21,10 @@ import (
 const cabinetJWTTTL = 7 * 24 * time.Hour
 
 // loginTTL bounds how old Telegram Login Widget data may be (anti-replay).
-const loginTTL = 24 * time.Hour
+// loginTTL — сколько живёт подпись виджета входа. Виджет перебрасывает в
+// кабинет сразу после нажатия, так что окно нужно короткое: сутки означали, что
+// утёкшая подпись сутки меняется на свежие пропуска.
+const loginTTL = 15 * time.Minute
 
 // validateTelegramLogin verifies Telegram Login Widget data per the official
 // algorithm: secret = SHA256(botToken); the data-check-string is every provided
@@ -56,7 +59,11 @@ func validateTelegramLogin(fields map[string]string, botToken string, ttl time.D
 	}
 	if ttl > 0 {
 		ad, err := strconv.ParseInt(fields["auth_date"], 10, 64)
-		if err != nil || ad <= 0 || time.Since(time.Unix(ad, 0)) > ttl {
+		if err != nil || ad <= 0 {
+			return 0, errAuth
+		}
+		// Как и у мини-аппа: дата из будущего раньше принималась всегда.
+		if d := time.Since(time.Unix(ad, 0)); d > ttl || d < -authClockSkew {
 			return 0, errAuth
 		}
 	}
@@ -97,31 +104,8 @@ func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) cabinetOK() bool { return s.mini != nil && s.mini.CabinetEnabled() }
 
-// requireHTTPS makes sure the cabinet is never served over plain HTTP. Static
-// GETs are redirected to https; API calls are refused.
-func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request, api bool) bool {
-	if isSecure(r) {
-		return true
-	}
-	if api || r.Method != http.MethodGet {
-		writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "требуется HTTPS"})
-		return false
-	}
-	http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
-	return false
-}
-
-// authThrottled rate-limits the internet-facing auth endpoints per client IP.
-func (s *Server) authThrottled(w http.ResponseWriter, r *http.Request) bool {
-	if s.authLimiter != nil && !s.authLimiter.allow(clientIP(r)) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "слишком много попыток, попробуйте позже"})
-		return true
-	}
-	return false
-}
-
 func (s *Server) issueCabinetToken(w http.ResponseWriter, tgID int64) {
-	tok := issueJWT(tgID, true, jwtKey(s.mini.MiniBotToken()), cabinetJWTTTL)
+	tok := issueJWT(tgID, true, jwtKey(s.mini.MiniBotToken()), cabinetJWTTTL, s.mini.SessionVersion())
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "expires_in": int(cabinetJWTTTL.Seconds())})
 }
 
@@ -131,10 +115,6 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.requireHTTPS(w, r, true) {
-		return
-	}
-	s.setSecurityHeaders(w, true)
 	writeJSON(w, http.StatusOK, map[string]any{"bot_username": s.mini.CabinetBotUsername()})
 }
 
@@ -142,13 +122,6 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Request) {
 	if !s.cabinetOK() {
 		http.NotFound(w, r)
-		return
-	}
-	if !s.requireHTTPS(w, r, true) {
-		return
-	}
-	s.setSecurityHeaders(w, true)
-	if s.authThrottled(w, r) {
 		return
 	}
 
@@ -200,13 +173,6 @@ func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register b
 		http.NotFound(w, r)
 		return
 	}
-	if !s.requireHTTPS(w, r, true) {
-		return
-	}
-	s.setSecurityHeaders(w, true)
-	if s.authThrottled(w, r) {
-		return
-	}
 	body, err := readAllLimited(r, 8*1024)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -249,7 +215,6 @@ func (s *Server) handleCabinetP2PScreenshot(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	s.setSecurityHeaders(w, true)
 	if !web {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
@@ -290,10 +255,6 @@ func (s *Server) handleCabinetStatic(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.requireHTTPS(w, r, false) {
-		return
-	}
-	s.setSecurityHeaders(w, true)
 	p := s.mini.CabinetPath()
 	if !strings.HasPrefix(r.URL.Path, p) {
 		http.NotFound(w, r)

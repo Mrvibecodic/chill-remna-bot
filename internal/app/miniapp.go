@@ -277,6 +277,24 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 	return &sale{Plan: p, D: d, Months: months}
 }
 
+// SessionVersion — текущее поколение пропусков кабинета и мини-аппа.
+func (a *App) SessionVersion() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return 0
+	}
+	return a.botCfg.Cabinet.SessionVer
+}
+
+// MiniLegalRequired — нужно ли принять документы перед действием. Единый гейт
+// для всех ручек мини-аппа и кабинета: точечные проверки внутри отдельных
+// действий оставлены как защита в глубину, но новое действие теперь закрыто
+// само собой.
+func (a *App) MiniLegalRequired(ctx context.Context, tgID int64) bool {
+	return a.legalRequired(ctx, tgID)
+}
+
 // MiniCheckout buys/renews a plan duration. Only the "balance" method
 // completes in-app (reuses finalizePurchase, the same provisioning core as
 // the chat flow); other methods return a payment URL or Redirect=true.

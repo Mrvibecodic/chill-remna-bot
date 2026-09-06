@@ -57,28 +57,59 @@ func (rl *rateLimiter) allow(key string) bool {
 // values are only accepted if they parse to a real, globally-routable unicast
 // address, so a spoofed or garbage header (e.g. a multicast 232.x.x.x) is
 // ignored and we fall back to the real TCP peer.
-func clientIP(r *http.Request) string {
-	peer := r.RemoteAddr
+// peerAddr — адрес TCP-пира без порта.
+func peerAddr(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		peer = host
+		return host
 	}
-	// Заголовкам проксирования верим только когда TCP-пир — локальный реверс-
-	// прокси (loopback/private), то есть заголовок выставил наш nginx/caddy.
-	// Иначе любой прямой клиент подставляет произвольный «IP» и получает свой
-	// ключ лимитера на каждый запрос — лимит 15/5мин на auth-эндпоинтах
-	// кабинета обходится полностью.
-	if p := net.ParseIP(peer); p == nil || !(p.IsLoopback() || p.IsPrivate()) {
+	return r.RemoteAddr
+}
+
+// fromTrustedProxy — запрос пришёл от локального реверс-прокси, а не напрямую
+// из интернета. Только такому пиру можно верить в служебных заголовках:
+// прямой клиент подставит в них что угодно.
+func fromTrustedProxy(r *http.Request) bool {
+	p := net.ParseIP(peerAddr(r))
+	return p != nil && (p.IsLoopback() || p.IsPrivate())
+}
+
+func clientIP(r *http.Request) string {
+	peer := peerAddr(r)
+	if !fromTrustedProxy(r) {
 		return peer
 	}
-	for _, h := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
-		v := r.Header.Get(h)
+	// Цепочка пересылки читается СПРАВА НАЛЕВО. Рекомендованный нами конфиг
+	// nginx использует $proxy_add_x_forwarded_for, который дописывает реальный
+	// адрес в КОНЕЦ строки, присланной клиентом. Значит первый элемент пишет
+	// сам клиент — и, беря его, лимитер получал ключ, полностью подконтрольный
+	// атакующему: перебор паролей кабинета шёл без всякого ограничения.
+	//
+	// Идём с конца, пропуская адреса своих прокси (частные и loopback), и
+	// берём первый недоверенный — это и есть клиент.
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		parts := strings.Split(v, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := net.ParseIP(strings.TrimSpace(parts[i]))
+			if ip == nil {
+				continue
+			}
+			if ip.IsLoopback() || ip.IsPrivate() {
+				continue // свой прокси, идём левее
+			}
+			if ip.IsGlobalUnicast() {
+				return ip.String()
+			}
+		}
+	}
+	// X-Real-IP и CF-Connecting-IP — одиночные значения, подделать цепочкой их
+	// нельзя, но наш пример конфига их не выставляет и не вырезает. Поэтому они
+	// читаются ПОСЛЕ цепочки, а не вперёд неё.
+	for _, h := range []string{"X-Real-IP", "CF-Connecting-IP"} {
+		v := strings.TrimSpace(r.Header.Get(h))
 		if v == "" {
 			continue
 		}
-		if i := strings.IndexByte(v, ','); i > 0 {
-			v = v[:i]
-		}
-		if ip := net.ParseIP(strings.TrimSpace(v)); ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
+		if ip := net.ParseIP(v); ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
 			return ip.String()
 		}
 	}
@@ -87,14 +118,26 @@ func clientIP(r *http.Request) string {
 
 // isSecure reports whether the request reached us over HTTPS, directly or via a
 // TLS-terminating reverse proxy.
+//
+// Заголовку верим только от локального прокси. Раньше он принимался от кого
+// угодно, и одна строка в запросе снимала и редирект на HTTPS, и отказ 426:
+// клиент добровольно отдавал пароль и ключ доступа в открытый канал, а сканер
+// обходил единственное препятствие. Адрес клиента рядом определяется строго —
+// эта асимметрия и была дырой.
 func isSecure(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	if r.TLS != nil {
+		return true
+	}
+	if !fromTrustedProxy(r) {
+		return false
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // setSecurityHeaders applies baseline hardening headers. frameDeny is used for
 // the cabinet (clickjacking protection); the Mini App is intentionally framable
 // by Telegram, so it is not set there. HSTS is only meaningful over TLS.
-func (s *Server) setSecurityHeaders(w http.ResponseWriter, frameDeny bool) {
+func (s *Server) setSecurityHeaders(w http.ResponseWriter, frameDeny, secure bool) {
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
@@ -102,7 +145,9 @@ func (s *Server) setSecurityHeaders(w http.ResponseWriter, frameDeny bool) {
 	if frameDeny {
 		h.Set("X-Frame-Options", "DENY")
 	}
-	if s.domain != "" {
+	if secure {
+		// Раньше условием был режим autocert, поэтому за прокси HSTS не
+		// выдавался никогда — даже когда соединение честно защищено.
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 	}
 }

@@ -64,7 +64,11 @@ func validateInitData(initData, botToken string, ttl time.Duration) (int64, erro
 		if err != nil || ad <= 0 {
 			return 0, errAuth
 		}
-		if time.Since(time.Unix(ad, 0)) > ttl {
+		// Дата «из будущего» раньше принималась без ограничений: разность
+		// отрицательна, и проверка «меньше срока» проходила всегда. Перехваченная
+		// подпись с большой датой жила бы вечно. Допуск в обе стороны — на
+		// расхождение часов.
+		if d := time.Since(time.Unix(ad, 0)); d > ttl || d < -authClockSkew {
 			return 0, errAuth
 		}
 	}
@@ -90,22 +94,29 @@ type jwtClaims struct {
 	TgID int64 `json:"tg"`
 	Web  bool  `json:"w,omitempty"`
 	Exp  int64 `json:"exp"`
+	// Ver — поколение сессий. Ключ подписи выведен из токена бота и не меняется
+	// даже при перезапуске, а в пропуске не было ни идентификатора, ни версии —
+	// значит «разлогинить всех» было нечем, и украденный пропуск работал все
+	// семь суток. Админ поднимает поколение — все прежние пропуска мертвы.
+	Ver int `json:"v,omitempty"`
 }
 
 func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // issueJWT signs {tg,exp} with HS256 using key.
-func issueJWT(tgID int64, web bool, key []byte, ttl time.Duration) string {
+func issueJWT(tgID int64, web bool, key []byte, ttl time.Duration, ver int) string {
 	header := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	cl, _ := json.Marshal(jwtClaims{TgID: tgID, Web: web, Exp: time.Now().Add(ttl).Unix()})
+	cl, _ := json.Marshal(jwtClaims{TgID: tgID, Web: web, Exp: time.Now().Add(ttl).Unix(), Ver: ver})
 	payload := b64url(cl)
 	signing := header + "." + payload
 	sig := b64url(hmacSHA256(key, []byte(signing)))
 	return signing + "." + sig
 }
 
-// parseJWT verifies the signature and expiry, returning the Telegram id.
-func parseJWT(token string, key []byte) (int64, bool, error) {
+// parseJWT verifies the signature, expiry and session generation, returning the
+// Telegram id. Пропуск прежнего поколения отвергается — это и есть «разлогинить
+// всех».
+func parseJWT(token string, key []byte, ver int) (int64, bool, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return 0, false, errAuth
@@ -126,6 +137,9 @@ func parseJWT(token string, key []byte) (int64, bool, error) {
 	if time.Now().Unix() > cl.Exp {
 		return 0, false, errAuth
 	}
+	if cl.Ver != ver {
+		return 0, false, errAuth
+	}
 	return cl.TgID, cl.Web, nil
 }
 
@@ -135,3 +149,7 @@ func jwtKey(botToken string) []byte {
 	k := sha256.Sum256([]byte("miniapp-jwt:" + botToken))
 	return k[:]
 }
+
+// authClockSkew — допустимое расхождение часов клиента и сервера при проверке
+// даты подписи.
+const authClockSkew = 2 * time.Minute

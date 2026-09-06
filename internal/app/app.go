@@ -132,6 +132,13 @@ type App struct {
 	torStrikeSeen map[int64]time.Time
 	torStrikeFail map[int64]time.Time
 	planLinkFails map[int64][]time.Time
+	// planLinkGlobalFails — тот же счётчик, но на весь бот. Лимит на человека
+	// обходится новым аккаунтом: регистрация бесплатна, а перебор кодов
+	// параллелится линейно по числу аккаунтов.
+	planLinkGlobalFails []time.Time
+	// p2pReqNotified — когда последний раз звали админа по заявке на доступ к
+	// переводу. Без этого каждое нажатие давало отдельное сообщение.
+	p2pReqNotified map[int64]time.Time
 
 	// bannerFail — сколько отказов подряд пришло на конкретную картинку
 	// баннера (ключ — file_id или ссылка). Живёт под a.mu.

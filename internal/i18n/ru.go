@@ -361,6 +361,8 @@ var ru = map[string]string{
 	"cabinet.btn_desc":         "✏️ Описание",
 	"cabinet.btn_favicon":      "🖼 Фавикон",
 	"cabinet.btn_antifp":       "🕵️ Анти-фингерпринт",
+	"cabinet.btn_logout_all":   "🚪 Разлогинить всех",
+	"cabinet.logout_done":      "🚪 Все сессии кабинета и мини-аппа отозваны. Выданные пропуска больше не принимаются — людям нужно войти заново.",
 	"cabinet.ask_title":        "Введите заголовок страницы кабинета («-» — сбросить):",
 	"cabinet.ask_desc":         "Введите meta-описание страницы («-» — сбросить):",
 	"cabinet.ask_favicon":      "Вставьте URL фавикона или data:-URI («-» — сбросить):",

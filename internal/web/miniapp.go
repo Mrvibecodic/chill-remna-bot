@@ -9,7 +9,14 @@ import (
 )
 
 // initDataTTL bounds how old Telegram init data may be (anti-replay).
-const initDataTTL = 24 * time.Hour
+// initDataTTL — сколько живёт подпись Telegram при обмене на пропуск.
+//
+// Сутки — это верхняя граница из примера референсной библиотеки, а не
+// рекомендация: сама дока Telegram окна не называет и лишь советует проверять
+// auth_date. Мини-апп открывается из чата, подпись по построению свежая, и
+// сутки означали лишь одно — перехваченная подпись сутки конвертировалась в
+// новые пропуска. Фронт при отказе переоткрывает мини-апп и получает свежую.
+const initDataTTL = 15 * time.Minute
 
 // jwtTTL is the lifetime of a Mini App session token.
 const jwtTTL = 30 * time.Minute
@@ -86,6 +93,13 @@ type MiniProvider interface {
 	MiniAccessDenied(ctx context.Context, tgID int64) bool
 	// CabinetFlag returns a self-hosted country-flag SVG by ISO code.
 	CabinetFlag(code string) ([]byte, bool)
+	// MiniLegalRequired reports whether the user must accept the service
+	// documents before doing anything but reading them.
+	MiniLegalRequired(ctx context.Context, tgID int64) bool
+	// SessionVersion — поколение сессий. Пропуска прежнего поколения
+	// отвергаются: это единственный способ «разлогинить всех», потому что ключ
+	// подписи выведен из токена бота и сам по себе не меняется.
+	SessionVersion() int
 }
 
 type MiniReferralDTO struct {
@@ -324,7 +338,7 @@ func (s *Server) miniAuth(r *http.Request) (id int64, web bool, ok bool) {
 	if !strings.HasPrefix(h, "Bearer ") {
 		return 0, false, false
 	}
-	id, web, err := parseJWT(strings.TrimPrefix(h, "Bearer "), jwtKey(s.mini.MiniBotToken()))
+	id, web, err := parseJWT(strings.TrimPrefix(h, "Bearer "), jwtKey(s.mini.MiniBotToken()), s.mini.SessionVersion())
 	if err != nil {
 		return 0, false, false
 	}
@@ -354,8 +368,20 @@ func (s *Server) handleMiniAuth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	tok := issueJWT(tgID, false, jwtKey(s.mini.MiniBotToken()), jwtTTL)
+	tok := issueJWT(tgID, false, jwtKey(s.mini.MiniBotToken()), jwtTTL, s.mini.SessionVersion())
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "expires_in": int(jwtTTL.Seconds())})
+}
+
+// legalFreePaths — ручки, доступные до принятия документов. Без них человек не
+// смог бы увидеть сами документы и нажать «принимаю» — экран согласия
+// зациклился бы.
+func legalFreePaths(path string) bool {
+	switch path {
+	case "/api/miniapp/me", "/api/miniapp/menu", "/api/miniapp/legal/accept",
+		"/api/miniapp/subscription", "/api/miniapp/connect":
+		return true
+	}
+	return false
 }
 
 func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, web bool, ok bool) {
@@ -368,12 +394,41 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return 0, false, false
 	}
+	// Признак поверхности из пропуска сверяется с тем, включена ли она.
+	// Раньше страж пускал, если включена ЛЮБАЯ из двух: админ выключал
+	// кабинет, страница и вход исчезали, а выданные пропуска ещё неделю читали
+	// подписки, создавали счета и тратили баланс — выключатель был иллюзией.
+	// Кабинет пользуется тем же API мини-аппа, поэтому проверка здесь.
+	if web && !s.mini.CabinetEnabled() {
+		http.NotFound(w, r)
+		return 0, false, false
+	}
+	if !web && !s.mini.MiniEnabled() {
+		http.NotFound(w, r)
+		return 0, false, false
+	}
 	if s.mini.MiniBlocked(r.Context(), id) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ заблокирован"})
 		return 0, false, false
 	}
 	if s.mini.MiniAccessDenied(r.Context(), id) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "доступ к боту ограничен"})
+		return 0, false, false
+	}
+	// Модерация кабинета проверяется на КАЖДОМ запросе, а не только на входе:
+	// пропуск живёт семь суток, и без этого отзыв доступа не действовал бы всю
+	// неделю.
+	if web {
+		if err := s.mini.CabinetGate(r.Context(), id, id < 0); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return 0, false, false
+		}
+	}
+	// Гейт документов — одной точкой на все ручки. Раньше он стоял только на
+	// оформлении счёта, и триал, промокод, пополнение и сброс устройств
+	// проходили мимо согласия целиком.
+	if !legalFreePaths(r.URL.Path) && s.mini.MiniLegalRequired(r.Context(), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "сначала примите документы сервиса"})
 		return 0, false, false
 	}
 	return id, web, true

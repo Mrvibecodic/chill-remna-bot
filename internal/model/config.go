@@ -879,7 +879,13 @@ type CabinetConfig struct {
 	Desc    string `json:"desc"`
 	Favicon string `json:"favicon"`
 	AntiFP  bool   `json:"anti_fp"`
-	Init    bool   `json:"init"`
+	// SessionVer — поколение выданных пропусков. Ключ подписи выведен из токена
+	// бота и не меняется даже при перезапуске, а в самом пропуске нет ни
+	// идентификатора, ни срока отзыва — поэтому «разлогинить всех» делается
+	// только поднятием этого числа. Пропуска прежнего поколения перестают
+	// приниматься немедленно.
+	SessionVer int  `json:"session_ver,omitempty"`
+	Init       bool `json:"init"`
 }
 
 // Cabinet approval modes.
