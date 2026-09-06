@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -89,6 +90,32 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	var u rwUserPayload
 	_ = json.Unmarshal(ev.Data, &u)
 
+	// Панель штатно переотправляет событие, если не получила ответ вовремя, и
+	// тело повтора совпадает байт в байт. Три доставки давали человеку три
+	// одинаковых «подписка истекла».
+	//
+	// Только для user.*: у torrent_blocker.report своя защита, завязанная на
+	// содержимое отчёта.
+	// Место занимается СРАЗУ: панель шлёт повтор, не дождавшись ответа, то
+	// есть обе доставки идут одновременно, каждая в своей горутине. Проверка
+	// «видели?» и отметка по разные стороны отправки в Telegram дали бы
+	// человеку два сообщения.
+	//
+	// Но если доставка не удалась, место освобождается: иначе дедуп выключал
+	// бы ровно тот механизм, ради которого нужен, — повтор панели после
+	// отказа Telegram.
+	dedup := strings.HasPrefix(ev.Event, "user.")
+	if dedup && !a.rwEventClaim(body) {
+		a.log.Info("remnawave webhook: повтор события пропущен", "event", ev.Event, "tg_id", u.TelegramID)
+		return true, nil
+	}
+	delivered := false
+	defer func() {
+		if dedup && !delivered {
+			a.rwEventRelease(body)
+		}
+	}()
+
 	switch {
 	case ev.Event == "user.expiration":
 		// Панель с 2.8.0 (контракт 2.8.20): одно событие вместо user.expires_in_*/user.expired_*_ago,
@@ -106,20 +133,26 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 		}
 		if hours > 0 {
 			// Подписка истекла hours часов назад — напоминание продлить.
-			a.pushExpired(ctx, u)
+			delivered = a.pushExpired(ctx, u)
 			return true, nil
 		}
-		a.pushExpiryWarning(ctx, u, ev.Event, -hours)
+		delivered = a.pushExpiryWarning(ctx, u, ev.Event, -hours)
 		return true, nil
 	case strings.HasPrefix(ev.Event, "user.expires_in"):
 		// Панели 2.7.x (контракты до 2.8.19).
-		a.pushExpiryWarning(ctx, u, ev.Event, expiresInHours(ev.Event))
+		delivered = a.pushExpiryWarning(ctx, u, ev.Event, expiresInHours(ev.Event))
 		return true, nil
 	case ev.Event == "user.expired":
-		a.pushExpired(ctx, u)
+		delivered = a.pushExpired(ctx, u)
+		return true, nil
+	case ev.Event == "user.disabled":
+		delivered = a.pushAccessChanged(ctx, u, false)
+		return true, nil
+	case ev.Event == "user.enabled":
+		delivered = a.pushAccessChanged(ctx, u, true)
 		return true, nil
 	case ev.Event == "user.limited" || ev.Event == "user.bandwidth_usage_threshold_reached":
-		a.pushTrafficLimited(ctx, u)
+		delivered = a.pushTrafficLimited(ctx, u)
 		return true, nil
 	case ev.Event == "torrent_blocker.report":
 		a.pushTorrentReport(ctx, ev.Data)
@@ -130,9 +163,9 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	}
 }
 
-func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event string, hours int) {
+func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event string, hours int) bool {
 	if u.TelegramID == 0 {
-		return
+		return true
 	}
 	lang := a.lang(u.TelegramID)
 	text := i18n.T(lang, "rw.warn_expiring")
@@ -142,10 +175,11 @@ func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event stri
 	case hours > 0:
 		text = i18n.T(lang, "rw.warn_expiring_hours", hours)
 	}
-	a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
+	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	})
-	a.log.Info("remnawave webhook: warn sent", "event", event, "tg_id", u.TelegramID)
+	}) != 0
+	a.log.Info("remnawave webhook: warn sent", "event", event, "tg_id", u.TelegramID, "ok", ok)
+	return ok
 }
 
 func expiresInHours(event string) int {
@@ -154,25 +188,110 @@ func expiresInHours(event string) int {
 	return n
 }
 
-func (a *App) pushExpired(ctx context.Context, u rwUserPayload) {
+func (a *App) pushExpired(ctx context.Context, u rwUserPayload) bool {
 	if u.TelegramID == 0 {
-		return
+		return true
 	}
 	a.invalidateSubCache(u.TelegramID)
 	lang := a.lang(u.TelegramID)
-	a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.expired"), [][]models.InlineKeyboardButton{
+	ok := a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.expired"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	})
-	a.log.Info("remnawave webhook: expired notified", "tg_id", u.TelegramID)
+	}) != 0
+	a.log.Info("remnawave webhook: expired notified", "tg_id", u.TelegramID, "ok", ok)
+	return ok
 }
 
-func (a *App) pushTrafficLimited(ctx context.Context, u rwUserPayload) {
+func (a *App) pushTrafficLimited(ctx context.Context, u rwUserPayload) bool {
 	if u.TelegramID == 0 {
-		return
+		return true
 	}
 	lang := a.lang(u.TelegramID)
-	a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.limited"), [][]models.InlineKeyboardButton{
+	ok := a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.limited"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	})
-	a.log.Info("remnawave webhook: limit notified", "tg_id", u.TelegramID)
+	}) != 0
+	a.log.Info("remnawave webhook: limit notified", "tg_id", u.TelegramID, "ok", ok)
+	return ok
+}
+
+// pushAccessChanged — доступ выключили или включили в панели. Раньше событие
+// молча игнорировалось: человек терял связь и не понимал почему, а кэш
+// «есть подписка» ещё полминуты говорил обратное.
+func (a *App) pushAccessChanged(ctx context.Context, u rwUserPayload, enabled bool) bool {
+	if u.TelegramID == 0 {
+		return true
+	}
+	a.invalidateSubCache(u.TelegramID)
+	lang := a.lang(u.TelegramID)
+	ok := false
+	if enabled {
+		ok = a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.enabled"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")},
+		}) != 0
+	} else {
+		var rows [][]models.InlineKeyboardButton
+		if sup := a.supportURL(); sup != "" {
+			rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "btn.support"), URL: sup}})
+		}
+		ok = a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.disabled"), rows) != 0
+	}
+	a.log.Info("remnawave webhook: access change notified", "tg_id", u.TelegramID, "enabled", enabled, "ok", ok)
+	return ok
+}
+
+// rwEventTTL — окно, в котором повторная доставка считается повтором. Панель
+// исчерпывает попытки за минуты. Окно намеренно короткое: ключ — хэш тела, а
+// гарантии, что панель кладёт в конверт уникальный timestamp, у нас нет, и
+// длинное окно склеило бы два РАЗНЫХ одинаковых события (отключили — включили
+// — снова отключили).
+const rwEventTTL = 10 * time.Minute
+
+// rwSeenMax — потолок карты дедупа. Поток разных событий не должен раздувать
+// её без конца: окно всего десять минут, и сброс переполненной карты стоит
+// дешевле, чем неограниченный рост под общим замком.
+const rwSeenMax = 4096
+
+// rwSeenSweep — не чаще этого перебираем карту целиком. Полный проход на
+// каждом событии — плохой обмен: замок общий с торрент-блокером.
+const rwSeenSweep = time.Minute
+
+// rwEventClaim занимает место под событие. false — это тело уже в работе или
+// недавно обработано.
+func (a *App) rwEventClaim(body []byte) bool {
+	key := rwEventKey(body)
+	now := time.Now()
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	if a.rwSeen == nil {
+		a.rwSeen = map[string]time.Time{}
+	}
+	if now.Sub(a.rwSweptAt) > rwSeenSweep {
+		a.rwSweptAt = now
+		for k, t := range a.rwSeen {
+			if now.Sub(t) > rwEventTTL {
+				delete(a.rwSeen, k)
+			}
+		}
+		if len(a.rwSeen) > rwSeenMax {
+			a.log.Warn("remnawave webhook: карта дедупа переполнена, сброшена", "size", len(a.rwSeen))
+			a.rwSeen = map[string]time.Time{}
+		}
+	}
+	if t, ok := a.rwSeen[key]; ok && now.Sub(t) <= rwEventTTL {
+		return false
+	}
+	a.rwSeen[key] = now
+	return true
+}
+
+// rwEventRelease освобождает место: доставить не удалось, повтор панели нужен.
+func (a *App) rwEventRelease(body []byte) {
+	key := rwEventKey(body)
+	a.thrMu.Lock()
+	delete(a.rwSeen, key)
+	a.thrMu.Unlock()
+}
+
+func rwEventKey(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

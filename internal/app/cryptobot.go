@@ -121,7 +121,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	}
 	payURL, invoiceID, err := a.cbCreateInvoiceSnap(ctx, chatID, months, price, false, a.saleSnapshot(s))
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
 	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
@@ -154,7 +154,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil && p.Purpose == "topup" {
 			inv, err := client.GetInvoice(ctx, invoiceID)
 			if err != nil {
-				a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
+				a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 				return
 			}
 			a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "topup status=%s", inv.Status)
@@ -181,7 +181,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 	}
 	inv, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
 	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "status=%s", inv.Status)
@@ -230,7 +230,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 			a.showMySubs(ctx, chatID)
 			return
 		}
-		a.sendHome(ctx, chatID, i18n.T(lang, "cb.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
 	a.sendSubActive(ctx, payChat, link, expireAt)

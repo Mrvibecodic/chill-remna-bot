@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/go-telegram/bot/models"
 
@@ -90,13 +93,20 @@ func (a *App) setContact(ctx context.Context, chatID int64, field, raw string) {
 	if raw == "-" || raw == "—" {
 		raw = ""
 	}
+	val, ok := normalizeContactURL(raw)
+	if !ok {
+		// Не сохраняем и оставляем ожидание ввода: битый адрес в этом поле
+		// оставляет без экрана всех пользователей сразу.
+		a.send(ctx, chatID, i18n.T(a.lang(chatID), "contacts.bad_url"))
+		return
+	}
 	a.mu.Lock()
 	if a.botCfg != nil {
 		switch field {
 		case "group":
-			a.botCfg.Contact.GroupURL = normalizeContactURL(raw)
+			a.botCfg.Contact.GroupURL = val
 		case "support":
-			a.botCfg.Contact.SupportURL = normalizeContactURL(raw)
+			a.botCfg.Contact.SupportURL = val
 		}
 	}
 	a.mu.Unlock()
@@ -109,27 +119,84 @@ func (a *App) setContact(ctx context.Context, chatID int64, field, raw string) {
 // value Telegram accepts as an inline-button URL. Plain links, @usernames,
 // bare usernames and t.me/... (with or without scheme) all become a usable
 // https/tg link; an empty value clears the button.
-func normalizeContactURL(raw string) string {
+// ok=false — ввод адресом кнопки быть не может.
+//
+// Раньше последняя ветка возвращала введённое как есть, и любая строка
+// становилась адресом. Telegram отвергает сообщение с таким адресом ЦЕЛИКОМ, а
+// кнопки контактов подмешиваются в главное меню, в «Мои подписки» и в
+// сообщение об активной подписке — то есть одна опечатка в поле «Группа»
+// оставляла без экрана всех пользователей сразу. Причём админ этого не видел:
+// в его меню контактных кнопок нет.
+func normalizeContactURL(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return "", true
 	}
 	low := strings.ToLower(raw)
 	switch {
 	case strings.HasPrefix(low, "https://"), strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "tg://"):
-		return raw
+		return raw, validButtonURL(raw)
 	case strings.HasPrefix(raw, "@"):
-		return "https://t.me/" + strings.TrimPrefix(raw, "@")
+		return checkedURL("https://t.me/" + strings.TrimPrefix(raw, "@"))
 	case strings.HasPrefix(low, "t.me/"), strings.HasPrefix(low, "telegram.me/"),
 		strings.HasPrefix(low, "telegram.dog/"), strings.HasPrefix(low, "www."):
-		return "https://" + raw
+		return checkedURL("https://" + raw)
 	case !strings.ContainsAny(raw, "/. :"):
 		// Bare username like "my_channel".
-		return "https://t.me/" + raw
+		return checkedURL("https://t.me/" + raw)
 	case strings.Contains(raw, "."):
 		// Looks like a domain without a scheme.
-		return "https://" + raw
+		return checkedURL("https://" + raw)
 	default:
-		return raw
+		// Осмысленного адреса из этого не выйдет — раньше сюда попадала любая
+		// фраза вроде «пишите в личку».
+		return "", false
 	}
+}
+
+func checkedURL(u string) (string, bool) {
+	if !validButtonURL(u) {
+		return "", false
+	}
+	return u, true
+}
+
+// validButtonURL — Telegram примет такой адрес в кнопке.
+//
+// Проверяем то же, на чём он спотыкается: схему, непустой хост, отсутствие
+// пробелов и переводов строк.
+func validButtonURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	// Пробелы, управляющие и невидимые символы. Проверять только " \t\r\n"
+	// мало: адрес с нулевой шириной внутри (его легко получить копированием)
+	// выглядит рабочим, а Telegram отвергает такую кнопку вместе со ВСЕМ
+	// сообщением — меню перестаёт открываться, и админ этого не видит.
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) ||
+			unicode.In(r, unicode.Cf, unicode.Zs, unicode.Zl, unicode.Zp) {
+			return false
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https", "http":
+		if u.Host == "" {
+			return false
+		}
+		// Точка в имени — признак настоящего домена, но не единственный
+		// допустимый адрес: локальный хост и IP-литерал (в том числе IPv6 в
+		// скобках) тоже рабочие, и молча выкидывать такую кнопку нельзя.
+		host := u.Hostname()
+		return strings.Contains(host, ".") || strings.EqualFold(host, "localhost") ||
+			net.ParseIP(host) != nil
+	case "tg":
+		// tg://resolve?domain=x — хоста в привычном смысле нет.
+		return u.Opaque != "" || u.Host != ""
+	}
+	return false
 }

@@ -1502,14 +1502,37 @@ func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, st
 	return u.SubscriptionURL, u.ExpireAt, true
 }
 
-const StatusDisabled = "DISABLED"
+// Статусы пользователя в панели. Раньше объявлен был только DISABLED, а
+// EXPIRED и LIMITED не упоминались нигде — поэтому истёкшая подписка и
+// исчерпанный трафик показывались как «активна».
+const (
+	StatusActive   = "ACTIVE"
+	StatusDisabled = "DISABLED"
+	StatusExpired  = "EXPIRED"
+	StatusLimited  = "LIMITED"
+)
 
 func (c *Client) SubscriptionFull(ctx context.Context, telegramID int64) (url, expireAt, status string, ok bool) {
+	url, expireAt, status, ok, _ = c.SubscriptionState(ctx, telegramID)
+	return url, expireAt, status, ok
+}
+
+// SubscriptionState — как SubscriptionFull, но с ошибкой.
+//
+// Различать «панель ответила: такого пользователя нет» и «панель недоступна»
+// обязательно: без этого авария панели выглядит для платящего клиента как
+// «подписки у вас нет, купите заново». Внутри клиента различие есть и
+// поддерживается аккуратно (sentinel-ошибки, routeGone, undecidedStatus) — и
+// схлопывалось в один false ровно здесь, на последнем шаге.
+func (c *Client) SubscriptionState(ctx context.Context, telegramID int64) (url, expireAt, status string, found bool, err error) {
 	u, err := c.findByTelegram(ctx, telegramID)
-	if err != nil || u == nil || u.SubscriptionURL == "" {
-		return "", "", "", false
+	if err != nil {
+		return "", "", "", false, err
 	}
-	return u.SubscriptionURL, u.ExpireAt, u.Status, true
+	if u == nil || u.SubscriptionURL == "" {
+		return "", "", "", false, nil
+	}
+	return u.SubscriptionURL, u.ExpireAt, u.Status, true, nil
 }
 
 // DeviceInfo is a read-only snapshot of a user's HWID devices.

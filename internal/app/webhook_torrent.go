@@ -31,6 +31,16 @@ const torrentRepeatWindow = 30 * 24 * time.Hour
 // torrentUnblockTick — период проверки, не пора ли слать «блокировка снята».
 const torrentUnblockTick = 30 * time.Second
 
+// torrentUnblockRetry — сколько ждать ответа панели о статусе подписки,
+// считая от срока разблокировки или от старта бота (если бот стоял дольше
+// этого срока, первая же попытка после запуска оказалась бы вне бюджета —
+// и одного медленного ответа панели хватило бы, чтобы закрыть запись без
+// обещанного сообщения),
+// прежде чем закрыть запись о разблокировке без уведомления. Короткая
+// недоступность панели не должна съедать обещанное человеку сообщение, а
+// долгая не должна крутить запись в очереди сутки.
+const torrentUnblockRetry = 15 * time.Minute
+
 // torrentUnblockStale — если срок разблокировки прошёл давнее этого (бот был
 // выключен), сообщение уже неактуально: запись помечается без отправки.
 const torrentUnblockStale = 24 * time.Hour
@@ -573,12 +583,19 @@ func (a *App) torrentNotifyUser(ctx context.Context, r *rwTorrentReport, will st
 	if sup := a.supportURL(); sup != "" {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "btn.support"), URL: sup}})
 	}
-	text := i18n.T(lang, "rw.torrent_user",
-		fmtBlockDur(lang, act.BlockDuration), torrentTill(will, lang))
-	// Обещать сообщение о снятии можно только когда срок известен: без него
-	// запись сразу помечается отработанной и уведомление не придёт никогда.
-	if will != "" {
+	// Срок известен не всегда: панель шлёт отчёт и без block_duration. Печатать
+	// «заблокирован на — (до —)» бессмысленно — для этого случая отдельный
+	// текст без срока.
+	var text string
+	if act.BlockDuration > 0 && will != "" {
+		text = i18n.T(lang, "rw.torrent_user",
+			fmtBlockDur(lang, act.BlockDuration), torrentTill(will, lang))
+		// Обещать сообщение о снятии можно только когда срок известен: без
+		// него запись сразу помечается отработанной и уведомление не придёт
+		// никогда.
 		text += i18n.T(lang, "rw.torrent_user_wait")
+	} else {
+		text = i18n.T(lang, "rw.torrent_user_nodur")
 	}
 	// Адрес пира, на который шёл торрент-трафик: пользователю это доказательство,
 	// что сработало не «просто так». Панель поле не гарантирует — строку
@@ -640,13 +657,19 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 	// несколькими устройствами записей несколько, а ответ один и тот же.
 	subOff := map[int64]bool{}
 	subKnown := map[int64]bool{}
+	// subRetry — «панель не ответила»; только тогда есть смысл переспросить.
+	// Ответ «такого пользователя нет» окончательный: переспрашивать его 30
+	// тиков подряд — впустую дёргать панель.
+	subRetry := map[int64]bool{}
 	for _, r := range due {
 		send := notifyUser && r.TelegramID != 0
+		since, sinceOK := time.Duration(0), false
+		if t, err := time.Parse(time.RFC3339, r.WillUnblockAt); err == nil {
+			since, sinceOK = now.Sub(t), true
+		}
 		// Срок вышел давно (бот стоял) — сообщение уже неактуально.
-		if send && checkStale {
-			if t, err := time.Parse(time.RFC3339, r.WillUnblockAt); err != nil || now.Sub(t) > torrentUnblockStale {
-				send = false
-			}
+		if send && checkStale && (!sinceOK || since > torrentUnblockStale) {
+			send = false
 		}
 		// reserved — пауза занята именно этой итерацией: только тогда её можно
 		// откатить, если пометка в БД не удалась.
@@ -667,11 +690,12 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 			}
 			a.thrMu.Unlock()
 		}
+		retryLater := false
 		if send {
 			known, ok := subKnown[r.TelegramID]
 			if !ok {
 				var off bool
-				off, known = a.subDisabled(ctx, r.TelegramID)
+				off, known, subRetry[r.TelegramID] = a.subState(ctx, r.TelegramID)
 				subOff[r.TelegramID], subKnown[r.TelegramID] = off, known
 			}
 			// Статус неизвестен (панель молчит или пользователя там нет) —
@@ -679,9 +703,26 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 			if !known || subOff[r.TelegramID] {
 				if !known {
 					a.log.Info("торрент-блокер: статус подписки неизвестен, о снятии не пишем", "tg_id", r.TelegramID)
+					// Молчание панели — не ответ, а его отсутствие. Закрыть
+					// запись сейчас значило бы не прислать обещанное «сообщим
+					// о снятии» никогда. Пробуем ещё, но не бесконечно.
+					if subRetry[r.TelegramID] && checkStale && sinceOK &&
+						(since <= torrentUnblockRetry || time.Since(a.bootAt) <= torrentUnblockRetry) {
+						retryLater = true
+					}
 				}
 				send = false
 			}
+		}
+		if retryLater {
+			// Пауза занята этой итерацией — вернуть, иначе следующий тик
+			// упрётся в неё и всё равно закроет запись.
+			if reserved {
+				a.thrMu.Lock()
+				delete(a.torUnbSeen, r.TelegramID)
+				a.thrMu.Unlock()
+			}
+			continue
 		}
 		// Пометка ставится в любом случае: иначе запись крутилась бы в очереди
 		// вечно. Решение уже принято выше.
@@ -697,25 +738,33 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 			}
 			continue
 		}
-		if send {
-			a.sendTorrentUnblock(ctx, r.TelegramID)
+		if send && !a.sendTorrentUnblock(ctx, r.TelegramID) {
+			// Telegram отказал: пауза бесполезна — на следующем тике записи
+			// уже не будет (пометка стоит), но снять её честнее, чем держать
+			// человека под тишиной ещё десять минут.
+			a.thrMu.Lock()
+			delete(a.torUnbSeen, r.TelegramID)
+			a.thrMu.Unlock()
+			a.log.Warn("торрент-блокер: уведомление о снятии не доставлено", "tg_id", r.TelegramID)
 		}
 	}
 }
 
 // sendTorrentUnblock шлёт «блокировка снята»: заданный админом текст с его
 // форматированием, иначе — стандартный из i18n.
-func (a *App) sendTorrentUnblock(ctx context.Context, chatID int64) {
+func (a *App) sendTorrentUnblock(ctx context.Context, chatID int64) bool {
 	tc := a.torrentCfg()
 	lang := a.lang(chatID)
+	ok := false
 	if strings.TrimSpace(tc.UnblockText) != "" {
 		var ents []models.MessageEntity
 		_ = json.Unmarshal(tc.UnblockEntities, &ents)
-		a.msg.SendEnt(ctx, chatID, tc.UnblockText, ents, [][]models.InlineKeyboardButton{backHomeRow(lang)})
+		ok = a.msg.SendEnt(ctx, chatID, tc.UnblockText, ents, [][]models.InlineKeyboardButton{backHomeRow(lang)}) != 0
 	} else {
-		a.notifyKB(ctx, chatID, i18n.T(lang, "rw.torrent_unblocked"), nil)
+		ok = a.notifyKB(ctx, chatID, i18n.T(lang, "rw.torrent_unblocked"), nil) != 0
 	}
-	a.log.Info("торрент-блокер: уведомление о разблокировке", "tg_id", chatID)
+	a.log.Info("торрент-блокер: уведомление о разблокировке", "tg_id", chatID, "ok", ok)
+	return ok
 }
 
 // torrentTill форматирует момент разблокировки; при пустом/кривом значении — «—».
@@ -763,21 +812,28 @@ func orDash(s string) string {
 // Второе значение — «ответ получен». Панель не различает «нет связи» и «такого
 // пользователя нет», поэтому оба случая честнее считать неизвестностью, чем
 // молча трактовать как «подписка активна».
-func (a *App) subDisabled(ctx context.Context, tgID int64) (disabled, known bool) {
+// subState — то же, но с ответом на вопрос «стоит ли переспрашивать».
+// retry=true означает, что ответа от панели не было вовсе; при retry=false
+// ответ получен (в том числе «такого пользователя нет») и переспрашивать
+// бессмысленно.
+func (a *App) subState(ctx context.Context, tgID int64) (disabled, known, retry bool) {
 	if tgID == 0 {
-		return false, false
+		return false, false, false
 	}
 	panel := a.panelClient()
 	if panel == nil {
 		// Панель не настроена — проверять нечем, но и врать нечему: подписками
 		// в этом режиме никто не управляет.
-		return false, true
+		return false, true, false
 	}
-	_, _, st, ok := panel.SubscriptionFull(ctx, tgID)
-	if !ok {
-		return false, false
+	_, _, st, found, err := panel.SubscriptionState(ctx, tgID)
+	if err != nil {
+		return false, false, true
 	}
-	return st == remnawave.StatusDisabled, true
+	if !found {
+		return false, false, false
+	}
+	return st == remnawave.StatusDisabled, true, false
 }
 
 // pruneStrikeMaps чистит служебные карты: они нужны только на время паузы

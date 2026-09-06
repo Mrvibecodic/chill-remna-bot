@@ -252,7 +252,7 @@ func (a *App) startHeleket(ctx context.Context, chatID int64) {
 	}
 	payURL, uuid, err := a.hlCreateInvoiceSnap(ctx, chatID, months, price, "", 0, a.saleSnapshot(s))
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "hl.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Heleket", err))
 		return
 	}
 	a.sendKB(ctx, chatID, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
@@ -278,7 +278,7 @@ func (a *App) onHLCheck(ctx context.Context, chatID int64, uuid string) {
 	}
 	inv, err := client.Info(ctx, uuid)
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "hl.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Heleket", err))
 		return
 	}
 	a.payLog(ctx, model.PayMethodHeleket, extID, chatID, "manual_check", "status=%s", inv.Status)

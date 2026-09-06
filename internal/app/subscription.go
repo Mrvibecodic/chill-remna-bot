@@ -34,7 +34,8 @@ func (a *App) displayNameByID(ctx context.Context, id int64) string {
 func (a *App) supportURL() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.botCfg != nil {
+	if a.botCfg != nil && validButtonURL(a.botCfg.Contact.SupportURL) {
+		// Битый адрес отвергает всё сообщение целиком — см. contactRows.
 		return a.botCfg.Contact.SupportURL
 	}
 	return ""

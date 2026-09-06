@@ -884,51 +884,10 @@ function cnPlatforms(){
 }
 function curPlatform(){var ps=cnPlatforms();for(var i=0;i<ps.length;i++)if(ps[i].key===CONNECT_KEY)return ps[i];return ps[0]||null;}
 function connectList(){var p=curPlatform();return (p&&p.apps)||[];}
-var APP_CONFIG_PATHS=['/assets/.app-config-v2.json','/assets/app-config.json','/assets/app-config-v2.json'];
-function subOrigin(u){try{return new URL(u).origin;}catch(e){return '';}}
-function locJS(m,lang){if(!m||typeof m!=='object')return '';return m[lang]||m.en||m.ru||(function(){for(var k in m){if(m[k])return m[k];}return '';})();}
-function substJS(t,sub,user){return String(t==null?'':t).split('{{SUBSCRIPTION_LINK}}').join(sub).split('{{USERNAME}}').join(user||'');}
-function deeplinkStd(scheme,sub){if(!scheme||!sub)return '';return scheme.charAt(scheme.length-1)==='='?(scheme+encodeURIComponent(sub)):(scheme+sub);}
-function parseConfig(j,sub,user,lang){
-  var res={ios:[],android:[]};
-  if(!j||!j.platforms)return res;
-  ['ios','android'].forEach(function(os){
-    var p=j.platforms[os];if(!p)return;
-    if(Array.isArray(p)){
-      p.forEach(function(ap){
-        var dto={name:ap.name,featured:!!ap.isFeatured,deeplink:deeplinkStd(ap.urlScheme,sub),add_desc:locJS(ap.addSubscriptionStep&&ap.addSubscriptionStep.description,lang),installs:[]};
-        ((ap.installationStep&&ap.installationStep.buttons)||[]).forEach(function(b){if(b.buttonLink)dto.installs.push({text:locJS(b.buttonText,lang),url:b.buttonLink});});
-        if(dto.deeplink||dto.installs.length)res[os].push(dto);
-      });
-    }else if(p.apps&&p.apps.length){
-      p.apps.forEach(function(ap){
-        var dto={name:ap.name,featured:!!ap.featured,deeplink:'',add_desc:'',installs:[]};
-        (ap.blocks||[]).forEach(function(bl){(bl.buttons||[]).forEach(function(b){
-          if(b.type==='subscriptionLink'){if(!dto.deeplink&&b.link){dto.deeplink=substJS(b.link,sub,user);if(!dto.add_desc)dto.add_desc=locJS(bl.description,lang);}}
-          else if(b.type==='external'){if(b.link)dto.installs.push({text:locJS(b.text,lang),url:substJS(b.link,sub,user)});}
-        });});
-        if(dto.deeplink||dto.installs.length)res[os].push(dto);
-      });
-    }
-    res[os].sort(function(a,b){return (b.featured?1:0)-(a.featured?1:0);});
-  });
-  return res;
-}
-async function fetchConfigClient(sub,user,lang){
-  var origin=subOrigin(sub);if(!origin)return null;
-  for(var i=0;i<APP_CONFIG_PATHS.length;i++){
-    try{
-      var r=await fetch(origin+APP_CONFIG_PATHS[i]);
-      if(!r.ok)continue;
-      var txt=await r.text();
-      if(!txt||txt.replace(/^\s+/,'').charAt(0)==='<')continue;
-      var j=JSON.parse(txt);
-      var res=parseConfig(j,sub,user,lang);
-      if(res.ios.length||res.android.length)return res;
-    }catch(e){}
-  }
-  return null;
-}
+// Клиентский разбор конфига приложений удалён: он дублировал серверный
+// (App.MiniConnect), никогда не вызывался, и всё равно не сработал бы —
+// это кросс-доменный запрос к странице подписки без CORS. Пустой ответ
+// сервера уже обработан внятно: «скопируйте ссылку и добавьте вручную».
 async function openConnect(){
   haptic('tap');skSimple();setBack(boot);
   try{

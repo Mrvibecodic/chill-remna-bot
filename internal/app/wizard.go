@@ -121,6 +121,12 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	key, val, _ := strings.Cut(cq.Data, ":")
 
 	switch key {
+	case "botlang":
+		// Смена языка уже настроенного бота — отдельный ключ: cbLang живёт
+		// только при активном мастере установки.
+		if isAdmin {
+			a.setBotLang(ctx, chatID, val)
+		}
 	case cbLang, cbDB, cbLoc, cbInst, cbAPIProt:
 		if !isAdmin {
 			return

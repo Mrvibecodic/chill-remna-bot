@@ -137,7 +137,7 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDT
 	_ = a.store.UpsertUser(ctx, tgID)
 	u, err := a.store.GetUser(ctx, tgID)
 	if err != nil {
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	if !a.p2pAllowed(u) {
 		a.notifyAdminUserRequest(ctx, tgID)
@@ -278,7 +278,7 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method, web_)
 	if err != nil {
 		a.payLog(ctx, method, "", tgID, "topup_error", "kopecks=%d: %v", kopecks, err)
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	return web.MiniActionDTO{OK: true, PayURL: payURL}
 }
@@ -302,7 +302,7 @@ func (a *App) MiniAutoPay(ctx context.Context, tgID int64) web.MiniAutoPayDTO {
 // MiniSetAutoPay включает/выключает автопродление из мини-аппа или кабинета.
 func (a *App) MiniSetAutoPay(ctx context.Context, tgID int64, on bool) web.MiniActionDTO {
 	if err := a.SetAutoPayEnabled(ctx, tgID, on); err != nil {
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	return web.MiniActionDTO{OK: true}
 }

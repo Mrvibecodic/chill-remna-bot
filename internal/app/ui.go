@@ -113,7 +113,22 @@ func (a *App) userHasSub(ctx context.Context, chatID int64) bool {
 	if panel == nil {
 		return false
 	}
-	_, _, has := panel.Subscription(ctx, chatID)
+	_, _, _, has, err := panel.SubscriptionState(ctx, chatID)
+	if err != nil {
+		// Панель молчит — это НЕ «подписки нет». Отрицательный ответ при
+		// аварии кэшировался на полминуты и переживал возвращение панели:
+		// платящий клиент полминуты видел «у вас нет подписок, купите».
+		// Отдаём последнее известное значение и ничего не запоминаем.
+		a.subMu.Lock()
+		last := false
+		if a.subCache != nil {
+			if e, ok := a.subCache[chatID]; ok {
+				last = e.has
+			}
+		}
+		a.subMu.Unlock()
+		return last
+	}
 
 	a.subMu.Lock()
 	if a.subCache == nil {
@@ -182,11 +197,14 @@ func (a *App) contactRows() [][]models.InlineKeyboardButton {
 		lang = a.botCfg.Language
 	}
 	a.mu.Unlock()
+	// Второй рубеж: адрес из конфига мог попасть туда до проверки при вводе
+	// (старая установка) или из импорта. Битая кнопка отвергает всё сообщение
+	// целиком, поэтому лучше показать меню без неё, чем не показать вовсе.
 	var row []models.InlineKeyboardButton
-	if g != "" {
+	if validButtonURL(g) {
 		row = append(row, models.InlineKeyboardButton{Text: i18n.T(lang, "btn.group"), URL: g})
 	}
-	if sup != "" {
+	if validButtonURL(sup) {
 		row = append(row, models.InlineKeyboardButton{Text: i18n.T(lang, "btn.support"), URL: sup})
 	}
 	if len(row) == 0 {
@@ -268,8 +286,36 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
+		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
 		homeRow(lang),
 	})
+}
+
+// showBotLang — выбор языка бота.
+//
+// До этого язык задавался только на первом шаге первичного мастера, и сменить
+// его после установки было нельзя вообще ничем: переустановка стартует сразу с
+// выбора базы, а обработчик языка живёт только при активном мастере.
+func (a *App) showBotLang(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, i18n.T(lang, "lang.title"), [][]models.InlineKeyboardButton{
+		{btn("🇷🇺 "+i18n.T(lang, "lang.name_ru"), "botlang:ru"), btn("🇬🇧 "+i18n.T(lang, "lang.name_en"), "botlang:en")},
+		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+	})
+}
+
+// setBotLang меняет язык бота и сразу перерисовывает экран уже на новом.
+func (a *App) setBotLang(ctx context.Context, chatID int64, code string) {
+	if code != "ru" && code != "en" {
+		return
+	}
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.Language = code
+	}
+	a.mu.Unlock()
+	_ = a.saveBotConfig(ctx)
+	a.showBotLang(ctx, chatID)
 }
 
 func (a *App) showPay(ctx context.Context, chatID int64) {
@@ -688,6 +734,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "iface":
 		if isAdmin {
 			a.showIface(ctx, chatID)
+		}
+	case "botlang":
+		if isAdmin {
+			a.showBotLang(ctx, chatID)
 		}
 	case "pay":
 		if isAdmin {

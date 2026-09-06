@@ -967,11 +967,21 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 	var url, expireAt, status string
 	ok := false
+	var perr error
 	if panel != nil {
-		url, expireAt, status, ok = panel.SubscriptionFull(ctx, chatID)
+		url, expireAt, status, ok, perr = panel.SubscriptionState(ctx, chatID)
 		if ok {
 			url = a.rewriteSub(url)
 		}
+	}
+	if perr != nil {
+		// Панель недоступна — это НЕ «подписки нет». Раньше платящему клиенту
+		// во время аварии показывали «у вас нет активных подписок, нажмите
+		// Купить», и он рисковал оплатить второй раз.
+		a.log.Warn("экран подписки: панель недоступна", "err", perr, "user", chatID)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.unavailable"),
+			[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")}, home})
+		return
 	}
 	if !ok {
 		rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}}
@@ -994,6 +1004,21 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		}
 		rows = append(rows, home)
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "subs.blocked"), rows)
+		return
+	}
+	// Истёкшая подписка и исчерпанный трафик раньше попадали в общую ветку
+	// «активна»: человек видел «активна до <дата в прошлом>» и нерабочую
+	// ссылку, а единственной кнопкой был сброс устройств — её и нажимали,
+	// пытаясь починить, и теряли настроенные клиенты. Кнопки «Продлить» на
+	// этом экране не было вообще ни при каком статусе.
+	if key := subDeadKey(status, expireAt); key != "" {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.renew"), "menu:renew")})
+		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
+			rows = append(rows, row)
+		}
+		rows = append(rows, home)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription,
+			i18n.T(lang, key, formatExpire(expireAt, lang)), rows)
 		return
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
@@ -1062,4 +1087,22 @@ func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Cl
 		val += " / " + strconv.Itoa(info.Limit)
 	}
 	return "\n\n" + i18n.T(a.lang(chatID), "sub.devices", val)
+}
+
+// subDeadKey — подписка не работает: какой текст показать. Пустая строка —
+// подписка живая.
+//
+// Статус проверяется первым, но и дата не лишняя: панель могла ещё не
+// пересчитать статус, а срок уже в прошлом.
+func subDeadKey(status, expireAt string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case remnawave.StatusExpired:
+		return "subs.expired"
+	case remnawave.StatusLimited:
+		return "subs.limited"
+	}
+	if t, err := time.Parse(time.RFC3339, expireAt); err == nil && !t.After(time.Now()) {
+		return "subs.expired"
+	}
+	return ""
 }

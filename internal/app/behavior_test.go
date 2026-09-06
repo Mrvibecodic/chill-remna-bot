@@ -39,6 +39,12 @@ type fakeMsg struct {
 	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
 	refunds   []string
 	refundErr error
+	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
+	// вызывающий отличает доставку от неудачи.
+	kbFail bool
+	// sendDelay — искусственная задержка отправки: так проверяется поведение
+	// при одновременных доставках.
+	sendDelay time.Duration
 	// starTx — история звёздных операций, которую отдаёт GetStarTransactions.
 	starTx []models.StarTransaction
 	// sentDocIDs — file_id (или имя файла при загрузке) документов, ушедших
@@ -104,7 +110,11 @@ func hasCB(list []string, want string) bool {
 func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
 func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
-	return f.add(text)
+	id := f.add(text)
+	if f.kbFail {
+		return 0
+	}
+	return id
 }
 func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
 	return f.add(text)
@@ -221,6 +231,9 @@ func (f *fakeMsg) Download(_ context.Context, fileID string) ([]byte, error) {
 	return data, nil
 }
 func (f *fakeMsg) add(s string) int {
+	if d := f.sendDelay; d > 0 {
+		time.Sleep(d)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.texts = append(f.texts, s)
@@ -1596,6 +1609,7 @@ func newTestApp(t *testing.T) (*App, *fakeMsg, *fakeStore) {
 		wiz: map[int64]*wizard{},
 	}
 	a.newStore = func(kind, dsn string) (storage.Storage, error) { return fs, nil }
+	a.bootAt = time.Now()
 	return a, fm, fs
 }
 

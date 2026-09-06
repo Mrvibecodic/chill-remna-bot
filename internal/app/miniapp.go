@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,7 +235,7 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 		return web.MiniActionDTO{Error: "триал недоступен"}
 	}
 	if err != nil {
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
 }
@@ -334,7 +335,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if method != model.PayMethodBalance {
 		payURL, invoice, err := a.miniPayURL(ctx, tgID, s, method, web_)
 		if err != nil {
-			return web.MiniActionDTO{Error: err.Error()}
+			return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 		}
 		return web.MiniActionDTO{OK: true, PayURL: payURL, Invoice: invoice}
 	}
@@ -349,13 +350,24 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	}
+	// Запросы веб-сервера конкурентны, в отличие от чата, где апдейты идут по
+	// очереди. Ключ сделки ниже строится из конца срока, ПРОЧИТАННОГО ДО
+	// списания, — а он сдвигается каждой выдачей: второй запрос, успевший
+	// прочитать его после первой выдачи, получал другой ключ и списывал
+	// деньги во второй раз. Замок закрывает окно, а отметка ниже — двойной
+	// тап с паузой, когда ключ уже заведомо разошёлся.
+	buyKey := strconv.FormatInt(tgID, 10) + "|" + s.planCode() + "|" + strconv.Itoa(months)
+	clk := &a.checkoutLk[extLockIndex(buyKey)]
+	clk.Lock()
+	defer clk.Unlock()
+	if a.boughtJustNow(buyKey) {
+		a.payLog(ctx, "balance", "", tgID, "duplicate", "повторное нажатие: покупка только что выполнена")
+		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.just_bought")}
+	}
+
 	// Ключ сделки против двойного нажатия. Намерения покупки здесь нет (счёт
 	// из мини-аппа намеренно не перебивает выбор в чате), поэтому момент
-	// различается концом срока ДО покупки: он сдвигается каждой выдачей, а два
-	// одновременных запроса видят один и тот же.
-	//
-	// Запросы веб-сервера конкурентны, в отличие от чата, где апдейты идут по
-	// очереди, — здесь двойное списание воспроизводится уверенно.
+	// различается концом срока ДО покупки.
 	discr := "none"
 	if u, uerr := a.store.GetUser(ctx, tgID); uerr == nil && u != nil {
 		discr = "exp:" + u.SubExpireAt
@@ -372,7 +384,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	snap := a.saleSnapshot(s)
 	deducted, err := a.store.DeductBalance(ctx, tgID, kopecks)
 	if err != nil {
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	if !deducted {
 		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
@@ -384,9 +396,37 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 			return web.MiniActionDTO{Error: "покупка уже выполнена"}
 		}
 		a.refundBalance(tgID, kopecks, err)
-		return web.MiniActionDTO{Error: err.Error()}
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
+	a.markBought(buyKey)
 	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
+}
+
+// buyCooldown — сколько после выдачи повтор той же покупки считается двойным
+// нажатием. Полминуты: за это время человек не успевает осознанно захотеть
+// второй такой же период, а палец по кнопке попадает дважды легко.
+const buyCooldown = 30 * time.Second
+
+func (a *App) boughtJustNow(key string) bool {
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	t, ok := a.recentBuy[key]
+	return ok && time.Since(t) <= buyCooldown
+}
+
+func (a *App) markBought(key string) {
+	now := time.Now()
+	a.thrMu.Lock()
+	defer a.thrMu.Unlock()
+	if a.recentBuy == nil {
+		a.recentBuy = map[string]time.Time{}
+	}
+	for k, t := range a.recentBuy {
+		if now.Sub(t) > buyCooldown {
+			delete(a.recentBuy, k)
+		}
+	}
+	a.recentBuy[key] = now
 }
 
 // miniLegalDocs — документы сервиса для мини-аппа и кабинета: тот же состав,

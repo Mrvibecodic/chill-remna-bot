@@ -163,6 +163,7 @@ func (a *App) showRenew(ctx context.Context, chatID int64) {
 	code := planCodeOf(snap)
 	if snap == nil || code == "" {
 		// Покупок со снимком не было — обычная витрина.
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "renew.no_history"))
 		a.showPlans(ctx, chatID)
 		return
 	}

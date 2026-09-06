@@ -1116,7 +1116,50 @@ func TestTorrentUnblock_SilentWhenPanelUnknown(t *testing.T) {
 	stub.attach(a)
 	rwDeliver(t, a, torrentBody)
 
-	// Панель «пропала»: пользователя в ней нет.
+	// Панель молчит (ответа нет вовсе).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+
+	fm.texts = nil
+	for i := range fs.torrents {
+		fs.torrents[i].WillUnblockAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	}
+	a.torrentUnblockOnce(ctxBG())
+
+	if countContains(fm.texts, "Блокировка снята") != 0 {
+		t.Fatalf("статус неизвестен — молчим: %v", fm.texts)
+	}
+	// Молчание панели — не решение: запись остаётся в очереди, иначе
+	// обещанное «сообщим о снятии» не придёт никогда.
+	if fs.torrents[0].UnblockNotified {
+		t.Fatalf("запись закрыта, хотя панель не ответила — уведомление потеряно")
+	}
+
+	// Панель ответила на следующем тике — сообщение приходит.
+	stub.attach(a)
+	a.thrMu.Lock()
+	a.torUnbSeen = nil
+	a.thrMu.Unlock()
+	a.torrentUnblockOnce(ctxBG())
+	if countContains(fm.texts, "Блокировка снята") != 1 {
+		t.Fatalf("панель ответила — сообщение должно прийти: %v", fm.texts)
+	}
+	if !fs.torrents[0].UnblockNotified {
+		t.Fatalf("запись не закрылась после отправки")
+	}
+}
+
+// Ответ «такого пользователя в панели нет» — окончательный: переспрашивать
+// его тридцать тиков подряд значит впустую дёргать панель.
+func TestTorrentUnblock_UnknownUserClosesAtOnce(t *testing.T) {
+	a, fm, fs := torrentApp(t)
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+	rwDeliver(t, a, torrentBody)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"response":[]}`))
@@ -1131,10 +1174,41 @@ func TestTorrentUnblock_SilentWhenPanelUnknown(t *testing.T) {
 	a.torrentUnblockOnce(ctxBG())
 
 	if countContains(fm.texts, "Блокировка снята") != 0 {
+		t.Fatalf("пользователя в панели нет — молчим: %v", fm.texts)
+	}
+	if !fs.torrents[0].UnblockNotified {
+		t.Fatalf("окончательный ответ панели должен закрывать запись")
+	}
+}
+
+// Панель молчит долго: запись всё-таки закрывается, иначе тикер крутит её
+// сутки и каждые 30 секунд дёргает лежащую панель.
+func TestTorrentUnblock_GivesUpAfterRetryWindow(t *testing.T) {
+	a, fm, fs := torrentApp(t)
+	stub := newTorrentPanelStub(t)
+	stub.attach(a)
+	rwDeliver(t, a, torrentBody)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+
+	fm.texts = nil
+	for i := range fs.torrents {
+		fs.torrents[i].WillUnblockAt = time.Now().UTC().
+			Add(-torrentUnblockRetry - time.Minute).Format(time.RFC3339)
+	}
+	// Бот работает давно: запас «первые минуты после старта» не действует.
+	a.bootAt = time.Now().Add(-24 * time.Hour)
+	a.torrentUnblockOnce(ctxBG())
+
+	if countContains(fm.texts, "Блокировка снята") != 0 {
 		t.Fatalf("статус неизвестен — молчим: %v", fm.texts)
 	}
 	if !fs.torrents[0].UnblockNotified {
-		t.Fatalf("запись должна закрыться, иначе тикер крутит её вечно")
+		t.Fatalf("после окна ожидания запись обязана закрыться")
 	}
 }
 
@@ -1184,6 +1258,16 @@ func TestTorrentWebhook_NoUnblockTimeNoPromise(t *testing.T) {
 	}
 	if !fs.torrents[0].UnblockNotified {
 		t.Fatalf("без срока запись должна быть закрыта сразу: %+v", fs.torrents[0])
+	}
+	// Прочерк вместо срока в тексте ДЛЯ ЧЕЛОВЕКА — не сообщение, а недоделка.
+	// В отчёте админу поле с прочерком читается нормально: там подпись рядом.
+	for _, tx := range fm.texts {
+		if !strings.Contains(tx, "Обнаружен торрент-трафик") {
+			continue
+		}
+		if strings.Contains(tx, "заблокирован на —") || strings.Contains(tx, "(до —)") {
+			t.Fatalf("срок неизвестен, а напечатан прочерком: %q", tx)
+		}
 	}
 
 	fm.texts = nil

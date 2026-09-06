@@ -326,7 +326,14 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.hl_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:hl")})
 	}
 	if len(rows) == 0 {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "topup.no_methods"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		// Админу — что включить, покупателю — куда писать. Раньше все видели
+		// админскую инструкцию «Включите ЮKassa или CryptoBot», хотя такой
+		// кнопки у них нет.
+		key := "topup.unavailable"
+		if chatID == a.cfg.AdminID {
+			key = "topup.no_methods"
+		}
+		a.sendPayKB(ctx, chatID, i18n.T(lang, key), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
 	rows = append(rows, navBack(lang, "menu:topup"))
@@ -353,7 +360,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	rub := kopecksToRub(k)
 	payURL, checkExtID, err := a.topUpCreate(ctx, chatID, k, method, false)
 	if err != nil {
-		a.sendHome(ctx, chatID, err.Error())
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "счёт на пополнение", err))
 		return
 	}
 	checkCB := "ykc:" + checkExtID
@@ -387,7 +394,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	lang := a.lang(chatID)
 	// Последний рубеж: сюда приходят и чат, и мини-апп, и веб-кабинет.
 	if !a.topUpEnabled() {
-		return "", "", errors.New(i18n.T(lang, "topup.disabled"))
+		return "", "", errUserText(i18n.T(lang, "topup.disabled"))
 	}
 	rub := kopecksToRub(k)
 	if a.store != nil {
@@ -397,7 +404,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	case "yk":
 		client := a.ykClient()
 		if client == nil {
-			return "", "", errors.New(i18n.T(lang, "yk.not_configured"))
+			return "", "", errUserText(i18n.T(lang, "yk.not_configured"))
 		}
 		ret := a.ykConfig().ReturnURL
 		if ret == "" {
@@ -406,7 +413,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		pay, e := client.CreatePayment(ctx, rub, "RUB", i18n.T(lang, "topup.invoice_desc"), ret, chatID, 0)
 		if e != nil {
 			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "topup kopecks=%d: %v", k, e)
-			return "", "", errors.New(i18n.T(lang, "yk.fail", e.Error()))
+			return "", "", fmt.Errorf("шлюз ЮKassa: счёт на пополнение: %w", e)
 		}
 		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "topup kopecks=%d", k)
 		if a.store != nil {
@@ -416,7 +423,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	case "cb":
 		client := a.cbClient()
 		if client == nil {
-			return "", "", errors.New(i18n.T(lang, "cb.not_configured"))
+			return "", "", errUserText(i18n.T(lang, "cb.not_configured"))
 		}
 		// Баланс ведётся в рублях, поэтому счёт на пополнение всегда в RUB.
 		// Описание задаём явно: по умолчанию клиент пишет «VPN subscription
@@ -424,7 +431,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		inv, e := client.CreateInvoice(ctx, rub, "RUB", a.cbConfig().Asset, i18n.T(lang, "topup.invoice_desc"), chatID, 0)
 		if e != nil {
 			a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "topup kopecks=%d: %v", k, e)
-			return "", "", errors.New(i18n.T(lang, "cb.fail", e.Error()))
+			return "", "", fmt.Errorf("шлюз CryptoBot: счёт на пополнение: %w", e)
 		}
 		extID := "cb:" + strconv.FormatInt(inv.InvoiceID, 10)
 		a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "invoice_created", "topup kopecks=%d", k)
@@ -443,15 +450,15 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		return payURL, strconv.FormatInt(inv.InvoiceID, 10), nil
 	case "hl":
 		if a.hlClient() == nil {
-			return "", "", errors.New(i18n.T(lang, "hl.not_configured"))
+			return "", "", errUserText(i18n.T(lang, "hl.not_configured"))
 		}
 		payURL, uuid, e := a.hlCreateInvoice(ctx, chatID, 0, rub, purposeTopUp, k)
 		if e != nil {
-			return "", "", errors.New(i18n.T(lang, "hl.fail", e.Error()))
+			return "", "", fmt.Errorf("шлюз Heleket: счёт на пополнение: %w", e)
 		}
 		return payURL, uuid, nil
 	}
-	return "", "", errors.New(i18n.T(lang, "topup.no_methods"))
+	return "", "", errUserText(i18n.T(lang, "topup.unavailable"))
 }
 
 func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, method, amount, extID string) error {
@@ -589,7 +596,14 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	kopecks, ok := rubToKopecks(priceStr)
 	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
 	// иначе «5 $» молча списались бы как «5 ₽».
-	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
+	if !a.saleGridCurrency(s) {
+		// Отдельная ветка: раньше сюда попадало «Тарифы пока не настроены» —
+		// человеку, стоящему на карточке настроенного тарифа.
+		a.sendHome(ctx, chatID, i18n.T(lang, "buy.currency_mismatch",
+			curSymbol(a.saleCurrency(s)), curSymbol(a.pricing().Currency)))
+		return
+	}
+	if priceStr == "" || !ok || kopecks <= 0 {
 		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
 		return
 	}
@@ -616,7 +630,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	snap := a.saleSnapshot(s)
 	deducted, err := a.store.DeductBalance(ctx, chatID, kopecks)
 	if err != nil {
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "списание с баланса", err))
 		return
 	}
 	if deducted {
@@ -642,7 +656,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 			return
 		}
 		a.refundBalance(chatID, kopecks, err)
-		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", err.Error()))
+		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", a.clientErr(ctx, chatID, "оплата с баланса", err)))
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)

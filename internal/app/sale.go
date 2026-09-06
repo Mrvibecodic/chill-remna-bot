@@ -121,6 +121,7 @@ func (a *App) saleOrAsk(ctx context.Context, chatID int64) *sale {
 		return nil
 	}
 	if s == nil {
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.choice_expired"))
 		a.showPlans(ctx, chatID)
 		return nil
 	}

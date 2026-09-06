@@ -98,7 +98,7 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	desc := i18n.T(lang, "yk.invoice_desc", months)
 	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save, a.saleSnapshot(s))
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
 		return
 	}
 	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur))
@@ -157,7 +157,7 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	}
 	pay, err := client.GetPayment(ctx, payID)
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
 		return
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, payID, chatID, "manual_check", "status=%s paid=%v", pay.Status, pay.Paid)
@@ -213,7 +213,7 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
 	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID, a.pendingSnapshot(ctx, payID))
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
 		return
 	}
 	a.saveAutoPayFromPayment(ctx, payChat, months, pay, a.pendingSnapshot(ctx, payID))

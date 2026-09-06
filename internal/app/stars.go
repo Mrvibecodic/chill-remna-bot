@@ -174,7 +174,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		}
 		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "finalize_error", "%v", err)
 		a.starsOfferRefund(ctx, chatID, sp.TelegramPaymentChargeID, sp.TotalAmount)
-		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", err.Error()))
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", a.clientErr(ctx, chatID, "выдача по звёздам", err)))
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)

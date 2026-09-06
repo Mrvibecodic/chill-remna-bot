@@ -338,7 +338,7 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		// «кода не существует» (попытка считается) от «тариф закрыт» (не
 		// считается) — и лимит сам становился оракулом существования тарифа.
 		a.log.Warn("карточка тарифа: лимит попыток", "user", chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	// Кривой код — тот же единый отказ, а не витрина. Свои кнопки бот всегда
@@ -349,7 +349,7 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 	// неотличимы, иначе лимит остаётся оракулом.
 	if !model.ValidPlanCode(code) {
 		a.planLinkFail(chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	p, err := a.planByCode(ctx, code)
@@ -367,14 +367,14 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 	// считаются в лимит.
 	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
 		a.planLinkFail(chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	// Существующий тариф, закрытый покупателю, — обычно устаревшая кнопка
 	// витрины, а не перебор: отказ БЕЗ счётчика, иначе пять нажатий на старое
 	// сообщение молча выключали бы все кнопки тарифов на окно троттлинга.
 	if !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	a.showPlanOfferView(ctx, chatID, p, offerView{backToList: true})
@@ -391,7 +391,7 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	if a.planLinkThrottled(chatID) || a.planLinkGlobalBlocked(ctx, chatID) {
 		// См. onPlanView: единый ответ, иначе лимит выдаёт существование кода.
 		a.log.Warn("кнопка тарифа: лимит попыток", "user", chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	code, moStr, _ := strings.Cut(val, ":")
@@ -400,7 +400,7 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 		// См. onPlanView: единый отказ вместо витрины, иначе по нему читается
 		// состояние счётчика, а по нему — существование пробного кода.
 		a.planLinkFail(chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	p, perr := a.planByCode(ctx, code)
@@ -423,12 +423,12 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 	// (см. onPlanView).
 	if p == nil {
 		a.planLinkFail(chatID)
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	d := p.Duration(mo)
 	if !p.Enabled || !a.planAccessibleFor(ctx, p, chatID) || d == nil || d.Base == "" {
-		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
 	if a.trialLockNotice(ctx, chatID) {

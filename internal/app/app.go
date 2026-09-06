@@ -132,6 +132,20 @@ type App struct {
 	torStrikeSeen map[int64]time.Time
 	torStrikeFail map[int64]time.Time
 	planLinkFails map[int64][]time.Time
+	// rwSeen — хэши уже обработанных тел вебхуков панели: она переотправляет
+	// событие, не дождавшись ответа, и без этого повтор давал второе
+	// сообщение человеку.
+	// bootAt — когда поднялся этот процесс. Нужен там, где бюджет ожидания
+	// отсчитывается от события: после долгого простоя все накопленные записи
+	// оказались бы «просроченными» в первую же секунду.
+	bootAt time.Time
+
+	rwSeen    map[string]time.Time
+	rwSweptAt time.Time
+	// remindFails — сколько раз подряд не удалось доставить напоминание по
+	// ключу «человек:окно». Без потолка заблокировавший бота крутился бы в
+	// очереди до самого истечения подписки.
+	remindFails map[string]remindFail
 	// planLinkGlobalFails — тот же счётчик, но на весь бот. Лимит на человека
 	// обходится новым аккаунтом: регистрация бесплатна, а перебор кодов
 	// параллелится линейно по числу аккаунтов.
@@ -168,6 +182,20 @@ type App struct {
 	// конвертировался бы дважды. Берётся ПОСЛЕ finalizeLk, порядок строгий.
 	finalizeUserLk [finalizeLockShards]sync.Mutex
 
+	// checkoutLk сериализует оплату с баланса из мини-аппа по «человек+тариф+
+	// срок». Запросы веб-сервера идут параллельно (в чате апдейты по
+	// очереди), а ключ сделки там строится из конца срока, прочитанного ДО
+	// списания: второй запрос, прочитавший его уже после первой выдачи,
+	// получал другой ключ и списывал деньги ещё раз.
+	//
+	// Отдельный набор замков, а НЕ finalizeUserLk: тот берёт finalizePurchase
+	// внутри, и повторный захват здесь означал бы взаимную блокировку.
+	checkoutLk [finalizeLockShards]sync.Mutex
+	// recentBuy — когда по этому ключу только что прошла покупка. Замок
+	// защищает от одновременности, а это — от двойного тапа с паузой:
+	// после выдачи конец срока уже другой, и ключ сделки не совпадёт.
+	recentBuy map[string]time.Time
+
 	// p2pRotate — очередь реквизитов перевода. В памяти, а не в конфиге:
 	// см. nextP2PCardIdx.
 	p2pRotate atomic.Uint64
@@ -181,6 +209,14 @@ type App struct {
 
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
+	// connectFail — когда в последний раз не вышло достать конфиг приложений,
+	// по ключу «хост|ссылка подписки». Без этого каждое нажатие «Подключить»
+	// на лежащей странице заново ждало обхода всех путей.
+	//
+	// Ключ включает ССЫЛКУ, а не только хост: конфиг отдаётся по сессионной
+	// куке конкретной подписки, и один человек с отозванной ссылкой не должен
+	// на минуту выключать «Подключить» всем остальным.
+	connectFail map[string]time.Time
 	// panelCfgs — разобранные конфиги страницы подписки из панели (3.0.0+).
 	panelCfgs *panelCfgCache
 	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
@@ -230,6 +266,7 @@ type subCacheEntry struct {
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
 	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{},
+		bootAt: time.Now(),
 		screen: map[int64][]int{}, kbSet: map[int64]bool{}, editTarget: map[int64]int{}, screenSection: map[int64]string{}}
 }
 
@@ -674,6 +711,22 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		return
 	}
 	if !isAdmin {
+		// Обычный человек прислал текст, которого никто не ждёт: раньше он
+		// исчезал молча. Чаще всего это ответ на просьбу ввести что-то, чьё
+		// ожидание не пережило перезапуск бота.
+		//
+		// Но не в группе: там бот отвечал бы на каждое сообщение чата.
+		if m.Chat.Type != models.ChatTypePrivate {
+			return
+		}
+		// Чек об оплате бот ждёт КАРТИНКОЙ или файлом (см. handlePhoto), а
+		// человек часто пишет текстом «оплатил, операция 12345». Отвечать ему
+		// «я ничего не жду» посреди оплаты — худшее, что можно сделать.
+		if a.getUI(chatID).awaitShotReq != 0 {
+			a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "p2p.send_screenshot"))
+			return
+		}
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "input.not_expected"))
 		return
 	}
 
@@ -1252,9 +1305,12 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
 }
 
-func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+// notifyKB возвращает id отправленного сообщения; 0 — доставить не удалось.
+// Вызывающему это важно там, где факт доставки что-то закрывает (окно
+// напоминания).
+func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
 	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
-	a.msg.SendKB(ctx, chatID, a.applyPremium(text), withClose)
+	return a.msg.SendKB(ctx, chatID, a.applyPremium(text), withClose)
 }
 
 func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {

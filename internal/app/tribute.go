@@ -36,6 +36,7 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 	// Tribute продаёт только «Базовый», и счёт живёт на стороне Tribute —
 	// вторая точка гейта здесь, при выдаче ссылки.
 	if !a.baseSaleAllowed(ctx, chatID) {
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"))
 		a.showPlans(ctx, chatID)
 		return
 	}

@@ -100,32 +100,82 @@ func (a *App) payReferralBonus(ctx context.Context, telegramID int64) {
 		return
 	}
 	ref := u.ReferredBy
-	// One-time bonus to the referrer.
+	// Отметка «выплачено» ставится ТОЛЬКО после удачного начисления.
+	//
+	// Раньше она стояла безусловно, а начисление честно отказывает, когда у
+	// пригласившего нет учётки в панели или панель недоступна. У только что
+	// зарегистрировавшегося учётки заведомо нет — значит бонус днями сгорал
+	// почти всегда, и второй попытки не было никогда: повторный проход
+	// выходит по этой самой отметке. С промокодами такое уже сделано
+	// правильно — там закрепление откатывается (см. promo.go).
+	//
+	// Решает бонус ПРИГЛАСИВШЕГО: он главный, и повтор не должен задваивать
+	// его. Неудачу по бонусу приглашённого пишем в журнал.
+	//
+	// Флаг «выплачено» в базе один на обе выплаты, поэтому и повтор возможен
+	// только целиком: если бонус пригласившего не прошёл, приглашённому не
+	// платим тоже — иначе следующая покупка начислила бы ему второй раз (и
+	// третий, и четвёртый: отметка так и не ставится).
+	//
+	// Но повтор бывает не всегда. В режиме «бонус по ссылке» (OnFirstPay=false)
+	// сюда заходят ровно один раз — из bindReferrer при первом /start, и
+	// второго захода не будет никогда. Откладывать там значит потерять
+	// приветственный бонус насовсем, поэтому в этом режиме платим и метим
+	// несмотря на неудачу у пригласившего.
+	retryLater := cfg.OnFirstPay
+	granted := true
 	if cfg.BonusValue > 0 {
 		switch cfg.BonusKind {
 		case model.ReferralBonusDays:
-			if ok, _ := a.addReferralDays(ctx, ref, cfg.BonusValue); ok {
+			ok, found := a.addReferralDays(ctx, ref, cfg.BonusValue)
+			switch {
+			case ok:
 				a.notify(ctx, ref, i18n.T(a.lang(ref), "ref.bonus_days", cfg.BonusValue))
+			case !found:
+				// Учётки пригласившего на панели нет — начислять дни некуда, и
+				// само это не изменится (человек раздаёт ссылки, а подписку не
+				// покупал). Повторять поход в панель на каждой покупке
+				// бессмысленно, а держать из-за него приветственный бонус
+				// приглашённого — вредно: он не придёт никогда.
+				granted = false
+				retryLater = false
+				a.log.Warn("реферальный бонус днями некуда начислить: пригласившего нет на панели", "ref", ref, "invitee", telegramID)
+			default:
+				granted = false
+				a.log.Warn("реферальный бонус днями не начислен, повторим позже", "ref", ref, "invitee", telegramID)
 			}
 		default:
 			if err := a.store.AddBalance(ctx, ref, int64(cfg.BonusValue)*100); err == nil {
 				_ = a.store.AddRefEarned(ctx, ref, int64(cfg.BonusValue)*100)
 				a.notify(ctx, ref, i18n.T(a.lang(ref), "ref.bonus_balance", cfg.BonusValue))
+			} else {
+				granted = false
+				a.log.Warn("реферальный бонус на баланс не начислен, повторим позже", "err", err, "ref", ref)
 			}
 		}
 	}
 	// One-time welcome bonus to the invited friend (paid together, once).
-	if cfg.InviteeValue > 0 {
+	if (granted || !retryLater) && cfg.InviteeValue > 0 {
 		switch cfg.InviteeKind {
 		case model.ReferralBonusDays:
 			if ok, _ := a.addReferralDays(ctx, telegramID, cfg.InviteeValue); ok {
 				a.notify(ctx, telegramID, i18n.T(a.lang(telegramID), "ref.invitee_days", cfg.InviteeValue))
+			} else {
+				a.log.Warn("приветственный бонус днями не начислен", "invitee", telegramID)
 			}
 		case model.ReferralBonusBalance:
 			if err := a.store.AddBalance(ctx, telegramID, int64(cfg.InviteeValue)*100); err == nil {
 				a.notify(ctx, telegramID, i18n.T(a.lang(telegramID), "ref.invitee_balance", cfg.InviteeValue))
+			} else {
+				a.log.Warn("приветственный бонус на баланс не начислен", "err", err, "invitee", telegramID)
 			}
 		}
+	}
+	if !granted && retryLater {
+		return
+	}
+	if !granted {
+		a.log.Warn("бонус пригласившему потерян: повторить негде", "ref", ref, "invitee", telegramID)
 	}
 	_ = a.store.SetRefBonusPaid(ctx, telegramID)
 }

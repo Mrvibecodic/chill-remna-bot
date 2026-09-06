@@ -247,6 +247,7 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 		// и не влезает в колонку), либо нажатие на старом экране по сроку,
 		// который админ снял с продажи, либо тариф, недоступный этому
 		// покупателю (вторая точка гейта — витрина покажет отказ сама).
+		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"))
 		a.showPlans(ctx, chatID)
 		return
 	}
@@ -330,6 +331,15 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		payBtn := []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_pay", kopecksToRub(k)), "method:bal")}
 		rows = append([][]models.InlineKeyboardButton{payBtn}, rows...)
 	}
+	if len(rows) == 0 && !gridCur {
+		// Настоящая причина: тариф в одной валюте, а оплата настроена в
+		// другой. Раньше здесь показывалось «способы оплаты ещё не настроены»
+		// — при настроенных способах.
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.currency_mismatch",
+			curSymbol(a.saleCurrency(s)), curSymbol(a.pricing().Currency)),
+			[][]models.InlineKeyboardButton{homeRow(lang)})
+		return
+	}
 	if len(rows) == 0 {
 		empty := [][]models.InlineKeyboardButton{}
 		if a.topUpEnabled() {
@@ -402,7 +412,7 @@ func (a *App) startP2P(ctx context.Context, chatID int64) {
 	_ = a.store.UpsertUser(ctx, chatID)
 	u, err := a.store.GetUser(ctx, chatID)
 	if err != nil {
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
 		return
 	}
 	if !a.p2pAllowed(u) {
@@ -466,7 +476,7 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 	lang := a.lang(chatID)
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, chatID, s)
 	if err != nil {
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
 		return
 	}
 	idStr := strconv.FormatInt(reqID, 10)
@@ -704,7 +714,7 @@ func (a *App) submitP2PReceipt(ctx context.Context, m *models.Message, fileID st
 	req.Screenshot = fileID
 	req.Status = model.P2PSubmitted
 	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
-		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
 		return
 	}
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), chatID, "screenshot_submitted", "ожидает проверки админом")
@@ -1699,6 +1709,13 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showTrialAdmin(ctx, chatID)
+	default:
+		// Отличить «админ просто написал боту» от «ожидание не пережило
+		// перезапуск» здесь нечем: ожидание живёт в памяти процесса, и после
+		// перезапуска adminInput пуст ровно так же. Поэтому один честный
+		// текст на оба случая: раньше сообщение просто удалялось и человек не
+		// получал НИЧЕГО — ни ошибки, ни подсказки.
+		a.sendHome(ctx, chatID, i18n.T(lang, "admin.input_lost"))
 	}
 }
 

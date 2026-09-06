@@ -128,7 +128,6 @@ func TestHeleketScreenPlaceholders(t *testing.T) {
 		bad(t, "hl.probe_ok", i18n.T(lang, "hl.probe_ok", 12, "USDT, TRX"))
 		bad(t, "hl.probe_fail", i18n.T(lang, "hl.probe_fail", "boom"))
 		bad(t, "hl.pay_prompt", i18n.T(lang, "hl.pay_prompt", 3, "597 ₽"))
-		bad(t, "hl.fail", i18n.T(lang, "hl.fail", "boom"))
 		bad(t, "method.hl_btn", i18n.T(lang, "method.hl_btn", "199 ₽"))
 		bad(t, "hl.admin_underpaid", i18n.T(lang, "hl.admin_underpaid", "u-1", "199.00 RUB"))
 		bad(t, "hl.admin_locked", i18n.T(lang, "hl.admin_locked", "u-1", "199.00 RUB"))

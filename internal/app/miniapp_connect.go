@@ -20,6 +20,11 @@ import (
 // appConfigTTL bounds how long the subscription page's app-config is cached.
 const appConfigTTL = 5 * time.Minute
 
+// appConfigFailTTL — на сколько запоминается неудача. Короче appConfigTTL:
+// страница подписки могла лечь на минуту, и заставлять человека ждать
+// починки пять минут незачем.
+const appConfigFailTTL = time.Minute
+
 // connectUA is a browser-like User-Agent so a WAF/Cloudflare in front of the
 // subscription page does not reject the fetch as a bot.
 const connectUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -313,9 +318,23 @@ func (a *App) tryFetchParse(ctx context.Context, client *http.Client, base, path
 func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectCacheEntry {
 	a.connectMu.Lock()
 	ce := a.connectCache
+	failAt := a.connectFail[base+"|"+subURL]
 	a.connectMu.Unlock()
 	if ce != nil && ce.base == base && time.Since(ce.fetchedAt) < appConfigTTL {
 		return ce
+	}
+	// Отрицательный ответ тоже кэшируем. Пока этого не было, каждое нажатие
+	// «Подключить» на лежащей странице подписки честно ждало полный обход всех
+	// путей — по 4 секунды на каждый, — и так у каждого человека.
+	//
+	// Протухшая положительная запись отдаётся тут же: она лучше и пустоты, и
+	// четырёх секунд ожидания. Раньше проверка отказа стояла до неё и на
+	// боте, который хоть раз видел конфиг, не срабатывала никогда.
+	if !failAt.IsZero() && time.Since(failAt) < appConfigFailTTL {
+		if ce != nil && ce.base == base {
+			return ce
+		}
+		return nil
 	}
 
 	// Subscription pages gate the app-config behind a session cookie the server
@@ -365,16 +384,41 @@ func (a *App) fetchAppConfig(ctx context.Context, base, subURL string) *connectC
 	}
 
 	for _, p := range appConfigPaths {
+		// Ждать нечего, если время запроса уже вышло: следующий путь всё равно
+		// упрётся в тот же дедлайн, а человек тем временем смотрит в пустоту.
+		if ctx.Err() != nil {
+			break
+		}
 		v2, std, ok := a.tryFetchParse(ctx, client, base, p, panelBase)
 		if ok {
 			ne := &connectCacheEntry{base: base, v2: v2, std: std, fetchedAt: time.Now()}
 			a.connectMu.Lock()
 			a.connectCache = ne
+			delete(a.connectFail, base+"|"+subURL)
 			a.connectMu.Unlock()
 			return ne
 		}
 	}
 	a.log.Warn("miniapp connect: no app-config found on subscription host", "base", base)
+	// Оборванный запрос (человек закрыл мини-апп) — не отказ страницы:
+	// запомнить его значило бы на минуту сказать «приложений нет» всем
+	// остальным, у кого страница работает.
+	if ctx.Err() == nil {
+		a.connectMu.Lock()
+		if a.connectFail == nil {
+			a.connectFail = map[string]time.Time{}
+		}
+		now := time.Now()
+		// Карта живёт минуту — подметаем её здесь же, чтобы не копить по
+		// записи на каждую ссылку подписки.
+		for k, t := range a.connectFail {
+			if now.Sub(t) > appConfigFailTTL {
+				delete(a.connectFail, k)
+			}
+		}
+		a.connectFail[base+"|"+subURL] = now
+		a.connectMu.Unlock()
+	}
 	if ce != nil && ce.base == base {
 		return ce
 	}

@@ -582,7 +582,8 @@ func (b *base) DeductBalance(ctx context.Context, telegramID int64, kopecks int6
 
 func (b *base) UsersForNotify(ctx context.Context) ([]model.User, error) {
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, sub_expire_at, notify_kind, notify_sent FROM users WHERE sub_expire_at <> ''")
+		"SELECT telegram_id, username, first_name, sub_expire_at, notify_kind, notify_sent, blocked FROM users "+
+			"WHERE sub_expire_at <> '' AND blocked = 0 AND telegram_id > 0")
 	if err != nil {
 		return nil, err
 	}
@@ -590,9 +591,11 @@ func (b *base) UsersForNotify(ctx context.Context) ([]model.User, error) {
 	var out []model.User
 	for rows.Next() {
 		var u model.User
-		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent); err != nil {
+		var blocked int
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &blocked); err != nil {
 			return nil, err
 		}
+		u.Blocked = blocked != 0
 		out = append(out, u)
 	}
 	return out, rows.Err()

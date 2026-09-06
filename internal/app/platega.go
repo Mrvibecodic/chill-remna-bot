@@ -117,7 +117,7 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	desc := i18n.T(lang, "pl.invoice_desc", months)
 	redirect, txID, err := a.plCreateTransactionSnap(ctx, chatID, months, amount, desc, returnURL, a.saleSnapshot(s))
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "pl.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Platega", err))
 		return
 	}
 	a.sendKB(ctx, chatID, i18n.T(lang, "pl.pay_prompt", months, value+curSuffix(curRUB)), [][]models.InlineKeyboardButton{
@@ -141,7 +141,7 @@ func (a *App) onPLCheck(ctx context.Context, chatID int64, txID string) {
 	}
 	tx, err := client.GetTransaction(ctx, txID)
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "pl.fail", err.Error()))
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Platega", err))
 		return
 	}
 	a.payLog(ctx, model.PayMethodPlatega, txID, chatID, "manual_check", "status=%s", tx.Status)
