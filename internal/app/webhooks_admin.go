@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,10 +31,45 @@ func (a *App) webhookListenPort() string {
 		addr = a.botCfg.Webhook.ListenAddr
 	}
 	a.mu.Unlock()
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		return addr[i+1:]
+	// Через разбор, а не «хвост после двоеточия». Иначе экран показывал
+	// сохранённый мусор, а compose переписывался на 8080 — два разных числа
+	// на соседних экранах.
+	if _, port, ok := splitListenAddr(addr); ok {
+		return strconv.Itoa(port)
 	}
 	return "8080"
+}
+
+// normalizeListenAddr приводит ввод админа к каноническому виду и говорит,
+// годится ли он вообще. Хост сохраняется как есть: привязка к 127.0.0.1
+// внутри контейнера — осмысленный сценарий, и терять её нельзя.
+func normalizeListenAddr(in string) (string, bool) {
+	host, port, ok := splitListenAddr(in)
+	if !ok {
+		return "", false
+	}
+	return host + ":" + strconv.Itoa(port), true
+}
+
+// splitListenAddr разбирает «18080», «:18080», «0.0.0.0:18080».
+func splitListenAddr(in string) (host string, port int, ok bool) {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return "", 0, false
+	}
+	portStr := in
+	if strings.Contains(in, ":") {
+		h, p, err := net.SplitHostPort(in)
+		if err != nil {
+			return "", 0, false
+		}
+		host, portStr = h, p
+	}
+	n, err := strconv.Atoi(portStr)
+	if err != nil || n < 1 || n > 65535 {
+		return "", 0, false
+	}
+	return host, n, true
 }
 
 func (a *App) selfContainerName() string {

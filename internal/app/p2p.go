@@ -229,12 +229,14 @@ func planMinPrice(p *model.Plan) string {
 	return out
 }
 
-// planCurrencyOr — валюта тарифа или запасная (валюта сетки).
+// planCurrencyOr — валюта тарифа или запасная (валюта сетки). Через
+// curSymbol: в поле мог попасть мусор до того, как появилась проверка при
+// вводе, а печатается это в подписи кнопки.
 func planCurrencyOr(p *model.Plan, fallback string) string {
 	if p.Currency != "" {
-		return p.Currency
+		return curSymbol(p.Currency)
 	}
-	return fallback
+	return curSymbol(fallback)
 }
 
 const popularThreshold = 10
@@ -1272,6 +1274,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		if v == "-" {
 			v = ""
 		}
+		if !validCurrencyInput(v) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "plans.currency_invalid"))
+			return
+		}
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.P2P.Currency = v
@@ -1284,6 +1290,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		v := strings.TrimSpace(text)
 		if v == "-" {
 			v = ""
+		}
+		if !validCurrencyInput(v) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "plans.currency_invalid"))
+			return
 		}
 		a.mu.Lock()
 		if a.botCfg != nil {
@@ -1327,9 +1337,17 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.showYooKassaAdmin(ctx, chatID)
 	case "yk_return":
 		ui.adminInput = ""
+		v := strings.TrimSpace(text)
+		// Адрес уезжает в запрос к ЮKassa: мусор роняет создание платежа на
+		// 400 у шлюза, и покупатель видит отказ без объяснения. У Heleket
+		// такая проверка есть с самого начала.
+		if v != "" && !validGatewayReturnURL(v) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "pay.return_url_bad"))
+			return
+		}
 		a.mu.Lock()
 		if a.botCfg != nil {
-			a.botCfg.YooKassa.ReturnURL = strings.TrimSpace(text)
+			a.botCfg.YooKassa.ReturnURL = v
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
@@ -1354,12 +1372,19 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	case "subdomain":
 		a.setSubdomain(ctx, chatID, text)
 	case "wh_addr":
-		text = strings.TrimSpace(text)
-		// Accept a bare port ("18080") or a full bind addr (":18080",
-		// "0.0.0.0:18080"); normalize a bare number to ":port".
-		if text != "" && !strings.Contains(text, ":") {
-			text = ":" + text
+		// Принимаем и голый порт («18080»), и полный адрес («:18080»,
+		// «0.0.0.0:18080»). Мусор больше не сохраняем: раньше он проходил
+		// молча, экран показывал 8080 (значение по умолчанию при разборе), на
+		// 8080 же переписывался compose — а веб-сервер после перезапуска
+		// пытался слушать несуществующий порт, падал, и вебхуки всех платёжек
+		// переставали приходить. Админ при этом видел «сохранено».
+		addr, ok := normalizeListenAddr(text)
+		if !ok {
+			a.sendHome(ctx, chatID, i18n.T(lang, "wh.port_bad"))
+			ui.adminInput = ""
+			return
 		}
+		text = addr
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.Webhook.ListenAddr = text

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -423,7 +424,14 @@ func (a *App) setPlanStrategy(ctx context.Context, code, strat string) error {
 }
 
 // setPlanCurrency ставит валюту тарифа.
+// errPlanCurrencyInvalid — админ ввёл в поле валюты что-то, что нельзя ни
+// показать, ни отдать платёжке.
+var errPlanCurrencyInvalid = errors.New("недопустимая валюта")
+
 func (a *App) setPlanCurrency(ctx context.Context, code, cur string) error {
+	if !validCurrencyInput(cur) {
+		return errPlanCurrencyInvalid
+	}
 	return a.editPlanPricing(ctx, code, func(p *model.Plan) error {
 		p.Currency = strings.TrimSpace(cur)
 		return nil

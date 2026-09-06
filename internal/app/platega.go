@@ -101,10 +101,7 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	returnURL := cfg.ReturnURL
-	if returnURL == "" {
-		returnURL = "https://t.me"
-	}
+	returnURL := gatewayReturnURL(cfg.ReturnURL)
 	// Строгий разбор цены: parseAmountRub на «1 000» дал бы счёт на 1 ₽ при
 	// выдаче полной подписки (та же грабля, что закрыта у Heleket).
 	valueK, okV := rubToKopecks(value)
@@ -268,6 +265,10 @@ func (a *App) onPlategaAdmin(ctx context.Context, chatID int64, val string) {
 
 func (a *App) setPlategaField(ctx context.Context, chatID int64, field, text string) {
 	text = strings.TrimSpace(text)
+	if field == "pl_return" && text != "" && !validGatewayReturnURL(text) {
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "pay.return_url_bad"))
+		return
+	}
 	a.mu.Lock()
 	if a.botCfg != nil {
 		switch field {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -547,9 +548,18 @@ func TestPlansAdmin_AllHandTypedFieldsEscaped(t *testing.T) {
 	a.handleMessage(ctx, msgText(planAdmin, "до 5 <устройств> & быстро"))
 	planTap(t, a, "pln:icon:"+model.PlanCodeBase)
 	a.handleMessage(ctx, msgText(planAdmin, "<b>"))
-	// Валюта — свободный ввод админа на экране цен, и она едет в строку сроков.
-	if err := a.setPlanCurrency(ctx, model.PlanCodeBase, "<b>USD"); err != nil {
+	// Валюта с разметкой теперь не сохраняется вовсе (см. plans.currency_invalid),
+	// но у кого-то она уже лежит в базе с прежних версий — экранирование должно
+	// работать и для такого значения. Пишем в обход проверки, как оно и попало
+	// туда исторически.
+	if err := a.editPlanPricing(ctx, model.PlanCodeBase, func(p *model.Plan) error {
+		p.Currency = "<b>USD"
+		return nil
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if err := a.setPlanCurrency(ctx, model.PlanCodeBase, "<b>USD"); !errors.Is(err, errPlanCurrencyInvalid) {
+		t.Fatalf("разметка в поле валюты должна отвергаться, получено %v", err)
 	}
 	planTap(t, a, "pln:open:"+model.PlanCodeBase)
 

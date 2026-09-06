@@ -94,10 +94,23 @@ func (s *Server) mux() *http.ServeMux {
 
 func applyTimeouts(srv *http.Server) {
 	srv.ReadHeaderTimeout = 5 * time.Second
-	srv.ReadTimeout = 10 * time.Second
-	srv.WriteTimeout = 15 * time.Second
+	// Чек об оплате принимается размером до 12 МБ, а на мобильном интернете
+	// это заметно дольше десяти секунд: с прежним значением загрузка чека
+	// обрывалась на чтении тела.
+	srv.ReadTimeout = 60 * time.Second
+	// Внешняя граница, а не внутренняя: денежные обработчики живут до 25
+	// секунд, и прежние 15 срабатывали посреди создания счёта — счёт у
+	// провайдера уже создан, а ответ покупателю не уходит, и он жмёт
+	// «оплатить» второй раз.
+	srv.WriteTimeout = 35 * time.Second
 	srv.IdleTimeout = 60 * time.Second
 }
+
+// shutdownGrace — сколько ждём завершения текущих запросов при остановке.
+// Обработка вебхука платёжки занимает до 15 секунд, прежние 5 рвали её на
+// середине; больше брать нельзя — docker убивает контейнер через 10 секунд
+// после SIGTERM, и остаток нужен фоновым задачам бота.
+const shutdownGrace = 3 * time.Second
 
 // newServer — общая часть обоих конструкторов: лимитеры и признак «разрешено
 // без HTTPS» (переменная окружения для установок, чей прокси не выставляет
@@ -150,9 +163,14 @@ func (s *Server) runPlain(ctx context.Context) error {
 	}()
 	select {
 	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
-		_ = s.srv.Shutdown(shutCtx)
+		// Ошибку дренажа больше не выбрасываем не глядя: «не успели» значит
+		// «бросили запрос на середине», и это ровно то событие, ради которого
+		// пишут логи. Кодом выхода она не становится — это не отказ сервера.
+		if err := s.srv.Shutdown(shutCtx); err != nil {
+			s.log.Warn("веб-сервер: не все запросы успели завершиться", "err", err)
+		}
 		return nil
 	case err := <-errCh:
 		return err
@@ -171,7 +189,14 @@ func (s *Server) runTLS(ctx context.Context) error {
 	applyTimeouts(challenge)
 
 	errCh := make(chan error, 1)
-	go func() { _ = challenge.ListenAndServe() }()
+	go func() {
+		// Отказ челлендж-сервера раньше не был виден вообще никогда: :80
+		// занят — сертификат не выпускается, а рукопожатие падает уже у
+		// клиента, без единой строки в логе.
+		if err := challenge.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.log.Error("ACME-челлендж на :80 не запущен — сертификат не выпустится", "err", err)
+		}
+	}()
 	go func() {
 		s.log.Info("HTTPS webhook server starting", "domain", s.domain)
 		if err := s.srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -182,9 +207,11 @@ func (s *Server) runTLS(ctx context.Context) error {
 	}()
 	select {
 	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
-		_ = s.srv.Shutdown(shutCtx)
+		if err := s.srv.Shutdown(shutCtx); err != nil {
+			s.log.Warn("веб-сервер: не все запросы успели завершиться", "err", err)
+		}
 		_ = challenge.Shutdown(shutCtx)
 		return nil
 	case err := <-errCh:

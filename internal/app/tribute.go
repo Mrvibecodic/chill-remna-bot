@@ -29,7 +29,11 @@ func (a *App) tributeCfg() model.TributeConfig {
 func (a *App) startTribute(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	cfg := a.tributeCfg()
-	if !cfg.Enabled || cfg.PayURL == "" {
+	// Второй рубеж: битая ссылка могла попасть в настройки до появления
+	// проверки при вводе. Кнопку с ней Telegram отвергает вместе со всем
+	// сообщением, и человек не получает НИЧЕГО — честнее сказать «не
+	// настроено».
+	if !cfg.Enabled || !validButtonURL(cfg.PayURL) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "trb.not_configured"))
 		return
 	}
@@ -340,6 +344,13 @@ func (a *App) onTributeAdmin(ctx context.Context, chatID int64, val string) {
 
 func (a *App) setTributeField(ctx context.Context, chatID int64, field, text string) {
 	text = strings.TrimSpace(text)
+	// Ссылка оплаты уходит в кнопку: битый адрес Telegram отвергает вместе со
+	// ВСЕМ сообщением, и человек, нажавший «оплатить через Tribute», не
+	// получает ничего.
+	if field == "trb_url" && text != "" && !validButtonURL(text) {
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "trb.url_bad"))
+		return
+	}
 	a.mu.Lock()
 	if a.botCfg != nil {
 		switch field {

@@ -35,6 +35,10 @@ import (
 
 type messenger interface {
 	Send(ctx context.Context, chatID int64, text string) int
+	// SendErr — как Send, но отдаёт ошибку Telegram. Нужен рассылке: без неё
+	// нельзя отличить «человек заблокировал бота» от временной неудачи, и
+	// такие адресаты тратят по два обращения на каждую рассылку вечно.
+	SendErr(ctx context.Context, chatID int64, text string) (int, error)
 	SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int
 	// SendEnt отправляет текст с телеграмными entities (форматирование 1-в-1,
 	// без ParseMode) — для сообщений, набранных админом в клиенте Telegram.
@@ -176,6 +180,12 @@ type App struct {
 	// whole panel user list at the same time.
 	addSubSyncing atomic.Bool
 
+	// bcastRunning/bcastStop — состояние рассылки. Одно на весь бот: рассылка
+	// одна, а админов может быть несколько, и остановить её обязан любой.
+	// Раньше остановить её было нельзя вообще — только погасив контейнер.
+	bcastRunning atomic.Bool
+	bcastStop    atomic.Bool
+
 	// finalizeUserLk serializes finalizePurchase per USER (striped): два
 	// РАЗНЫХ платежа одного человека (P2P-заявка + вебхук) иначе считали бы
 	// зачёт остатка при смене тарифа от одного и того же снимка — и остаток
@@ -243,6 +253,15 @@ type App struct {
 	rsDump map[int64]*rsimport.Data
 
 	bgCtx context.Context
+
+	// moneyCtx — контекст «денежных» фоновых задач: выдача по звёздам,
+	// возврат на баланс. Отдельно от bgCtx НАМЕРЕННО: тот отменяется тем же
+	// сигналом, который начинает остановку, и всё недоделанное обрывалось на
+	// полпути — деньги списаны, подписки нет. Этот отменяется только в Drain,
+	// когда работа доиграла или вышел бюджет.
+	moneyCtx    context.Context
+	moneyCancel context.CancelFunc
+	moneyWG     sync.WaitGroup
 
 	// runInline выполняет фоновые задачи синхронно — нужно тестам, чтобы
 	// проверять результат сразу после вызова обработчика.
@@ -459,11 +478,25 @@ func (a *App) openStore(kind, dsn string) error {
 		_ = st.Close()
 		return err
 	}
-	if a.store != nil {
-		_ = a.store.Close()
-	}
+	a.mu.Lock()
+	old := a.store
 	a.store = st
+	a.mu.Unlock()
+	// Старое хранилище закрываем НЕ сразу: его прямо сейчас держат другие
+	// горутины (напоминания, сверка, вебхуки), и мгновенный Close отдал бы им
+	// «sql: database is closed» посреди работы.
+	if old != nil {
+		a.closeStoreLater(old)
+	}
 	return storage.SaveBootstrap(a.cfg.DataDir, &storage.Bootstrap{DBKind: kind, DSN: dsn})
+}
+
+// storeCloseDelay — сколько ждать, прежде чем закрыть подменённое хранилище.
+// Столько живёт самый долгий обработчик (вебхук платёжки — 15 с) плюс запас.
+const storeCloseDelay = 30 * time.Second
+
+func (a *App) closeStoreLater(old storage.Storage) {
+	time.AfterFunc(storeCloseDelay, func() { _ = old.Close() })
 }
 
 func (a *App) switchStore(ctx context.Context, kind, dsn string) error {
@@ -488,7 +521,7 @@ func (a *App) switchStore(ctx context.Context, kind, dsn string) error {
 	a.store = newSt
 	a.mu.Unlock()
 	if old != nil {
-		_ = old.Close()
+		a.closeStoreLater(old)
 	}
 	return storage.SaveBootstrap(a.cfg.DataDir, &storage.Bootstrap{DBKind: kind, DSN: dsn})
 }
@@ -512,6 +545,83 @@ func (a *App) Run(ctx context.Context) error {
 	a.log.Info("бот запущен")
 	b.Start(ctx)
 	return nil
+}
+
+// moneyContext — контекст для работы, которую нельзя бросить на полпути.
+func (a *App) moneyContext() context.Context {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.moneyCtx == nil {
+		a.moneyCtx, a.moneyCancel = context.WithCancel(context.Background())
+	}
+	return a.moneyCtx
+}
+
+// trackMoney запускает «денежную» задачу так, чтобы остановка бота дала ей
+// доиграть (см. Drain).
+func (a *App) trackMoney(name string, f func(context.Context)) {
+	ctx := a.moneyContext()
+	a.moneyWG.Add(1)
+	go func() {
+		defer a.moneyWG.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				a.log.Error("паника в фоновой задаче", "task", name, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		f(ctx)
+	}()
+}
+
+// Drain ждёт недоделанную «денежную» работу не дольше d и возвращает, успела
+// ли она. По истечении бюджета контекст отменяется: держать процесс дольше
+// бессмысленно — docker всё равно убьёт контейнер.
+func (a *App) Drain(d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		a.moneyWG.Wait()
+		close(done)
+	}()
+	ok := false
+	select {
+	case <-done:
+		ok = true
+	case <-time.After(d):
+	}
+	a.mu.Lock()
+	cancel := a.moneyCancel
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return ok
+}
+
+// WebRequired — нужна ли веб-часть этой установке. Если всё выключено, отказ
+// веб-сервера не повод гасить бота: чат продолжает работать.
+func (a *App) WebRequired() bool {
+	a.mu.Lock()
+	webhook := a.botCfg != nil && a.botCfg.Webhook.Enabled
+	a.mu.Unlock()
+	return webhook || a.MiniEnabled() || a.CabinetEnabled()
+}
+
+// AlertAdmin — короткое сообщение админу о поломке уровня процесса. Своим
+// контекстом: тот, что отменён сигналом, до Telegram уже не доедет.
+func (a *App) AlertAdmin(key string, cause error) {
+	a.mu.Lock()
+	msg := a.msg
+	a.mu.Unlock()
+	if msg == nil || a.cfg == nil || a.cfg.AdminID == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	detail := ""
+	if cause != nil {
+		detail = cause.Error()
+	}
+	msg.Send(ctx, a.cfg.AdminID, i18n.T(a.botLang(), key, detail))
 }
 
 // bgContext returns the long-lived root context so background goroutines
@@ -544,14 +654,11 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 		// pre_checkout_query Telegram требует ответ за 10 секунд. Уводим в
 		// горутину: внутри finalizePurchase свои замки и идемпотентность.
 		msg := update.Message
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					a.log.Error("паника в финализации оплаты Stars", "panic", r, "stack", string(debug.Stack()))
-				}
-			}()
-			a.handleSuccessfulPayment(a.bgContext(), msg)
-		}()
+		// Через trackMoney: перезапуск ровно в этот момент раньше обрывал
+		// выдачу — деньги списаны, подписки нет, и сверка её не подбирала.
+		a.trackMoney("финализация оплаты Stars", func(c context.Context) {
+			a.handleSuccessfulPayment(c, msg)
+		})
 	case update.Message != nil && update.Message.RefundedPayment != nil:
 		a.handleRefundedPayment(ctx, update.Message)
 	case update.Message != nil && update.Message.Text != "":
@@ -749,9 +856,24 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		return
 	}
 	a.mu.Lock()
-	wizActive := a.wiz[chatID] != nil
+	w := a.wiz[chatID]
+	// Брошенный мастер переустановки съедал ВЕСЬ ввод в админке до перезапуска
+	// процесса: проверка стоит выше обработки, а гасился он только своей
+	// кнопкой отмены. Если админ уже нажал «введите значение» в другом
+	// разделе — мастер брошен, и текст принадлежит тому разделу.
+	//
+	// Только для переустановки: при первичной установке админки ещё нет, а
+	// сброс мастера оставил бы бота без языка (a.lang читает w.cfg).
+	dropped := false
+	if w != nil && w.reconfig && ui.adminInput != "" {
+		delete(a.wiz, chatID)
+		w, dropped = nil, true
+	}
 	a.mu.Unlock()
-	if wizActive {
+	if dropped {
+		a.log.Info("мастер переустановки брошен: админ вводит значение в другом разделе", "chat_id", chatID)
+	}
+	if w != nil {
 		a.handleWizardText(ctx, chatID, text)
 		return
 	}
@@ -897,7 +1019,12 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 		startMsgID = a.msg.SendKB(ctx, chatID, startText, startRows)
 	}
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
-	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)), 0o600)
+	// Третьим полем — версия, с которой уходим. После рестарта по нему видно,
+	// обновились мы на самом деле или контейнер просто перезапустился на том
+	// же образе. Формат «chat:msg» из прежних версий тоже читается — иначе
+	// ровно то обновление, которое привозит эту правку, потеряло бы финальное
+	// сообщение.
+	_ = os.WriteFile(marker, []byte(strconv.FormatInt(chatID, 10)+":"+strconv.Itoa(startMsgID)+":"+a.cfg.Commit), 0o600)
 	// pull теперь синхронный (чтобы причина сбоя дошла до админа), поэтому весь
 	// процесс — в горутине: скачивание образа не должно блокировать обработку
 	// апдейтов единственным воркером.
@@ -921,11 +1048,25 @@ func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
 		defer ncancel()
 		a.updateFailMsg(nctx, chatID, startMsgID, err)
 	}
-	if err := a.ctl.SetImageChannel(channelTag(a.updChannel())); err != nil {
-		fail(err)
-		return
+	// Пин версии не трогаем. В стабильном канале образ часто пришпилен как
+	// «:v1» — и сам compose объясняет, что это защита от прыжка на 2.0.0.
+	// Прежний код молча превращал его в «:latest», отменяя это обещание с
+	// первого же нажатия «Обновить».
+	var prev []byte
+	if cur, err := a.ctl.BotImageTag(); err != nil || !tagInChannel(cur, a.updChannel()) {
+		p, serr := a.ctl.SetImageChannel(channelTag(a.updChannel()))
+		if serr != nil {
+			fail(serr)
+			return
+		}
+		prev = p
 	}
 	if err := a.ctl.SelfUpdate(ctx); err != nil {
+		// Образ не скачался, а тег уже переписан: следующий любой «up -d»
+		// поднял бы контейнер на несуществующем образе. Возвращаем файл.
+		if rerr := a.ctl.RestoreCompose(prev); rerr != nil {
+			a.log.Error("откат compose после неудачного обновления", "err", rerr)
+		}
 		fail(err)
 		return
 	}
@@ -968,17 +1109,28 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	}
 	_ = os.Remove(marker)
 
-	parts := strings.SplitN(strings.TrimSpace(string(data)), ":", 2)
+	parts := strings.SplitN(strings.TrimSpace(string(data)), ":", 3)
 	var chatID int64
 	var msgID int
-	if len(parts) == 2 {
+	prevCommit := ""
+	if len(parts) >= 2 {
 		chatID, _ = strconv.ParseInt(parts[0], 10, 64)
 		msgID, _ = strconv.Atoi(parts[1])
 	}
+	if len(parts) == 3 {
+		prevCommit = parts[2]
+	}
+	// Версия не изменилась — значит контейнер пересоздался на том же образе.
+	// Говорить «обновление установлено» тут было бы враньём.
+	sameVersion := prevCommit != "" && a.cfg.Commit != "" && prevCommit == a.cfg.Commit
 	if chatID == 0 {
 		chatID = a.cfg.AdminID
 	}
-	doneText := a.applyPremium(i18n.T(a.botLang(), "update.done"))
+	doneKey := "update.done"
+	if sameVersion {
+		doneKey = "update.same_version"
+	}
+	doneText := a.applyPremium(i18n.T(a.botLang(), doneKey))
 	doneRows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
 	doneID := msgID
 	if msgID == 0 || a.msg == nil || !a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
@@ -1502,6 +1654,10 @@ func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
 	return m.SendKB(ctx, chatID, text, nil)
 }
 
+func (m botMessenger) SendErr(ctx context.Context, chatID int64, text string) (int, error) {
+	return m.sendKBErr(ctx, chatID, text, nil)
+}
+
 // sendWithRetry retries a Telegram call when the API replies 429 Too Many
 // Requests, honouring the retry_after hint. Non-429 errors return immediately.
 func (m botMessenger) sendWithRetry(ctx context.Context, do func() error) error {
@@ -1535,6 +1691,11 @@ func (m botMessenger) sendWithRetry(ctx context.Context, do func() error) error 
 }
 
 func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
+	id, _ := m.sendKBErr(ctx, chatID, text, rows)
+	return id
+}
+
+func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) (int, error) {
 	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -1545,6 +1706,14 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 		return e
 	})
 	if err != nil {
+		// Повтор без разметки нужен ради 400 «can't parse entities». Но если
+		// человек заблокировал бота, разметка ни при чём — второй запрос
+		// уходил впустую по каждому такому адресату, на каждой рассылке и в
+		// каждом уведомлении.
+		if errors.Is(err, bot.ErrorForbidden) {
+			m.log.Warn("send message: чат недоступен", "chat_id", chatID)
+			return 0, err
+		}
 		params.ParseMode = ""
 		params.Text = stripHTMLTags(text)
 		err = m.sendWithRetry(ctx, func() (e error) {
@@ -1553,11 +1722,11 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 		})
 		if err != nil {
 			m.log.Error("send message", "err", err)
-			return 0
+			return 0, err
 		}
 		m.log.Warn("send message: HTML rejected, sent as plain text", "chat_id", chatID)
 	}
-	return msg.ID
+	return msg.ID, nil
 }
 
 func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {

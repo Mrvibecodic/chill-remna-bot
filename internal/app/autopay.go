@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-telegram/bot/models"
 
@@ -380,7 +381,45 @@ func curSymbol(cur string) string {
 	case "", "RUB", "RUR":
 		return curRUB
 	}
+	// Второй рубеж: в поле могло попасть что угодно до того, как появилась
+	// проверка при вводе (строка на 300 знаков с переносами и разметкой
+	// проходила). Печатать такое в подписи кнопки нельзя — Telegram отвергает
+	// сообщение целиком. Здесь фильтр мягче, чем на вводе: «$» и «€» не код
+	// ISO, но это осмысленная валюта, и подменять её рублями было бы враньём.
+	if !printableCurrency(cur) {
+		return curRUB
+	}
 	return strings.ToUpper(cur)
+}
+
+// printableCurrency — можно ли это показать как валюту. Формально: коротко,
+// одной строкой, без разметки и невидимых символов.
+func printableCurrency(cur string) bool {
+	r := []rune(cur)
+	if len(r) == 0 || len(r) > 8 {
+		return false
+	}
+	for _, c := range r {
+		if unicode.IsSpace(c) || unicode.IsControl(c) ||
+			unicode.In(c, unicode.Cf, unicode.Zs, unicode.Zl, unicode.Zp) {
+			return false
+		}
+		if c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
+}
+
+// validCurrencyInput — что админ вправе ввести как валюту: пусто (снять),
+// трёхбуквенный код или рублёвое написание. Закрытый список ISO не заводим:
+// его пришлось бы поддерживать, и он отрезал бы USDT-подобные значения.
+func validCurrencyInput(cur string) bool {
+	cur = strings.TrimSpace(cur)
+	if cur == "" {
+		return true
+	}
+	return currencyCode(cur) || rubCurrency(cur)
 }
 
 // rubCurrency — обозначает ли строка рубли: пусто (исторический дефолт),

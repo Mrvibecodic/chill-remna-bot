@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"html"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/assets"
@@ -42,8 +44,26 @@ func (a *App) onBroadcast(ctx context.Context, chatID int64, val string) {
 			a.showBroadcast(ctx, chatID)
 			return
 		}
-		a.sendKB(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{navBack(lang, "menu:marketing")})
+		if !a.bcastRunning.CompareAndSwap(false, true) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "bcast.already_running"))
+			return
+		}
+		a.bcastStop.Store(false)
+		a.sendKB(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "bcast.btn_stop"), "bc:stop")},
+			navBack(lang, "menu:marketing"),
+		})
 		a.runBroadcast(chatID, text, a.screenMsgID(chatID))
+	case "stop":
+		// Флаг на всём боте, а не на экране: рассылка одна, а админов может
+		// быть несколько — остановить обязан любой. Раньше остановить её было
+		// нельзя вообще, только погасив контейнер.
+		if !a.bcastRunning.Load() {
+			a.sendHome(ctx, chatID, i18n.T(lang, "bcast.not_running"))
+			return
+		}
+		a.bcastStop.Store(true)
+		a.sendHome(ctx, chatID, i18n.T(lang, "bcast.stopping"))
 	}
 }
 
@@ -98,11 +118,13 @@ func (a *App) expandBroadcastVars(text string, u *model.User, lang string) strin
 
 func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 	if a.store == nil {
+		a.bcastRunning.Store(false)
 		return
 	}
 	lang := a.lang(adminChat)
 	ctx := a.bgContext()
 	go func() {
+		defer a.bcastRunning.Store(false)
 		ids, err := a.store.AllUserIDs(ctx)
 		if err != nil {
 			a.sendHome(ctx, adminChat, i18n.T(lang, "bcast.failed"))
@@ -112,7 +134,8 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 		// promptly on shutdown. Per-message 429s are retried inside sendWithRetry.
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
-		var sent, failed int
+		var sent, failed, gone int
+		stopped := false
 		for _, id := range ids {
 			select {
 			case <-ctx.Done():
@@ -120,17 +143,35 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 				return
 			case <-ticker.C:
 			}
+			if a.bcastStop.Load() {
+				stopped = true
+				break
+			}
 			out := text
 			if u, err := a.store.GetUser(ctx, id); err == nil && u != nil {
 				out = a.expandBroadcastVars(text, u, a.lang(id))
 			}
-			if a.msg.Send(ctx, id, a.applyPremium(out)) != 0 {
+			mid, serr := a.msg.SendErr(ctx, id, a.applyPremium(out))
+			switch {
+			case mid != 0:
 				sent++
-			} else {
+			case errors.Is(serr, bot.ErrorForbidden):
+				// Человек заблокировал бота или удалил аккаунт. Помечаем, чтобы
+				// следующая рассылка на него не тратилась. Это НЕ бан: доступ
+				// к боту не закрывается, метка снимается его же сообщением.
+				gone++
+				if err := a.store.SetUnreachable(ctx, id, time.Now().UTC().Format(time.RFC3339)); err != nil {
+					a.log.Warn("метка недоступного чата не сохранена", "err", err)
+				}
+			default:
 				failed++
 			}
 		}
-		doneText := a.applyPremium(i18n.T(lang, "bcast.done", sent, failed))
+		key := "bcast.done"
+		if stopped {
+			key = "bcast.stopped"
+		}
+		doneText := a.applyPremium(i18n.T(lang, key, sent, failed, gone))
 		doneRows := [][]models.InlineKeyboardButton{navBack(lang, "menu:marketing")}
 		if statusID == 0 || !a.msg.EditText(ctx, adminChat, statusID, doneText, doneRows) {
 			a.msg.SendKB(ctx, adminChat, doneText, doneRows)

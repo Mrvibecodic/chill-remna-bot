@@ -406,10 +406,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		if client == nil {
 			return "", "", errUserText(i18n.T(lang, "yk.not_configured"))
 		}
-		ret := a.ykConfig().ReturnURL
-		if ret == "" {
-			ret = "https://t.me"
-		}
+		ret := gatewayReturnURL(a.ykConfig().ReturnURL)
 		pay, e := client.CreatePayment(ctx, rub, "RUB", i18n.T(lang, "topup.invoice_desc"), ret, chatID, 0)
 		if e != nil {
 			a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "topup kopecks=%d: %v", k, e)
@@ -500,7 +497,9 @@ func (a *App) refundBalance(chatID int64, kopecks int64, cause error) {
 	if a.store == nil || kopecks <= 0 {
 		return
 	}
-	ctx := a.bgContext()
+	// Возврат денег нельзя бросить на полпути: moneyContext переживает сигнал
+	// остановки, см. App.Drain.
+	ctx := a.moneyContext()
 	// Ровно одна попытка, без повторов. Начисление баланса не идемпотентно
 	// (balance = balance + N) и не прикрыто барьером по ключу сделки, а самый
 	// частый способ получить ошибку — потерянный ОТВЕТ на уже применённую

@@ -595,8 +595,22 @@ func (a *App) hlProbe(ctx context.Context, chatID int64) {
 // hlValidReturnURL — требование Heleket к url_return/url_success: строка
 // 6..255 символов и настоящий http(s)-URL. Кривое значение валило бы каждое
 // создание счёта с 422.
-func hlValidReturnURL(s string) bool {
-	if len(s) < 6 || len(s) > 255 {
+func hlValidReturnURL(s string) bool { return validGatewayReturnURL(s) }
+
+// gatewayReturnURL — адрес возврата, годный к отправке в шлюз. Пустой или
+// битый (мог попасть в настройки до появления проверки) заменяется на ссылку
+// Telegram: иначе шлюз отвечает 400 и покупатель видит отказ без причины.
+func gatewayReturnURL(s string) string {
+	if validGatewayReturnURL(strings.TrimSpace(s)) {
+		return strings.TrimSpace(s)
+	}
+	return "https://t.me"
+}
+
+// validGatewayReturnURL — адрес возврата, который уезжает в API платёжного
+// шлюза. Только http(s): «tg://» там недопустим, в отличие от кнопки.
+func validGatewayReturnURL(s string) bool {
+	if len(s) < 6 || len(s) > 255 || hasInvisible(s) {
 		return false
 	}
 	u, err := url.Parse(s)

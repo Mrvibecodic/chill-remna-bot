@@ -63,7 +63,7 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 	for _, mo := range planEditorMonths(p) {
 		label := "—"
 		if d := p.Duration(mo); d != nil && d.Base != "" {
-			label = d.Base + curSuffix(p.Currency)
+			label = d.Base + curSuffix(curSymbol(p.Currency))
 		}
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "plans.month_btn", mo, label), "pln:prm:"+strconv.Itoa(mo)+":"+p.Code),
@@ -117,7 +117,7 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 			return "—"
 		}
 		// Валюту тоже вводит человек — экранируется вместе со значением.
-		return html_(v + curSuffix(p.Currency))
+		return html_(v + curSuffix(curSymbol(p.Currency)))
 	}
 	base, p2p, yk := "", "", ""
 	stars := 0
@@ -274,6 +274,10 @@ func (a *App) planInputFailed(ctx context.Context, chatID int64, err error) {
 	}
 	if errors.Is(err, errPlanPriceInvalid) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.price_invalid"))
+		return
+	}
+	if errors.Is(err, errPlanCurrencyInvalid) {
+		a.sendHome(ctx, chatID, i18n.T(lang, "plans.currency_invalid"))
 		return
 	}
 	a.log.Warn("цена тарифа не сохранена", "err", err)

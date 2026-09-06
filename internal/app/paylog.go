@@ -18,11 +18,16 @@ import (
 
 func (a *App) payLog(ctx context.Context, method, extID string, telegramID int64, stage, format string, args ...any) {
 	detail := fmt.Sprintf(format, args...)
-	// Журналирование не имеет права ронять платёжный путь: логгер может быть не
-	// задан (ранний старт, тестовые сборки), а payLog теперь вызывается в том
-	// числе из отказных веток оплаты.
+	// В stdout эта запись больше не дублируется. Журнал платежей целиком
+	// лежит в базе — с поиском по человеку и по номеру платежа, выгрузкой в
+	// CSV и сроком хранения 90 дней. Дубль в логе процесса не давал админу
+	// ничего сверх этого, зато выкладывал номер человека, сумму и номер
+	// платежа открытым текстом любому, у кого есть доступ к докеру, — без
+	// ротации и с уходом в любой сборщик логов.
+	//
+	// Отладочный уровень оставлен: LOG_LEVEL=debug возвращает прежний вид.
 	if a.log != nil {
-		a.log.Info("paylog", "method", method, "ext_id", extID, "tg_id", telegramID, "stage", stage, "detail", detail)
+		a.log.Debug("paylog", "method", method, "ext_id", extID, "tg_id", telegramID, "stage", stage, "detail", detail)
 	}
 	if a.store == nil {
 		return

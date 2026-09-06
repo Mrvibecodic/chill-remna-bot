@@ -64,6 +64,10 @@ type Storage interface {
 	DeleteAutoPay(ctx context.Context, telegramID int64) error
 	DeleteUser(ctx context.Context, telegramID int64) error
 	AllUserIDs(ctx context.Context) ([]int64, error)
+	// SetUnreachable помечает, что Telegram ответил «чат недоступен». Это НЕ
+	// бан: доступ к боту не закрывается, метка только выводит человека из
+	// рассылки и снимается любым его сообщением.
+	SetUnreachable(ctx context.Context, telegramID int64, at string) error
 
 	SetPurchaseIntent(ctx context.Context, in *model.PurchaseIntent) error
 	PurchaseIntent(ctx context.Context, telegramID int64) (*model.PurchaseIntent, error)
@@ -313,8 +317,10 @@ func (b *base) UpsertUser(ctx context.Context, telegramID int64) error {
 }
 
 func (b *base) SetUserInfo(ctx context.Context, telegramID int64, username, firstName string) error {
+	// Человек написал боту — значит чат снова доступен, метку снимаем здесь
+	// же: отдельного места, где видно «вернулся», в боте нет.
 	_, err := b.db.ExecContext(ctx,
-		"UPDATE users SET username = "+b.ph(1)+", first_name = "+b.ph(2)+" WHERE telegram_id = "+b.ph(3),
+		"UPDATE users SET username = "+b.ph(1)+", first_name = "+b.ph(2)+", unreachable_at = '' WHERE telegram_id = "+b.ph(3),
 		username, firstName, telegramID)
 	return err
 }
@@ -1828,8 +1834,15 @@ func (b *base) CountReferrals(ctx context.Context, referrerID int64) (int, error
 	return n, err
 }
 
+func (b *base) SetUnreachable(ctx context.Context, telegramID int64, at string) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET unreachable_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2), at, telegramID)
+	return err
+}
+
 func (b *base) AllUserIDs(ctx context.Context) ([]int64, error) {
-	rows, err := b.db.QueryContext(ctx, "SELECT telegram_id FROM users WHERE blocked = 0")
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id FROM users WHERE blocked = 0 AND unreachable_at = ''")
 	if err != nil {
 		return nil, err
 	}

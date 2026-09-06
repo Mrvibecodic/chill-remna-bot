@@ -53,10 +53,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		if !cfg.Enabled || !okPrice {
 			return "", false, errors.New("оплата картой недоступна")
 		}
-		returnURL := cfg.ReturnURL
-		if returnURL == "" {
-			returnURL = "https://t.me"
-		}
+		returnURL := gatewayReturnURL(cfg.ReturnURL)
 		// В прайсе валюта задаётся символом («₽» — тоже три байта), поэтому
 		// длины мало: нужен настоящий трёхбуквенный код, иначе ЮKassa вернёт
 		// 400. Рублёвый фолбэк допустим только для валюты сетки — чужой символ
@@ -89,10 +86,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) || !a.plGridCurrencyOK() {
 			return "", false, errors.New("оплата недоступна")
 		}
-		returnURL := cfg.ReturnURL
-		if returnURL == "" {
-			returnURL = "https://t.me"
-		}
+		returnURL := gatewayReturnURL(cfg.ReturnURL)
 		valueK, okV := rubToKopecks(value)
 		if !okV || valueK <= 0 {
 			return "", false, errors.New("оплата недоступна")
@@ -115,7 +109,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 			return "", false, errors.New("оплата недоступна")
 		}
 		cfg := a.tributeCfg()
-		if !cfg.Enabled || cfg.PayURL == "" {
+		if !cfg.Enabled || !validButtonURL(cfg.PayURL) {
 			return "", false, errors.New("оплата недоступна")
 		}
 		if a.store != nil {

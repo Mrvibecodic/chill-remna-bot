@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +33,24 @@ type Config struct {
 
 	Commit    string
 	BuildDate string
+
+	// LogLevel — подробность лога процесса (LOG_LEVEL: debug|info|warn|error).
+	// По умолчанию info. На debug возвращается дублирование журнала платежей
+	// в stdout и прочая отладочная россыпь.
+	LogLevel string
+}
+
+// SlogLevel — уровень для slog по значению LOG_LEVEL.
+func (c *Config) SlogLevel() slog.Level {
+	switch strings.ToLower(strings.TrimSpace(c.LogLevel)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	}
+	return slog.LevelInfo
 }
 
 func Load() (*Config, error) {
@@ -46,6 +65,7 @@ func Load() (*Config, error) {
 		DatabaseURL:  strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		SecretKey:    os.Getenv("SECRET_KEY"),
 		PremiumEmoji: parseEmojiMap(os.Getenv("PREMIUM_EMOJI")),
+		LogLevel:     strings.TrimSpace(os.Getenv("LOG_LEVEL")),
 	}
 	if c.BotToken == "" {
 		return nil, fmt.Errorf("BOT_TOKEN не задан")

@@ -79,10 +79,7 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	returnURL := cfg.ReturnURL
-	if returnURL == "" {
-		returnURL = "https://t.me"
-	}
+	returnURL := gatewayReturnURL(cfg.ReturnURL)
 	// См. currencyCode: проверка по длине пропускала символ «₽» (три байта),
 	// и ЮKassa отвечала 400 на такой код валюты. Рублёвый фолбэк допустим
 	// только для валюты сетки — чужой символ тарифа списался бы как рубли.

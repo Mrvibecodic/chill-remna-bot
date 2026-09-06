@@ -165,19 +165,27 @@ func checkedURL(u string) (string, bool) {
 //
 // Проверяем то же, на чём он спотыкается: схему, непустой хост, отсутствие
 // пробелов и переводов строк.
+// hasInvisible — есть ли в строке пробельные, управляющие или невидимые
+// символы. Проверять только " \t\r\n" мало: адрес с нулевой шириной внутри
+// (его легко получить копированием) выглядит рабочим, а Telegram отвергает
+// такую кнопку вместе со ВСЕМ сообщением — меню перестаёт открываться, и
+// админ этого не видит.
+func hasInvisible(raw string) bool {
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) ||
+			unicode.In(r, unicode.Cf, unicode.Zs, unicode.Zl, unicode.Zp) {
+			return true
+		}
+	}
+	return false
+}
+
 func validButtonURL(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	// Пробелы, управляющие и невидимые символы. Проверять только " \t\r\n"
-	// мало: адрес с нулевой шириной внутри (его легко получить копированием)
-	// выглядит рабочим, а Telegram отвергает такую кнопку вместе со ВСЕМ
-	// сообщением — меню перестаёт открываться, и админ этого не видит.
-	for _, r := range raw {
-		if unicode.IsSpace(r) || unicode.IsControl(r) ||
-			unicode.In(r, unicode.Cf, unicode.Zs, unicode.Zl, unicode.Zp) {
-			return false
-		}
+	if hasInvisible(raw) {
+		return false
 	}
 	u, err := url.Parse(raw)
 	if err != nil {

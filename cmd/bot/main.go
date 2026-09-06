@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"remnabot/internal/app"
 	"remnabot/internal/config"
@@ -21,6 +22,11 @@ var (
 	buildDate = ""
 )
 
+// shutdownGrace — сколько ждём недоделанную фоновую работу после сигнала
+// остановки. Docker по умолчанию убивает контейнер через 10 секунд, поэтому
+// больше обещать нечестно: остаток уйдёт на дренаж веб-сервера.
+const shutdownGrace = 6 * time.Second
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -31,6 +37,8 @@ func main() {
 	}
 	cfg.Commit = commit
 	cfg.BuildDate = buildDate
+	// Подробность лога — из окружения. По умолчанию прежняя (info).
+	log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 
 	crypter, err := crypto.LoadOrCreate(cfg.SecretKey, cfg.DataDir)
 	if err != nil {
@@ -69,6 +77,19 @@ func main() {
 	go func() {
 		defer wg.Done()
 		webErr = webSrv.Run(ctx)
+		if webErr == nil || ctx.Err() != nil {
+			return
+		}
+		// Веб-сервер умирал молча: в Telegram бот бодро отвечал, а вебхуки
+		// платёжек, мини-апп и кабинет были мертвы, и текст ошибки печатался
+		// только при выключении.
+		log.Error("веб-сервер остановлен", "err", webErr)
+		a.AlertAdmin("web.down", webErr)
+		if a.WebRequired() {
+			// Что-то из веб-части включено — работать «наполовину» нельзя:
+			// платежи не доедут. Гасимся, дальше поднимет docker.
+			stop()
+		}
 	}()
 
 	go func() {
@@ -99,6 +120,12 @@ func main() {
 		a.RunTorrentUnblocker(ctx)
 	}()
 	wg.Wait()
+	// Даём доиграть недоделанному: выдаче по звёздам, возврату на баланс.
+	// Бюджет короткий намеренно — docker убивает контейнер через 10 секунд
+	// после SIGTERM, и обещать больше нечестно.
+	if !a.Drain(shutdownGrace) {
+		log.Warn("не всё фоновое успело завершиться за отведённое время")
+	}
 
 	if botErr != nil {
 		log.Error("работа бота", "err", botErr)

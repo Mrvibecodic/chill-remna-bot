@@ -2,10 +2,12 @@ package hostctl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -227,39 +229,188 @@ func (c *Controller) SelfUpdate(ctx context.Context) error {
 	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s up -d", c.project))
 }
 
-// SetImageChannel rewrites the tag of the bot service image in the compose file
-// (e.g. ...:latest -> ...:dev), preserving the registry/repository part.
-func (c *Controller) SetImageChannel(tag string) error {
+// SetImageChannel меняет ТЕГ образа сервиса bot в compose-файле
+// (…:latest → …:dev) и возвращает прежнее содержимое файла — оно нужно, чтобы
+// откатиться, если образ так и не скачался (см. app.runSelfUpdate).
+//
+// Правка построчная, а не «разобрать YAML и записать обратно». Разбор с
+// сериализацией переписывал ВЕСЬ файл своим форматом: пропадали комментарии
+// (в том числе тот, что объясняет пин `:v1`), кавычки, порядок ключей и
+// якоря. Файл принадлежит владельцу установки, а не боту, — трогаем ровно те
+// байты, которые обязаны измениться.
+//
+// Пустой prev означает «менять было нечего»: тег уже нужный.
+func (c *Controller) SetImageChannel(tag string) (prev []byte, err error) {
 	data, err := os.ReadFile(c.composeFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	root := map[string]any{}
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return err
+	out, changed, err := replaceBotImageTag(data, tag)
+	if err != nil {
+		return nil, err
 	}
-	services, _ := root["services"].(map[string]any)
-	if services == nil {
-		return fmt.Errorf("в compose нет services")
+	if !changed {
+		return nil, nil
 	}
-	bot, ok := services["bot"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("в compose нет сервиса bot")
+	if err := c.writeCompose(out); err != nil {
+		return nil, err
 	}
-	img, _ := bot["image"].(string)
-	if img == "" {
-		return fmt.Errorf("у сервиса bot нет image")
+	return data, nil
+}
+
+// BotImageTag возвращает текущий тег образа сервиса bot ("" — тега нет).
+func (c *Controller) BotImageTag() (string, error) {
+	data, err := os.ReadFile(c.composeFile)
+	if err != nil {
+		return "", err
 	}
-	base := img
-	if i := strings.LastIndex(img, ":"); i > strings.LastIndex(img, "/") {
-		base = img[:i]
+	ref, err := botImageRef(data)
+	if err != nil {
+		return "", err
 	}
-	bot["image"] = base + ":" + tag
-	out, err := yaml.Marshal(root)
+	if j := strings.LastIndex(ref, ":"); j > strings.LastIndex(ref, "/") {
+		return ref[j+1:], nil
+	}
+	return "", nil
+}
+
+// RestoreCompose возвращает файл к прежнему содержимому. Пустой prev — значит
+// файл не трогали, и возвращать нечего.
+func (c *Controller) RestoreCompose(prev []byte) error {
+	if len(prev) == 0 {
+		return nil
+	}
+	return c.writeCompose(prev)
+}
+
+// writeCompose пишет через временный файл рядом и переименование: обрыв на
+// половине записи оставил бы установку с обрезанным compose, а это «бот не
+// поднимается» до ручного вмешательства.
+func (c *Controller) writeCompose(data []byte) error {
+	dir := filepath.Dir(c.composeFile)
+	mode := os.FileMode(0o600)
+	if fi, err := os.Stat(c.composeFile); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	f, err := os.CreateTemp(dir, ".compose-*")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.composeFile, out, 0o600)
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, c.composeFile)
+}
+
+// errImageDigestPinned — образ пришпилен по digest (…@sha256:…). Такой ref
+// тега не имеет; прежний код дописывал тег прямо после «@sha256», получалась
+// заведомо неверная ссылка и pull падал всегда.
+var errImageDigestPinned = errors.New("образ сервиса bot пришпилен по digest — канал обновления менять нечему")
+
+// botImageRef возвращает ссылку на образ сервиса bot как она записана.
+func botImageRef(data []byte) (string, error) {
+	_, _, ref, err := scanBotImage(data)
+	if err != nil {
+		return "", err
+	}
+	return ref, nil
+}
+
+// replaceBotImageTag заменяет тег в строке image сервиса bot, не трогая
+// остальные байты. changed=false — тег уже нужный.
+func replaceBotImageTag(data []byte, tag string) (out []byte, changed bool, err error) {
+	lines, idx, ref, err := scanBotImage(data)
+	if err != nil {
+		return nil, false, err
+	}
+	if strings.Contains(ref, "@") {
+		return nil, false, errImageDigestPinned
+	}
+	base := ref
+	if j := strings.LastIndex(ref, ":"); j > strings.LastIndex(ref, "/") {
+		base = ref[:j]
+	}
+	if base+":"+tag == ref {
+		return data, false, nil
+	}
+	line := lines[idx]
+	trimmed := strings.TrimSpace(line)
+	_, quote, trail := splitImageValue(strings.TrimPrefix(trimmed, "image:"))
+	lines[idx] = line[:len(line)-len(trimmed)] + "image: " + quote + base + ":" + tag + quote + trail
+	return []byte(strings.Join(lines, "\n")), true, nil
+}
+
+// scanBotImage находит строку image у сервиса bot: её номер и значение.
+func scanBotImage(data []byte) (lines []string, idx int, ref string, err error) {
+	lines = strings.Split(string(data), "\n")
+	inServices := false
+	servicesIndent := -1
+	svcIndent := -1
+	curSvc := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if !inServices {
+			if indent == 0 && (trimmed == "services:" || strings.HasPrefix(trimmed, "services:")) {
+				inServices, servicesIndent = true, indent
+			}
+			continue
+		}
+		if indent <= servicesIndent {
+			// Вышли из services — дальше сервиса bot быть не может.
+			break
+		}
+		if svcIndent == -1 || indent == svcIndent {
+			if name, ok := strings.CutSuffix(trimmed, ":"); ok && !strings.Contains(name, " ") {
+				svcIndent, curSvc = indent, name
+				continue
+			}
+		}
+		if curSvc != "bot" || indent <= svcIndent {
+			continue
+		}
+		rest, ok := strings.CutPrefix(trimmed, "image:")
+		if !ok {
+			continue
+		}
+		v, _, _ := splitImageValue(rest)
+		if v == "" {
+			return nil, 0, "", fmt.Errorf("у сервиса bot пустой image")
+		}
+		return lines, i, v, nil
+	}
+	return nil, 0, "", fmt.Errorf("в compose нет сервиса bot с image")
+}
+
+// splitImageValue разбирает хвост строки «image: …» на сам ref, кавычки
+// вокруг него и хвостовой комментарий — чтобы вернуть строку в прежнем виде.
+func splitImageValue(rest string) (ref, quote, trail string) {
+	rest = strings.TrimLeft(rest, " \t")
+	if rest == "" {
+		return "", "", ""
+	}
+	if q := rest[0]; q == '"' || q == '\'' {
+		if end := strings.IndexByte(rest[1:], q); end >= 0 {
+			return rest[1 : 1+end], string(q), rest[2+end:]
+		}
+		return "", "", ""
+	}
+	if sp := strings.IndexAny(rest, " \t"); sp >= 0 {
+		return rest[:sp], "", rest[sp:]
+	}
+	return rest, "", ""
 }
 
 // PortsBusy probes whether the given host ports are already in use. It runs a

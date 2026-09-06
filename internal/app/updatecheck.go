@@ -32,6 +32,31 @@ func channelTag(ch string) string {
 	return "latest"
 }
 
+// tagInChannel — принадлежит ли уже прописанный тег нужному каналу. Для
+// стабильного канала это и «latest», и любой пин версии («v1», «v1.4.4»):
+// такой пин ставят намеренно, и обновление не вправе его снимать.
+func tagInChannel(tag, ch string) bool {
+	if tag == "" {
+		return false
+	}
+	if ch == "dev" {
+		return tag == "dev"
+	}
+	if tag == "latest" || tag == "stable" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(tag, "v")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if (r < '0' || r > '9') && r != '.' {
+			return false
+		}
+	}
+	return rest[0] >= '0' && rest[0] <= '9'
+}
+
 func (a *App) updChannel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()

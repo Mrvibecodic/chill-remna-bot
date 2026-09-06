@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/config"
@@ -42,6 +43,9 @@ type fakeMsg struct {
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
+	// forbidden — чаты, где Telegram отвечает 403 («человек заблокировал
+	// бота»): так проверяется, что рассылка отличает это от временной ошибки.
+	forbidden map[int64]bool
 	// sendDelay — искусственная задержка отправки: так проверяется поведение
 	// при одновременных доставках.
 	sendDelay time.Duration
@@ -108,6 +112,16 @@ func hasCB(list []string, want string) bool {
 }
 
 func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
+func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, error) {
+	if f.forbidden != nil && f.forbidden[chatID] {
+		return 0, bot.ErrorForbidden
+	}
+	id := f.add(text)
+	if f.kbFail {
+		return 0, errors.New("не доставлено")
+	}
+	return id, nil
+}
 func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
 	id := f.add(text)
@@ -279,23 +293,24 @@ type fakeStore struct {
 	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
 	// триал) без этого ловили бы гонку самого двойника, а не проверяемого кода.
 	// Остальные методы не заперты намеренно: они вызываются последовательно.
-	mu         sync.Mutex
-	cfg        *model.BotConfig
-	users      map[int64]*model.User
-	reqs       map[int64]*model.P2PRequest
-	pays       map[int64]*model.Payment
-	media      map[string]string
-	pending    map[int64]*model.PendingInvoice
-	plans      map[string]*model.Plan
-	planAccess map[string]model.PlanAccess
-	intents    map[int64]*model.PurchaseIntent
-	invSnaps   map[string]*model.PlanSnapshot
-	invSnapAt  map[string]string
-	promos     map[string]*model.PromoCode
-	promoUses  map[string]bool
-	webUsers   map[string]*model.WebUser
-	paylogs    []model.PayLogEntry
-	torrents   []model.TorrentReport
+	mu          sync.Mutex
+	cfg         *model.BotConfig
+	unreachable map[int64]string
+	users       map[int64]*model.User
+	reqs        map[int64]*model.P2PRequest
+	pays        map[int64]*model.Payment
+	media       map[string]string
+	pending     map[int64]*model.PendingInvoice
+	plans       map[string]*model.Plan
+	planAccess  map[string]model.PlanAccess
+	intents     map[int64]*model.PurchaseIntent
+	invSnaps    map[string]*model.PlanSnapshot
+	invSnapAt   map[string]string
+	promos      map[string]*model.PromoCode
+	promoUses   map[string]bool
+	webUsers    map[string]*model.WebUser
+	paylogs     []model.PayLogEntry
+	torrents    []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -924,6 +939,15 @@ func (s *fakeStore) SearchUsers(_ context.Context, q string, limit, offset int) 
 	return all[offset:end], total, nil
 }
 
+func (s *fakeStore) SetUnreachable(_ context.Context, id int64, at string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unreachable == nil {
+		s.unreachable = map[int64]string{}
+	}
+	s.unreachable[id] = at
+	return nil
+}
 func (s *fakeStore) SetBlocked(_ context.Context, id int64, blocked bool) error {
 	if s.users == nil {
 		s.users = map[int64]*model.User{}

@@ -23,8 +23,12 @@ func (a *App) WebhookServer() (addr, domain, cacheDir string) {
 	defer a.mu.Unlock()
 	addr = ":8080"
 	if a.botCfg != nil {
-		if a.botCfg.Webhook.ListenAddr != "" {
-			addr = a.botCfg.Webhook.ListenAddr
+		// Второй рубеж: в поле мог попасть мусор до того, как появилась
+		// проверка при вводе. Отдать его в http.Server значит не поднять
+		// веб-сервер вовсе — вебхуки всех платёжек, мини-апп и кабинет
+		// мертвы, а причина видна только в логе.
+		if norm, ok := normalizeListenAddr(a.botCfg.Webhook.ListenAddr); ok {
+			addr = norm
 		}
 		if a.botCfg.Webhook.TLS && a.botCfg.Webhook.Domain != "" {
 			domain = a.botCfg.Webhook.Domain
@@ -40,7 +44,10 @@ func (a *App) WebhookConfig() (addr string, enabled bool, publicURL string) {
 	if a.botCfg == nil {
 		return ":8080", false, ""
 	}
-	addr = a.botCfg.Webhook.ListenAddr
+	addr = ":8080"
+	if norm, ok := normalizeListenAddr(a.botCfg.Webhook.ListenAddr); ok {
+		addr = norm
+	}
 	if addr == "" {
 		addr = ":8080"
 	}

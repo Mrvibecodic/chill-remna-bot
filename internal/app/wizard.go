@@ -9,6 +9,7 @@ import (
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/storage"
 )
 
 type step int
@@ -31,6 +32,14 @@ type wizard struct {
 	step     step
 	cfg      model.BotConfig
 	reconfig bool
+
+	// pendingDB — выбор хранилища, ещё НЕ применённый. При переустановке
+	// нажатие на пункт раньше немедленно закрывало боевую базу и подставляло
+	// новую: «передумал и нажал Назад» оставляло бота работать с пустым
+	// хранилищем, а выбор переживал перезапуск. Теперь выбор копится и
+	// применяется на финише, когда панель уже проверена.
+	pendingDBKind string
+	pendingDSN    string
 
 	// note — пояснение к СЛЕДУЮЩЕМУ экрану мастера. Отдельным сообщением его
 	// слать нельзя: каждый шаг мастера удаляет предыдущий экран, и пояснение
@@ -351,7 +360,7 @@ func (a *App) wizardCallback(ctx context.Context, chatID int64, w *wizard, key, 
 	case "apiprot":
 		if val == "yes" {
 			w.step = stepAPIKey
-			a.send(ctx, chatID, i18n.T(w.cfg.Language, "step.apikey.ask"))
+			a.sendKB(ctx, chatID, i18n.T(w.cfg.Language, "step.apikey.ask"), a.wizCancelRows(w))
 		} else {
 			a.verify(ctx, chatID, w)
 		}
@@ -367,8 +376,8 @@ func (a *App) handleWizardText(ctx context.Context, chatID int64, text string) {
 	}
 	switch w.step {
 	case stepPGDSN:
-		if err := a.openStore(model.DBPostgres, text); err != nil {
-			a.send(ctx, chatID, "❌ "+err.Error())
+		if err := a.useStore(ctx, w, model.DBPostgres, text); err != nil {
+			a.send(ctx, chatID, a.clientErr(ctx, chatID, "выбор хранилища", err))
 			return
 		}
 		a.gotoLocation(ctx, chatID, w)
@@ -384,7 +393,45 @@ func (a *App) handleWizardText(ctx context.Context, chatID int64, text string) {
 	case stepAPIKey:
 		w.cfg.Panel.APIKey = text
 		a.verify(ctx, chatID, w)
+	default:
+		// Шаги с кнопками (выбор языка, базы, размещения) текста не ждут.
+		// Раньше сообщение просто удалялось и человек не получал НИЧЕГО: ни
+		// ошибки, ни подсказки — при этом весь остальной ввод в админке
+		// продолжал молча уходить сюда же.
+		a.sendKB(ctx, chatID, i18n.T(w.cfg.Language, "wiz.buttons_only"), a.wizCancelRows(w))
 	}
+}
+
+// wizardFields — что именно спрашивает мастер. Всё остальное в конфиге ему не
+// принадлежит, и переносить это снимком нельзя.
+func (a *App) configWithWizard(w *wizard) *model.BotConfig {
+	a.mu.Lock()
+	var base model.BotConfig
+	if a.botCfg != nil {
+		if c, err := a.botCfg.Clone(); err == nil && c != nil {
+			base = *c
+		} else {
+			// Копия не сделалась — берём то, что мастер собрал сам. Хуже, чем
+			// наложение, но лучше, чем отказ на финише установки.
+			base = w.cfg
+			a.log.Warn("копия конфига не сделана, мастер пишет свой снимок", "err", err)
+		}
+	}
+	a.mu.Unlock()
+	base.Language = w.cfg.Language
+	base.DBKind = w.cfg.DBKind
+	base.Panel = w.cfg.Panel
+	base.Installed = w.cfg.Installed
+	return &base
+}
+
+// wizCancelRows — кнопка «отменить настройку», если мастер запущен на уже
+// работающем боте. При первичной установке отменять нечего: бот не настроен.
+func (a *App) wizCancelRows(w *wizard) [][]models.InlineKeyboardButton {
+	if !w.reconfig {
+		return nil
+	}
+	return [][]models.InlineKeyboardButton{{btn(i18n.T(w.cfg.Language, "rcfg.btn_cancel"), "rcfg:cancel")}}
 }
 
 func (a *App) gotoDB(ctx context.Context, chatID int64, w *wizard) {
@@ -410,8 +457,8 @@ func (a *App) gotoDB(ctx context.Context, chatID int64, w *wizard) {
 func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind string) {
 	w.cfg.DBKind = kind
 	if kind == model.DBSQLite {
-		if err := a.openStore(model.DBSQLite, a.dsnForEnv(model.DBSQLite)); err != nil {
-			a.send(ctx, chatID, "❌ "+err.Error())
+		if err := a.useStore(ctx, w, model.DBSQLite, a.dsnForEnv(model.DBSQLite)); err != nil {
+			a.send(ctx, chatID, a.clientErr(ctx, chatID, "выбор хранилища", err))
 			return
 		}
 		a.gotoLocation(ctx, chatID, w)
@@ -423,7 +470,7 @@ func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind stri
 		a.send(ctx, chatID, i18n.T(lang, "step.db.pg_starting"))
 		dsn, err := a.ctl.EnablePostgres(ctx)
 		if err == nil {
-			err = a.switchStore(ctx, model.DBPostgres, dsn)
+			err = a.useStore(ctx, w, model.DBPostgres, dsn)
 		}
 		if err != nil {
 			a.send(ctx, chatID, i18n.T(lang, "step.db.pg_failed", err.Error()))
@@ -443,8 +490,8 @@ func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind stri
 	}
 
 	if a.cfg.DatabaseURL != "" {
-		if err := a.openStore(model.DBPostgres, a.cfg.DatabaseURL); err != nil {
-			a.send(ctx, chatID, "❌ "+err.Error())
+		if err := a.useStore(ctx, w, model.DBPostgres, a.cfg.DatabaseURL); err != nil {
+			a.send(ctx, chatID, a.clientErr(ctx, chatID, "выбор хранилища", err))
 			return
 		}
 		a.gotoLocation(ctx, chatID, w)
@@ -454,13 +501,66 @@ func (a *App) onDBChosen(ctx context.Context, chatID int64, w *wizard, kind stri
 	a.send(ctx, chatID, i18n.T(lang, "step.pgdsn.ask"))
 }
 
+// useStore выбирает хранилище. При первичной установке применяет сразу —
+// дальше мастеру некуда писать. При переустановке только проверяет, что база
+// открывается и мигрируется, и запоминает выбор до финиша.
+func (a *App) useStore(ctx context.Context, w *wizard, kind, dsn string) error {
+	a.mu.Lock()
+	live := a.store != nil
+	a.mu.Unlock()
+	if !w.reconfig || !live {
+		return a.openStore(kind, dsn)
+	}
+	st, err := a.openOne(kind, dsn)
+	if err != nil {
+		return err
+	}
+	if err := st.Migrate(ctx); err != nil {
+		_ = st.Close()
+		return err
+	}
+	_ = st.Close()
+	w.pendingDBKind, w.pendingDSN = kind, dsn
+	return nil
+}
+
+// applyPendingDB применяет отложенный выбор хранилища. Через switchStore, а не
+// openStore: смена базы обязана переносить данные — иначе переустановка
+// «Postgres → SQLite» подсовывала боту пустую базу, и люди, платежи и тарифы
+// для него исчезали.
+func (a *App) applyPendingDB(ctx context.Context, w *wizard) error {
+	if w.pendingDBKind == "" {
+		return nil
+	}
+	a.mu.Lock()
+	cur := a.store
+	a.mu.Unlock()
+	if cur != nil && cur.Kind() == w.pendingDBKind && a.storeDSN() == w.pendingDSN {
+		return nil
+	}
+	return a.switchStore(ctx, w.pendingDBKind, w.pendingDSN)
+}
+
+// storeDSN — с каким DSN бот работает сейчас (из bootstrap-файла).
+func (a *App) storeDSN() string {
+	bs, err := storage.LoadBootstrap(a.cfg.DataDir)
+	if err != nil || bs == nil {
+		return ""
+	}
+	return bs.DSN
+}
+
 func (a *App) gotoLocation(ctx context.Context, chatID int64, w *wizard) {
 	w.step = stepLocation
 	lang := w.cfg.Language
-	a.sendKB(ctx, chatID, i18n.T(lang, "step.location.title"), [][]models.InlineKeyboardButton{{
+	// Кнопка отмены — на КАЖДОМ экране переустановки. Раньше она была только
+	// на первом: уйдя дальше, погасить мастер было нечем, и он до перезапуска
+	// съедал весь ввод в админке.
+	rows := [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "step.location.choose_local"), "loc:local"),
 		btn(i18n.T(lang, "step.location.choose_remote"), "loc:remote"),
-	}})
+	}}
+	a.sendKB(ctx, chatID, i18n.T(lang, "step.location.title"), append(rows, a.wizCancelRows(w)...))
 }
 
 func (a *App) onLocationChosen(ctx context.Context, chatID int64, w *wizard, val string) {
@@ -477,20 +577,21 @@ func (a *App) onLocationChosen(ctx context.Context, chatID int64, w *wizard, val
 	}
 	w.step = stepInstall
 	lang := w.cfg.Language
-	a.sendKB(ctx, chatID, i18n.T(lang, "step.install.title"), [][]models.InlineKeyboardButton{{
+	rows := [][]models.InlineKeyboardButton{{
 		btn(i18n.T(lang, "step.install.choose_docs"), "inst:docs"),
 		btn(i18n.T(lang, "step.install.choose_egames"), "inst:egames"),
-	}})
+	}}
+	a.sendKB(ctx, chatID, i18n.T(lang, "step.install.title"), append(rows, a.wizCancelRows(w)...))
 }
 
 func (a *App) gotoURL(ctx context.Context, chatID int64, w *wizard) {
 	w.step = stepURL
-	a.send(ctx, chatID, i18n.T(w.cfg.Language, "step.url.ask"))
+	a.sendKB(ctx, chatID, i18n.T(w.cfg.Language, "step.url.ask"), a.wizCancelRows(w))
 }
 
 func (a *App) gotoToken(ctx context.Context, chatID int64, w *wizard) {
 	w.step = stepToken
-	a.send(ctx, chatID, i18n.T(w.cfg.Language, "step.token.ask"))
+	a.sendKB(ctx, chatID, i18n.T(w.cfg.Language, "step.token.ask"), a.wizCancelRows(w))
 }
 
 // withNote приклеивает отложенное пояснение к тексту экрана и гасит его, чтобы
@@ -517,7 +618,7 @@ func (a *App) afterToken(ctx context.Context, chatID int64, w *wizard) {
 		switch w.cfg.Panel.InstallType {
 		case model.InstallEGames:
 			w.step = stepCookie
-			a.send(ctx, chatID, w.withNote(i18n.T(lang, "step.cookie.ask")))
+			a.sendKB(ctx, chatID, w.withNote(i18n.T(lang, "step.cookie.ask")), a.wizCancelRows(w))
 			return
 		case model.InstallDocs:
 			// Ключ уже пришёл из окружения — спрашивать нечего.
@@ -526,10 +627,10 @@ func (a *App) afterToken(ctx context.Context, chatID int64, w *wizard) {
 				return
 			}
 			w.step = stepAPIKeyAsk
-			a.sendKB(ctx, chatID, i18n.T(lang, "step.apikey.ask_protected"), [][]models.InlineKeyboardButton{
+			a.sendKB(ctx, chatID, i18n.T(lang, "step.apikey.ask_protected"), append([][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "step.apikey.yes"), "apiprot:yes"),
 					btn(i18n.T(lang, "step.apikey.no"), "apiprot:no")},
-			})
+			}, a.wizCancelRows(w)...))
 			return
 		}
 	}
@@ -559,20 +660,32 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 		return
 	}
 
+	// Хранилище подменяем только теперь: панель проверена, мастер дошёл до
+	// конца. Отказ здесь оставляет бота на прежней базе.
+	if err := a.applyPendingDB(ctx, w); err != nil {
+		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", err.Error()))
+		return
+	}
+
 	w.cfg.Installed = true
-	w.cfg.NormalizePricing()
-	w.cfg.NormalizeReminders()
 	if a.store == nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", "БД не инициализирована"))
 		return
 	}
-	if err := a.store.SaveConfig(ctx, &w.cfg); err != nil {
+	// Пишем не снимок, а СВЕЖИЙ конфиг с наложенными полями мастера. Раньше
+	// сюда уезжала копия, снятая на старте: всё, что админ поправил, пока
+	// мастер был открыт (цена, битый баннер, ключи платёжек), молча
+	// откатывалось на финише.
+	cfg := a.configWithWizard(w)
+	cfg.NormalizePricing()
+	cfg.NormalizeReminders()
+	if err := a.store.SaveConfig(ctx, cfg); err != nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", err.Error()))
 		return
 	}
 
 	a.mu.Lock()
-	saved := w.cfg
+	saved := *cfg
 	saved.NormalizeUpdateCheck()
 	a.botCfg = &saved
 	a.panel = client

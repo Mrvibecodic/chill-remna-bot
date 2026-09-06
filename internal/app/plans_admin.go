@@ -349,7 +349,7 @@ func planDurationsLine(lang string, p *model.Plan) string {
 		if price == "" {
 			price = "—"
 		} else {
-			price += curSuffix(p.Currency)
+			price += curSuffix(curSymbol(p.Currency))
 		}
 		parts = append(parts, term+" — "+price)
 	}

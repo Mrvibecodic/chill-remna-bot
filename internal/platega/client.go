@@ -31,7 +31,10 @@ type Client struct {
 
 func New(merchant, secret string) *Client {
 	return &Client{
-		http:     &http.Client{Timeout: 30 * time.Second},
+		// Не дольше бюджета обработчика, который его зовёт (25 с): иначе
+		// обработчик отваливается по своему контексту раньше, чем клиент
+		// вообще перестанет ждать ответа.
+		http:     &http.Client{Timeout: 20 * time.Second},
 		merchant: merchant,
 		secret:   secret,
 	}
