@@ -57,6 +57,11 @@ server {
     ssl_certificate     /etc/ssl/wildcard.pem;   # лучше wildcard *.example.com (см. выше)
     ssl_certificate_key /etc/ssl/wildcard.key;
 
+    # Чек об оплате переводом принимается размером до 12 МБ. Без этой строки
+    # nginx режет тело на своём умолчании в 1 МБ и отвечает 413: скриншот с
+    # телефона (1,5–4 МБ) до бота не доедет вообще.
+    client_max_body_size 16m;
+
     location / {
         proxy_pass http://127.0.0.1:8080;        # порт бота — тот же, что для вебхуков
         proxy_set_header Host $host;
@@ -69,6 +74,13 @@ server {
         proxy_set_header X-Real-IP       $remote_addr;
         # Эти заголовки клиент подделывает напрямую — вырезаем.
         proxy_set_header CF-Connecting-IP "";
+
+        # Не копить тело запроса перед отправкой: загрузка чека с медленного
+        # мобильного канала иначе целиком лежит на диске прокси, а бот всё это
+        # время не знает, что человек ещё жив.
+        proxy_request_buffering off;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 ```

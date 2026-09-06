@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -417,5 +418,100 @@ func TestPayLog_NotInProcessLog(t *testing.T) {
 	// В журнале платежей запись при этом есть — админу она нужна.
 	if rows, _ := fs.PayLogs(context.Background(), "pay-1", 0, 10); len(rows) == 0 {
 		t.Fatal("запись не попала в журнал платежей")
+	}
+}
+
+// Проверка «бот жив» не смотрела на базу — отвалившееся хранилище
+// давало бодрое «всё хорошо», и оркестратор ничего не перезапускал.
+func TestHealthy_ChecksDatabase(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true}
+	if err := a.Healthy(context.Background()); err != nil {
+		t.Fatalf("здоровый бот признан больным: %v", err)
+	}
+	fs.pingErr = errors.New("connection refused")
+	if err := a.Healthy(context.Background()); err == nil {
+		t.Fatal("база отвалилась, а проверка отвечает «всё хорошо»")
+	}
+}
+
+// «сегодня» в сводке считалось по всемирным суткам, а время человеку
+// печаталось по Москве — выручка обнулялась в три ночи.
+func TestAnalytics_TodayIsMoscowDay(t *testing.T) {
+	// 01:30 по Москве = 22:30 предыдущего дня по UTC.
+	now := time.Date(2026, 9, 6, 22, 30, 0, 0, time.UTC)
+	dayStart := dayStartFor(now)
+
+	// Платёж в 00:30 МСК того же дня обязан попасть в «сегодня».
+	if paid := time.Date(2026, 9, 6, 21, 30, 0, 0, time.UTC); !paid.After(dayStart) {
+		t.Fatal("платёж после московской полуночи не попал в «сегодня»")
+	}
+	// А платёж до неё — не обязан.
+	if before := time.Date(2026, 9, 6, 20, 30, 0, 0, time.UTC); before.After(dayStart) {
+		t.Fatal("платёж до московской полуночи попал в «сегодня»")
+	}
+	// Ровно та же граница, что печатается человеку.
+	if got := dayStart.In(displayTZ).Format("15:04"); got != "00:00" {
+		t.Fatalf("сутки начинаются не в полночь по поясу показа: %s", got)
+	}
+}
+
+// Панель прилегла в момент «Одобрить» — кнопки уже удалены нажатием.
+// Заявка не должна оставаться без единого способа её одобрить.
+func TestP2P_StuckRequestStaysApprovable(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	a.store = fs
+	req := &model.P2PRequest{ID: 77, TelegramID: 555, Months: 1, Price: "150", Status: model.P2PSubmitted, Screenshot: "web"}
+	if err := fs.CreateP2PRequest(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+
+	// Панель не настроена — выдача не проходит, карточку обязаны вернуть.
+	fm.texts = nil
+	a.handleCallback(ctx, cb(planAdmin, "adm:pok:77"))
+	if !hasCB(fm.allCallbackData(), "adm:pok:77") {
+		t.Fatalf("после неудачи одобрить заявку негде: %v", fm.allCallbackData())
+	}
+	if r, _ := fs.GetP2PRequest(ctx, 77); r == nil || r.Status != model.P2PSubmitted {
+		t.Fatalf("статус заявки не откатился: %+v", r)
+	}
+
+	// И её же видно на экране висящих заявок.
+	fm.texts = nil
+	a.handleCallback(ctx, cb(planAdmin, "adm:pending"))
+	if !strings.Contains(fm.joined(), "Заявки на рассмотрении") {
+		t.Fatalf("экран висящих заявок не открылся:\n%s", fm.joined())
+	}
+	if !hasCB(fm.allCallbackData(), "adm:pok:77") {
+		t.Fatalf("в списке нет кнопки одобрения: %v", fm.allCallbackData())
+	}
+}
+
+// Удалили человека, а его незакрытый счёт остался. Сверка добивала его и
+// заводила человека заново — с деньгами, но без принятых документов и допуска.
+func TestReconcile_DeletedUserIsNotResurrected(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	a.store = fs
+	const gone int64 = 909090
+
+	pi := &model.PendingInvoice{ID: 5, Method: "yookassa", ExtID: "pay-gone", TelegramID: gone, Purpose: "topup", Kopecks: 50000}
+	if err := fs.AddPendingInvoice(ctx, pi); err != nil {
+		t.Fatal(err)
+	}
+	if ok := a.reconcileFinalize(ctx, fs, pi, "500.00 RUB"); ok {
+		t.Fatal("подписка выдана удалённому пользователю")
+	}
+	if u, _ := fs.GetUser(ctx, gone); u != nil {
+		t.Fatalf("удалённый пользователь заведён заново: %+v", u)
+	}
+	if !strings.Contains(fm.joined(), "удалённого пользователя") {
+		t.Fatalf("админа не позвали разобраться:\n%s", fm.joined())
+	}
+	// Счёт закрыт — сверка не будет крутить его сутки.
+	if p := fs.pending[5]; p == nil || !p.Resolved {
+		t.Fatal("счёт остался незакрытым — сверка будет крутить его сутки")
 	}
 }

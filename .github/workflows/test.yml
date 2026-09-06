@@ -29,5 +29,19 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27.1"
+          cache: true
+      - name: gofmt
+        run: |
+          FMT=$(gofmt -l .)
+          if [ -n "$FMT" ]; then
+            echo "не отформатированы:"; echo "$FMT"; exit 1
+          fi
       - run: go vet ./...
-      - run: go test ./... -count=1
+      # -race вместо обычного прогона, а не в дополнение: иначе платим за
+      # компиляцию дважды. Гонка в деньгах — это двойное списание, и ловить её
+      # обязана сборка, а не боевая установка.
+      - run: go test -race ./... -count=1
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2

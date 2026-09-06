@@ -2,16 +2,29 @@
 set -uo pipefail
 
 GOROOT=/tmp/go
-if [ ! -x "$GOROOT/bin/go" ]; then
-  echo "→ Go не найден в /tmp/go — качаю go1.23.4…"
-  V=go1.23.4.linux-amd64.tar.gz
+# Версия — та же, что в сборке (.github/workflows/test.yml и Dockerfile).
+# Скрипт качал go1.23.4, на которой проект уже не собирается: GOTOOLCHAIN=local
+# запрещает автоподкачку нужной, и прогон падал на первом же шаге с «go.mod
+# requires go >= 1.25.0», отчитываясь при этом «есть проблемы» — то есть
+# сломанный инструмент выглядел как найденные дефекты кода.
+GOVER=${GOVER:-1.27.1}
+
+need_go() {
+  [ -x "$GOROOT/bin/go" ] || return 0
+  have=$("$GOROOT/bin/go" env GOVERSION 2>/dev/null || echo go0)
+  [ "$have" != "go${GOVER}" ]
+}
+if need_go; then
+  echo "→ ставлю go${GOVER} в /tmp/go…"
+  V="go${GOVER}.linux-amd64.tar.gz"
   if curl -fsSL "https://go.dev/dl/$V" -o "/tmp/$V"; then
     rm -rf /tmp/go && tar -C /tmp -xzf "/tmp/$V" && rm -f "/tmp/$V"
   else
     echo "❌ Не удалось скачать Go. Установите toolchain в /tmp/go вручную." ; exit 1
   fi
 fi
-export GOROOT PATH="$GOROOT/bin:$PATH" GOTOOLCHAIN=local GOFLAGS=-mod=mod
+# readonly, а не mod: «проверка качества» не имеет права молча править go.mod.
+export GOROOT PATH="$GOROOT/bin:$PATH" GOTOOLCHAIN=local GOFLAGS=-mod=readonly
 export GOMODCACHE=/dev/shm/gomod GOCACHE=/dev/shm/gocache TMPDIR=/dev/shm/gotmp GOTMPDIR=/dev/shm/gotmp
 mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOTMPDIR"
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,10 @@ type Storage interface {
 	// LastAwaitingP2PRequest — последняя заявка пользователя, ждущая чек.
 	// Нужна, когда ожидание чека в памяти потеряно (перезапуск бота).
 	OpenP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
+	ListP2PRequestsByStatus(ctx context.Context, status string, limit int) ([]model.P2PRequest, error)
+	// Ping — жива ли база. Нужен проверке «бот жив»: без него она отвечала
+	// «всё хорошо» при отвалившемся хранилище.
+	Ping(ctx context.Context) error
 	LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
 
@@ -641,6 +646,34 @@ func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, 
 // приславшая его. Одна на человека: без этого каждое нажатие «Перевод на
 // карту» плодило новую строку, новый набор кнопок админу и (раньше) новую
 // перезапись конфига, а обслуживалась всё равно только последняя.
+// ListP2PRequestsByStatus — заявки в заданном статусе, новые сверху. Нужен
+// экрану «висящие заявки»: раньше заявку, чью карточку админ потерял, было не
+// найти ничем.
+func (b *base) ListP2PRequestsByStatus(ctx context.Context, status string, limit int) ([]model.P2PRequest, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+p2pCols+" FROM p2p_requests WHERE status = "+b.ph(1)+
+			" ORDER BY created_at DESC, id DESC LIMIT "+strconv.Itoa(limit), status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.P2PRequest
+	for rows.Next() {
+		var r model.P2PRequest
+		var snapRaw string
+		if err := rows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot,
+			&r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card); err != nil {
+			return nil, err
+		}
+		r.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (b *base) OpenP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error) {
 	r := &model.P2PRequest{}
 	var snapRaw string
@@ -691,14 +724,33 @@ func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
 	if p.CreatedAt == "" {
 		p.CreatedAt = nowStr()
 	}
-	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
-		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt, p.Snapshot.Encode())
-	if err != nil && isUniqueViolation(err) {
-		return ErrDuplicateExtID
+	// Столкновение id — не дубль сделки, а невезение с часами: пробуем новый.
+	for attempt := 0; ; attempt++ {
+		_, err := b.db.ExecContext(ctx,
+			"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot) "+
+				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
+			p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt, p.Snapshot.Encode())
+		switch {
+		case err == nil:
+			return nil
+		case isExtIDDuplicate(err):
+			return ErrDuplicateExtID
+		case isPKCollision(err) && attempt < 3:
+			p.ID = nextPaymentID(p.ID)
+		default:
+			return err
+		}
 	}
-	return err
+}
+
+// nextPaymentID — следующий свободный идентификатор платежа. Просто «+1»:
+// столкновение означает, что эта наносекунда занята, соседняя — почти наверняка
+// свободна.
+func nextPaymentID(cur int64) int64 {
+	if now := time.Now().UnixNano(); now > cur {
+		return now
+	}
+	return cur + 1
 }
 
 // AddPaymentAndBalance записывает платёж и зачисляет баланс ОДНОЙ транзакцией.
@@ -756,9 +808,13 @@ func (b *base) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopec
 		"INSERT INTO payments (id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot) "+
 			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
 		p.ID, p.TelegramID, p.Method, p.Months, p.Amount, p.Status, p.Comment, p.ExtID, p.CreatedAt, p.Snapshot.Encode()); err != nil {
-		if isUniqueViolation(err) {
+		if isExtIDDuplicate(err) {
 			return ErrDuplicateExtID
 		}
+		// Столкновение id внутри транзакции не чиним повтором: транзакция уже
+		// аварийная. Отдаём как обычную ошибку — счёт останется незакрытым, и
+		// сверка добьёт его через пару минут. Это честнее, чем сказать
+		// «уже зачислено» и потерять пополнение.
 		return err
 	}
 	if kopecks != 0 {
@@ -776,14 +832,56 @@ func (b *base) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopec
 	return tx.Commit()
 }
 
+// isUniqueViolation — нарушено ЛЮБОЕ уникальное ограничение. Годится там, где
+// важен сам факт («такая строка уже есть»): импорт дампа, погашение промокода.
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique constraint") ||
-		strings.Contains(msg, "23505") ||
-		strings.Contains(msg, "duplicate key")
+	if pg := pgError(err); pg != nil {
+		return pg.Code == pgUniqueViolation
+	}
+	switch sqliteCode(err) {
+	case sqliteUniqueIndex, sqliteUniquePK:
+		return true
+	}
+	return false
+}
+
+// uqPaymentsExtID — имя уникального индекса по (method, ext_id) из миграции
+// 0014. Одинаково в обоих диалектах у всех установок.
+const uqPaymentsExtID = "uq_payments_method_extid"
+
+// isExtIDDuplicate — платёж с таким ключом сделки УЖЕ записан.
+//
+// Отличать это от столкновения первичных ключей обязательно: id платежа — это
+// наносекунды текущего времени, и совпадение (две доставки в одну наносекунду,
+// грубый таймер, восстановление из бэкапа, импорт из другого бота) прежде
+// читалось как «уже оплачено». Пополнение при этом теряется: finalizeTopUp на
+// ErrDuplicateExtID выходит с nil, то есть «уже зачислено», а транзакция
+// откатилась и баланса нет.
+func isExtIDDuplicate(err error) bool {
+	if err == nil {
+		return false
+	}
+	if pg := pgError(err); pg != nil {
+		return pg.Code == pgUniqueViolation && pg.ConstraintName == uqPaymentsExtID
+	}
+	// SQLite имени индекса в ошибке не даёт, но различает коды: 2067 —
+	// уникальный индекс, 1555 — первичный ключ.
+	return sqliteCode(err) == sqliteUniqueIndex
+}
+
+// isPKCollision — столкнулись первичные ключи: тот же платёж тут ни при чём,
+// просто не повезло со временем. Лечится новым id.
+func isPKCollision(err error) bool {
+	if err == nil {
+		return false
+	}
+	if pg := pgError(err); pg != nil {
+		return pg.Code == pgUniqueViolation && strings.HasSuffix(pg.ConstraintName, "_pkey")
+	}
+	return sqliteCode(err) == sqliteUniquePK
 }
 
 func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error) {
@@ -1833,6 +1931,8 @@ func (b *base) CountReferrals(ctx context.Context, referrerID int64) (int, error
 		"SELECT COUNT(1) FROM users WHERE referred_by = "+b.ph(1), referrerID).Scan(&n)
 	return n, err
 }
+
+func (b *base) Ping(ctx context.Context) error { return b.db.PingContext(ctx) }
 
 func (b *base) SetUnreachable(ctx context.Context, telegramID int64, at string) error {
 	_, err := b.db.ExecContext(ctx,

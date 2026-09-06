@@ -41,14 +41,22 @@ func (a *App) supportURL() string {
 	return ""
 }
 
+// displayTZ — пояс, в котором бот показывает время И считает границы суток для
+// сводок. Одно место на оба: раньше печать шла по Москве, а «сегодня» в
+// аналитике — по всемирным суткам, и выручка обнулялась в три ночи.
+//
+// ВАЖНО: на UTC завязаны ключи идемпотентности (autoPayPeriod, remindFailKey) —
+// их переводить на этот пояс НЕЛЬЗЯ: на переводе часов ключ изменился бы, а
+// это двойное списание.
+var displayTZ = time.FixedZone("MSK", 3*60*60)
+
 func formatExpire(raw, lang string) string {
 	if raw == "" {
 		return i18n.T(lang, "sub.no_expire")
 	}
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 
-		msk := t.UTC().Add(3 * time.Hour)
-		return msk.Format("02.01.2006 15:04") + " " + i18n.T(lang, "sub.tz_msk")
+		return t.In(displayTZ).Format("02.01.2006 15:04") + " " + i18n.T(lang, "sub.tz_msk")
 	}
 	return raw
 }

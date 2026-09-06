@@ -235,6 +235,13 @@ func (a *App) CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filen
 	if req.Status != model.P2PAwaiting && req.Status != model.P2PSubmitted {
 		return errors.New("заявка уже обработана")
 	}
+	// Повтор после оборванного ответа не должен слать админу второй чек:
+	// заливка с телефона легко упирается в таймаут уже ПОСЛЕ того, как чек
+	// ушёл, и человек честно жмёт «отправить» ещё раз.
+	if req.Status == model.P2PSubmitted && req.Screenshot != "" {
+		a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), tgID, "screenshot_repeat", "повтор загрузки чека — админу не пересылаем")
+		return nil
+	}
 	if len(data) == 0 {
 		return errors.New("пустой файл")
 	}

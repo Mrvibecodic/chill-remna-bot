@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"remnabot/internal/heleket"
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
 )
@@ -237,6 +238,22 @@ func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *mode
 // если подписка была выдана именно этим вызовом (дубли и ошибки — false), чтобы
 // вызывающий не повторял разовые действия вроде предложения автопродления.
 func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *model.PendingInvoice, amount string) bool {
+	// Пользователя удалили, а счёт остался незакрытым. Прежде сверка добивала
+	// его и ЗАВОДИЛА человека заново — с деньгами, но без принятых документов,
+	// без допуска к тарифам и без вайтлиста. Удалять счета вместе с
+	// пользователем нельзя: он мог оплатить уже после нажатия «удалить», и
+	// тогда деньги списаны, услуги нет, следов нет. Поэтому не выдаём и не
+	// начисляем, а зовём админа разобраться руками.
+	if u, err := st.GetUser(ctx, pi.TelegramID); err == nil && u == nil {
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "orphan_paid",
+			"оплата пришла на удалённого пользователя: %s, purpose=%s", amount, pi.Purpose)
+		_ = st.ResolvePending(ctx, pi.ID)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.orphan_payment",
+			escapeName(pi.Method), escapeName(pi.ExtID), escapeName(amount), pi.TelegramID))
+		a.log.Warn("сверка: оплата на удалённого пользователя", "method", pi.Method, "ext_id", pi.ExtID)
+		return false
+	}
 	if pi.Purpose == "topup" {
 		if err := a.finalizeTopUp(ctx, pi.TelegramID, pi.Kopecks, pi.Method, amount, pi.ExtID); err != nil &&
 			!errors.Is(err, storage.ErrDuplicateExtID) {

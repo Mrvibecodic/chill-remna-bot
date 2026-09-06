@@ -34,6 +34,14 @@ func methodLabel(m string) string {
 	return m
 }
 
+// dayStartFor — начало суток, которые человек называет «сегодня». Время в боте
+// печатается по Москве (см. formatExpire), а сутки для сводки считались по
+// всемирным: выручка с полуночи до трёх ночи падала во вчерашний день.
+func dayStartFor(now time.Time) time.Time {
+	local := now.In(displayTZ)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, displayTZ).UTC()
+}
+
 func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	if a.store == nil {
@@ -43,7 +51,7 @@ func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 	now := time.Now().UTC()
 	d7 := now.AddDate(0, 0, -7)
 	d30 := now.AddDate(0, 0, -30)
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dayStart := dayStartFor(now)
 
 	var revAll, rev7, rev30, revToday float64
 	byMethod := map[string]int{}

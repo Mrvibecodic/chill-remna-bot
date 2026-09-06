@@ -296,21 +296,23 @@ type fakeStore struct {
 	mu          sync.Mutex
 	cfg         *model.BotConfig
 	unreachable map[int64]string
-	users       map[int64]*model.User
-	reqs        map[int64]*model.P2PRequest
-	pays        map[int64]*model.Payment
-	media       map[string]string
-	pending     map[int64]*model.PendingInvoice
-	plans       map[string]*model.Plan
-	planAccess  map[string]model.PlanAccess
-	intents     map[int64]*model.PurchaseIntent
-	invSnaps    map[string]*model.PlanSnapshot
-	invSnapAt   map[string]string
-	promos      map[string]*model.PromoCode
-	promoUses   map[string]bool
-	webUsers    map[string]*model.WebUser
-	paylogs     []model.PayLogEntry
-	torrents    []model.TorrentReport
+	// pingErr — ответ Ping: так проверяется, что «бот жив» смотрит на базу.
+	pingErr    error
+	users      map[int64]*model.User
+	reqs       map[int64]*model.P2PRequest
+	pays       map[int64]*model.Payment
+	media      map[string]string
+	pending    map[int64]*model.PendingInvoice
+	plans      map[string]*model.Plan
+	planAccess map[string]model.PlanAccess
+	intents    map[int64]*model.PurchaseIntent
+	invSnaps   map[string]*model.PlanSnapshot
+	invSnapAt  map[string]string
+	promos     map[string]*model.PromoCode
+	promoUses  map[string]bool
+	webUsers   map[string]*model.WebUser
+	paylogs    []model.PayLogEntry
+	torrents   []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -939,6 +941,20 @@ func (s *fakeStore) SearchUsers(_ context.Context, q string, limit, offset int) 
 	return all[offset:end], total, nil
 }
 
+func (s *fakeStore) Ping(_ context.Context) error { return s.pingErr }
+func (s *fakeStore) ListP2PRequestsByStatus(_ context.Context, status string, limit int) ([]model.P2PRequest, error) {
+	var out []model.P2PRequest
+	for _, r := range s.reqs {
+		if r.Status == status {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 func (s *fakeStore) SetUnreachable(_ context.Context, id int64, at string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2024,7 +2040,7 @@ func TestUserLabel(t *testing.T) {
 		u    model.User
 		want string
 	}{
-		{model.User{TelegramID: 6882779276, Username: "vasya"}, "@vasya (6882779276)"},
+		{model.User{TelegramID: 1000000001, Username: "vasya"}, "@vasya (1000000001)"},
 		{model.User{TelegramID: 7, FirstName: "Вася"}, "Вася (7)"},
 		{model.User{TelegramID: 42}, "42"},
 	}

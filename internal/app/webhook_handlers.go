@@ -3,17 +3,40 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"time"
 )
 
-func (a *App) Healthy(_ context.Context) error {
+// healthPingBudget — сколько ждём ответа базы. Заведомо меньше 3 секунд,
+// отведённых обработчику: остаток нужен на запись ответа.
+const healthPingBudget = 2 * time.Second
+
+func (a *App) Healthy(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.store == nil {
+	st := a.store
+	installed := a.botCfg != nil && a.botCfg.Installed
+	a.mu.Unlock()
+	if st == nil {
 		return errors.New("storage not initialised")
 	}
-	if a.botCfg == nil || !a.botCfg.Installed {
+	if !installed {
 		return errors.New("bot not installed")
+	}
+	// Проверка «бот жив» без базы отвечала «всё хорошо» при отвалившемся
+	// хранилище — оркестратор ничего не перезапускал. Пинг делается ВНЕ замка:
+	// a.mu — главный замок приложения, и держать его на время недоступной
+	// базы значило бы заодно подвесить весь бот.
+	//
+	// Панель здесь намеренно НЕ проверяется: её недоступность рестартом бота
+	// не лечится, а рестарт посреди обработки вебхука прямо вредит.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pctx, cancel := context.WithTimeout(ctx, healthPingBudget)
+	defer cancel()
+	if err := st.Ping(pctx); err != nil {
+		return fmt.Errorf("база не отвечает: %w", err)
 	}
 	return nil
 }

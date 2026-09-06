@@ -219,6 +219,15 @@ func (s *Server) handleCabinetP2PScreenshot(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
 	}
+	// Дедлайн записи для этой одной ручки. Общий WriteTimeout отсчитывается от
+	// РАЗБОРА ЗАГОЛОВКОВ, а не от конца тела: чек до 12 МБ с мобильного
+	// аплинка заливается дольше, чем весь бюджет, и ответ покупателю уже не
+	// уходит — админ чек получил, а человек видит ошибку сети и жмёт ещё раз.
+	// Ошибку игнорируем намеренно: на HTTP/2 управление дедлайном не
+	// поддерживается, поведение просто останется прежним.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Now().Add(90 * time.Second))
+	}
 	// Hard-cap the whole request body so an oversized upload can't spool large
 	// temp files to disk (ParseMultipartForm's argument is only the in-memory
 	// threshold, not a total limit).

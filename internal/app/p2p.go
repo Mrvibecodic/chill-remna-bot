@@ -731,6 +731,36 @@ func (a *App) submitP2PReceipt(ctx context.Context, m *models.Message, fileID st
 	a.notifyAdminPayment(ctx, req, fileID, asDoc)
 }
 
+// resendP2PCard возвращает админу карточку заявки с кнопками. Нужен там, где
+// действие не выполнилось: кнопки уже удалены нажатием, а заявка осталась
+// «на рассмотрении».
+func (a *App) resendP2PCard(ctx context.Context, req *model.P2PRequest) {
+	if req == nil {
+		return
+	}
+	// Чек, загруженный через кабинет, лежит не в Telegram — фото по нему не
+	// отправить, только текстовая карточка.
+	if req.Screenshot == "" || req.Screenshot == "web" {
+		lang := a.lang(a.cfg.AdminID)
+		a.notifyKB(ctx, a.cfg.AdminID, a.p2pCardText(ctx, req, lang), a.p2pCardRows(lang, req.ID))
+		return
+	}
+	a.notifyAdminPayment(ctx, req, req.Screenshot, false)
+}
+
+func (a *App) p2pCardText(ctx context.Context, req *model.P2PRequest, lang string) string {
+	return i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID),
+		req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
+}
+
+func (a *App) p2pCardRows(lang string, id int64) [][]models.InlineKeyboardButton {
+	sid := strconv.FormatInt(id, 10)
+	return [][]models.InlineKeyboardButton{{
+		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+sid),
+		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+sid),
+	}}
+}
+
 func (a *App) notifyAdminPayment(ctx context.Context, req *model.P2PRequest, fileID string, asDoc bool) {
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
@@ -767,8 +797,36 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 		{toggleBtn(lang, p2p.Enabled, "adm:toggle"), btn(i18n.T(lang, "admin.btn_rotate"), "adm:rotate")},
 		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
+		{btn(i18n.T(lang, "admin.btn_pending"), "adm:pending")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
+}
+
+// showP2PPending — заявки, ждущие решения. Пока экрана не было, заявку, чью
+// карточку админ потерял (нажал «одобрить», а панель прилегла), нельзя было
+// найти ничем: клиент при этом заперт — новую покупку переводом с открытой
+// заявкой не начать.
+func (a *App) showP2PPending(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
+		return
+	}
+	reqs, err := a.store.ListP2PRequestsByStatus(ctx, model.P2PSubmitted, 20)
+	if err != nil {
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "список заявок", err))
+		return
+	}
+	if len(reqs) == 0 {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "admin.pending_none"),
+			[][]models.InlineKeyboardButton{navBack(lang, "menu:p2p")})
+		return
+	}
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "admin.pending_title", len(reqs)),
+		[][]models.InlineKeyboardButton{navBack(lang, "menu:p2p")})
+	for i := range reqs {
+		a.resendP2PCard(ctx, &reqs[i])
+	}
 }
 
 func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID int) {
@@ -805,6 +863,8 @@ func (a *App) onAdmin(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showP2PAdmin(ctx, chatID)
+	case "pending":
+		a.showP2PPending(ctx, chatID)
 	case "cards":
 		a.getUI(chatID).adminInput = "cards"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "admin.ask_cards"), "menu:p2p")
@@ -894,7 +954,8 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 	req.Status = model.P2PApproved
 	req.DecidedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
-		a.sendHome(ctx, adminChat, "❌ "+err.Error())
+		a.sendHome(ctx, adminChat, a.clientErr(ctx, adminChat, "одобрение заявки", err))
+		a.resendP2PCard(ctx, req)
 		return
 	}
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "approved", "подтверждено администратором")
@@ -908,6 +969,11 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		req.DecidedAt = ""
 		_ = a.store.UpdateP2PRequest(ctx, req)
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.provision_fail", err.Error()))
+		// Кнопки карточки удаляются нажатием, а действие не выполнилось —
+		// одобрить заявку стало бы негде, и она висела бы вечно: клиент при
+		// этом заперт, новую покупку переводом с открытой заявкой не начать.
+		// Возвращаем карточку.
+		a.resendP2PCard(ctx, req)
 		return
 	}
 	a.cleanupP2PUser(ctx, req.TelegramID)
