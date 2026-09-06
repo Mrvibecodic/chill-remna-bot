@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -35,6 +36,11 @@ type fakeMsg struct {
 	downloads map[string][]byte
 	// docs — документы, отправленные ботом: ключ — имя файла.
 	docs map[string][]byte
+	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
+	refunds   []string
+	refundErr error
+	// starTx — история звёздных операций, которую отдаёт GetStarTransactions.
+	starTx []models.StarTransaction
 	// sentDocIDs — file_id (или имя файла при загрузке) документов, ушедших
 	// через SendDocumentKB: так проверяется пересылка чека-файла админу.
 	sentDocIDs []string
@@ -104,6 +110,20 @@ func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.Me
 	return f.add(text)
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
+func (f *fakeMsg) RefundStars(_ context.Context, userID int64, chargeID string) error {
+	f.refunds = append(f.refunds, fmt.Sprintf("%d:%s", userID, chargeID))
+	return f.refundErr
+}
+func (f *fakeMsg) StarTransactions(_ context.Context, offset, limit int) ([]models.StarTransaction, error) {
+	if offset >= len(f.starTx) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(f.starTx) {
+		end = len(f.starTx)
+	}
+	return f.starTx[offset:end], nil
+}
 func (f *fakeMsg) EditText(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
 	return false
 }
@@ -730,6 +750,17 @@ func (s *fakeStore) HasApprovedPurchase(_ context.Context, id int64) (bool, erro
 
 // AddPaymentAndBalance — фейк той же атомарности: барьер по ext_id срабатывает
 // ДО денег, и при дубле баланс не трогается вовсе.
+func (s *fakeStore) SetPaymentStatus(_ context.Context, extID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.pays {
+		if p.ExtID != "" && p.ExtID == extID {
+			p.Status = status
+		}
+	}
+	return nil
+}
+
 func (s *fakeStore) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error {
 	// Своего замка нет намеренно: обе половины запирают его сами, а он не
 	// реентерабельный. Для теста важно, что барьер по ext_id внутри AddPayment

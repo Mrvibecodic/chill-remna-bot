@@ -79,7 +79,10 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.CryptoBot.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodCryptoBot)
 		}
-		if c.Platega.Enabled {
+		// Platega выставляет счёт только в рублях (см. plGridCurrencyOK):
+		// при нерублёвой сетке способ не показываем, а не показываем и продаём
+		// по курсу один к одному.
+		if c.Platega.Enabled && a.plGridCurrencyOK() {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodPlatega)
 		}
 		if c.Heleket.Enabled {

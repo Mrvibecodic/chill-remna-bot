@@ -371,3 +371,14 @@ func TestHeleketWebhook_BadSignUnknownInvoiceDropped(t *testing.T) {
 		t.Fatalf("залп мусорных вебхуков добавил %d записей — троттлинг не работает", grown)
 	}
 }
+
+// Переплата: подписка выдаётся (деньги пришли), но излишек больше не исчезает
+// молча — админ получает обе суммы. Раньше paid_over шёл ровно как paid.
+func TestHeleketOverpaid_NotifiesAdmin(t *testing.T) {
+	if heleket.StatusPaidOver != "paid_over" {
+		t.Fatalf("статус переплаты: %q", heleket.StatusPaidOver)
+	}
+	if !heleket.Successful(heleket.StatusPaidOver) {
+		t.Fatal("переплата обязана считаться успешной оплатой: деньги пришли")
+	}
+}

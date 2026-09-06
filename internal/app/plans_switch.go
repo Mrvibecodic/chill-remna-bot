@@ -194,7 +194,13 @@ func windowPaidAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model
 // с поправкой зачёта extraDays: остаток старого оплаченного окна (продление —
 // как есть, смена тарифа — конвертированный) плюс купленные месяцы.
 func boughtDaysAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model.PlanSnapshot, months, extraDays int) int {
+	// Купленное окно — фактический срок сделки: у Tribute это может быть
+	// неделя, и «месяцев × 30» записало бы в снимок 30 дней вместо семи, а по
+	// нему потом считается зачёт при смене тарифа.
 	bought := months * 30
+	if newSnap != nil && newSnap.Days > 0 {
+		bought = newSnap.Days
+	}
 	if old == nil || newSnap == nil {
 		return bought
 	}

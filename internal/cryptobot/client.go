@@ -83,12 +83,18 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 
 // CreateInvoice выставляет фиатный счёт. fiat — код валюты счёта (RUB, USD,
 // EUR…); пустое значение означает RUB.
-func (c *Client) CreateInvoice(ctx context.Context, amount, fiat, acceptedAssets string, telegramID int64, months int) (*Invoice, error) {
+// CreateInvoice выставляет счёт. description видит плательщик на форме оплаты
+// CryptoBot, поэтому текст задаёт вызывающий: пополнению баланса не подходит
+// «подписка на N месяцев», а при N=0 получалось «подписка на 0 мес.».
+func (c *Client) CreateInvoice(ctx context.Context, amount, fiat, acceptedAssets, description string, telegramID int64, months int) (*Invoice, error) {
 	if acceptedAssets == "" {
 		acceptedAssets = "USDT"
 	}
 	if fiat == "" {
 		fiat = "RUB"
+	}
+	if description == "" {
+		description = fmt.Sprintf("VPN subscription %d mo", months)
 	}
 
 	body := map[string]any{
@@ -96,7 +102,7 @@ func (c *Client) CreateInvoice(ctx context.Context, amount, fiat, acceptedAssets
 		"fiat":            fiat,
 		"amount":          amount,
 		"accepted_assets": acceptedAssets,
-		"description":     fmt.Sprintf("VPN subscription %d mo", months),
+		"description":     description,
 		"payload":         fmt.Sprintf("%d:%d", telegramID, months),
 		"expires_in":      60 * 30,
 	}

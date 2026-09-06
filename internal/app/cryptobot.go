@@ -37,6 +37,45 @@ func (a *App) cryptoAmount(snap *model.PlanSnapshot, months int, fallback string
 	return fallback
 }
 
+// cbFiatCodes — фиатные валюты, которые принимает CryptoBot (закрытый список
+// провайдера). Всё остальное счётом не выставляется: молчаливая подстановка
+// рубля продавала подписку по цене в сто раз меньше.
+var cbFiatCodes = map[string]bool{
+	"RUB": true, "USD": true, "EUR": true, "BYN": true, "UAH": true, "KZT": true,
+	"UZS": true, "GEL": true, "TRY": true, "AMD": true, "THB": true, "INR": true,
+	"BRL": true, "IDR": true, "AZN": true, "AED": true, "PLN": true, "ILS": true,
+	"KGS": true, "TJS": true,
+}
+
+// cbFiat — код валюты для счёта CryptoBot. Пустая валюта и любые написания
+// рубля дают RUB (так прайс задавался годами), ISO-код из списка провайдера —
+// сам себя, всё прочее — отказ.
+func cbFiat(cur string) (string, bool) {
+	c := strings.TrimSpace(cur)
+	if c == "" || rubCurrency(c) {
+		return "RUB", true
+	}
+	up := strings.ToUpper(c)
+	if cbFiatCodes[up] {
+		return up, true
+	}
+	return "", false
+}
+
+// cbExpired — счёт протух: ждать нечего, кнопку повторной проверки не
+// показываем и гасим счёт, чтобы сверка его больше не опрашивала.
+func (a *App) cbExpired(ctx context.Context, chatID int64, extID string, pendingID int64) {
+	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "expired", "счёт истёк — ожидание оплаты прекращено")
+	if a.store != nil && pendingID != 0 {
+		_ = a.store.ResolvePending(ctx, pendingID)
+	}
+	lang := a.lang(chatID)
+	a.sendKB(ctx, chatID, i18n.T(lang, "cb.expired"), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
+		{btn(i18n.T(lang, "btn.home"), "menu:home")},
+	})
+}
+
 func cbAmount(asset, amount, paidAsset, paidAmount, fiat string) string {
 	switch {
 	case asset != "":
@@ -119,6 +158,10 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 				return
 			}
 			a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "topup status=%s", inv.Status)
+			if inv.Status == "expired" {
+				a.cbExpired(ctx, chatID, extID, p.ID)
+				return
+			}
 			if inv.Status != "paid" {
 				a.sendKB(ctx, chatID, i18n.T(lang, "cb.pending"), [][]models.InlineKeyboardButton{
 					{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+idStr+":"+mosStr)},
@@ -142,6 +185,19 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		return
 	}
 	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "status=%s", inv.Status)
+	if inv.Status == "expired" {
+		// Счёт CryptoBot живёт 30 минут, а кнопка «Проверить оплату» — вечно.
+		// «Оплата ещё не поступила, попробуйте через минуту» на мёртвом счёте —
+		// это предложение ждать того, чего не будет.
+		var pendingID int64
+		if a.store != nil {
+			if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+				pendingID = p.ID
+			}
+		}
+		a.cbExpired(ctx, chatID, extID, pendingID)
+		return
+	}
 	if inv.Status != "paid" {
 		a.sendKB(ctx, chatID, i18n.T(lang, "cb.pending"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+idStr+":"+mosStr)},
@@ -235,11 +291,17 @@ func (a *App) cbCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	// Валюта счёта — из прайса (hlCurrency валидирует код и по умолчанию даёт
-	// RUB), а не жёстко рубли: прайс в USD не должен превращаться в счёт на то
-	// же число в рублях.
-	fiat := a.hlCurrency()
-	inv, err := client.CreateInvoice(ctx, price, fiat, cfg.Asset, chatID, months)
+	// Валюта счёта — из прайса, но только та, которую CryptoBot реально
+	// принимает. Раньше здесь стоял общий хелпер, который любую нераспознанную
+	// строку молча превращал в RUB: прайс в «$» с ценой «10» уходил счётом на
+	// 10 ₽, и увидеть это было негде — пользователю рисовался тот же рубль.
+	fiat, curOK := cbFiat(a.pricing().Currency)
+	if !curOK {
+		a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error",
+			"валюта прайса %q не поддерживается CryptoBot — счёт не выставлен", a.pricing().Currency)
+		return "", 0, errors.New(i18n.T(a.lang(chatID), "cb.cur_unsupported"))
+	}
+	inv, err := client.CreateInvoice(ctx, price, fiat, cfg.Asset, "", chatID, months)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", 0, err

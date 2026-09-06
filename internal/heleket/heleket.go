@@ -160,6 +160,10 @@ const (
 	StatusWrongAmount        = string(sdk.PaymentStatusWrongAmount)
 	StatusWrongAmountWaiting = string(sdk.PaymentStatusWrongAmountWaiting)
 	StatusLocked             = string(sdk.PaymentStatusLocked)
+	// StatusPaidOver — переплата: денег пришло больше, чем в счёте. Статус
+	// успешный и финальный, поэтому подписка по нему выдаётся, — но излишек
+	// иначе исчезал бы бесследно, и админ о нём не узнавал.
+	StatusPaidOver = string(sdk.PaymentStatusPaidOver)
 )
 
 // Humanize превращает ошибку SDK в текст, который не стыдно показать

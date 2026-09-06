@@ -48,34 +48,35 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 	})
 }
 
-func tributePeriodToMonths(period string) int {
-	p := strings.ToLower(strings.TrimSpace(period))
-	// Сначала точные значения официального enum Tribute (trial, onetime,
-	// weekly, monthly, quarterly, halfyearly, yearly): подстрочный разбор
-	// отдавал halfyearly ветке "year" и выдавал 12 месяцев вместо 6.
-	switch p {
-	case "yearly", "annual":
-		return 12
-	case "halfyearly":
-		return 6
+// tributePeriod — срок из события Tribute: дни (сколько выдать) и месяцы
+// (по какому ключу сетки брать условия). ok=false — период не продаётся, и
+// тогда подписку выдавать НЕЛЬЗЯ.
+//
+// Раньше здесь был подстрочный разбор с «по умолчанию месяц» в конце. Он и
+// печатал дни, и обманывал: недельная подписка выдавала календарный месяц, а
+// любое новое или незнакомое значение продавалось как месяц — бот не может
+// продавать срок, которого не понимает. Список закрытый и повторяет
+// официальный enum Tribute; всё, чего в нём нет, отбивается.
+//
+// Дни у сроков от месяца не задаются: там выдача идёт календарными месяцами,
+// как у всех остальных способов оплаты (days=0 — «считать по месяцам»).
+func tributePeriod(period string) (days, months int, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case "weekly":
+		// Купил неделю — получает неделю. Календарного эквивалента у недели
+		// нет, поэтому единственный срок, который выдаётся днями.
+		return 7, 0, true
+	case "monthly":
+		return 0, 1, true
 	case "quarterly":
-		return 3
-	case "monthly", "weekly", "trial", "onetime":
-		return 1
+		return 0, 3, true
+	case "halfyearly":
+		return 0, 6, true
+	case "yearly", "annual":
+		return 0, 12, true
 	}
-	// Фолбэк для нестандартных строк — «half» строго до «year».
-	switch {
-	case strings.Contains(p, "half"):
-		return 6
-	case strings.Contains(p, "year") || strings.Contains(p, "annual") || strings.Contains(p, "12"):
-		return 12
-	case strings.Contains(p, "6"):
-		return 6
-	case strings.Contains(p, "3") || strings.Contains(p, "quart"):
-		return 3
-	default:
-		return 1
-	}
+	// trial, onetime, пустая строка, новые значения enum и опечатки — сюда.
+	return 0, 0, false
 }
 
 // tributeWebhook — часть полезной нагрузки вебхука Tribute, которая нам нужна.
@@ -102,6 +103,10 @@ type tributeWebhook struct {
 		TelegramUserID   int64     `json:"telegram_user_id"`
 		TelegramUsername string    `json:"telegram_username"`
 		ExpiresAt        time.Time `json:"expires_at"`
+		// Поля события digital_product_refunded. По спеке Tribute purchase_id
+		// — ключ, которым возврат сопоставляется с исходной покупкой.
+		PurchaseID   string `json:"purchase_id"`
+		RefundReason string `json:"refund_reason"`
 	} `json:"payload"`
 }
 
@@ -167,10 +172,13 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 		return true, nil
 	case "cancelled_subscription":
 		// Доступ не трогаем: в Tribute отмена выключает автопродление, а
-		// оплаченный период дорабатывает до expires_at.
+		// оплаченный период дорабатывает до expires_at. Это НЕ возврат денег.
 		a.payLog(ctx, model.PayMethodTribute, "", chatID, "cancelled",
 			"подписка отменена в Tribute: продления не будет, оплаченный период до %s%s",
 			wh.Payload.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), wh.who())
+		return true, nil
+	case "digital_product_refunded":
+		a.tributeRefunded(ctx, wh)
 		return true, nil
 	default:
 		a.log.Info("tribute webhook: ignored", "event", wh.Name)
@@ -181,7 +189,7 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 		a.log.Warn("tribute webhook: no telegram_user_id")
 		return true, nil
 	}
-	months := tributePeriodToMonths(wh.Payload.Period)
+	days, months, periodOK := tributePeriod(wh.Payload.Period)
 	// В ключе дедупликации обязателен telegram_user_id: subscription_id — это
 	// идентификатор тарифа автора, общий для всех подписчиков, и двое купивших
 	// один тариф в одну секунду иначе получили бы одинаковый ext_id (второму —
@@ -198,20 +206,92 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "warning", "Tribute выключен в админке, но оплата пришла — обрабатываем")
 	}
 	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s%s", wh.Name, wh.Payload.Period, amount, wh.who())
+
+	// Триал и подарок подпиской НЕ являются. Триал у нас бесплатный, свой,
+	// выдаётся ботом без всякой платёжки и помечается «использован»; выдавать
+	// за него полный оплаченный месяц — это раздача подписок за ноль рублей по
+	// повторяемой схеме «подписался на триал → отменил». Признаков два: тип
+	// сделки и нулевая цена (по спеке Tribute поле type в new_subscription
+	// необязательное, а у триала и подарка оплата нулевая).
+	if kind := strings.ToLower(strings.TrimSpace(wh.Payload.Type)); kind == "trial" || kind == "gift" || paid <= 0 {
+		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "not_a_payment",
+			"событие без оплаты (тип=%q, сумма=%d) — подписка не выдана%s", wh.Payload.Type, paid, wh.who())
+		return true, nil
+	}
+	// Неизвестный период не продаётся. Раньше он молча становился месяцем —
+	// то есть бот продавал срок, которого не понимает.
+	if !periodOK {
+		a.tributeRejected(ctx, extID, chatID, "неизвестный период %q — подписка не выдана", wh.Payload.Period)
+		return true, nil
+	}
+	// Срок обязан быть в сетке: из неё берутся трафик, лимит устройств и
+	// сквады. Для срока вне сетки трафик равен нулю, а ноль в панели означает
+	// БЕЗЛИМИТ — покупатель получал безлимитный трафик по цене базового
+	// тарифа. Проверка та же, что у всех остальных путей продажи.
+	saleMonths := months
+	if saleMonths == 0 {
+		// Недельная подписка: условия берём по ближайшему проданному сроку —
+		// месячному. Если и его нет в сетке, продавать нечего.
+		saleMonths = 1
+	}
+	if !a.periodOnSale(saleMonths) {
+		a.tributeRejected(ctx, extID, chatID, "срок %d мес. не продаётся (period=%q) — подписка не выдана", saleMonths, wh.Payload.Period)
+		return true, nil
+	}
 	if a.store != nil {
 		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
 			a.payLog(ctx, model.PayMethodTribute, extID, chatID, "duplicate", "уже финализирован, вебхук пропущен")
 			return true, nil
 		}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodTribute, amount, extID, nil)
+	// Снимок собирается явно, чтобы проставить в него фактический срок в днях:
+	// ядро выдачи по нему продлевает днями, а не календарными месяцами.
+	snap := a.planSnapshot(saleMonths)
+	if snap != nil && days > 0 {
+		snap.Days = days
+	}
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, saleMonths, model.PayMethodTribute, amount, extID, snap)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "finalize_error", "%v", err)
 		return false, fmt.Errorf("tribute finalize %s: %w", extID, err)
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
-	a.log.Info("tribute webhook: finalized", "chat_id", chatID, "months", months)
+	a.log.Info("tribute webhook: finalized", "chat_id", chatID, "months", saleMonths, "days", days)
 	return true, nil
+}
+
+// tributeRejected — оплата принята Tribute, но выдать по ней нечего. Отвечаем
+// 200: ретраи сутки подряд ничего не изменят, а человека и админа надо звать
+// сейчас.
+func (a *App) tributeRejected(ctx context.Context, extID string, chatID int64, format string, args ...any) {
+	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "error", format, args...)
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodTribute, extID, a.userLabelByID(ctx, chatID)))
+	a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
+}
+
+// tributeRefunded — Tribute вернул деньги по цифровому товару. Событий возврата
+// по ПОДПИСКАМ провайдер не присылает вовсе (отмена подписки — это выключение
+// автопродления, а не возврат), поэтому здесь обрабатывается единственное
+// refund-событие, которое существует.
+//
+// Доступ не отзывается: возврат мог сделать сам админ по договорённости.
+// Платёж помечается возвращённым — он перестаёт быть выручкой и перестаёт
+// закрывать тарифы «только новым».
+func (a *App) tributeRefunded(ctx context.Context, wh tributeWebhook) {
+	chatID := wh.Payload.TelegramUserID
+	extID := wh.Payload.PurchaseID
+	amount := tributeAmount(wh.Payload.Amount, wh.Payload.Currency)
+	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "refunded",
+		"возврат %s по покупке %q (причина: %s)%s", amount, extID, wh.Payload.RefundReason, wh.who())
+	if a.store != nil && extID != "" {
+		if err := a.store.SetPaymentStatus(ctx, extID, model.PaymentRefunded); err != nil {
+			a.log.Warn("платёж не помечен возвращённым", "err", err, "ext_id", extID)
+		}
+	}
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.refunded",
+		model.PayMethodTribute, extID, a.userLabelByID(ctx, chatID), amount))
 }
 
 func (a *App) showTributeAdmin(ctx context.Context, chatID int64) {

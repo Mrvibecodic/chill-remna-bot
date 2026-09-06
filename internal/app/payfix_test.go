@@ -43,25 +43,38 @@ func TestHLValidReturnURL(t *testing.T) {
 	}
 }
 
-// Регресс: halfyearly перехватывался веткой "year" и давал 12 месяцев вместо 6.
-func TestTributePeriodToMonths(t *testing.T) {
-	cases := map[string]int{
-		"monthly":    1,
-		"quarterly":  3,
-		"halfyearly": 6,
-		"yearly":     12,
-		"annual":     12,
-		"weekly":     1,
-		"trial":      1,
-		"onetime":    1,
-		"HalfYearly": 6,
-		"6months":    6,
-		"3-month":    3,
-		"":           1,
+// Период Tribute: список закрытый, неделя выдаётся неделей, а всё, чего бот не
+// понимает, НЕ продаётся.
+//
+// Прежняя версия функции заканчивалась «по умолчанию месяц»: недельная
+// подписка давала календарный месяц, а любое новое значение enum, опечатка,
+// пустая строка и даже "trial" продавались как месяц.
+func TestTributePeriod(t *testing.T) {
+	type want struct {
+		days, months int
+		ok           bool
 	}
-	for in, want := range cases {
-		if got := tributePeriodToMonths(in); got != want {
-			t.Errorf("tributePeriodToMonths(%q) = %d, ожидалось %d", in, got, want)
+	cases := map[string]want{
+		"weekly":     {7, 0, true},
+		"monthly":    {0, 1, true},
+		"quarterly":  {0, 3, true},
+		"halfyearly": {0, 6, true},
+		"HalfYearly": {0, 6, true},
+		"yearly":     {0, 12, true},
+		"annual":     {0, 12, true},
+		// Не продаётся ничего из этого.
+		"trial":    {0, 0, false},
+		"onetime":  {0, 0, false},
+		"":         {0, 0, false},
+		"6months":  {0, 0, false},
+		"3-month":  {0, 0, false},
+		"biweekly": {0, 0, false},
+	}
+	for in, w := range cases {
+		days, months, ok := tributePeriod(in)
+		if days != w.days || months != w.months || ok != w.ok {
+			t.Errorf("tributePeriod(%q) = (%d, %d, %v), ожидалось (%d, %d, %v)",
+				in, days, months, ok, w.days, w.months, w.ok)
 		}
 	}
 }

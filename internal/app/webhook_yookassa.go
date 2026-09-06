@@ -23,6 +23,9 @@ type ykNotification struct {
 			Currency string `json:"currency"`
 		} `json:"amount"`
 		Metadata map[string]string `json:"metadata"`
+		// PaymentID заполнен у события refund.succeeded: там object — это
+		// объект возврата, а не платежа, и связь с платежом даёт только оно.
+		PaymentID string `json:"payment_id"`
 	} `json:"object"`
 }
 
@@ -69,6 +72,20 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "canceled", "платёж отменён (причина: %s)", reason)
 		return true, nil
 	}
+	if n.Event == "refund.succeeded" && n.Object.PaymentID != "" {
+		// Решение — по ответу API, а не по телу: колбэк не аутентифицирован
+		// (см. ветку отмены выше). Спрашиваем платёж и смотрим refunded_amount.
+		client := a.ykClient()
+		if client == nil {
+			return true, nil
+		}
+		pay, err := client.GetPayment(ctx, n.Object.PaymentID)
+		if err != nil {
+			return false, fmt.Errorf("yookassa webhook: verify refund %s: %w", n.Object.PaymentID, err)
+		}
+		a.ykRefunded(ctx, n.Object.PaymentID, hintTG, pay)
+		return true, nil
+	}
 	if n.Event != "payment.succeeded" {
 		a.log.Info("yookassa webhook: skipping event", "event", n.Event, "id", n.Object.ID)
 		return false, nil
@@ -95,6 +112,11 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 		return false, fmt.Errorf("yookassa webhook: verify %s: %w", n.Object.ID, err)
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "verified", "API: status=%s paid=%v amount=%s %s", pay.Status, pay.Paid, pay.Amount.Value, pay.Amount.Currency)
+	// Возврат разбирается ДО дедупликации и до выдачи: он приходит уже после
+	// того, как платёж стал succeeded, и по нему выдавать нечего.
+	if a.ykRefunded(ctx, n.Object.ID, hintTG, pay) {
+		return true, nil
+	}
 	if pay.Status != "succeeded" || !pay.Paid {
 		a.log.Warn("yookassa webhook: payment not confirmed by API", "id", n.Object.ID, "status", pay.Status, "paid", pay.Paid)
 		return true, nil

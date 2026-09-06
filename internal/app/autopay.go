@@ -588,8 +588,16 @@ func (a *App) chargeAutoPay(ctx context.Context, ap *model.AutoPay, now, exp tim
 		return ""
 	}
 	a.autoPayResolve(ctx, pi)
+	// Человеку называем ФАКТИЧЕСКИ списанное, а не ожидавшуюся цену: окно
+	// идемпотентности ЮKassa — сутки, и по тому же ключу возвращается прежний
+	// платёж со старой суммой (см. выше, autocharge_amount_mismatch). Раньше в
+	// уведомлении стояла новая цена, а в выписке банка — старая.
+	shown := value + curSuffix(curSymbol(currency))
+	if pay.Amount.Value != "" {
+		shown = pay.Amount.Value + curSuffix(curSymbol(pay.Amount.Currency))
+	}
 	a.notifyKB(ctx, ap.TelegramID,
-		i18n.T(lang, "ap.charged", monthsWord(lang, months), value+curSuffix(curSymbol(currency)), formatExpire(expireAt, lang)),
+		i18n.T(lang, "ap.charged", monthsWord(lang, months), shown, formatExpire(expireAt, lang)),
 		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")}})
 	a.log.Info("autopay: подписка продлена", "tg_id", ap.TelegramID, "months", months, "expire", expireAt)
 	return ""

@@ -112,6 +112,36 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 	})
 }
 
+// ykRefunded — по платежу есть возврат, выдавать нельзя.
+//
+// У ЮKassa статус оплаченного платежа навсегда остаётся succeeded — возврат
+// создаётся отдельным объектом и виден только в refunded_amount. Проверка
+// нужна во всех трёх точках выдачи (вебхук, кнопка «Проверить оплату»,
+// сверка): счёт живёт сутки, а кнопка в переписке — вечно, и без неё подписка
+// выдавалась за возвращённые деньги.
+//
+// Счёт при возврате гасим: догонять его больше незачем.
+func (a *App) ykRefunded(ctx context.Context, extID string, chatID int64, pay *yookassa.Payment) bool {
+	if !pay.Refunded() {
+		return false
+	}
+	amount := pay.RefundedAmount.Value + " " + pay.RefundedAmount.Currency
+	a.payLog(ctx, model.PayMethodYooKassa, extID, chatID, "refunded",
+		"по платежу возвращено %s — выдача не проводится", amount)
+	if a.store != nil {
+		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
+			_ = a.store.ResolvePending(ctx, p.ID)
+		}
+		if err := a.store.SetPaymentStatus(ctx, extID, model.PaymentRefunded); err != nil {
+			a.log.Warn("платёж не помечен возвращённым", "err", err, "ext_id", extID)
+		}
+	}
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.refunded",
+		model.PayMethodYooKassa, extID, a.userLabelByID(ctx, chatID), amount))
+	return true
+}
+
 func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 	lang := a.lang(chatID)
 	client := a.ykClient()
@@ -131,6 +161,10 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		return
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, payID, chatID, "manual_check", "status=%s paid=%v", pay.Status, pay.Paid)
+	if a.ykRefunded(ctx, payID, chatID, pay) {
+		a.sendHome(ctx, chatID, i18n.T(lang, "yk.refunded"))
+		return
+	}
 	// Условия выдачи те же, что у вебхука: succeeded И paid. Ручная кнопка не
 	// должна быть мягче автоматики.
 	if pay.Status != "succeeded" || !pay.Paid {

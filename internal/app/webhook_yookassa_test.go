@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"remnabot/internal/config"
 	"remnabot/internal/model"
 	"remnabot/internal/yookassa"
 )
@@ -39,7 +40,7 @@ func installedYK() *App {
 func TestYooKassaWebhook_SkipUnknownEvent(t *testing.T) {
 	a := &App{log: slog.Default()}
 	body, _ := json.Marshal(map[string]any{
-		"event":  "refund.succeeded",
+		"event":  "payout.succeeded",
 		"object": map[string]any{"id": "pay_x", "paid": false},
 	})
 	handled, err := a.HandleYooKassaWebhook(context.Background(), body)
@@ -134,5 +135,50 @@ func TestYooKassaWebhook_BadJSON(t *testing.T) {
 	}
 	if handled {
 		t.Errorf("при ошибке парсинга handled должен быть false")
+	}
+}
+
+// Возврат: платёж со ЗДЕШНИМ статусом succeeded, но с непустым refunded_amount
+// подписку не выдаёт — ни вебхуком, ни кнопкой, ни сверкой. У ЮKassa статус
+// оплаченного платежа навсегда остаётся succeeded, поэтому по нему одному
+// возврат не виден.
+func TestYooKassaWebhook_RefundedNotIssued(t *testing.T) {
+	defer mockYooKassa(t, map[string]any{
+		"id": "pay_ref", "status": "succeeded", "paid": true,
+		"amount":          map[string]any{"value": "150.00", "currency": "RUB"},
+		"refunded_amount": map[string]any{"value": "150.00", "currency": "RUB"},
+		"metadata":        map[string]string{"telegram_id": "555", "months": "1"},
+	})()
+	a := installedYK()
+	a.cfg = &config.Config{AdminID: 100, DataDir: t.TempDir()}
+	a.msg = &fakeMsg{}
+	fs := &fakeStore{}
+	a.store = fs
+	body, _ := json.Marshal(map[string]any{
+		"event":  "payment.succeeded",
+		"object": map[string]any{"id": "pay_ref", "status": "succeeded", "paid": true},
+	})
+	handled, err := a.HandleYooKassaWebhook(context.Background(), body)
+	if err != nil || !handled {
+		t.Fatalf("вебхук не обработан: handled=%v err=%v", handled, err)
+	}
+	if paid, _ := fs.HasPaidPayment(context.Background(), 555); paid {
+		t.Fatal("по возвращённому платежу выдана подписка")
+	}
+}
+
+// Признак возврата читается как число: «0.00» — это НЕ возврат.
+func TestYooKassaPaymentRefunded(t *testing.T) {
+	var p yookassa.Payment
+	if p.Refunded() {
+		t.Fatal("пустое refunded_amount — не возврат")
+	}
+	p.RefundedAmount.Value = "0.00"
+	if p.Refunded() {
+		t.Fatal("нулевой возврат — не возврат")
+	}
+	p.RefundedAmount.Value = "150.00"
+	if !p.Refunded() {
+		t.Fatal("непустой возврат не распознан")
 	}
 }

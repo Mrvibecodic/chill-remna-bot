@@ -52,11 +52,26 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_sent", "purchase plan=%s months=%d stars=%d", s.planCode(), months, amount)
 }
 
-func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery) {
-	months := 0
-	if _, after, ok := strings.Cut(q.InvoicePayload, ":"); ok {
-		months, _ = strconv.Atoi(after)
+// starsPayload — разбор payload звёздного счёта.
+//
+// Формат «stars:<месяцы>» заморожен исторически, поэтому разбор обратно
+// совместим: старые счета из переписки продолжают работать. Новый хвост
+// «:<tgID>» — это тот, КОМУ счёт выставляли; он нужен, чтобы отличить оплату
+// по своей ссылке от оплаты по ссылке, которую переслали третьему лицу.
+func starsPayload(payload string) (months int, forID int64) {
+	parts := strings.Split(payload, ":")
+	if len(parts) < 2 || parts[0] != "stars" {
+		return 0, 0
 	}
+	months, _ = strconv.Atoi(parts[1])
+	if len(parts) >= 3 {
+		forID, _ = strconv.ParseInt(parts[2], 10, 64)
+	}
+	return months, forID
+}
+
+func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery) {
+	months, forID := starsPayload(q.InvoicePayload)
 	var fromID int64
 	if q.From != nil {
 		fromID = q.From.ID
@@ -80,16 +95,52 @@ func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery)
 		a.msg.AnswerPreCheckout(ctx, q.ID, false, i18n.T(a.lang(fromID), "stars.no_price"))
 		return
 	}
+	// Ссылка-счёт по своей природе многоразовая и переносимая: у метода
+	// createInvoiceLink нет ни адресата, ни срока, ни лимита оплат. Значит
+	// единственное место, где можно не пустить чужого плательщика, — вот этот
+	// ответ на предпроверку.
+	//
+	// Проверяем ровно тогда, когда платит НЕ тот, кому счёт выставляли: иначе
+	// пришлось бы дублировать все гейты на каждой оплате, а свои они уже
+	// прошли при выставлении счёта.
+	if forID != 0 && fromID != 0 && forID != fromID {
+		if reason := a.starsForeignPayerRefusal(ctx, fromID); reason != "" {
+			a.payLog(ctx, model.PayMethodStars, "", fromID, "precheckout_rejected",
+				"счёт выставлен %d, платит %d: %s", forID, fromID, reason)
+			a.msg.AnswerPreCheckout(ctx, q.ID, false, reason)
+			return
+		}
+	}
 	a.msg.AnswerPreCheckout(ctx, q.ID, true, "")
+}
+
+// starsForeignPayerRefusal — почему этому плательщику нельзя продать по чужой
+// ссылке. Пустая строка — можно.
+//
+// Гейты при выставлении счёта проверялись для того, кому его выставляли:
+// документы, блокировка, режим доступа. Пересланная ссылка их обходила
+// целиком — третий человек платил и получал подписку, не приняв оферту и не
+// пройдя модерацию.
+func (a *App) starsForeignPayerRefusal(ctx context.Context, payerID int64) string {
+	lang := a.lang(payerID)
+	if a.store != nil {
+		if u, err := a.store.GetUser(ctx, payerID); err == nil && u != nil && u.Blocked {
+			return i18n.T(lang, "stars.payer_blocked")
+		}
+	}
+	if a.legalRequired(ctx, payerID) {
+		return i18n.T(lang, "stars.payer_legal")
+	}
+	return ""
 }
 
 func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	sp := m.SuccessfulPayment
+	// Подписку получает ПЛАТЕЛЬЩИК: сервисное сообщение об оплате приходит в
+	// его личный чат с ботом. Это и требование доки Telegram, и единственное
+	// честное поведение — деньги списаны у него.
 	chatID := m.Chat.ID
-	months := 0
-	if _, after, ok := strings.Cut(sp.InvoicePayload, ":"); ok {
-		months, _ = strconv.Atoi(after)
-	}
+	months, _ := starsPayload(sp.InvoicePayload)
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
 	if months <= 0 {
@@ -97,6 +148,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		// только при испорченной доставке. Подставлять срок «по умолчанию»
 		// нельзя: человек заплатил за другой.
 		a.noPeriodForPayment(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID)
+		a.starsOfferRefund(ctx, chatID, sp.TelegramPaymentChargeID, sp.TotalAmount)
 		return
 	}
 	snap, ok := a.starsSnapshotForAmount(ctx, chatID, months, sp.TotalAmount)
@@ -107,6 +159,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "error", "оплаченная сумма %d⭐ не совпала с условиями счетов — выдача не проводится", sp.TotalAmount)
 		alang := a.lang(a.cfg.AdminID)
 		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodStars+" "+sp.TelegramPaymentChargeID, a.userLabelByID(ctx, chatID)))
+		a.starsOfferRefund(ctx, chatID, sp.TelegramPaymentChargeID, sp.TotalAmount)
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
 		return
 	}
@@ -120,6 +173,7 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 			return
 		}
 		a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "finalize_error", "%v", err)
+		a.starsOfferRefund(ctx, chatID, sp.TelegramPaymentChargeID, sp.TotalAmount)
 		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "stars.fail", err.Error()))
 		return
 	}
@@ -171,6 +225,14 @@ func (a *App) handleRefundedPayment(ctx context.Context, m *models.Message) {
 	}
 	chatID := m.Chat.ID
 	a.payLog(ctx, model.PayMethodStars, rp.TelegramPaymentChargeID, chatID, "refunded", "возврат %d %s, payload=%s", rp.TotalAmount, rp.Currency, rp.InvoicePayload)
+	// Платёж помечается возвращённым. Без этого он навсегда оставался
+	// «оплаченным»: человек считался покупателем, тариф «только новым» ему был
+	// закрыт, а возвращённые звёзды продолжали числиться выручкой.
+	if a.store != nil && rp.TelegramPaymentChargeID != "" {
+		if err := a.store.SetPaymentStatus(ctx, rp.TelegramPaymentChargeID, model.PaymentRefunded); err != nil {
+			a.log.Warn("платёж не помечен возвращённым", "err", err, "charge_id", rp.TelegramPaymentChargeID)
+		}
+	}
 	alang := a.lang(a.cfg.AdminID)
 	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "stars.admin_refunded", rp.TelegramPaymentChargeID, rp.TotalAmount, a.userLabelByID(ctx, chatID)))
 }
@@ -190,6 +252,8 @@ func (a *App) showStarsAdmin(ctx context.Context, chatID int64) {
 func (a *App) onStars(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	switch action {
+	case "refund":
+		a.starsRefund(ctx, chatID, arg)
 	case "toggle":
 		a.mu.Lock()
 		if a.botCfg != nil {
@@ -269,11 +333,59 @@ func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, s *sale) (stri
 	a.rememberStarsSnapshot(ctx, chatID, months, a.saleSnapshot(s))
 	title := i18n.T(lang, "stars.invoice_title", months)
 	desc := i18n.T(lang, "stars.invoice_desc", months)
-	link, err := a.msg.CreateInvoiceLink(ctx, title, desc, "stars:"+strconv.Itoa(months), "XTR", amount)
+	// В payload ссылки едет её адресат: ссылку можно переслать кому угодно, и
+	// без адресата чужого плательщика не отличить от своего (см. предпроверку).
+	payload := "stars:" + strconv.Itoa(months) + ":" + strconv.FormatInt(chatID, 10)
+	link, err := a.msg.CreateInvoiceLink(ctx, title, desc, payload, "XTR", amount)
 	if err != nil {
 		a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_error", "purchase plan=%s months=%d stars=%d: %v", s.planCode(), months, amount, err)
 		return "", err
 	}
 	a.payLog(ctx, model.PayMethodStars, "", chatID, "invoice_link", "purchase plan=%s months=%d stars=%d", s.planCode(), months, amount)
 	return link, nil
+}
+
+// starsOfferRefund — предложить админу вернуть звёзды.
+//
+// Бот сам создаёт три состояния «деньги приняты, выдачи нет»: неизвестный срок,
+// сумма не совпала ни с одним счётом, панель не отдала подписку. Вернуть их
+// было нечем, а команда /paysupport в боте возврат обещает. Кнопка приходит
+// ровно туда, где состояние и возникло.
+func (a *App) starsOfferRefund(ctx context.Context, payerID int64, chargeID string, amount int) {
+	if chargeID == "" || payerID == 0 {
+		return
+	}
+	alang := a.lang(a.cfg.AdminID)
+	a.notifyKB(ctx, a.cfg.AdminID,
+		i18n.T(alang, "stars.admin_refund_offer", amount, a.userLabelByID(ctx, payerID), chargeID),
+		[][]models.InlineKeyboardButton{{
+			btn(i18n.T(alang, "stars.btn_refund"), "star:refund:"+strconv.FormatInt(payerID, 10)+":"+chargeID),
+		}})
+}
+
+// starsRefund — админ подтвердил возврат. Возврат необратим и делается целиком:
+// частичного у Telegram нет.
+func (a *App) starsRefund(ctx context.Context, adminID int64, arg string) {
+	lang := a.lang(adminID)
+	idStr, chargeID, ok := strings.Cut(arg, ":")
+	payerID, err := strconv.ParseInt(idStr, 10, 64)
+	if !ok || err != nil || chargeID == "" {
+		a.sendHome(ctx, adminID, i18n.T(lang, "stars.refund_failed", "неверные данные возврата"))
+		return
+	}
+	if rerr := a.msg.RefundStars(ctx, payerID, chargeID); rerr != nil {
+		a.payLog(ctx, model.PayMethodStars, chargeID, payerID, "refund_error", "%v", rerr)
+		a.sendHome(ctx, adminID, i18n.T(lang, "stars.refund_failed", rerr.Error()))
+		return
+	}
+	// Отметку о возврате ставит Telegram отдельным событием refunded_payment,
+	// но ждать его не обязательно: платёж помечаем сразу, повторная отметка
+	// безвредна.
+	a.payLog(ctx, model.PayMethodStars, chargeID, payerID, "refunded", "возврат сделан админом")
+	if a.store != nil {
+		if serr := a.store.SetPaymentStatus(ctx, chargeID, model.PaymentRefunded); serr != nil {
+			a.log.Warn("платёж не помечен возвращённым", "err", serr, "charge_id", chargeID)
+		}
+	}
+	a.sendHome(ctx, adminID, i18n.T(lang, "stars.refund_done", a.userLabelByID(ctx, payerID)))
 }

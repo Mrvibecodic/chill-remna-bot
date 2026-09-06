@@ -86,7 +86,7 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 	case model.PayMethodPlatega:
 		cfg := a.plConfig()
 		value := a.saleFiat(s, model.PayMethodPlatega)
-		if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) {
+		if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) || !a.plGridCurrencyOK() {
 			return "", false, errors.New("оплата недоступна")
 		}
 		returnURL := cfg.ReturnURL
@@ -255,7 +255,7 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 
 // MiniTopUp creates a balance top-up payment (preset amount + yk/cb) via the
 // shared topUpCreate core and returns the payment URL.
-func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string) web.MiniActionDTO {
+func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string, web_ bool) web.MiniActionDTO {
 	if !a.topUpEnabled() {
 		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "topup.disabled")}
 	}
@@ -275,7 +275,7 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: "способ пополнения недоступен"}
 	}
-	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method)
+	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method, web_)
 	if err != nil {
 		a.payLog(ctx, method, "", tgID, "topup_error", "kopecks=%d: %v", kopecks, err)
 		return web.MiniActionDTO{Error: err.Error()}

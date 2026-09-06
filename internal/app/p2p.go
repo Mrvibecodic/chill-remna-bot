@@ -311,7 +311,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
-	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur {
+	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
 		label := i18n.T(lang, "method.pl_btn", a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
@@ -1035,7 +1035,22 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// конвертированный) плюс купленные месяцы. Бонусные дни сюда не входят.
 	snap.BoughtDays = boughtDaysAfter(prevSnap, prevExpire, snap, months, extraDays)
 	snap.WindowPaidK = windowPaidAfter(prevSnap, prevExpire, snap)
-	link, expireAt, err := panel.CreateOrUpdateUser(ctx, telegramID, months, extraDays, limits)
+	// Снимок с явной длительностью в днях выдаётся днями, а не календарными
+	// месяцами: Tribute продаёт недельную подписку, и «месяцев × 30» превращало
+	// неделю в месяц. Остальные способы Days не ставят и идут прежней веткой.
+	var link, expireAt string
+	var err error
+	if snap.Days > 0 {
+		days := snap.Days + extraDays
+		if days < 1 {
+			// Зачёт при смене тарифа не может съесть весь оплаченный срок:
+			// человек заплатил, значит хотя бы день он получает.
+			days = 1
+		}
+		link, expireAt, err = panel.CreateOrUpdateUserDays(ctx, telegramID, days, limits)
+	} else {
+		link, expireAt, err = panel.CreateOrUpdateUser(ctx, telegramID, months, extraDays, limits)
+	}
 	if err != nil {
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
 		return "", "", nil, err

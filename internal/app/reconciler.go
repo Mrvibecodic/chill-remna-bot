@@ -34,6 +34,7 @@ func (a *App) RunReconciler(ctx context.Context) {
 			return
 		case <-t.C:
 			a.reconcileOnce(ctx)
+			a.reconcileStars(ctx)
 		}
 	}
 }
@@ -140,6 +141,9 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 		return
 	}
 	a.reconLog(ctx, pi, "reconcile", pay.Status, "status=%s paid=%v", pay.Status, pay.Paid)
+	if a.ykRefunded(ctx, pi.ExtID, pi.TelegramID, pay) {
+		return
+	}
 	switch {
 	case pay.Status == "succeeded" && pay.Paid:
 		// Платёж мог быть сделан с сохранением карты: если вебхук не дошёл и

@@ -351,7 +351,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		return
 	}
 	rub := kopecksToRub(k)
-	payURL, checkExtID, err := a.topUpCreate(ctx, chatID, k, method)
+	payURL, checkExtID, err := a.topUpCreate(ctx, chatID, k, method, false)
 	if err != nil {
 		a.sendHome(ctx, chatID, err.Error())
 		return
@@ -381,7 +381,9 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 // For "cb" the returned ExtID is the bare invoice id (caller adds the "cb:"
 // prefix where needed). Shared by the chat flow and the Mini App so the pending
 // record format stays identical for the webhooks.
-func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method string) (payURL, checkExtID string, err error) {
+// web — запрос пришёл из браузерного кабинета, а не из мини-аппа Telegram.
+// Признак нужен CryptoBot: ссылка мини-аппа вне Telegram не открывается.
+func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method string, web bool) (payURL, checkExtID string, err error) {
 	lang := a.lang(chatID)
 	// Последний рубеж: сюда приходят и чат, и мини-апп, и веб-кабинет.
 	if !a.topUpEnabled() {
@@ -417,7 +419,9 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 			return "", "", errors.New(i18n.T(lang, "cb.not_configured"))
 		}
 		// Баланс ведётся в рублях, поэтому счёт на пополнение всегда в RUB.
-		inv, e := client.CreateInvoice(ctx, rub, "RUB", a.cbConfig().Asset, chatID, 0)
+		// Описание задаём явно: по умолчанию клиент пишет «VPN subscription
+		// N mo», и при N=0 плательщик видел «подписка на 0 мес.».
+		inv, e := client.CreateInvoice(ctx, rub, "RUB", a.cbConfig().Asset, i18n.T(lang, "topup.invoice_desc"), chatID, 0)
 		if e != nil {
 			a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "topup kopecks=%d: %v", k, e)
 			return "", "", errors.New(i18n.T(lang, "cb.fail", e.Error()))
@@ -427,7 +431,12 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 		if a.store != nil {
 			_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: extID, TelegramID: chatID, Purpose: "topup", Kopecks: k})
 		}
+		// Из браузерного кабинета — веб-ссылка: ссылку мини-аппа вне Telegram
+		// открыть нечем. У покупки этот выбор давно есть, у пополнения не было.
 		payURL := inv.MiniAppInvoiceURL
+		if web && inv.WebAppInvoiceURL != "" {
+			payURL = inv.WebAppInvoiceURL
+		}
 		if payURL == "" {
 			payURL = inv.BotInvoiceURL
 		}

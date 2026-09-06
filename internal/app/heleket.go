@@ -356,6 +356,16 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 	extID := hlExtPrefix + inv.UUID
 	amount := a.hlAmountLabel(inv)
 
+	// Переплата: подписку выдаём как обычно (деньги пришли, человека без
+	// подписки оставлять нельзя), но излишек больше не исчезает молча — админ
+	// получает обе суммы и решает, вернуть или зачислить. Недоплату бот
+	// разбирал давно, переплату — нет.
+	if inv.Status == heleket.StatusPaidOver {
+		a.payLog(ctx, model.PayMethodHeleket, extID, 0, "overpaid",
+			"переплата: получено %s при счёте %s %s", amount, inv.Amount, inv.Currency)
+		a.hlNotifyAdmin(ctx, inv, "overpaid")
+	}
+
 	if p, _ := a.store.PendingByExtID(ctx, extID); p != nil && p.Purpose == purposeTopUp {
 		if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodHeleket, amount, extID); err != nil {
 			a.log.Error("heleket topup finalize", "err", err, "uuid", inv.UUID)

@@ -137,6 +137,7 @@ type Storage interface {
 
 	AddPayment(ctx context.Context, p *model.Payment) error
 	AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error
+	SetPaymentStatus(ctx context.Context, extID, status string) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
@@ -707,6 +708,23 @@ func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
 //
 // Потерянный ответ на успешный COMMIT транзакция не лечит — его лечит повтор:
 // платёж уже виден, finalizeTopUp выходит через дубль, баланс уже зачислен.
+// SetPaymentStatus меняет статус платежа по внешнему ключу сделки. Нужен для
+// возвратов: у ЮKassa и Telegram Stars платёж остаётся «успешным» навсегда, а
+// признак возврата приходит отдельно.
+//
+// Ключ — ext_id, а не id: возврат опознаётся именно им (у Stars это
+// telegram_payment_charge_id, у ЮKassa — id платежа). Пустой ext_id ничего не
+// меняет: у оплат без ключа отличить одну от другой нечем.
+func (b *base) SetPaymentStatus(ctx context.Context, extID, status string) error {
+	if extID == "" {
+		return errors.New("storage: пустой ключ сделки")
+	}
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE payments SET status = "+b.ph(1)+" WHERE ext_id = "+b.ph(2),
+		status, extID)
+	return err
+}
+
 func (b *base) AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error {
 	if p == nil {
 		return errors.New("payment is nil")

@@ -14,6 +14,18 @@ import (
 	"remnabot/internal/platega"
 )
 
+// plGridCurrencyOK — сетка цен в рублях, и счёт Platega можно выставлять.
+//
+// Валюта счёта у Platega зашита рублём: провайдер работает с СБП и картами,
+// публичного списка других валют у него нет, и отправлять туда «USD» наугад
+// нельзя — в лучшем случае это отказ на форме, в худшем приём в рублях с
+// проигнорированным полем. Поэтому при нерублёвой сетке способ просто не
+// продаётся: иначе цена «10» уходила счётом на 10 ₽, и увидеть это было негде
+// — и на экране, и в журнале стоял тот же рубль.
+func (a *App) plGridCurrencyOK() bool {
+	return rubCurrency(a.pricing().Currency)
+}
+
 func (a *App) plConfig() model.PlategaConfig {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -75,8 +87,9 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	cfg := a.plConfig()
 	value := a.saleFiat(s, model.PayMethodPlatega)
 	// Валюта тарифа ≠ валюта сетки: Platega считает в рублях, и число тарифа
-	// в чужой валюте списалось бы как рубли.
-	if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) {
+	// в чужой валюте списалось бы как рубли. Вторая половина той же проверки —
+	// plGridCurrencyOK: сетка тоже обязана быть рублёвой.
+	if !cfg.Enabled || value == "" || !a.saleGridCurrency(s) || !a.plGridCurrencyOK() {
 		a.sendHome(ctx, chatID, i18n.T(lang, "pl.no_price"))
 		return
 	}

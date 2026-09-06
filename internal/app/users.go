@@ -825,8 +825,11 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 			date = date[:10]
 		}
 		statusKey := "payments.st_paid"
-		if p.Status == model.PaymentRejected {
+		switch p.Status {
+		case model.PaymentRejected:
 			statusKey = "payments.st_rejected"
+		case model.PaymentRefunded:
+			statusKey = "payments.st_refunded"
 		}
 		user := strconv.FormatInt(p.TelegramID, 10)
 		term := strconv.Itoa(p.Months) + "m"

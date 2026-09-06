@@ -57,6 +57,14 @@ type messenger interface {
 	SendInvoice(ctx context.Context, chatID int64, title, description, payload, currency string, amount int)
 	CreateInvoiceLink(ctx context.Context, title, description, payload, currency string, amount int) (string, error)
 	AnswerPreCheckout(ctx context.Context, id string, ok bool, errMsg string)
+	// RefundStars возвращает звёзды плательщику. Бот сам создаёт состояния
+	// «деньги приняты, выдачи нет» (неизвестный срок, сумма не совпала,
+	// панель не ответила), а вернуть их было нечем.
+	RefundStars(ctx context.Context, userID int64, chargeID string) error
+	// StarTransactions — история звёздных операций бота. Единственный способ
+	// догнать оплату, апдейт о которой не дожил до выдачи: Telegram
+	// подтверждает получение апдейта сразу, а не после обработки.
+	StarTransactions(ctx context.Context, offset, limit int) ([]models.StarTransaction, error)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
 	// SendDocumentKB отправляет файл (по file_id или загрузкой) с подписью и
@@ -1701,6 +1709,24 @@ func (m botMessenger) AnswerPreCheckout(ctx context.Context, id string, ok bool,
 	}); err != nil {
 		m.log.Error("answer precheckout", "err", err)
 	}
+}
+
+func (m botMessenger) RefundStars(ctx context.Context, userID int64, chargeID string) error {
+	_, err := m.b.RefundStarPayment(ctx, &bot.RefundStarPaymentParams{
+		UserID: userID, TelegramPaymentChargeID: chargeID,
+	})
+	return err
+}
+
+func (m botMessenger) StarTransactions(ctx context.Context, offset, limit int) ([]models.StarTransaction, error) {
+	res, err := m.b.GetStarTransactions(ctx, &bot.GetStarTransactionsParams{Offset: offset, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	return res.Transactions, nil
 }
 
 func (m botMessenger) RemoveKeyboard(ctx context.Context, chatID int64) {

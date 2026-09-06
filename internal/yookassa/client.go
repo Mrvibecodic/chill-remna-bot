@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -74,6 +75,22 @@ func New(shopID, secret string) *Client {
 	return &Client{shopID: shopID, secret: secret, http: &http.Client{Timeout: 20 * time.Second}}
 }
 
+// Refunded — по платежу есть возврат (полный или частичный).
+//
+// Сравнение через число, а не со строкой: ЮKassa отдаёт суммы как «0.00»,
+// «100.00», и побайтная проверка на пустоту пропустила бы нулевой возврат.
+func (p *Payment) Refunded() bool {
+	if p == nil {
+		return false
+	}
+	v := strings.TrimSpace(p.RefundedAmount.Value)
+	if v == "" {
+		return false
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	return err == nil && f > 0
+}
+
 type Payment struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -85,6 +102,15 @@ type Payment struct {
 	Confirmation struct {
 		ConfirmationURL string `json:"confirmation_url"`
 	} `json:"confirmation"`
+	// RefundedAmount — сколько по платежу уже возвращено. У ЮKassa статус
+	// оплаченного платежа НАВСЕГДА остаётся succeeded: возврат создаёт
+	// отдельный объект, а признак возврата виден только здесь. Без этого поля
+	// незакрытый счёт после возврата выдавал подписку сверкой или кнопкой
+	// «Проверить оплату», которая живёт в переписке вечно.
+	RefundedAmount struct {
+		Value    string `json:"value"`
+		Currency string `json:"currency"`
+	} `json:"refunded_amount"`
 	Metadata map[string]string `json:"metadata"`
 	// CancellationDetails — кто и почему отменил платёж (insufficient_funds,
 	// card_expired, …); без причины пользователю не объяснить, что чинить.

@@ -50,7 +50,8 @@ type MiniProvider interface {
 	// MiniTopUpOptions returns preset top-up amounts + enabled methods.
 	MiniTopUpOptions(ctx context.Context, tgID int64) MiniTopUpOptionsDTO
 	// MiniTopUp creates a balance top-up payment (yk/cb) and returns the URL.
-	MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string) MiniActionDTO
+	// web — запрос из браузерного кабинета: ссылка мини-аппа там не работает.
+	MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string, web bool) MiniActionDTO
 
 	// MiniConnect returns install apps + deeplinks for the user's subscription,
 	// sourced from their subscription page (iOS + Android only).
@@ -547,7 +548,7 @@ func (s *Server) handleMiniTopUpOptions(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
@@ -566,7 +567,7 @@ func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method))
+	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web))
 }
 
 func (s *Server) handleMiniConnect(w http.ResponseWriter, r *http.Request) {

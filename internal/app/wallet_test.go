@@ -65,10 +65,10 @@ func TestWallet_TopUpOffHidesAndBlocks(t *testing.T) {
 // Ядро создания счёта — последний рубеж: оно общее для чата, мини-аппа и ЛК.
 func TestWallet_TopUpCreateRefused(t *testing.T) {
 	a, _, _ := walletApp(t, false)
-	if _, _, err := a.topUpCreate(context.Background(), 700, 10000, "yk"); err == nil {
+	if _, _, err := a.topUpCreate(context.Background(), 700, 10000, "yk", false); err == nil {
 		t.Fatal("создание счёта на пополнение должно отказывать")
 	}
-	if dto := a.MiniTopUp(context.Background(), 700, 10000, "yk"); dto.Error == "" {
+	if dto := a.MiniTopUp(context.Background(), 700, 10000, "yk", false); dto.Error == "" {
 		t.Fatal("мини-апп должен отказывать в пополнении")
 	}
 	if dto := a.MiniTopUpOptions(context.Background(), 700); len(dto.Amounts) != 0 || len(dto.Methods) != 0 {
