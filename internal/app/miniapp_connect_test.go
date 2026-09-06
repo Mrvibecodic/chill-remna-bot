@@ -40,7 +40,7 @@ func TestAppConfigBase(t *testing.T) {
 	cases := map[string]string{
 		"https://sub.example.com/u/token": "https://sub.example.com",
 		"https://sub.example.com:8443/x":  "https://sub.example.com:8443",
-		"http://1.2.3.4/sub/abc":          "http://1.2.3.4",
+		"http://192.0.2.4/sub/abc":        "http://192.0.2.4",
 		"not a url":                       "",
 		"":                                "",
 	}
