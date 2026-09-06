@@ -124,11 +124,46 @@ func (a *App) markPanelLinked(ctx context.Context, chatID int64, expireAt string
 		return
 	}
 	_ = a.store.UpsertUser(ctx, chatID)
+	// Пустая карточка бывает двух разных видов. Человек, которому бот САМ
+	// вернул неиспользованный пробный период, выглядит ровно как новичок — а
+	// привязка ставит «триал использован» и восстанавливает просроченный
+	// срок. Возврат отменялся бы молча, на первом же заходе в бота, ради
+	// которого его и делали. Живой срок в панели — другое дело: подписка у
+	// человека есть, и записать её надо.
+	if !panelSubAlive(expireAt) && a.trialWasReturned(ctx, chatID) {
+		a.log.Info("panel sync: возвращённый триал не отбираем", "tg_id", chatID)
+		return
+	}
 	_ = a.store.SetTrialUsed(ctx, chatID, time.Now().UTC().Format(time.RFC3339))
 	if expireAt != "" {
 		_ = a.store.SetSubExpiry(ctx, chatID, expireAt, "paid")
 	}
 	a.invalidateSubCache(chatID)
+}
+
+// trialWasReturned — возвращал ли бот этому человеку пробный период.
+//
+// Ошибка чтения считается «да»: соврать в эту сторону значит не привязать
+// панельную учётку лишний раз, а в обратную — молча отобрать выданный возврат.
+func (a *App) trialWasReturned(ctx context.Context, chatID int64) bool {
+	if a.store == nil {
+		return false
+	}
+	n, err := a.store.TrialResets(ctx, chatID)
+	if err != nil {
+		a.log.Warn("panel sync: счётчик возвратов триала", "tg_id", chatID, "err", err)
+		return true
+	}
+	return n > 0
+}
+
+// panelSubAlive — срок из панели ещё не истёк.
+func panelSubAlive(expireAt string) bool {
+	if expireAt == "" {
+		return false
+	}
+	exp, err := time.Parse(time.RFC3339, expireAt)
+	return err == nil && exp.After(time.Now().UTC())
 }
 
 func (a *App) adminLinkPanel(ctx context.Context, adminChat, uid int64, input string) {

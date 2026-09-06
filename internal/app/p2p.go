@@ -1696,6 +1696,18 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.setTrialGB(n)
 		_ = a.saveBotConfig(ctx)
 		a.showTrialAdmin(ctx, chatID)
+	case "trial_reset_pct":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialResetPct(n)
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "trial_reset_max":
+		ui.adminInput = ""
+		n, _ := strconv.Atoi(strings.TrimSpace(text))
+		a.setTrialResetMax(n)
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
 	case "addsub_gb":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))

@@ -244,7 +244,9 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 				rep.blocked++
 			}
 		}
-		if u.TrialUsed && (fresh || existing.TrialUsedAt == "") {
+		// existing.TrialUsedAt == "" бывает и у того, кому бот САМ вернул
+		// неиспользованный пробный период: импорт отбирал бы возврат обратно.
+		if u.TrialUsed && (fresh || existing.TrialUsedAt == "") && !a.trialWasReturned(ctx, u.TelegramID) {
 			ts := u.CreatedAt
 			if ts == "" {
 				ts = time.Now().UTC().Format(time.RFC3339)

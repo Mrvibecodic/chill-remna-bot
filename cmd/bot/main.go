@@ -66,7 +66,7 @@ func main() {
 	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
-	wg.Add(8)
+	wg.Add(9)
 	var botErr, webErr error
 
 	go func() {
@@ -118,6 +118,10 @@ func main() {
 	go func() {
 		defer wg.Done()
 		a.RunTorrentUnblocker(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.RunTrialReset(ctx)
 	}()
 	wg.Wait()
 	// Даём доиграть недоделанному: выдаче по звёздам, возврату на баланс.

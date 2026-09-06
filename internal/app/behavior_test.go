@@ -297,22 +297,23 @@ type fakeStore struct {
 	cfg         *model.BotConfig
 	unreachable map[int64]string
 	// pingErr — ответ Ping: так проверяется, что «бот жив» смотрит на базу.
-	pingErr    error
-	users      map[int64]*model.User
-	reqs       map[int64]*model.P2PRequest
-	pays       map[int64]*model.Payment
-	media      map[string]string
-	pending    map[int64]*model.PendingInvoice
-	plans      map[string]*model.Plan
-	planAccess map[string]model.PlanAccess
-	intents    map[int64]*model.PurchaseIntent
-	invSnaps   map[string]*model.PlanSnapshot
-	invSnapAt  map[string]string
-	promos     map[string]*model.PromoCode
-	promoUses  map[string]bool
-	webUsers   map[string]*model.WebUser
-	paylogs    []model.PayLogEntry
-	torrents   []model.TorrentReport
+	pingErr     error
+	users       map[int64]*model.User
+	reqs        map[int64]*model.P2PRequest
+	pays        map[int64]*model.Payment
+	media       map[string]string
+	pending     map[int64]*model.PendingInvoice
+	plans       map[string]*model.Plan
+	planAccess  map[string]model.PlanAccess
+	intents     map[int64]*model.PurchaseIntent
+	invSnaps    map[string]*model.PlanSnapshot
+	invSnapAt   map[string]string
+	promos      map[string]*model.PromoCode
+	trialResets map[int64]int
+	promoUses   map[string]bool
+	webUsers    map[string]*model.WebUser
+	paylogs     []model.PayLogEntry
+	torrents    []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -723,6 +724,59 @@ func (s *fakeStore) ListSubRepairTargets(_ context.Context) ([]storage.SubRepair
 		out = append(out, storage.SubRepairTarget{TelegramID: id, SubExpireAt: u.SubExpireAt})
 	}
 	return out, nil
+}
+
+func (s *fakeStore) TrialResets(_ context.Context, id int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.trialResets[id], nil
+}
+
+func (s *fakeStore) ListTrialResetTargets(_ context.Context, maxResets, limit int) ([]storage.TrialResetTarget, error) {
+	if maxResets <= 0 || limit <= 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	paid := map[int64]bool{}
+	for _, p := range s.pays {
+		if p != nil && p.Method != model.PayMethodTrial &&
+			(p.Status == model.PaymentPaid || p.Status == model.PaymentRefunded) {
+			paid[p.TelegramID] = true
+		}
+	}
+	var out []storage.TrialResetTarget
+	for id, u := range s.users {
+		if u == nil || u.Blocked || id <= 0 || u.TrialUsedAt == "" || u.SubExpireAt == "" || paid[id] {
+			continue
+		}
+		if s.unreachable[id] != "" {
+			continue
+		}
+		if s.trialResets[id] >= maxResets {
+			continue
+		}
+		out = append(out, storage.TrialResetTarget{TelegramID: id, SubExpireAt: u.SubExpireAt, Resets: s.trialResets[id]})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ResetTrialForRepeat(_ context.Context, id int64, expectExpire string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.users[id]
+	if u == nil || u.TrialUsedAt == "" || expectExpire == "" || u.SubExpireAt != expectExpire {
+		return false, nil
+	}
+	u.TrialUsedAt, u.SubExpireAt, u.NotifyKind, u.NotifySent = "", "", "", ""
+	if s.trialResets == nil {
+		s.trialResets = map[int64]int{}
+	}
+	s.trialResets[id]++
+	return true, nil
 }
 
 func (s *fakeStore) LastPaidSubPayment(_ context.Context, id int64) (*model.Payment, error) {
@@ -1432,7 +1486,12 @@ func (s *fakeStore) RedeemPromo(_ context.Context, code string, id int64) (bool,
 	}
 	return true, nil
 }
-func (s *fakeStore) ReleasePromo(_ context.Context, code string, id int64) error {
+func (s *fakeStore) ReleasePromo(ctx context.Context, code string, id int64) error {
+	// Отменённый контекст двойник обязан уважать: на нём и ломалась
+	// компенсация промокода в бою.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	delete(s.promoUses, code+"|"+itoa64(id))
 	if p := s.promos[code]; p != nil && p.Used > 0 {
 		p.Used--

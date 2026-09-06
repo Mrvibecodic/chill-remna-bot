@@ -42,9 +42,11 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	a.mu.Lock()
 	strat := ""
 	allowBuy := false
+	var reset model.TrialConfig
 	if a.botCfg != nil {
 		strat = a.botCfg.Trial.Strategy
 		allowBuy = a.botCfg.Trial.AllowBuy
+		reset = a.botCfg.Trial
 	}
 	a.mu.Unlock()
 	stratStr := i18n.T(lang, "trial.strat_inherit")
@@ -55,14 +57,20 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	if allowBuy {
 		buyKey = "admin.on"
 	}
+	resetStr := i18n.T(lang, "trial.reset_off")
+	if reset.ResetUnused && reset.ResetUnusedMax > 0 {
+		resetStr = i18n.T(lang, "trial.reset_on", reset.ResetUnusedMax, reset.ResetUnusedPct)
+	}
 	body := i18n.T(lang, "trial.title",
-		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), internalCSV, externalName)
+		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), resetStr, internalCSV, externalName)
 
 	rows := [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
 		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
+		{toggleBtn(lang, reset.ResetUnused, "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
+		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
@@ -88,6 +96,25 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
 		a.showTrialAdmin(ctx, chatID)
+	case "resettoggle":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Trial.ResetUnused = !a.botCfg.Trial.ResetUnused
+			// Включили впервые — потолок повторов обязан быть ненулевым,
+			// иначе тумблер «включено» ничего не делает и выглядит поломкой.
+			if a.botCfg.Trial.ResetUnused && a.botCfg.Trial.ResetUnusedMax <= 0 {
+				a.botCfg.Trial.ResetUnusedMax = 1
+			}
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "resetpct":
+		a.getUI(chatID).adminInput = "trial_reset_pct"
+		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_pct"), "menu:trial")
+	case "resetmax":
+		a.getUI(chatID).adminInput = "trial_reset_max"
+		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_max"), "menu:trial")
 	case "days":
 		a.getUI(chatID).adminInput = "trial_days"
 		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_days"), "menu:trial")
@@ -271,6 +298,43 @@ func (a *App) setTrialHWID(n int) {
 	}
 }
 
+// setTrialResetPct — порог «не воспользовался» в процентах лимита.
+// 100 и больше означало бы «возвращать всем подряд», поэтому потолок 99.
+func (a *App) setTrialResetPct(n int) {
+	if n < 0 {
+		n = 0
+	}
+	if n > 99 {
+		n = 99
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg != nil {
+		a.botCfg.Trial.ResetUnusedPct = n
+	}
+}
+
+// setTrialResetMax — сколько раз одному человеку можно вернуть триал.
+// Ноль выключает возврат целиком: иначе тот, кто никогда не купит, крутил бы
+// пробный период бесконечно.
+func (a *App) setTrialResetMax(n int) {
+	if n < 0 {
+		n = 0
+	}
+	if n > 10 {
+		n = 10
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	a.botCfg.Trial.ResetUnusedMax = n
+	if n == 0 {
+		a.botCfg.Trial.ResetUnused = false
+	}
+}
+
 func (a *App) trialAvailable(ctx context.Context, chatID int64) bool {
 	a.mu.Lock()
 	enabled := a.botCfg != nil && a.botCfg.Trial.Enabled && a.botCfg.Trial.Days > 0
@@ -360,7 +424,7 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 		// сколько угодно раз. Молчать тут нельзя: зовём админа.
 		markErr := a.store.SetTrialUsed(ctx, chatID, time.Now().UTC().Format(time.RFC3339))
 		_ = a.store.AddPayment(ctx, &model.Payment{
-			TelegramID: chatID, Method: "trial", Months: 0, Amount: "—",
+			TelegramID: chatID, Method: model.PayMethodTrial, Months: 0, Amount: "—",
 			Status: model.PaymentPaid,
 		})
 		if err := a.store.SetSubExpiry(ctx, chatID, expireAt, "trial"); err != nil && markErr == nil {
