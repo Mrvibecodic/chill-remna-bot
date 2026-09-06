@@ -144,6 +144,27 @@ func TestSubRepair_FullReapplyAfterRollback(t *testing.T) {
 	}
 }
 
+// Полная переприменка не имеет права ПОНИЖАТЬ потолок трафика: сверх
+// проданного его поднимают бонусные гигабайты (промокод на трафик) и ручная
+// щедрость админа. Абсолютная запись отбирала бы подарок в ближайшие 12 часов.
+func TestSubRepair_FullReapplyKeepsBonusTraffic(t *testing.T) {
+	// В панели 150 ГБ — 50 проданных плюс 100 подаренных.
+	a, fs, patches := repairFixture(t, 3, 3*repairGB)
+	ctx := context.Background()
+	seedRepairUser(t, fs, time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339), nil)
+	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{
+		ID: 9001, Method: model.PayMethodYooKassa, ExtID: "yk_r1", TelegramID: 555, Months: 12,
+		Snapshot: &model.PlanSnapshot{Months: 12, DeviceLimit: 10, TrafficGB: 50, IntSquads: []string{"squad-new"}},
+	})
+
+	if st := a.repairSubscriptions(ctx); st.fixed != 1 {
+		t.Fatalf("полная переприменка не выполнена: fixed=%d", st.fixed)
+	}
+	if got := (*patches)[0]["trafficLimitBytes"]; got != float64(3*repairGB) {
+		t.Fatalf("сверка отобрала бонусный трафик: %v (ожидалось %v)", got, float64(3*repairGB))
+	}
+}
+
 // Покупка без снимка и без счёта (Stars, баланс, перевод, Tribute): что именно
 // продали — неизвестно. Гадать нельзя ни в плюс, ни в минус.
 func TestSubRepair_NoGuessWithoutInvoice(t *testing.T) {

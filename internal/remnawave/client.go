@@ -1283,6 +1283,20 @@ func (c *Client) ResetTraffic(ctx context.Context, ref UserRef) error {
 	return nil
 }
 
+// SetTrafficLimit переписывает ТОЛЬКО потолок трафика, не трогая срок.
+//
+// Отдельный метод, а не CreateOrUpdateUserDays с нулём дней: тот всегда шлёт
+// expireAt, и бонусный трафик двигал бы дату окончания подписки на «сейчас+0»
+// у всех, чей срок в панели уже истёк.
+func (c *Client) SetTrafficLimit(ctx context.Context, ref UserRef, bytes int64) error {
+	if ref.Empty() {
+		return errors.New("пустая ссылка на пользователя панели")
+	}
+	patch := ref.apply(map[string]any{"trafficLimitBytes": bytes})
+	_, _, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
+	return err
+}
+
 func (c *Client) DeleteByTelegramID(ctx context.Context, telegramID int64) (bool, error) {
 	u, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {

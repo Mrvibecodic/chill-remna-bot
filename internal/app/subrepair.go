@@ -190,10 +190,20 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 	// именно той покупки, которую чиним, так что понизить чужими условиями
 	// невозможно.
 	if full {
+		// Трафик — единственное из набора, что видно по панели, и понижать
+		// его нельзя даже здесь: сверх проданного потолок поднимают бонусные
+		// гигабайты (промокод на трафик) и ручная щедрость админа. Абсолютная
+		// запись отбирала бы подарок обратно в ближайшие 12 часов, и человек
+		// не узнал бы почему. Проданный безлимит (ноль) — наоборот, всегда
+		// повышение, его пишем как есть.
+		traffic := snap.TrafficBytes()
+		if traffic > 0 && pu.TrafficLimit > traffic {
+			traffic = pu.TrafficLimit
+		}
 		limits = remnawave.UserLimits{
 			InternalSquads: snap.IntSquads,
 			ExternalSquad:  snap.ExtSquad,
-			TrafficBytes:   snap.TrafficBytes(),
+			TrafficBytes:   traffic,
 			TrafficSet:     true,
 			DeviceLimit:    snap.DeviceLimit,
 			Strategy:       snap.Strategy,

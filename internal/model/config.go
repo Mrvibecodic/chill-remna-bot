@@ -305,6 +305,18 @@ type TrialConfig struct {
 	// выключено: витрина закрыта до последних суток триала, чтобы его дни не
 	// сгорали. ⚠ Поле живёт в конфиге-блобе, старый образ его выбрасывает.
 	AllowBuy bool `json:"allow_buy,omitempty"`
+	// ResetUnused — возвращать пробный период тем, кто взял его и не
+	// воспользовался. ⚠ Поле живёт в конфиге-блобе: старый образ при
+	// сохранении конфига его выбрасывает, и возврат просто выключается —
+	// уже выданные повторы при этом остаются в силе.
+	ResetUnused bool `json:"reset_unused,omitempty"`
+	// ResetUnusedPct — порог «не воспользовался»: сколько процентов лимита
+	// трафика разрешено потратить. 0 — не потрачено вообще ничего.
+	ResetUnusedPct int `json:"reset_unused_pct,omitempty"`
+	// ResetUnusedMax — сколько раз одному человеку можно вернуть пробный
+	// период. 0 выключает возврат: без потолка тот, кто никогда не купит,
+	// крутил бы триал бесконечно.
+	ResetUnusedMax int `json:"reset_unused_max,omitempty"`
 }
 
 type SubscriptionPlan struct {
@@ -444,6 +456,9 @@ const (
 	PayMethodHeleket   = "heleket"
 	PayMethodTribute   = "tribute"
 	PayMethodBalance   = "balance"
+	// PayMethodTrial — запись о выданном пробном периоде. Денег за ней нет:
+	// все выборки «человек нам платил» обязаны её исключать.
+	PayMethodTrial = "trial"
 )
 
 const (
@@ -548,6 +563,11 @@ type User struct {
 	CreatedAt       string
 	TermsAcceptedAt string
 	TrialUsedAt     string
+	// TrialResets — сколько раз бот возвращал этому человеку неиспользованный
+	// пробный период. В выгрузке нужен обязательно: без него смена движка БД
+	// (SQLite↔Postgres идёт через Export/Import) обнуляла бы потолок повторов
+	// и раздавала всем ещё круг бесплатных триалов.
+	TrialResets int
 
 	SubExpireAt string
 
@@ -756,6 +776,11 @@ type PromoCode struct {
 const (
 	PromoKindBalance = "balance"
 	PromoKindDays    = "days"
+	// PromoKindTraffic — прибавка к потолку трафика в панели, значение в ГБ.
+	// Старый образ бота такой код не знает и уводит его в ветку баланса:
+	// человек получит рубли вместо гигабайтов. Поэтому коды на трафик заводить
+	// только после того, как обновление прижилось.
+	PromoKindTraffic = "traffic"
 )
 
 type MoyNalogConfig struct {
