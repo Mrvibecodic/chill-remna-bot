@@ -18,6 +18,11 @@ const (
 	// стабильном порядке первые же двести закрывали бы очередь собой.
 	bonusSweepBatch = 200
 	bonusSweepPace  = 200 * time.Millisecond
+	// Записи давно ушедших людей чистим: подписки нет, потолок применят
+	// заново при следующей оплате, а запись стоит запроса в панель каждый
+	// час. Срок с запасом — вернувшийся через месяц-другой человек ещё
+	// застанет свой подарок.
+	bonusStaleAfter = 90 * 24 * time.Hour
 )
 
 // RunBonusTrafficSweep забирает разовые подарки трафика обратно.
@@ -108,8 +113,14 @@ func (a *App) sweepBonusOne(ctx context.Context, st storage.Storage, panel *remn
 	if !bonus.SameAccount(pu.TrafficLimit, pu.ExpireAt) {
 		return a.clearTrafficBonus(ctx, st, t.TelegramID)
 	}
-	// Период не сменился — подарок ещё работает.
+	// Период не сменился — подарок ещё работает. Но если подписка кончилась
+	// давно, держать запись незачем: снимать прибавку с мёртвой учётки
+	// бессмысленно, а потолок ей всё равно применят заново при оплате.
 	if !bonus.Spent(pu.TrafficResetAt) {
+		if exp, perr := time.Parse(time.RFC3339, pu.ExpireAt); perr == nil &&
+			time.Since(exp) > bonusStaleAfter {
+			return a.clearTrafficBonus(ctx, st, t.TelegramID)
+		}
 		return false
 	}
 	want := bonus.Limit - bonus.Bytes

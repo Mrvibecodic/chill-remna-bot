@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"remnabot/internal/model"
@@ -156,6 +157,14 @@ func (a *App) repairTarget(ctx context.Context, panel *remnawave.Client, tgID in
 	if snap == nil {
 		return false
 	}
+	// Тот же замок, что сериализует выдачу подписки по человеку. Сверка
+	// читает потолок и через несколько запросов записывает его обратно, и без
+	// замка её запись затирала бы то, что успели поставить покупка или снятие
+	// подарочного трафика: у сверки число абсолютное, чужие правки в нём не
+	// учтены.
+	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(tgID, 10))]
+	lk.Lock()
+	defer lk.Unlock()
 	pu, err := panel.FindByTelegramID(ctx, tgID)
 	if err != nil || pu == nil {
 		return false

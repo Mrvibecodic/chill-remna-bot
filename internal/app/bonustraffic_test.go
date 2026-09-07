@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
@@ -342,4 +343,75 @@ func TestBonusTraffic_GrantAfterRollTakesOldBack(t *testing.T) {
 
 func storageTarget(id int64, b *model.TrafficBonus) storage.TrafficBonusTarget {
 	return storage.TrafficBonusTarget{TelegramID: id, Bonus: b}
+}
+
+// Учётки в панели больше нет — запись закрываем, иначе она висела бы вечно и
+// стоила запроса в панель каждый час.
+func TestBonusTraffic_NoPanelAccountClearsRecord(t *testing.T) {
+	p := newBonusPanel(t, 50*gb, 10*gb)
+	a, fs := bonusApp(t, p)
+	ctx := context.Background()
+	_ = fs.CreatePromo(ctx, &model.PromoCode{Code: "GIGA", Kind: model.PromoKindTraffic, Value: 25, MaxUses: 1})
+	if _, ok := a.redeemPromo(ctx, 555, "GIGA"); !ok {
+		t.Fatal("подарок не выдан")
+	}
+	gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":[]}`))
+	}))
+	t.Cleanup(gone.Close)
+	a.panel = testPanel(gone.URL)
+
+	if !a.sweepBonusOne(ctx, fs, a.panel, storageTarget(555, nil)) {
+		t.Fatal("запись без учётки в панели не закрыта")
+	}
+	if u, _ := fs.GetUser(ctx, 555); u.TrafficBonus != nil {
+		t.Fatalf("запись осталась: %+v", u.TrafficBonus)
+	}
+}
+
+// Подписка кончилась давно: запись закрываем без похода в панель за прибавкой.
+func TestBonusTraffic_LongExpiredCleared(t *testing.T) {
+	p := newBonusPanel(t, 50*gb, 10*gb)
+	a, fs := bonusApp(t, p)
+	ctx := context.Background()
+	_ = fs.CreatePromo(ctx, &model.PromoCode{Code: "GIGA", Kind: model.PromoKindTraffic, Value: 25, MaxUses: 1})
+	if _, ok := a.redeemPromo(ctx, 555, "GIGA"); !ok {
+		t.Fatal("подарок не выдан")
+	}
+	// Срок в панели истёк год назад, период с тех пор не менялся.
+	old := time.Now().UTC().AddDate(-1, 0, 0).Format(time.RFC3339)
+	u, _ := fs.GetUser(ctx, 555)
+	u.TrafficBonus.Expire = old
+	_ = fs.SetTrafficBonus(ctx, 555, u.TrafficBonus)
+	p.mu.Lock()
+	p.expire = old
+	before := len(p.patches)
+	p.mu.Unlock()
+
+	if n := a.sweepBonusTrafficOnce(ctx); n != 1 {
+		t.Fatalf("запись давно ушедшего не закрыта: %d", n)
+	}
+	p.mu.Lock()
+	after := len(p.patches)
+	p.mu.Unlock()
+	if after != before {
+		t.Fatalf("в панель ушёл лишний патч: %d", after-before)
+	}
+}
+
+// Пустая запись не сохраняется и не читается: иначе проход возился бы с
+// подарком в ноль байт и мог бы записать в панель бессмысленное число.
+func TestTrafficBonus_EmptyNotStored(t *testing.T) {
+	for _, b := range []*model.TrafficBonus{nil, {Bytes: 0, Limit: 50 * gb}, {Bytes: -1}} {
+		if got := b.Encode(); got != "" {
+			t.Fatalf("пустой подарок закодирован: %q", got)
+		}
+	}
+	if got := model.DecodeTrafficBonus(`{"bytes":0,"limit":100}`); got != nil {
+		t.Fatalf("подарок в ноль байт прочитан: %+v", got)
+	}
+	if got := model.DecodeTrafficBonus("не json"); got != nil {
+		t.Fatalf("мусор прочитан как подарок: %+v", got)
+	}
 }
