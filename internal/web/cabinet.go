@@ -104,8 +104,8 @@ func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) cabinetOK() bool { return s.mini != nil && s.mini.CabinetEnabled() }
 
-func (s *Server) issueCabinetToken(w http.ResponseWriter, tgID int64) {
-	tok := issueJWT(tgID, true, jwtKey(s.mini.MiniBotToken()), cabinetJWTTTL, s.mini.SessionVersion())
+func (s *Server) issueCabinetToken(ctx context.Context, w http.ResponseWriter, tgID int64) {
+	tok := issueJWT(tgID, true, jwtKey(s.mini.MiniBotToken()), cabinetJWTTTL, s.mini.SessionVersion(), s.mini.SessionEpoch(ctx, tgID))
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "expires_in": int(cabinetJWTTTL.Seconds())})
 }
 
@@ -115,7 +115,13 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bot_username": s.mini.CabinetBotUsername()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bot_username": s.mini.CabinetBotUsername(),
+		// mail_on гасит на входе и «забыли пароль», и обещание письма при
+		// регистрации: предлагать действие, которое заведомо не сработает,
+		// хуже, чем не предлагать его вовсе.
+		"mail_on": s.mini.MailReady(),
+	})
 }
 
 // handleCabinetTelegramAuth exchanges Telegram Login Widget data for a token.
@@ -165,7 +171,7 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	}
-	s.issueCabinetToken(w, tgID)
+	s.issueCabinetToken(ctx, w, tgID)
 }
 
 func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register bool) {
@@ -198,7 +204,7 @@ func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register b
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
-	s.issueCabinetToken(w, id)
+	s.issueCabinetToken(ctx, w, id)
 }
 
 func (s *Server) handleCabinetRegister(w http.ResponseWriter, r *http.Request) {
@@ -351,4 +357,199 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		w.Header().Set("Cache-Control", "no-store")
 	}
 	_, _ = w.Write([]byte(out))
+}
+
+// --- аккаунт кабинета: почта, пароль, привязка Telegram ---
+
+// cabinetJSON читает тело запроса кабинета. Тела здесь короткие (адрес,
+// пароль, значение ссылки), поэтому предел жёсткий.
+func cabinetJSON(r *http.Request, dst any) bool {
+	body, err := readAllLimited(r, 8*1024)
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(body, dst) == nil
+}
+
+// handleCabinetAccount отдаёт состояние аккаунта: чем человек входит, что
+// подтверждено и что из-за этого закрыто.
+func (s *Server) handleCabinetAccount(w http.ResponseWriter, r *http.Request) {
+	id, web, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	if !web {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.mini.CabinetAccount(r.Context(), id))
+}
+
+// handleCabinetVerifySend отправляет письмо с подтверждением ещё раз.
+func (s *Server) handleCabinetVerifySend(w http.ResponseWriter, r *http.Request) {
+	id, web, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	if !web {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := s.mini.CabinetSendVerify(ctx, id); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleCabinetVerify гасит ссылку из письма.
+//
+// Ручка намеренно POST и намеренно без авторизации: письмо открывают в чужом
+// браузере и на телефоне, а GET-ссылку на изменение состояния выбирают за
+// человека почтовые антивирусы, гася её до того, как он до неё доберётся.
+func (s *Server) handleCabinetVerify(w http.ResponseWriter, r *http.Request) {
+	if !s.cabinetOK() {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Token string `json:"token"`
+	}
+	if !cabinetJSON(r, &req) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := s.mini.CabinetVerifyEmail(ctx, req.Token); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleCabinetPasswordChange меняет пароль по старому и выдаёт свежий пропуск
+// взамен своего же: поколение поднялось, и прежний пропуск этой вкладки умер
+// вместе с чужими.
+func (s *Server) handleCabinetPasswordChange(w http.ResponseWriter, r *http.Request) {
+	id, web, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	if !web {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
+		return
+	}
+	var req struct {
+		Old string `json:"old"`
+		New string `json:"new"`
+	}
+	if !cabinetJSON(r, &req) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := s.mini.CabinetChangePassword(ctx, id, req.Old, req.New); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.issueCabinetToken(ctx, w, id)
+}
+
+// handleCabinetForgot принимает адрес и отвечает одинаково всегда: иначе форма
+// становится проверялкой «есть ли у вас аккаунт с таким адресом».
+func (s *Server) handleCabinetForgot(w http.ResponseWriter, r *http.Request) {
+	if !s.cabinetOK() {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if !cabinetJSON(r, &req) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	s.mini.CabinetForgotPassword(ctx, req.Email)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleCabinetReset ставит новый пароль по ссылке из письма.
+func (s *Server) handleCabinetReset(w http.ResponseWriter, r *http.Request) {
+	if !s.cabinetOK() {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if !cabinetJSON(r, &req) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	id, err := s.mini.CabinetResetPassword(ctx, req.Token, req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.issueCabinetToken(ctx, w, id)
+}
+
+// handleCabinetBind привязывает Telegram к аккаунту, заведённому по почте.
+// Подпись виджета входа проверяется тем же кодом, что и на входе: привязка —
+// такое же доказательство владения аккаунтом Telegram, как и вход им.
+func (s *Server) handleCabinetBind(w http.ResponseWriter, r *http.Request) {
+	id, web, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	if !web {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
+		return
+	}
+	var req struct {
+		ID        int64  `json:"id"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
+		PhotoURL  string `json:"photo_url"`
+		AuthDate  int64  `json:"auth_date"`
+		Hash      string `json:"hash"`
+	}
+	if !cabinetJSON(r, &req) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	fields := map[string]string{
+		"id":        strconv.FormatInt(req.ID, 10),
+		"auth_date": strconv.FormatInt(req.AuthDate, 10),
+		"hash":      req.Hash,
+	}
+	for k, v := range map[string]string{"first_name": req.FirstName, "last_name": req.LastName, "username": req.Username, "photo_url": req.PhotoURL} {
+		if v != "" {
+			fields[k] = v
+		}
+	}
+	newID, err := validateTelegramLogin(fields, s.mini.MiniBotToken(), loginTTL)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "не удалось проверить вход через Telegram"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	bound, err := s.mini.CabinetBindTelegram(ctx, id, newID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mini.CabinetBindName(ctx, bound, req.Username, req.FirstName)
+	s.issueCabinetToken(ctx, w, bound)
 }

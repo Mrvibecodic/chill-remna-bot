@@ -25,6 +25,7 @@
   --good:#34d399;
   --good-glow:rgba(52,211,153,.35);
   --bad:#f87171;
+  --warn:#e0a200;
   --radius:20px;
   --radius-sm:14px;
   --space:16px;
@@ -437,6 +438,7 @@ function render(me,menu,sub,plans){
   var ub='';
   if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
   let h='<div class="stagger">';
+  h+=verifyBanner();
   if(sub.active){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
@@ -756,7 +758,8 @@ async function openMore(){
     STATE.legalBack=openMore;
     h+='<div class="sec-title">📜 Документы</div>'+legalRows();
   }
-  if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
+  if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="openAccount()">'+IC.users+'Аккаунт</button>';
+  if(WEB)h+='<button class="btn sec" style="margin-top:10px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
   h+='<button class="btn ghost" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
@@ -942,13 +945,163 @@ function renderConnect(){
   view(h,boot);
   drawQR(d.sub_url);
 }
+/* ---- account: почта, пароль, привязка Telegram ---- */
+function verifyBanner(){
+  if(!WEB)return '';
+  var a=STATE.acct;
+  if(!a||!a.money_blocked)return '';
+  return '<div class="card" style="border-color:var(--warn)">'+
+    '<div style="font-weight:600">Подтвердите почту</div>'+
+    '<div class="hint" style="margin-top:6px">Письмо со ссылкой отправлено на '+esc(a.email||'')+'. Пока адрес не подтверждён, оплата и пополнение недоступны.</div>'+
+    '<button class="btn sec" style="margin-top:10px" onclick="resendVerify(this)">Отправить письмо ещё раз</button></div>';
+}
+async function resendVerify(el){
+  haptic('tap');busy(el,true);
+  try{await post('/api/cabinet/email/verify/send',{});haptic('ok');toast('Письмо отправлено','ok');}
+  catch(e){haptic('err');toast(e.message||'Не удалось отправить','err');}
+  busy(el,false);
+}
+async function openAccount(){
+  var a=STATE.acct||{};
+  try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
+  var h='<div class="stagger">';
+  h+='<div class="sec-title">'+IC.users+'Аккаунт</div><div class="card">';
+  if(a.email){
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b>'+esc(a.email)+'</b></div>';
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Адрес</span><b style="color:'+(a.email_verified?'var(--good)':'var(--bad)')+'">'+(a.email_verified?'подтверждён':'не подтверждён')+'</b></div>';
+  }
+  h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Telegram</span><b>'+(a.tg_linked?'привязан':'не привязан')+'</b></div>';
+  h+='</div>';
+  if(a.email&&!a.email_verified&&a.mail_on){
+    h+='<div class="card"><div class="hint">Подтверждение открывает оплату, пополнение и промокоды.</div>'+
+      '<button class="btn" style="margin-top:10px" onclick="resendVerify(this)">Отправить письмо ещё раз</button></div>';
+  }
+  if(!a.tg_linked){
+    h+='<div class="sec-title">'+IC.bolt+'Привязать Telegram</div><div class="card">'+
+      '<div class="hint">После привязки в кабинет можно будет входить кнопкой Telegram, а бот в чате станет показывать эту же подписку. Ссылка подписки не изменится.</div>'+
+      '<div class="hint" style="margin-top:6px">Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.</div>'+
+      '<div class="tgwrap" style="margin-top:12px"><div id="tgbind"></div></div></div>';
+  }
+  if(a.has_password){
+    h+='<div class="sec-title">'+IC.tag+'Сменить пароль</div><div class="card">'+
+      '<input id="pwOld" class="field" type="password" placeholder="Текущий пароль" autocomplete="current-password">'+
+      '<input id="pwNew" class="field" style="margin-top:10px" type="password" placeholder="Новый пароль (мин. 8)" autocomplete="new-password">'+
+      '<input id="pwNew2" class="field" style="margin-top:10px" type="password" placeholder="Новый пароль ещё раз" autocomplete="new-password">'+
+      '<button class="btn" style="margin-top:10px" onclick="changePass(this)">'+IC.check+'Сменить пароль</button>'+
+      '<div class="hint" style="margin-top:8px;font-size:12px">Все остальные входы в этот аккаунт будут завершены.</div></div>';
+  }
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
+  view(h,openMore);
+  if(!a.tg_linked)mountTGWidget('tgbind','onTGBind(user)');
+}
+// mountTGWidget вставляет виджет входа Telegram в контейнер. Отдельной функцией
+// потому, что мест два — экран входа и привязка, — а различаются они только
+// именем обработчика.
+function mountTGWidget(elID,onauth){
+  var cfgUser=STATE.botUser;
+  var put=function(u){
+    if(!u)return;
+    var m=document.getElementById(elID); if(!m)return;
+    var sc=document.createElement('script');sc.async=true;sc.src='https://telegram.org/js/telegram-widget.js?22';
+    sc.setAttribute('data-telegram-login',u);sc.setAttribute('data-size','large');
+    sc.setAttribute('data-onauth',onauth);sc.setAttribute('data-request-access','write');
+    m.appendChild(sc);
+  };
+  if(cfgUser){put(cfgUser);return;}
+  api('/api/cabinet/config').then(function(c){STATE.botUser=c&&c.bot_username;put(STATE.botUser);},function(){});
+}
+window.onTGBind=function(user){
+  post('/api/cabinet/tg/bind',user).then(function(r){
+    if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);haptic('ok');toast('Telegram привязан','ok');STATE.acct=null;boot();return;}
+    toast('Не удалось привязать','err');
+  }).catch(function(e){haptic('err');toast(e.message||'Не удалось привязать','err');});
+};
+async function changePass(el){
+  var o=document.getElementById('pwOld'),n=document.getElementById('pwNew'),n2=document.getElementById('pwNew2');
+  var ov=o?o.value:'',nv=n?n.value:'',n2v=n2?n2.value:'';
+  if(!ov||!nv){toast('Заполните оба поля','err');return;}
+  if(nv!==n2v){toast('Новые пароли не совпадают','err');return;}
+  if(nv.length<8){toast('Пароль слишком короткий','err');return;}
+  haptic('tap');busy(el,true);
+  try{
+    var r=await post('/api/cabinet/password/change',{old:ov,new:nv});
+    // Поколение пропусков поднялось — прежний пропуск ЭТОЙ вкладки тоже мёртв,
+    // поэтому меняем его на присланный, иначе следующий же запрос даст 401.
+    if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);}
+    haptic('ok');toast('Пароль изменён','ok');openAccount();return;
+  }catch(e){haptic('err');toast(e.message||'Не удалось','err');}
+  busy(el,false);
+}
+/* ---- ссылки из писем ---- */
+// Значение приходит параметром, а запрос уходит POST'ом: GET-ссылку на
+// изменение состояния открывают почтовые антивирусы и «проверялки», и человек
+// добирается уже до погашенной ссылки.
+function linkParam(name){
+  try{return new URLSearchParams(window.location.search).get(name)||'';}catch(e){return '';}
+}
+function dropQuery(){
+  try{window.history.replaceState({},'',window.location.pathname);}catch(e){}
+}
+async function runVerifyLink(tok){
+  dropQuery();
+  try{await post('/api/cabinet/email/verify',{token:tok});toast('Адрес подтверждён','ok');}
+  catch(e){toast(e.message||'Ссылка недействительна','err');}
+  STATE.acct=null;
+}
+function openReset(tok){
+  setBack(null);
+  balchip.style.display='none';balchip.innerHTML='';
+  var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Новый пароль</span></div>'+
+    '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Задайте новый пароль для входа.</div></div>'+
+    '<div class="card">'+
+    '<input id="rsPass" class="field" type="password" placeholder="Новый пароль (мин. 8)" autocomplete="new-password">'+
+    '<input id="rsPass2" class="field" style="margin-top:10px" type="password" placeholder="Ещё раз" autocomplete="new-password">'+
+    '<button class="btn" style="margin-top:10px" onclick="doReset(this,\''+jsq(tok)+'\')">'+IC.check+'Сохранить</button>'+
+    '<button class="btn ghost" style="margin-top:10px" onclick="renderLogin()">← К входу</button></div></div></div>';
+  view(h,null);
+}
+async function doReset(el,tok){
+  var p=document.getElementById('rsPass'),p2=document.getElementById('rsPass2');
+  var v=p?p.value:'',v2=p2?p2.value:'';
+  if(v!==v2){toast('Пароли не совпадают','err');return;}
+  if(v.length<8){toast('Пароль слишком короткий','err');return;}
+  haptic('tap');busy(el,true);
+  try{
+    var r=await post('/api/cabinet/password/reset',{token:tok,password:v});
+    if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);haptic('ok');toast('Пароль изменён','ok');STATE.acct=null;boot();return;}
+    toast('Не удалось','err');
+  }catch(e){haptic('err');toast(e.message||'Ссылка недействительна','err');}
+  busy(el,false);
+}
+function openForgot(){
+  setBack(null);
+  var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Восстановление</span></div>'+
+    '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Пришлём ссылку на смену пароля.</div></div>'+
+    '<div class="card">'+
+    '<input id="fgEmail" class="field" type="email" placeholder="Email" autocomplete="email">'+
+    '<button class="btn" style="margin-top:10px" onclick="doForgot(this)">'+IC.check+'Отправить</button>'+
+    '<button class="btn ghost" style="margin-top:10px" onclick="renderLogin()">← К входу</button></div></div></div>';
+  view(h,null);
+}
+async function doForgot(el){
+  var e=document.getElementById('fgEmail');var v=e?e.value.trim():'';
+  if(!v){toast('Введите email','err');return;}
+  haptic('tap');busy(el,true);
+  try{await post('/api/cabinet/password/forgot',{email:v});}catch(err){}
+  // Ответ одинаков всегда и намеренно: иначе форма превращается в проверялку
+  // «а есть ли у вас аккаунт с таким адресом».
+  busy(el,false);
+  toast('Если такой адрес есть, письмо отправлено','ok');
+}
+
 /* ---- web cabinet login ---- */
 function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
-  STATE={balanceK:0,methods:[]};
+  var known=STATE.botUser;
+  STATE={balanceK:0,methods:[],botUser:known};
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Вход</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Войдите через Telegram или по email.</div></div>';
@@ -957,13 +1110,17 @@ async function renderLogin(){
     '<input id="lemail" class="field" type="email" placeholder="Email" autocomplete="email">'+
     '<input id="lpass" class="field" style="margin-top:10px" type="password" placeholder="Пароль (мин. 8)" autocomplete="current-password">'+
     '<button class="btn" style="margin-top:10px" onclick="cabLogin(this)">'+IC.check+'Войти</button>'+
-    '<button class="btn sec" style="margin-top:10px" onclick="cabRegister(this)">'+IC.plus+'Зарегистрироваться</button>'+
-    '<div class="hint" style="margin-top:8px;font-size:12px">Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.</div></div>';
+    '<button class="btn sec" style="margin-top:10px" onclick="cabRegister(this)">'+IC.plus+'Зарегистрироваться</button>';
+  if(cfg.mail_on){
+    h+='<button class="btn ghost" style="margin-top:10px" onclick="openForgot()">Забыли пароль?</button>'+
+      '<div class="hint" style="margin-top:8px;font-size:12px">После регистрации на адрес придёт письмо. Пока адрес не подтверждён, оплата и пополнение недоступны.</div>';
+  }else{
+    h+='<div class="hint" style="margin-top:8px;font-size:12px">Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.</div>';
+  }
+  h+='</div>';
   h+='</div></div>';
   view(h,null);
-  if(cfg.bot_username){var sc=document.createElement('script');sc.async=true;sc.src='https://telegram.org/js/telegram-widget.js?22';
-    sc.setAttribute('data-telegram-login',cfg.bot_username);sc.setAttribute('data-size','large');sc.setAttribute('data-onauth','onTGAuth(user)');sc.setAttribute('data-request-access','write');
-    var m=document.getElementById('tglogin');if(m)m.appendChild(sc);}
+  if(cfg.bot_username){STATE.botUser=cfg.bot_username;mountTGWidget('tglogin','onTGAuth(user)');}
 }
 window.onTGAuth=function(user){renderLoginBusy();post('/api/cabinet/auth/telegram',user).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
 function renderLoginBusy(){skSimple();}
@@ -984,6 +1141,12 @@ async function boot(){
   payGuardOff();
   try{
     if(WEB){
+      // Ссылки из писем разбираются до всего остального: человек мог прийти по
+      // ним, ещё не будучи залогиненным, и до кабинета ему тогда не добраться.
+      var vTok=linkParam('verify');
+      if(vTok)await runVerifyLink(vTok);
+      var rTok=linkParam('reset');
+      if(rTok){dropQuery();openReset(rTok);return;}
       if(!TOKEN)TOKEN=getStoredToken();
       if(!TOKEN){renderLogin();return;}
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
@@ -993,6 +1156,10 @@ async function boot(){
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
     try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
+    // Состояние аккаунта нужно на главной: пока адрес не подтверждён, оплата
+    // закрыта, и человек обязан увидеть почему — иначе кнопка просто «не
+    // работает».
+    if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';

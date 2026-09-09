@@ -384,6 +384,7 @@ var ru = map[string]string{
 	"cabinet.ask_title":        "Введите заголовок страницы кабинета («-» — сбросить):",
 	"cabinet.ask_desc":         "Введите meta-описание страницы («-» — сбросить):",
 	"cabinet.ask_favicon":      "Вставьте URL фавикона или data:-URI («-» — сбросить):",
+	"cabinet.bind_rollback":    "⚠️ <b>Привязка Telegram оборвалась</b>\nУчётка в панели <code>%s</code> помечена Telegram <code>%s</code>, а перенос аккаунта не прошёл. Снимите telegramId у этой учётки вручную, иначе первый вход этого Telegram подхватит чужую подписку.",
 	"btn.mail":                 "✉️ Почта",
 	"mail.brand":               "Личный кабинет",
 	"mail.title":               "✉️ <b>Почта кабинета</b>\n\nСостояние: %s\nСпособ: <b>%s</b>",

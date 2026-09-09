@@ -384,6 +384,7 @@ var en = map[string]string{
 	"cabinet.ask_title":        "Enter the cabinet page title (send a dash to clear):",
 	"cabinet.ask_desc":         "Enter the page meta description (send a dash to clear):",
 	"cabinet.ask_favicon":      "Paste a favicon URL or data: URI (send a dash to clear):",
+	"cabinet.bind_rollback":    "⚠️ <b>Telegram linking broke off</b>\nPanel account <code>%s</code> is now tagged with Telegram <code>%s</code>, but the account move failed. Clear telegramId on that panel account by hand, otherwise the first sign-in from that Telegram will pick up someone else's subscription.",
 	"btn.mail":                 "✉️ E-mail",
 	"mail.brand":               "Web cabinet",
 	"mail.title":               "✉️ <b>Cabinet e-mail</b>\n\nState: %s\nTransport: <b>%s</b>",

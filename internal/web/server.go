@@ -87,6 +87,13 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /api/cabinet/auth/telegram", s.handleCabinetTelegramAuth)
 	mux.HandleFunc("POST /api/cabinet/auth/register", s.handleCabinetRegister)
 	mux.HandleFunc("POST /api/cabinet/auth/login", s.handleCabinetLogin)
+	mux.HandleFunc("GET /api/cabinet/account", s.handleCabinetAccount)
+	mux.HandleFunc("POST /api/cabinet/email/verify/send", s.handleCabinetVerifySend)
+	mux.HandleFunc("POST /api/cabinet/email/verify", s.handleCabinetVerify)
+	mux.HandleFunc("POST /api/cabinet/password/change", s.handleCabinetPasswordChange)
+	mux.HandleFunc("POST /api/cabinet/password/forgot", s.handleCabinetForgot)
+	mux.HandleFunc("POST /api/cabinet/password/reset", s.handleCabinetReset)
+	mux.HandleFunc("POST /api/cabinet/tg/bind", s.handleCabinetBind)
 	mux.HandleFunc("POST /api/cabinet/p2p/screenshot", s.handleCabinetP2PScreenshot)
 	mux.HandleFunc("GET /", s.handleCabinetStatic)
 	return mux

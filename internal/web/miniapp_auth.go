@@ -99,14 +99,18 @@ type jwtClaims struct {
 	// значит «разлогинить всех» было нечем, и украденный пропуск работал все
 	// семь суток. Админ поднимает поколение — все прежние пропуска мертвы.
 	Ver int `json:"v,omitempty"`
+	// Epoch — поколение пропусков ОДНОГО аккаунта. Общее поколение выбивает
+	// всех разом и для смены пароля не годится: сменивший пароль обязан выбить
+	// чужие сессии, не трогая посторонних.
+	Epoch int `json:"e,omitempty"`
 }
 
 func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // issueJWT signs {tg,exp} with HS256 using key.
-func issueJWT(tgID int64, web bool, key []byte, ttl time.Duration, ver int) string {
+func issueJWT(tgID int64, web bool, key []byte, ttl time.Duration, ver, epoch int) string {
 	header := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	cl, _ := json.Marshal(jwtClaims{TgID: tgID, Web: web, Exp: time.Now().Add(ttl).Unix(), Ver: ver})
+	cl, _ := json.Marshal(jwtClaims{TgID: tgID, Web: web, Exp: time.Now().Add(ttl).Unix(), Ver: ver, Epoch: epoch})
 	payload := b64url(cl)
 	signing := header + "." + payload
 	sig := b64url(hmacSHA256(key, []byte(signing)))
@@ -116,31 +120,31 @@ func issueJWT(tgID int64, web bool, key []byte, ttl time.Duration, ver int) stri
 // parseJWT verifies the signature, expiry and session generation, returning the
 // Telegram id. Пропуск прежнего поколения отвергается — это и есть «разлогинить
 // всех».
-func parseJWT(token string, key []byte, ver int) (int64, bool, error) {
+func parseJWT(token string, key []byte, ver int) (int64, bool, int, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
 	signing := parts[0] + "." + parts[1]
 	want := b64url(hmacSHA256(key, []byte(signing)))
 	if !hmac.Equal([]byte(want), []byte(parts[2])) {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
 	var cl jwtClaims
 	if err := json.Unmarshal(raw, &cl); err != nil || cl.TgID == 0 {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
 	if time.Now().Unix() > cl.Exp {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
 	if cl.Ver != ver {
-		return 0, false, errAuth
+		return 0, false, 0, errAuth
 	}
-	return cl.TgID, cl.Web, nil
+	return cl.TgID, cl.Web, cl.Epoch, nil
 }
 
 // jwtKey derives the JWT signing key from the bot token, so no extra secret

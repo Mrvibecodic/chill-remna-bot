@@ -37,10 +37,10 @@ func (a *App) MiniMe(ctx context.Context, tgID int64) web.MiniMeDTO {
 			dto.BalanceK = u.Balance
 			dto.Name = displayName(u.FirstName, u.Username)
 		}
-		if tgID < 0 {
-			if wu, _ := a.store.GetWebUserByTgID(ctx, tgID); wu != nil {
-				dto.Email = wu.Email
-			}
+		// Знак идентификатора больше не признак «аккаунт по почте»: после
+		// привязки Telegram у аккаунта и положительный идентификатор, и почта.
+		if wu, _ := a.store.GetWebUserByTgID(ctx, tgID); wu != nil {
+			dto.Email = wu.Email
 		}
 	}
 	return dto

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/mailer"
 	"remnabot/internal/model"
 )
 
@@ -155,17 +156,18 @@ var errCabinetAuth = errors.New("неверный email или пароль")
 const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
 // CabinetEmailRegister creates an email+password account and returns its
-// synthetic identity. No email confirmation (by design).
+// synthetic identity. На адрес уходит письмо с подтверждением: до него
+// аккаунту закрыты платные действия (см. CabinetMoneyBlocked).
 func (a *App) CabinetEmailRegister(ctx context.Context, email, password string) (int64, error) {
 	if !a.CabinetEnabled() {
 		return 0, errCabinetOff
 	}
 	email = normEmail(email)
-	if !strings.Contains(email, "@") || len(email) < 5 {
+	// Проверка строже прежней «есть собака и пять символов»: адрес, на который
+	// нельзя отправить письмо, регистрировать незачем — человек застрянет на
+	// «подтвердите почту» навсегда.
+	if !mailer.ValidAddress(email) {
 		return 0, errors.New("неверный email")
-	}
-	if len(password) < 8 {
-		return 0, errors.New("пароль слишком короткий (мин. 8 символов)")
 	}
 	if a.store == nil {
 		return 0, errCabinetOff
@@ -182,6 +184,12 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password string) 
 		}
 		return u.TgID, nil
 	}
+	// Длина проверяется ПОСЛЕ ветки «такой адрес уже есть»: там это вход, а не
+	// заведение аккаунта, и упереться в требование к паролю на входе тот, у
+	// кого пароль уже есть, не должен.
+	if !longEnoughPassword(password) {
+		return 0, errShortPassword
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return 0, err
@@ -191,6 +199,20 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password string) 
 		return 0, errCabinetAuth
 	}
 	_ = a.store.UpsertUser(ctx, tgID)
+	// Письмо уходит в фоне и на своём контексте: разговор с почтовым сервером
+	// занимает секунды, а ждать их регистрация не должна — тем более что
+	// упавшая отправка не повод не заводить аккаунт. Не дошло — в кабинете есть
+	// «отправить ещё раз», и вот она отвечает уже честной ошибкой.
+	if a.MailReady() {
+		bg := a.bgContext()
+		a.mailWG.Add(1)
+		go func() {
+			defer a.mailWG.Done()
+			if err := a.sendVerifyMail(bg, tgID, email); err != nil {
+				a.log.Warn("кабинет: письмо с подтверждением не отправлено", "err", err)
+			}
+		}()
+	}
 	if err := a.CabinetGate(ctx, tgID, true); err != nil {
 		return 0, err
 	}

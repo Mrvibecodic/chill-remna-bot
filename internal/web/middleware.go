@@ -39,9 +39,15 @@ func rlBucket(r *http.Request) string {
 		// Вебхуки лимитировать нельзя категорически: на 429 провайдеры уходят
 		// в суточные повторы, а healthz дёргает оркестратор.
 		return ""
-	case strings.HasPrefix(p, "/api/cabinet/auth/"), p == "/api/miniapp/auth":
+	case strings.HasPrefix(p, "/api/cabinet/auth/"), p == "/api/miniapp/auth",
+		strings.HasPrefix(p, "/api/cabinet/password/"),
+		strings.HasPrefix(p, "/api/cabinet/email/"),
+		strings.HasPrefix(p, "/api/cabinet/tg/"):
 		// Вход и обмен подписи: подбор пароля и бесплатный расход процессора
-		// на проверке подписи.
+		// на проверке подписи. Здесь же ссылки из писем и смена пароля: перебор
+		// значения ссылки, подбор старого пароля и — отдельной статьёй — чужой
+		// почтовый сервер, с которого нас попросят, если превратить отправку в
+		// бесплатную рассылку.
 		return "auth"
 	case p == "/api/miniapp/promo",
 		p == "/api/miniapp/checkout",

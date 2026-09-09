@@ -318,9 +318,16 @@ func (a *App) hasListPlans(ctx context.Context) bool {
 	return false
 }
 
-// userAccessEmail — почта e-mail-аккаунта кабинета ("" — обычный Telegram).
-func (a *App) userAccessEmail(ctx context.Context, uid int64) string {
-	if uid >= 0 {
+// userEmail — почта аккаунта кабинета, подтверждённая или нет ("" — почты нет).
+//
+// Знак идентификатора здесь ничего не решает: после привязки Telegram аккаунт
+// положительный, а почта у него осталась.
+//
+// Этой почтой админка ПИШЕТ записи допуска и показывает их галочками: запретить
+// админу выдать допуск, пока человек не подтвердил адрес, значило бы сломать
+// ровно тот случай, ради которого допуск и выдают — «выдай доступ вот этому».
+func (a *App) userEmail(ctx context.Context, uid int64) string {
+	if uid == 0 {
 		return ""
 	}
 	a.mu.Lock()
@@ -331,6 +338,26 @@ func (a *App) userAccessEmail(ctx context.Context, uid int64) string {
 	}
 	wu, err := st.GetWebUserByTgID(ctx, uid)
 	if err != nil || wu == nil {
+		return ""
+	}
+	return model.NormalizeEmail(wu.Email)
+}
+
+// userAccessEmail — та же почта, но только ПОДТВЕРЖДЁННАЯ. По ней проверяется
+// допуск: список сопоставляется по адресу, и без подтверждения допуск забирал
+// бы себе любой, кто зарегистрировался на чужой адрес.
+func (a *App) userAccessEmail(ctx context.Context, uid int64) string {
+	if uid == 0 {
+		return ""
+	}
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return ""
+	}
+	wu, err := st.GetWebUserByTgID(ctx, uid)
+	if err != nil || wu == nil || wu.VerifiedAt == "" {
 		return ""
 	}
 	return model.NormalizeEmail(wu.Email)
@@ -352,7 +379,7 @@ func (a *App) showUserPlanAccess(ctx context.Context, chatID, uid int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	email := a.userAccessEmail(ctx, uid)
+	email := a.userEmail(ctx, uid)
 	id := strconv.FormatInt(uid, 10)
 	var rows [][]models.InlineKeyboardButton
 	for i := range plans {
@@ -398,7 +425,7 @@ func (a *App) toggleUserPlanAccess(ctx context.Context, chatID, uid int64, code 
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	email := a.userAccessEmail(ctx, uid)
+	email := a.userEmail(ctx, uid)
 	tg := uid
 	if uid < 0 {
 		if email == "" {

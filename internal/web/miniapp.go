@@ -90,6 +90,22 @@ type MiniProvider interface {
 	CabinetEmailRegister(ctx context.Context, email, password string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
 	CabinetGate(ctx context.Context, tgID int64, isEmail bool) error
+	// CabinetAccount — состояние аккаунта для экрана «Аккаунт».
+	CabinetAccount(ctx context.Context, tgID int64) CabinetAccountDTO
+	// CabinetMoneyBlocked — платные действия закрыты до подтверждения почты.
+	CabinetMoneyBlocked(ctx context.Context, tgID int64) bool
+	// MailReady — отправка писем настроена.
+	MailReady() bool
+	CabinetSendVerify(ctx context.Context, tgID int64) error
+	CabinetVerifyEmail(ctx context.Context, token string) error
+	CabinetChangePassword(ctx context.Context, tgID int64, oldPass, newPass string) error
+	CabinetForgotPassword(ctx context.Context, email string)
+	CabinetResetPassword(ctx context.Context, token, newPass string) (int64, error)
+	// CabinetBindTelegram привязывает Telegram к аккаунту, заведённому по
+	// почте, и возвращает его новый (телеграмный) идентификатор.
+	CabinetBindTelegram(ctx context.Context, tgID, newTgID int64) (int64, error)
+	// CabinetBindName сохраняет имя и @username из подписи виджета входа.
+	CabinetBindName(ctx context.Context, tgID int64, username, firstName string)
 	CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filename string, data []byte) error
 	// MiniBlocked reports whether the user is blocked by an admin.
 	MiniBlocked(ctx context.Context, tgID int64) bool
@@ -102,6 +118,10 @@ type MiniProvider interface {
 	// MiniLegalRequired reports whether the user must accept the service
 	// documents before doing anything but reading them.
 	MiniLegalRequired(ctx context.Context, tgID int64) bool
+	// SessionEpoch — поколение пропусков ОДНОГО аккаунта: растёт при смене
+	// пароля и при привязке Telegram, чтобы выбить чужие сессии, не трогая
+	// остальных.
+	SessionEpoch(ctx context.Context, tgID int64) int
 	// SessionVersion — поколение сессий. Пропуска прежнего поколения
 	// отвергаются: это единственный способ «разлогинить всех», потому что ключ
 	// подписи выведен из токена бота и сам по себе не меняется.
@@ -178,6 +198,26 @@ type MiniMeDTO struct {
 	BalanceK int64  `json:"balance_kopecks"`
 	Name     string `json:"name,omitempty"`
 	Email    string `json:"email,omitempty"`
+}
+
+// CabinetAccountDTO — экран «Аккаунт» веб-кабинета: чем человек входит, что
+// подтверждено и что из-за этого закрыто.
+type CabinetAccountDTO struct {
+	TgID int64  `json:"tg_id"`
+	Name string `json:"name,omitempty"`
+	// Email/HasPassword — есть ли вход по паролю (у аккаунтов, вошедших только
+	// через Telegram, его нет).
+	Email       string `json:"email,omitempty"`
+	HasPassword bool   `json:"has_password"`
+	// EmailVerified — адрес подтверждён по ссылке из письма.
+	EmailVerified bool `json:"email_verified"`
+	// TgLinked — Telegram привязан (или это изначально телеграм-аккаунт).
+	TgLinked bool `json:"tg_linked"`
+	// MailOn — отправка писем настроена. Без неё кабинет не предлагает ни
+	// подтверждение, ни восстановление пароля.
+	MailOn bool `json:"mail_on"`
+	// MoneyBlocked — платные действия закрыты до подтверждения адреса.
+	MoneyBlocked bool `json:"money_blocked"`
 }
 
 // MiniMenuDTO mirrors navRow predicates so the front-end shows exactly the
@@ -344,8 +384,14 @@ func (s *Server) miniAuth(r *http.Request) (id int64, web bool, ok bool) {
 	if !strings.HasPrefix(h, "Bearer ") {
 		return 0, false, false
 	}
-	id, web, err := parseJWT(strings.TrimPrefix(h, "Bearer "), jwtKey(s.mini.MiniBotToken()), s.mini.SessionVersion())
+	id, web, epoch, err := parseJWT(strings.TrimPrefix(h, "Bearer "), jwtKey(s.mini.MiniBotToken()), s.mini.SessionVersion())
 	if err != nil {
+		return 0, false, false
+	}
+	// Поколение пропусков аккаунта: смена пароля и привязка Telegram обязаны
+	// выбить прежние сессии немедленно. Общего поколения для этого мало — оно
+	// выбивает всех сразу, поэтому им и не пользуются.
+	if epoch != s.mini.SessionEpoch(r.Context(), id) {
 		return 0, false, false
 	}
 	return id, web, true
@@ -374,7 +420,7 @@ func (s *Server) handleMiniAuth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	tok := issueJWT(tgID, false, jwtKey(s.mini.MiniBotToken()), jwtTTL, s.mini.SessionVersion())
+	tok := issueJWT(tgID, false, jwtKey(s.mini.MiniBotToken()), jwtTTL, s.mini.SessionVersion(), s.mini.SessionEpoch(r.Context(), tgID))
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "expires_in": int(jwtTTL.Seconds())})
 }
 
@@ -385,6 +431,18 @@ func legalFreePaths(path string) bool {
 	switch path {
 	case "/api/miniapp/me", "/api/miniapp/menu", "/api/miniapp/legal/accept",
 		"/api/miniapp/subscription", "/api/miniapp/connect":
+		return true
+	}
+	return false
+}
+
+// moneyPath — ручки, за которыми стоят деньги или выдача дней. Ровно этот
+// список закрыт до подтверждения почты; чтение подписки, ссылок и документов
+// остаётся доступным, иначе человек не увидел бы даже того, за что уже платил.
+func moneyPath(path string) bool {
+	switch path {
+	case "/api/miniapp/checkout", "/api/miniapp/topup", "/api/miniapp/promo",
+		"/api/miniapp/trial", "/api/miniapp/autopay", "/api/cabinet/p2p/screenshot":
 		return true
 	}
 	return false
@@ -435,6 +493,17 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	// проходили мимо согласия целиком.
 	if !legalFreePaths(r.URL.Path) && s.mini.MiniLegalRequired(r.Context(), id) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "сначала примите документы сервиса"})
+		return 0, false, false
+	}
+	// Гейт подтверждения почты — тоже одной точкой и ровно на платных ручках.
+	// Аккаунт, чья личность подтверждена только введённым адресом, не должен
+	// ни покупать, ни пополнять, ни гасить промокод: по почте сопоставляются
+	// списки допущенных, и неподтверждённый адрес — это чужой адрес.
+	// Только на записи: у автопродления и промокода по этому же пути живёт
+	// чтение состояния, и закрывать его значило бы ломать экран, который как раз
+	// и объясняет человеку, почему оплата недоступна.
+	if r.Method == http.MethodPost && moneyPath(r.URL.Path) && s.mini.CabinetMoneyBlocked(r.Context(), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "подтвердите почту — на неё отправлено письмо"})
 		return 0, false, false
 	}
 	return id, web, true

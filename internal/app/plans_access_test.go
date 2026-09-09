@@ -85,11 +85,14 @@ func TestPlanAccessibleFor_Modes(t *testing.T) {
 	_ = fs.GrantPlanAccess(ctx, p.Code, 500, "")
 	check(model.PlanAvailList, 500, true)
 
-	// E-mail-аккаунт кабинета сопоставляется по почте.
+	// Аккаунт кабинета сопоставляется по почте — но только ПОДТВЕРЖДЁННОЙ:
+	// иначе допуск забирал бы себе всякий, кто зарегистрировался на чужой адрес.
 	web := int64(-777)
 	fs.webUsers = map[string]*model.WebUser{"web@example.com": {TgID: web, Email: "web@example.com"}}
 	check(model.PlanAvailList, web, false)
 	_ = fs.GrantPlanAccess(ctx, p.Code, 0, "web@example.com")
+	check(model.PlanAvailList, web, false)
+	_ = fs.SetWebUserVerified(ctx, web, "")
 	check(model.PlanAvailList, web, true)
 }
 
