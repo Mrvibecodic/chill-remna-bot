@@ -15,6 +15,7 @@ var dynamicPrefixes = []string{
 	"access.mode_",
 	"access.hint_",
 	"cabinet.appr_",
+	"mail.ask_",
 	"hl.admin_",
 	"plans.av_",
 	"plans.avd_",

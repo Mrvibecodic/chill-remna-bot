@@ -1659,6 +1659,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	case "cab_favicon":
 		ui.adminInput = ""
 		a.setCabinetField(ctx, chatID, "favicon", text)
+	case "mail_from", "mail_fromname", "mail_host", "mail_user", "mail_pass", "mail_apiurl", "mail_apikey":
+		field := strings.TrimPrefix(ui.adminInput, "mail_")
+		ui.adminInput = ""
+		a.setMailField(ctx, chatID, field, text)
 	case "device_per":
 		mo := ui.priceMonths
 		code := ui.planCode

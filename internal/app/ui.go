@@ -78,16 +78,21 @@ func userLabel(u *model.User) string {
 
 func (a *App) userLabelByID(ctx context.Context, id int64) string {
 	if a.store != nil {
-		// Web-cabinet email accounts have a synthetic negative id and no
-		// Telegram username/name — show their email so they are identifiable.
-		if id < 0 {
+		// Карточка читается ОДИН раз: подпись рисуется в списках пользователей
+		// построчно, и второе чтение на строку удваивало бы запросы к базе.
+		u, _ := a.store.GetUser(ctx, id)
+		// У аккаунта кабинета нет ни имени, ни @username — подписываем почтой.
+		// Проверяется не знак идентификатора, а наличие имени: после привязки
+		// Telegram аккаунт положительный, и подписывать его почтой вместо имени
+		// уже неправильно.
+		if u == nil || (u.Username == "" && u.FirstName == "") {
 			if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
 				// Эскейп обязателен: e-mail — свободный ввод при регистрации в
 				// кабинете и попадает в сообщения с ParseModeHTML.
 				return "📧 " + escapeName(wu.Email)
 			}
 		}
-		if u, _ := a.store.GetUser(ctx, id); u != nil {
+		if u != nil {
 			return userLabel(u)
 		}
 	}
@@ -397,6 +402,7 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
 		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
+		{btn(i18n.T(lang, "btn.mail"), "menu:mail")},
 		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
 	}
 	// Ключ/кука доступа к панели — только там, где панель вообще чем-то закрыта.
@@ -815,6 +821,31 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "cablogout":
 		if isAdmin {
 			a.logoutAllSessions(ctx, chatID)
+		}
+	case "mail":
+		if isAdmin {
+			a.showMailAdmin(ctx, chatID)
+		}
+	case "mailtoggle":
+		if isAdmin {
+			a.toggleMail(ctx, chatID)
+		}
+	case "mailmode":
+		if isAdmin {
+			a.cycleMailMode(ctx, chatID)
+		}
+	case "mailtls":
+		if isAdmin {
+			a.cycleMailTLS(ctx, chatID)
+		}
+	case "mailtest":
+		if isAdmin {
+			a.sendTestMail(ctx, chatID)
+		}
+	case "mailfrom", "mailfromname", "mailhost", "mailuser", "mailpass", "mailapiurl", "mailapikey":
+		if isAdmin {
+			a.getUI(chatID).adminInput = "mail_" + strings.TrimPrefix(val, "mail")
+			a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "mail.ask_"+strings.TrimPrefix(val, "mail")), "menu:mail")
 		}
 	case "reconf":
 		if isAdmin {

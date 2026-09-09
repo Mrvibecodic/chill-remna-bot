@@ -238,6 +238,19 @@ type App struct {
 	flags        map[string][]byte
 	flagsStarted bool
 
+	// epochMu/epochs — поколение пропусков по аккаунтам. Проверяется на каждом
+	// запросе к API кабинета и мини-аппа, поэтому держится в памяти: иначе
+	// каждая загрузка страницы добавляла бы полдюжины лишних чтений базы.
+	// Значение меняется только отсюда же (смена пароля, привязка Telegram), и
+	// запись в карту идёт сразу за записью в базу — расхождения быть не может.
+	epochMu sync.RWMutex
+	epochs  map[int64]int
+
+	// mailWG считает письма, отправляемые в фоне. Нужен остановке (успеть
+	// договорить с почтовым сервером) и тестам, которым иначе не за что
+	// зацепиться, чтобы дождаться фоновой отправки.
+	mailWG sync.WaitGroup
+
 	botUserMu sync.Mutex
 	botUser   string
 
@@ -335,6 +348,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeMiniApp()
 		cfg.NormalizeWallet()
 		cfg.NormalizeCabinet()
+		cfg.NormalizeMail()
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
@@ -597,6 +611,9 @@ func (a *App) Drain(d time.Duration) bool {
 	done := make(chan struct{})
 	go func() {
 		a.moneyWG.Wait()
+		// Письма — тоже незаконченный разговор с внешним сервером: оборвать
+		// его на середине значит оставить человека без ссылки и без ошибки.
+		a.mailWG.Wait()
 		close(done)
 	}()
 	ok := false

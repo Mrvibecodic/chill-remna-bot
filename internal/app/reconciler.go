@@ -53,6 +53,9 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		_ = st.PurgeTorrentReports(ctx, time.Now().UTC().Add(-torrentRetention).Format(time.RFC3339))
 		// Условия счетов, которые заведомо уже никто не оплатит.
 		_ = st.PurgeInvoiceSnapshots(ctx, time.Now().UTC().AddDate(0, 0, -invoiceSnapRetentionDays).Format(time.RFC3339))
+		// Ссылки из писем кабинета. Порог с большим запасом: свежие строки
+		// нужны счётчику отправленных писем, по нему считается порог отправки.
+		_ = st.PurgeEmailTokens(ctx, time.Now().UTC().Add(-emailTokenRetention).Format(time.RFC3339))
 	}
 	cutoff := time.Now().UTC().Add(-reconcileGrace).Format(time.RFC3339)
 	list, err := st.ListUnresolvedPending(ctx, cutoff, reconcileBatch)
