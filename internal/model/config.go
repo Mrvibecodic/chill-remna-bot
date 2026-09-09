@@ -178,6 +178,8 @@ type BotConfig struct {
 
 	Cabinet CabinetConfig `json:"cabinet"`
 
+	Mail MailConfig `json:"mail"`
+
 	Wallet WalletConfig `json:"wallet"`
 }
 
@@ -593,6 +595,11 @@ type User struct {
 	// бота нет, истина в панели; снимок нужен, чтобы знать, что именно
 	// продано, и уметь это восстановить.
 	Snapshot *PlanSnapshot
+
+	// SessEpoch — поколение пропусков этого аккаунта. Растёт при смене пароля
+	// и при привязке Telegram: выданные ранее пропуска живут семь суток, и без
+	// счётчика смена пароля не выбивала бы того, кто уже сидит в кабинете.
+	SessEpoch int
 }
 
 type P2PRequest struct {
@@ -955,6 +962,111 @@ func (c *BotConfig) NormalizeCabinet() {
 	}
 }
 
+// Режимы доставки писем.
+const (
+	MailModeSMTP = "smtp"
+	MailModeAPI  = "api"
+)
+
+// Как шифруется соединение с почтовым сервером.
+const (
+	MailTLSStartTLS = "starttls" // 587: открытое соединение, апгрейд командой
+	MailTLSImplicit = "tls"      // 465: TLS с первого байта
+	MailTLSNone     = "none"     // только для сервера в той же приватной сети
+)
+
+// DefaultMailAPIURL — приёмник по умолчанию для режима «внешний API».
+// Совместимые шлюзы отличаются только адресом, поэтому он настраивается.
+const DefaultMailAPIURL = "https://api.resend.com/emails"
+
+// MailConfig — доставка писем кабинета: подтверждение адреса и сброс пароля.
+//
+// Два режима намеренно: SMTP закрывает и собственный сервер, и любой
+// коммерческий релей (у всех он есть), а «внешний API» нужен там, где
+// исходящий 25/465/587 закрыт хостером наглухо и остаётся только HTTPS.
+//
+// Выключенная почта — рабочее состояние: кабинет тогда живёт как раньше, без
+// подтверждения и без восстановления пароля.
+type MailConfig struct {
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode"`
+	// From — адрес отправителя, FromName — подпись перед ним. Имя лучше не
+	// оставлять пустым: без него письмо приходит от голого адреса и чаще
+	// попадает в спам.
+	From     string `json:"from"`
+	FromName string `json:"from_name"`
+
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	TLS      string `json:"tls"`
+
+	APIKey string `json:"api_key"`
+	APIURL string `json:"api_url"`
+}
+
+// MailReady — настроек хватает, чтобы попытаться отправить письмо.
+func (m MailConfig) MailReady() bool {
+	if !m.Enabled || m.From == "" {
+		return false
+	}
+	if m.Mode == MailModeAPI {
+		return m.APIKey != ""
+	}
+	return m.Host != ""
+}
+
+// NormalizeMail приводит режим, порт и шифрование к допустимым значениям.
+//
+// Порт выводится из способа шифрования, а не наоборот: админ выбирает «465 или
+// 587» кнопкой, и вводить второе число тем же руками — лишний шанс ошибиться.
+func (c *BotConfig) NormalizeMail() {
+	m := &c.Mail
+	m.From = strings.TrimSpace(m.From)
+	m.FromName = strings.TrimSpace(m.FromName)
+	m.Host = strings.TrimSpace(m.Host)
+	m.APIURL = strings.TrimSpace(m.APIURL)
+	switch m.Mode {
+	case MailModeAPI:
+	default:
+		m.Mode = MailModeSMTP
+	}
+	switch m.TLS {
+	case MailTLSImplicit, MailTLSNone:
+	default:
+		m.TLS = MailTLSStartTLS
+	}
+	if m.Port <= 0 || m.Port > 65535 {
+		if m.TLS == MailTLSImplicit {
+			m.Port = 465
+		} else {
+			m.Port = 587
+		}
+	}
+}
+
+// Назначения одноразовых ссылок из писем.
+const (
+	EmailPurposeVerify = "verify" // подтверждение адреса
+	EmailPurposeReset  = "reset"  // сброс забытого пароля
+)
+
+// EmailToken — одноразовая ссылка из письма.
+//
+// В базе лежит только Hash (SHA-256 от самого значения): значение уходит
+// человеку в письме и больше нигде не хранится, поэтому утечка базы не даёт
+// войти в чужой кабинет и не даёт сменить чужой пароль.
+type EmailToken struct {
+	Hash      string
+	TgID      int64
+	Purpose   string
+	Email     string
+	CreatedAt string
+	ExpiresAt string
+	UsedAt    string
+}
+
 // WebUser is an email+password account for the web cabinet. TgID is a synthetic
 // negative identity that maps the account into the bot's telegram-id-keyed
 // system (so it can buy/manage like any user); it never collides with a real
@@ -964,4 +1076,8 @@ type WebUser struct {
 	Email     string
 	PassHash  string
 	CreatedAt string
+	// VerifiedAt — когда подтверждён адрес. Пустая строка = не подтверждён:
+	// такому аккаунту закрыты покупка, пополнение, промокод и доступ к
+	// тарифам «по списку», потому что все они завязаны на почту.
+	VerifiedAt string
 }

@@ -100,6 +100,17 @@ type Storage interface {
 	GetWebUserByTgID(ctx context.Context, tgID int64) (*model.WebUser, error)
 	SetWebApproved(ctx context.Context, tgID int64, approved bool) error
 	SetWebDenied(ctx context.Context, tgID int64, denied bool) error
+	SetWebUserVerified(ctx context.Context, tgID int64, at string) error
+	SetWebUserPassword(ctx context.Context, tgID int64, hash string) error
+	UserSessEpoch(ctx context.Context, tgID int64) (int, error)
+	BumpSessEpoch(ctx context.Context, tgID int64) (int, error)
+	PutEmailToken(ctx context.Context, t *model.EmailToken) error
+	TakeEmailToken(ctx context.Context, hash, purpose string) (*model.EmailToken, error)
+	RevokeEmailTokens(ctx context.Context, tgID int64, purpose string) error
+	CountEmailTokensSince(ctx context.Context, tgID int64, purpose, since string) (int, error)
+	PurgeEmailTokens(ctx context.Context, before string) error
+	AccountFootprint(ctx context.Context, tgID int64) (AccountFootprint, error)
+	MoveAccount(ctx context.Context, from, to int64) error
 	GetPromo(ctx context.Context, code string) (*model.PromoCode, error)
 	ListPromos(ctx context.Context) ([]model.PromoCode, error)
 	DeletePromo(ctx context.Context, code string) error
@@ -354,17 +365,17 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	var refEarned int64
 	var webApproved, webDenied int
 	var snapRaw, bonusRaw string
-	var trialResets int
+	var trialResets, sessEpoch int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets, &bonusRaw)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets, &bonusRaw, &sessEpoch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets, TrafficBonus: model.DecodeTrafficBonus(bonusRaw)}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets, TrafficBonus: model.DecodeTrafficBonus(bonusRaw), SessEpoch: sessEpoch}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -500,7 +511,9 @@ func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 	// запись по почте.
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE telegram_id != 0 AND telegram_id = "+b.ph(1), telegramID)
-	if telegramID < 0 {
+	{
+		// Знак идентификатора больше не признак «аккаунт по почте»: после
+		// привязки Telegram он положительный, а запись по адресу осталась.
 		if wu, _ := b.GetWebUserByTgID(ctx, telegramID); wu != nil && wu.Email != "" {
 			// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 			_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE email != '' AND email = "+b.ph(1), model.NormalizeEmail(wu.Email))
@@ -1287,6 +1300,11 @@ type Snapshot struct {
 	// нет, и без переноса оплата пришла бы на текущие условия, а не на
 	// проданные.
 	InvoiceSnaps []InvoiceSnap
+	// WebUsers — аккаунты кабинета, заведённые по почте. В снимок не входили:
+	// смена движка базы стирала им и почту, и пароль, а сами строки users
+	// оставались — человек видел свою подписку только до конца выданного
+	// пропуска и войти заново уже не мог.
+	WebUsers []model.WebUser
 }
 
 type PromoUse struct {
@@ -1318,7 +1336,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 
 	urows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus FROM users")
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -1329,7 +1347,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		var webApproved, webDenied int
 		var terms, trial sql.NullString
 		var snapRaw, bonusRaw string
-		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets, &bonusRaw); err != nil {
+		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets, &bonusRaw, &u.SessEpoch); err != nil {
 			_ = urows.Close()
 			return nil, err
 		}
@@ -1474,6 +1492,25 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 		return nil, err
 	}
 	_ = snapRows.Close()
+
+	wrows, err := b.db.QueryContext(ctx, "SELECT tg_id, email, pass_hash, created_at, email_verified_at FROM web_users")
+	if err != nil {
+		return nil, err
+	}
+	for wrows.Next() {
+		var wu model.WebUser
+		if err := wrows.Scan(&wu.TgID, &wu.Email, &wu.PassHash, &wu.CreatedAt, &wu.VerifiedAt); err != nil {
+			_ = wrows.Close()
+			return nil, err
+		}
+		snap.WebUsers = append(snap.WebUsers, wu)
+	}
+	if err := wrows.Err(); err != nil {
+		_ = wrows.Close()
+		return nil, err
+	}
+	_ = wrows.Close()
+
 	urows2, err := b.db.QueryContext(ctx, "SELECT code, telegram_id, created_at FROM promo_redemptions")
 	if err != nil {
 		return nil, err
@@ -1633,6 +1670,17 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 			return err
 		}
 	}
+	for i := range s.WebUsers {
+		wu := &s.WebUsers[i]
+		if _, err := b.db.ExecContext(ctx,
+			"INSERT INTO web_users (tg_id, email, pass_hash, created_at, email_verified_at) "+
+				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+") "+
+				"ON CONFLICT (tg_id) DO UPDATE SET email = excluded.email, pass_hash = excluded.pass_hash, "+
+				"created_at = excluded.created_at, email_verified_at = excluded.email_verified_at",
+			wu.TgID, wu.Email, wu.PassHash, wu.CreatedAt, wu.VerifiedAt); err != nil && !isUniqueViolation(err) {
+			return err
+		}
+	}
 	for i := range s.PromoUses {
 		if _, err := b.db.ExecContext(ctx,
 			"INSERT INTO promo_redemptions (code, telegram_id, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+")",
@@ -1665,15 +1713,15 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 
 func (b *base) importUser(ctx context.Context, u *model.User) error {
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, trial_resets) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+") "+
+		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, trial_resets, sess_epoch) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+", "+b.ph(18)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET "+
 			"p2p_approved = excluded.p2p_approved, blocked = excluded.blocked, "+
 			"created_at = excluded.created_at, username = excluded.username, first_name = excluded.first_name, "+
 			"sub_expire_at = excluded.sub_expire_at, notify_kind = excluded.notify_kind, notify_sent = excluded.notify_sent, "+
-			"balance = excluded.balance, referred_by = excluded.referred_by, ref_bonus_paid = excluded.ref_bonus_paid, whitelisted = excluded.whitelisted, ref_earned = excluded.ref_earned, web_approved = excluded.web_approved, web_denied = excluded.web_denied, trial_resets = excluded.trial_resets",
+			"balance = excluded.balance, referred_by = excluded.referred_by, ref_bonus_paid = excluded.ref_bonus_paid, whitelisted = excluded.whitelisted, ref_earned = excluded.ref_earned, web_approved = excluded.web_approved, web_denied = excluded.web_denied, trial_resets = excluded.trial_resets, sess_epoch = excluded.sess_epoch",
 		u.TelegramID, boolToInt(u.P2PApproved), boolToInt(u.Blocked), u.CreatedAt, u.Username, u.FirstName,
-		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid), boolToInt(u.Whitelisted), u.RefEarned, boolToInt(u.WebApproved), boolToInt(u.WebDenied), u.TrialResets)
+		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid), boolToInt(u.Whitelisted), u.RefEarned, boolToInt(u.WebApproved), boolToInt(u.WebDenied), u.TrialResets, u.SessEpoch)
 	if err != nil {
 		return err
 	}
@@ -2136,16 +2184,16 @@ func (b *base) CreateWebUser(ctx context.Context, u *model.WebUser) error {
 	}
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO web_users (tg_id, email, pass_hash, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+")",
-		u.TgID, u.Email, u.PassHash, u.CreatedAt)
+		"INSERT INTO web_users (tg_id, email, pass_hash, created_at, email_verified_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+")",
+		u.TgID, u.Email, u.PassHash, u.CreatedAt, u.VerifiedAt)
 	return err
 }
 
 func (b *base) GetWebUserByTgID(ctx context.Context, tgID int64) (*model.WebUser, error) {
 	u := &model.WebUser{}
 	err := b.db.QueryRowContext(ctx,
-		"SELECT tg_id, email, pass_hash, created_at FROM web_users WHERE tg_id = "+b.ph(1), tgID).
-		Scan(&u.TgID, &u.Email, &u.PassHash, &u.CreatedAt)
+		"SELECT tg_id, email, pass_hash, created_at, email_verified_at FROM web_users WHERE tg_id = "+b.ph(1), tgID).
+		Scan(&u.TgID, &u.Email, &u.PassHash, &u.CreatedAt, &u.VerifiedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -2169,8 +2217,8 @@ func (b *base) SetWebDenied(ctx context.Context, tgID int64, denied bool) error 
 func (b *base) GetWebUserByEmail(ctx context.Context, email string) (*model.WebUser, error) {
 	u := &model.WebUser{}
 	err := b.db.QueryRowContext(ctx,
-		"SELECT tg_id, email, pass_hash, created_at FROM web_users WHERE email = "+b.ph(1), email).
-		Scan(&u.TgID, &u.Email, &u.PassHash, &u.CreatedAt)
+		"SELECT tg_id, email, pass_hash, created_at, email_verified_at FROM web_users WHERE email = "+b.ph(1), email).
+		Scan(&u.TgID, &u.Email, &u.PassHash, &u.CreatedAt, &u.VerifiedAt)
 	if err != nil {
 		return nil, err
 	}

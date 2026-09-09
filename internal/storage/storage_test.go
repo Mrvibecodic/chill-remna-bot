@@ -207,7 +207,7 @@ func cleanPGData(t *testing.T, dsn string) {
 	// Особенно settings: конфиг лежит там зашифрованным, и строка, оставшаяся
 	// от прогона с другим ключом, роняет Export с «message authentication
 	// failed» в тесте, который конфига вообще не касается.
-	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans", "plan_access", "purchase_intents", "invoice_snapshots", "web_users", "whitelist", "settings", "screen_state", "promo_redemptions", "promo_codes", "media_cache"} {
+	for _, tbl := range []string{"payments", "p2p_requests", "autopay", "invites", "users", "payment_log", "pending_invoices", "torrent_reports", "torrent_strikes", "plans", "plan_access", "purchase_intents", "invoice_snapshots", "web_users", "email_tokens", "whitelist", "settings", "screen_state", "promo_redemptions", "promo_codes", "media_cache"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("очистка %s: %v", tbl, err)
 		}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -312,6 +313,7 @@ type fakeStore struct {
 	trialResets map[int64]int
 	promoUses   map[string]bool
 	webUsers    map[string]*model.WebUser
+	mailTokens  map[string]*model.EmailToken
 	paylogs     []model.PayLogEntry
 	torrents    []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
@@ -1204,6 +1206,156 @@ func (s *fakeStore) GetWebUserByTgID(_ context.Context, tgID int64) (*model.WebU
 	}
 	return nil, nil
 }
+func (s *fakeStore) SetWebUserVerified(_ context.Context, tgID int64, at string) error {
+	if at == "" {
+		at = "2026-01-01T00:00:00Z"
+	}
+	for _, u := range s.webUsers {
+		if u.TgID == tgID {
+			u.VerifiedAt = at
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SetWebUserPassword(_ context.Context, tgID int64, hash string) error {
+	for _, u := range s.webUsers {
+		if u.TgID == tgID {
+			u.PassHash = hash
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
+func (s *fakeStore) UserSessEpoch(_ context.Context, tgID int64) (int, error) {
+	if s.users != nil && s.users[tgID] != nil {
+		return s.users[tgID].SessEpoch, nil
+	}
+	return 0, nil
+}
+
+func (s *fakeStore) BumpSessEpoch(_ context.Context, tgID int64) (int, error) {
+	if s.users != nil && s.users[tgID] != nil {
+		s.users[tgID].SessEpoch++
+		return s.users[tgID].SessEpoch, nil
+	}
+	return 0, nil
+}
+
+func (s *fakeStore) PutEmailToken(_ context.Context, t *model.EmailToken) error {
+	if s.mailTokens == nil {
+		s.mailTokens = map[string]*model.EmailToken{}
+	}
+	cp := *t
+	s.mailTokens[t.Hash] = &cp
+	return nil
+}
+
+func (s *fakeStore) TakeEmailToken(_ context.Context, hash, purpose string) (*model.EmailToken, error) {
+	t := s.mailTokens[hash]
+	if t == nil || t.Purpose != purpose || t.UsedAt != "" {
+		return nil, nil
+	}
+	if t.ExpiresAt != "" && t.ExpiresAt < time.Now().UTC().Format(time.RFC3339) {
+		return nil, nil
+	}
+	t.UsedAt = time.Now().UTC().Format(time.RFC3339)
+	cp := *t
+	return &cp, nil
+}
+
+func (s *fakeStore) RevokeEmailTokens(_ context.Context, tgID int64, purpose string) error {
+	for _, t := range s.mailTokens {
+		if t.TgID == tgID && t.Purpose == purpose && t.UsedAt == "" {
+			t.UsedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) CountEmailTokensSince(_ context.Context, tgID int64, purpose, since string) (int, error) {
+	n := 0
+	for _, t := range s.mailTokens {
+		if t.TgID == tgID && t.Purpose == purpose && t.CreatedAt > since {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) PurgeEmailTokens(_ context.Context, before string) error {
+	for h, t := range s.mailTokens {
+		if t.ExpiresAt < before {
+			delete(s.mailTokens, h)
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) AccountFootprint(_ context.Context, tgID int64) (storage.AccountFootprint, error) {
+	var fp storage.AccountFootprint
+	if u := s.users[tgID]; u != nil {
+		fp.HasRow = true
+		fp.Active = u.Balance != 0 || u.SubExpireAt != "" || u.TrialUsedAt != "" || u.TermsAcceptedAt != "" ||
+			u.ReferredBy != 0 || u.RefEarned != 0 || u.Whitelisted || u.WebApproved || u.WebDenied || u.P2PApproved
+	}
+	if fp.Active {
+		return fp, nil
+	}
+	for _, p := range s.pays {
+		if p.TelegramID == tgID {
+			fp.Active = true
+			return fp, nil
+		}
+	}
+	for _, r := range s.reqs {
+		if r.TelegramID == tgID {
+			fp.Active = true
+			return fp, nil
+		}
+	}
+	if s.autopays[tgID] != nil {
+		fp.Active = true
+	}
+	for _, u := range s.webUsers {
+		if u.TgID == tgID {
+			fp.Active = true
+		}
+	}
+	return fp, nil
+}
+
+func (s *fakeStore) MoveAccount(_ context.Context, from, to int64) error {
+	if u := s.users[from]; u != nil {
+		delete(s.users, from)
+		u.TelegramID = to
+		s.users[to] = u
+	}
+	for _, u := range s.webUsers {
+		if u.TgID == from {
+			u.TgID = to
+		}
+	}
+	for _, p := range s.pays {
+		if p.TelegramID == from {
+			p.TelegramID = to
+		}
+	}
+	for _, r := range s.reqs {
+		if r.TelegramID == from {
+			r.TelegramID = to
+		}
+	}
+	if ap := s.autopays[from]; ap != nil {
+		delete(s.autopays, from)
+		ap.TelegramID = to
+		s.autopays[to] = ap
+	}
+	return nil
+}
+
 func (s *fakeStore) SetWebApproved(_ context.Context, tgID int64, approved bool) error {
 	if s.users != nil && s.users[tgID] != nil {
 		s.users[tgID].WebApproved = approved
