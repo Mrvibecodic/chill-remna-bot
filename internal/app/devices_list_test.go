@@ -205,3 +205,21 @@ func TestNormalizeDevices(t *testing.T) {
 		t.Fatal("нормализация переписала выбор владельца")
 	}
 }
+
+// Установки, успевшие обновиться на сборку без поля «приложение», прошли
+// нормализацию с уже выставленным Init: приложение им включается разово.
+func TestNormalizeDevices_TurnsOnAppOnce(t *testing.T) {
+	c := model.BotConfig{Devices: model.DevicesConfig{
+		List: true, Platform: true, Model: true, Dates: true, Init: true,
+	}}
+	c.NormalizeDevices()
+	if !c.Devices.UA || !c.Devices.UAInit {
+		t.Fatalf("приложение не включилось: %+v", c.Devices)
+	}
+	// Владелец выключил его сам — второй раз не включаем.
+	c.Devices.UA = false
+	c.NormalizeDevices()
+	if c.Devices.UA {
+		t.Fatal("нормализация включила приложение поверх выбора владельца")
+	}
+}

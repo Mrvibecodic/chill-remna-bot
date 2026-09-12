@@ -924,6 +924,11 @@ type DevicesConfig struct {
 	HWID  bool `json:"hwid"`
 	Dates bool `json:"dates"`
 	Init  bool `json:"init"`
+	// UAInit — отметка, что поле «приложение» уже разбиралось. Оно появилось
+	// позже остальных, и у тех, кто успел обновиться на версию без него,
+	// общий Init уже выставлен: без отдельной отметки приложение осталось бы
+	// выключенным навсегда, хотя владелец его не выключал.
+	UAInit bool `json:"ua_init"`
 }
 
 // AnyField — есть ли хоть одно поле к показу. Список из строк «Устройство»
@@ -949,6 +954,13 @@ func (c *BotConfig) NormalizeDevices() {
 		c.Devices.Dates = true
 		c.Devices.HWID = false
 		c.Devices.Init = true
+		c.Devices.UAInit = true
+		return
+	}
+	// Разовое включение приложения тем, кто настроен ещё без этого поля.
+	if !c.Devices.UAInit {
+		c.Devices.UA = true
+		c.Devices.UAInit = true
 	}
 }
 
