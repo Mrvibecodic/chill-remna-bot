@@ -170,3 +170,45 @@ func TestTrustedProxiesFromEnv(t *testing.T) {
 	}
 	resetTrustedProxies()
 }
+
+// Перевод на HTTPS не должен уводить на чужой хост: адрес назначения берётся
+// из настроенного домена, а подставленный клиентом Host проверяется.
+func TestWrap_HTTPSRedirectHost(t *testing.T) {
+	get := func(s *Server, host, target string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.Host = host
+		r.RemoteAddr = "198.51.100.9:1234"
+		w := httptest.NewRecorder()
+		s.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
+		return w
+	}
+
+	s := newServer(nil, nil)
+	// Обычный случай: человек пришёл по открытому HTTP на свой же адрес.
+	w := get(s, "vpn.example.com", "/cabinet/?a=1")
+	if w.Code != http.StatusPermanentRedirect || w.Header().Get("Location") != "https://vpn.example.com/cabinet/?a=1" {
+		t.Fatalf("код %d, Location %q", w.Code, w.Header().Get("Location"))
+	}
+	// Подделанный Host: увести на чужой сайт нельзя — вместо перевода отказ.
+	for _, bad := range []string{"evil.com/path", "evil.com\\@x", "user@evil.com", "evil com"} {
+		w := get(s, bad, "/cabinet/")
+		if w.Code != http.StatusUpgradeRequired {
+			t.Fatalf("Host %q: код %d, ожидался 426 без перевода (Location %q)", bad, w.Code, w.Header().Get("Location"))
+		}
+	}
+	// Домен настроен — он и стоит в адресе, что бы ни прислал клиент.
+	sd := newServer(nil, nil)
+	sd.domain = "vpn.example.com"
+	if got := get(sd, "evil.com", "/cabinet/").Header().Get("Location"); got != "https://vpn.example.com/cabinet/" {
+		t.Fatalf("Location %q — должен быть настроенный домен", got)
+	}
+	// Абсолютная форма запроса не должна протаскивать чужой адрес в Location.
+	r := httptest.NewRequest(http.MethodGet, "http://evil.com/x", nil)
+	r.Host = "vpn.example.com"
+	r.RemoteAddr = "198.51.100.9:1234"
+	w = httptest.NewRecorder()
+	s.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
+	if got := w.Header().Get("Location"); got != "https://vpn.example.com/x" {
+		t.Fatalf("Location %q", got)
+	}
+}

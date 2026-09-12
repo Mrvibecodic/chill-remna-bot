@@ -126,6 +126,15 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.DevicesUsed = info.Used
 		dto.DeviceLimit = info.Limit
 		dto.HasLimit = info.HasLimit
+		// Тот же набор полей, что и в чате: экран один и тот же, решение о
+		// показе — одно и то же, принято владельцем бота в админке.
+		if cfg := a.devicesConfig(); cfg.Show() {
+			lang := a.lang(tgID)
+			for _, d := range info.List {
+				name, meta := deviceParts(lang, d, cfg)
+				dto.Devices = append(dto.Devices, web.MiniDeviceDTO{Name: name, Meta: meta})
+			}
+		}
 	}
 	// Same add-on state the chat screen shows, so the mini-app and the cabinet
 	// don't hide a доп-сервер that ran out of traffic.

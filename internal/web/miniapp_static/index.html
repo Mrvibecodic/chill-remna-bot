@@ -165,6 +165,7 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .frow:only-child{border-radius:14px}
 .frow .l{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
 .frow b{font-size:14.5px;font-variant-numeric:tabular-nums}
+.frow b.dmeta{font-size:12px;color:var(--muted);font-weight:600;text-align:right;max-width:58%;line-height:1.35}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
 .chip2{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(10px)}
 .flag{width:21px;height:15px;border-radius:3px;object-fit:cover;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
@@ -405,6 +406,17 @@ function devicesText(s){
   if(!s.devices_ok)return null;
   return s.has_limit? (s.devices_used+' / '+s.device_limit) : (''+s.devices_used);
 }
+// Список подключённых устройств. Обе строки собрал сервер по набору полей из
+// админки: тумблеры здесь не разбираются, пустой список = владелец скрыл обзор.
+function devicesBlock(s){
+  var list=(s&&s.devices)||[];
+  if(!list.length)return '';
+  var h='<div class="sec-title">'+IC.device+'Подключённые устройства</div><div class="feat">';
+  list.forEach(function(d){
+    h+='<div class="frow"><span class="l">'+esc(d.name||'')+'</span>'+(d.meta?'<b class="dmeta">'+esc(d.meta)+'</b>':'')+'</div>';
+  });
+  return h+'</div>';
+}
 function gbText(b){
   var gb=(Number(b)||0)/1073741824;
   var s=gb.toFixed(1);
@@ -457,6 +469,7 @@ function render(me,menu,sub,plans){
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
       '<button class="btn sec" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button></div>';}
+    h+=devicesBlock(sub);
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
     if(menu.can_renew&&STATE.plans.length)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';

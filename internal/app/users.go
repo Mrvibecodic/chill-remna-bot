@@ -1021,12 +1021,18 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 			i18n.T(lang, key, formatExpire(expireAt, lang)), rows)
 		return
 	}
+	// Сам список устройств живёт на отдельном экране: здесь подпись под
+	// баннером, а в неё длинный список не влезает.
+	devLine, devList := a.devicesLine(ctx, chatID, panel)
+	if devList {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_list"), "dev:list")})
+	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
 	if row := a.autoPayRow(ctx, chatID, lang); row != nil {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 
@@ -1074,19 +1080,28 @@ func formatGB(b int64) string {
 // (unlimited / limit disabled) it shows ONLY the connected count. Returns ""
 // when the panel is unavailable or HWID data cannot be fetched, so the screen
 // degrades gracefully. View-only: it never registers or removes devices.
-func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client) string {
+//
+// Второе значение — есть ли что показать на экране «Устройства»: по нему
+// экран подписки решает, рисовать ли кнопку. Считается из того же ответа
+// панели, что и счётчик, — второй запрос ради кнопки не нужен.
+func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client) (line string, hasList bool) {
 	if panel == nil {
-		return ""
+		return "", false
 	}
 	info, ok := panel.DevicesByTelegramID(ctx, chatID)
 	if !ok {
-		return ""
+		return "", false
 	}
+	lang := a.lang(chatID)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
 		val += " / " + strconv.Itoa(info.Limit)
 	}
-	return "\n\n" + i18n.T(a.lang(chatID), "sub.devices", val)
+	line = "\n\n" + i18n.T(lang, "sub.devices", val)
+	if !a.devicesConfig().Show() || len(info.List) == 0 {
+		return line, false
+	}
+	return line + "\n" + i18n.T(lang, "sub.devices_hint"), true
 }
 
 // subDeadKey — подписка не работает: какой текст показать. Пустая строка —

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1585,6 +1586,56 @@ type DeviceInfo struct {
 	Used     int
 	Limit    int
 	HasLimit bool
+	// List — сами устройства, как их вернула панель. Пусто, если панель отдала
+	// только счётчик: список — не обязательная часть ответа, и экран обязан
+	// пережить его отсутствие.
+	List []Device
+}
+
+// Device — одно устройство из HWID-регистраций пользователя. Поля, кроме
+// самого отпечатка, у панели nullable: клиенты присылают заголовки как умеют,
+// и половина полей приходит пустой. Время панель отдаёт в RFC3339; нулевое
+// значение означает «панель не сказала», а не «сегодня».
+type Device struct {
+	HWID      string
+	Platform  string
+	OSVersion string
+	Model     string
+	// UserAgent — подпись клиентского приложения. Часто единственное, что
+	// вообще приходит: модель присылают не все клиенты, а UA — почти всегда.
+	UserAgent string
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+// panelDevice — тот же объект в терминах панели (контракт HwidUserDeviceSchema
+// не менялся от 2.7.3 до 3.4.x).
+type panelDevice struct {
+	HWID        string  `json:"hwid"`
+	Platform    *string `json:"platform"`
+	OSVersion   *string `json:"osVersion"`
+	DeviceModel *string `json:"deviceModel"`
+	UserAgent   *string `json:"userAgent"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+}
+
+func nullStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+func devTime(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // DevicesByTelegramID returns the connected/allowed device counts for a user.
@@ -1607,8 +1658,8 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	}
 	var env struct {
 		Response struct {
-			Total   int               `json:"total"`
-			Devices []json.RawMessage `json:"devices"`
+			Total   int           `json:"total"`
+			Devices []panelDevice `json:"devices"`
 		} `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
@@ -1618,6 +1669,27 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	if info.Used == 0 && len(env.Response.Devices) > 0 {
 		info.Used = len(env.Response.Devices)
 	}
+	for _, d := range env.Response.Devices {
+		if strings.TrimSpace(d.HWID) == "" {
+			// Без отпечатка устройство неотличимо от соседнего и показывать
+			// его нечем: в счётчике оно уже учтено панелью.
+			continue
+		}
+		info.List = append(info.List, Device{
+			HWID:      strings.TrimSpace(d.HWID),
+			Platform:  nullStr(d.Platform),
+			OSVersion: nullStr(d.OSVersion),
+			Model:     nullStr(d.DeviceModel),
+			UserAgent: nullStr(d.UserAgent),
+			FirstSeen: devTime(d.CreatedAt),
+			LastSeen:  devTime(d.UpdatedAt),
+		})
+	}
+	// Сверху — то, что подключалось последним: на экране с ограничением по
+	// длине обрезается хвост, и обрезать надо самое старое.
+	sort.SliceStable(info.List, func(i, j int) bool {
+		return info.List[i].LastSeen.After(info.List[j].LastSeen)
+	})
 	return info, true
 }
 
