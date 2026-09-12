@@ -78,8 +78,11 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 
 		if !secure && !noHTTPSPaths(path) && !s.allowPlainHTTP {
 			if r.Method == http.MethodGet && !strings.HasPrefix(path, "/api/") {
-				http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
-				return
+				if to := s.httpsTarget(r); to != "" {
+					// #nosec G710 -- адрес собран httpsTarget: хост из настройки домена либо из Host, пропущенного через safeHost, путь и запрос — из разобранного URL
+					http.Redirect(w, r, to, http.StatusPermanentRedirect)
+					return
+				}
 			}
 			writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "требуется HTTPS"})
 			return
@@ -94,6 +97,75 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// httpsTarget собирает адрес, на который переводим с открытого HTTP. Пустая
+// строка — переводить некуда, вызывающий отвечает 426.
+//
+// Хост берётся из настроенного домена, и только если его нет — из заголовка
+// Host, да и то после проверки, что это действительно имя хоста. Заголовок
+// присылает клиент: подставленный в Location как есть, он превращает нашу
+// ссылку в переход на чужой сайт нашими руками. Путь и запрос берутся
+// разобранными, а не строкой запроса целиком: в абсолютной форме запроса
+// («GET http://…») там лежит чужой адрес вместе со схемой.
+func (s *Server) httpsTarget(r *http.Request) string {
+	host := strings.TrimSpace(s.domain)
+	if host == "" {
+		host = safeHost(r.Host)
+	}
+	if host == "" {
+		return ""
+	}
+	path := r.URL.EscapedPath()
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	out := "https://" + host + path
+	if r.URL.RawQuery != "" {
+		out += "?" + r.URL.RawQuery
+	}
+	return out
+}
+
+// safeHost пропускает только имя хоста с необязательным портом: буквы, цифры,
+// точки и дефисы (или адрес IPv6 в квадратных скобках). Всё остальное —
+// косые, собака, пробелы, переводы строк — пустая строка.
+func safeHost(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" || len(h) > 253 {
+		return ""
+	}
+	name, port := h, ""
+	if strings.HasPrefix(h, "[") {
+		end := strings.LastIndex(h, "]")
+		if end < 0 {
+			return ""
+		}
+		name, port = h[1:end], strings.TrimPrefix(h[end+1:], ":")
+		for _, c := range name {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == ':' || c == '.') {
+				return ""
+			}
+		}
+	} else {
+		if i := strings.LastIndex(h, ":"); i >= 0 {
+			name, port = h[:i], h[i+1:]
+		}
+		if name == "" {
+			return ""
+		}
+		for _, c := range name {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '.' || c == '-') {
+				return ""
+			}
+		}
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return h
 }
 
 // limiterFor выдаёт лимитер по имени корзины.
