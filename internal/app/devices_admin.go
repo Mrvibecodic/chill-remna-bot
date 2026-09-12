@@ -33,8 +33,9 @@ func (a *App) showDevicesAdmin(ctx context.Context, chatID int64) {
 		{btn(toggle, "devadm:list")},
 		{btn(fieldMark(lang, "devadm.f_platform", cfg.Platform), "devadm:platform"),
 			btn(fieldMark(lang, "devadm.f_model", cfg.Model), "devadm:model")},
-		{btn(fieldMark(lang, "devadm.f_hwid", cfg.HWID), "devadm:hwid"),
-			btn(fieldMark(lang, "devadm.f_dates", cfg.Dates), "devadm:dates")},
+		{btn(fieldMark(lang, "devadm.f_ua", cfg.UA), "devadm:ua"),
+			btn(fieldMark(lang, "devadm.f_hwid", cfg.HWID), "devadm:hwid")},
+		{btn(fieldMark(lang, "devadm.f_dates", cfg.Dates), "devadm:dates")},
 		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, text, rows)
@@ -62,6 +63,8 @@ func (a *App) onDevicesAdmin(ctx context.Context, chatID int64, val string) {
 			d.Platform = !d.Platform
 		case "model":
 			d.Model = !d.Model
+		case "ua":
+			d.UA = !d.UA
 		case "hwid":
 			d.HWID = !d.HWID
 		case "dates":

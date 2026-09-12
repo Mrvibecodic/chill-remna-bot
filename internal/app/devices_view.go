@@ -59,40 +59,51 @@ func shortHWID(s string) string {
 // разрешённому админом. Возвращает сырой текст: чат его экранирует, мини-апп
 // экранирует у себя.
 func deviceParts(lang string, d remnawave.Device, cfg model.DevicesConfig) (head, meta string) {
-	var tail []string
-	platform := strings.TrimSpace(strings.TrimSpace(cutField(d.Platform)) + " " + strings.TrimSpace(cutField(d.OSVersion)))
+	// В заголовке строки — что за устройство: модель и приложение клиента.
+	// Модель присылают не все клиенты, приложение — почти все, поэтому вместе
+	// они и дают узнаваемое имя. Остальное (платформа, отпечаток, дата) идёт
+	// второй строкой.
+	var name, tail []string
 	if cfg.Model {
-		head = cutField(d.Model)
+		if m := cutField(d.Model); m != "" {
+			name = append(name, m)
+		}
 	}
+	if cfg.UA {
+		if ua := cutField(d.UserAgent); ua != "" {
+			name = append(name, ua)
+		}
+	}
+	platform := strings.TrimSpace(strings.TrimSpace(cutField(d.Platform)) + " " + strings.TrimSpace(cutField(d.OSVersion)))
 	if cfg.Platform && platform != "" {
-		if head == "" {
-			head = platform
+		if len(name) == 0 {
+			name = append(name, platform)
 		} else {
 			tail = append(tail, platform)
 		}
 	}
 	if cfg.HWID && d.HWID != "" {
 		short := shortHWID(d.HWID)
-		if head == "" {
-			head = short
+		if len(name) == 0 {
+			name = append(name, short)
 		} else {
 			tail = append(tail, short)
 		}
 	}
-	if cfg.Dates {
-		if !d.FirstSeen.IsZero() {
-			tail = append(tail, i18n.T(lang, "dev.since", d.FirstSeen.In(displayTZ).Format("02.01.2006")))
-		}
-		if !d.LastSeen.IsZero() {
-			tail = append(tail, i18n.T(lang, "dev.last", d.LastSeen.In(displayTZ).Format("02.01.2006")))
-		}
+	// Показываем только дату подключения. Дата последней активности у панели
+	// есть, но на экране от неё больше путаницы, чем пользы: она обновляется
+	// на каждом обращении клиента и человеку ничего не говорит. Сортировать
+	// список по ней это не мешает.
+	if cfg.Dates && !d.FirstSeen.IsZero() {
+		tail = append(tail, i18n.T(lang, "dev.since", d.FirstSeen.In(displayTZ).Format("02.01.2006")))
 	}
-	if head == "" {
-		// Клиент не прислал ни модели, ни платформы, а отпечаток скрыт
-		// владельцем: строка всё равно нужна, иначе список короче счётчика.
-		head = i18n.T(lang, "dev.unknown")
+	if len(name) == 0 {
+		// Клиент не прислал ни модели, ни приложения, ни платформы, а
+		// отпечаток скрыт владельцем: строка всё равно нужна, иначе список
+		// окажется короче счётчика.
+		name = append(name, i18n.T(lang, "dev.unknown"))
 	}
-	return head, strings.Join(tail, " · ")
+	return strings.Join(name, " · "), strings.Join(tail, " · ")
 }
 
 // deviceLine — строка списка для чата (разметка HTML).

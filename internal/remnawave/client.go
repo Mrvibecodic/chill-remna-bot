@@ -1601,6 +1601,9 @@ type Device struct {
 	Platform  string
 	OSVersion string
 	Model     string
+	// UserAgent — подпись клиентского приложения. Часто единственное, что
+	// вообще приходит: модель присылают не все клиенты, а UA — почти всегда.
+	UserAgent string
 	FirstSeen time.Time
 	LastSeen  time.Time
 }
@@ -1612,6 +1615,7 @@ type panelDevice struct {
 	Platform    *string `json:"platform"`
 	OSVersion   *string `json:"osVersion"`
 	DeviceModel *string `json:"deviceModel"`
+	UserAgent   *string `json:"userAgent"`
 	CreatedAt   string  `json:"createdAt"`
 	UpdatedAt   string  `json:"updatedAt"`
 }
@@ -1676,6 +1680,7 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 			Platform:  nullStr(d.Platform),
 			OSVersion: nullStr(d.OSVersion),
 			Model:     nullStr(d.DeviceModel),
+			UserAgent: nullStr(d.UserAgent),
 			FirstSeen: devTime(d.CreatedAt),
 			LastSeen:  devTime(d.UpdatedAt),
 		})

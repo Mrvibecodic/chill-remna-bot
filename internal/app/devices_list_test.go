@@ -37,8 +37,8 @@ func devicesApp(base string, cfg model.DevicesConfig) *App {
 	}
 }
 
-const twoDevices = `{"hwid":"aaaabbbbccccdddd1111","userId":1,"platform":"iOS","osVersion":"18.2","deviceModel":"iPhone 15","userAgent":null,"requestIp":null,"createdAt":"2026-09-01T10:00:00Z","updatedAt":"2026-09-05T10:00:00Z"},` +
-	`{"hwid":"eeeeffff000011112222","userId":1,"platform":"Windows","osVersion":null,"deviceModel":null,"userAgent":null,"requestIp":null,"createdAt":"2026-09-02T10:00:00Z","updatedAt":"2026-09-09T10:00:00Z"}`
+const twoDevices = `{"hwid":"aaaabbbbccccdddd1111","userId":1,"platform":"iOS","osVersion":"18.2","deviceModel":"iPhone 15","userAgent":"Happ/2.9.1","requestIp":null,"createdAt":"2026-09-01T10:00:00Z","updatedAt":"2026-09-05T10:00:00Z"},` +
+	`{"hwid":"eeeeffff000011112222","userId":1,"platform":"Windows","osVersion":null,"deviceModel":null,"userAgent":"v2rayNG/1.9.16","requestIp":null,"createdAt":"2026-09-02T10:00:00Z","updatedAt":"2026-09-09T10:00:00Z"}`
 
 // Панель отдаёт список — клиент обязан его разобрать, пропустить запись без
 // отпечатка и положить сверху то, что заходило последним.
@@ -59,6 +59,9 @@ func TestDevicesByTelegramID_ParsesList(t *testing.T) {
 	if info.List[0].Platform != "Windows" {
 		t.Fatalf("сверху должно быть последнее заходившее, а там %q", info.List[0].Platform)
 	}
+	if info.List[0].UserAgent != "v2rayNG/1.9.16" {
+		t.Fatalf("подпись приложения не разобрана: %+v", info.List[0])
+	}
 	if info.List[1].Model != "iPhone 15" || info.List[1].OSVersion != "18.2" {
 		t.Fatalf("поля разобраны неверно: %+v", info.List[1])
 	}
@@ -74,11 +77,12 @@ func TestDeviceParts_Fields(t *testing.T) {
 		Platform:  "iOS",
 		OSVersion: "18.2",
 		Model:     "iPhone 15",
+		UserAgent: "Happ/2.9.1",
 		FirstSeen: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
 		LastSeen:  time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC),
 	}
-	head, meta := deviceParts(model.LangRU, d, model.DevicesConfig{Model: true, Platform: true, HWID: true, Dates: true})
-	if head != "iPhone 15" || !strings.Contains(meta, "iOS 18.2") || !strings.Contains(meta, "aaaa…1111") || !strings.Contains(meta, "01.09.2026") {
+	head, meta := deviceParts(model.LangRU, d, model.DevicesConfig{Model: true, Platform: true, UA: true, HWID: true, Dates: true})
+	if head != "iPhone 15 · Happ/2.9.1" || !strings.Contains(meta, "iOS 18.2") || !strings.Contains(meta, "aaaa…1111") || !strings.Contains(meta, "подключено 01.09.2026") {
 		t.Fatalf("полный набор: head=%q meta=%q", head, meta)
 	}
 	head, meta = deviceParts(model.LangRU, d, model.DevicesConfig{Platform: true})
@@ -87,6 +91,15 @@ func TestDeviceParts_Fields(t *testing.T) {
 	}
 	if _, meta := deviceParts(model.LangRU, d, model.DevicesConfig{Model: true}); meta != "" {
 		t.Fatalf("модель включена, остальное нет, а приписка не пуста: %q", meta)
+	}
+	// Модели нет, а подпись приложения есть — она и становится заголовком:
+	// ради этого поле и добавлено.
+	noModel := remnawave.Device{HWID: "zzzz", Platform: "Android", UserAgent: "v2rayNG/1.9.16"}
+	if head, _ := deviceParts(model.LangRU, noModel, model.DevicesConfig{Model: true, UA: true, Platform: true}); head != "v2rayNG/1.9.16" {
+		t.Fatalf("без модели заголовком должно быть приложение, а там %q", head)
+	}
+	if head, _ := deviceParts(model.LangRU, noModel, model.DevicesConfig{Model: true, Platform: true}); head != "Android" {
+		t.Fatalf("приложение выключено, а просочилось: %q", head)
 	}
 	// Клиент не прислал ничего, а отпечаток скрыт — строка всё равно нужна.
 	empty := remnawave.Device{HWID: "zzzz"}
@@ -119,7 +132,7 @@ func TestDevicesLine_BudgetAndToggles(t *testing.T) {
 	srv := devicesPanel(t, strings.Join(many, ","), 12)
 	defer srv.Close()
 
-	on := model.DevicesConfig{List: true, Platform: true, Model: true, HWID: true, Dates: true, Init: true}
+	on := model.DevicesConfig{List: true, Platform: true, Model: true, UA: true, HWID: true, Dates: true, Init: true}
 	a := devicesApp(srv.URL, on)
 	out := a.devicesLine(context.Background(), 42, a.panel, 0)
 	if !strings.Contains(out, "Устройства: <b>12 / 3</b>") {
@@ -173,7 +186,7 @@ func TestMiniSubscription_Devices(t *testing.T) {
 func TestNormalizeDevices(t *testing.T) {
 	var c model.BotConfig
 	c.NormalizeDevices()
-	if !c.Devices.List || !c.Devices.Platform || !c.Devices.Model || !c.Devices.Dates {
+	if !c.Devices.List || !c.Devices.Platform || !c.Devices.Model || !c.Devices.UA || !c.Devices.Dates {
 		t.Fatalf("по умолчанию: %+v", c.Devices)
 	}
 	if c.Devices.HWID {
@@ -182,7 +195,7 @@ func TestNormalizeDevices(t *testing.T) {
 	if !c.Devices.Show() {
 		t.Fatal("обзор с полями обязан показываться")
 	}
-	c.Devices.Platform, c.Devices.Model, c.Devices.Dates = false, false, false
+	c.Devices.Platform, c.Devices.Model, c.Devices.UA, c.Devices.Dates = false, false, false, false
 	if c.Devices.Show() {
 		t.Fatal("без единого поля обзор показывать нечем")
 	}

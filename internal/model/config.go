@@ -919,16 +919,18 @@ type DevicesConfig struct {
 	List     bool `json:"list"`
 	Platform bool `json:"platform"`
 	Model    bool `json:"model"`
-	HWID     bool `json:"hwid"`
-	Dates    bool `json:"dates"`
-	Init     bool `json:"init"`
+	// UA — подпись клиентского приложения из заголовка User-Agent.
+	UA    bool `json:"ua"`
+	HWID  bool `json:"hwid"`
+	Dates bool `json:"dates"`
+	Init  bool `json:"init"`
 }
 
 // AnyField — есть ли хоть одно поле к показу. Список из строк «Устройство»
 // без единой приметы не помогает никому, поэтому при пустом наборе обзор
 // не выводится вовсе.
 func (d DevicesConfig) AnyField() bool {
-	return d.Platform || d.Model || d.HWID || d.Dates
+	return d.Platform || d.Model || d.UA || d.HWID || d.Dates
 }
 
 // Show — показывать ли обзор устройств на клиентских экранах.
@@ -943,6 +945,7 @@ func (c *BotConfig) NormalizeDevices() {
 		c.Devices.List = true
 		c.Devices.Platform = true
 		c.Devices.Model = true
+		c.Devices.UA = true
 		c.Devices.Dates = true
 		c.Devices.HWID = false
 		c.Devices.Init = true
