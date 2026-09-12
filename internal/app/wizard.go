@@ -108,6 +108,7 @@ const (
 	cbClose     = "x"
 	cbAddSub    = "addsub"
 	cbDevices   = "dev"
+	cbDevAdmin  = "devadm"
 	cbRSImport  = "rsimp"
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
@@ -302,6 +303,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 	case cbDevices:
 		a.onDevices(ctx, chatID, val)
+	case cbDevAdmin:
+		if isAdmin {
+			a.onDevicesAdmin(ctx, chatID, val)
+		}
 	case cbRSImport:
 		if isAdmin {
 			a.onRSImport(ctx, chatID, val)
@@ -679,6 +684,9 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	cfg := a.configWithWizard(w)
 	cfg.NormalizePricing()
 	cfg.NormalizeReminders()
+	// Обзор устройств включён по умолчанию, и свежая установка обязана
+	// получить его сразу, а не после первого перезапуска.
+	cfg.NormalizeDevices()
 	if err := a.store.SaveConfig(ctx, cfg); err != nil {
 		a.send(ctx, chatID, i18n.T(lang, "step.verify.fail", err.Error()))
 		return

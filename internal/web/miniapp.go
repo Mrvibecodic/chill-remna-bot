@@ -269,6 +269,9 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+	// Devices — сами устройства, если владелец бота разрешил их показывать.
+	// Пусто — на экране остаётся только счётчик.
+	Devices []MiniDeviceDTO `json:"devices,omitempty"`
 
 	// AddSub* describe the add-on ("доп-сервер") subscription that the
 	// subscription middleware merges into the same link. AddSubOK is false when
@@ -281,6 +284,13 @@ type MiniSubDTO struct {
 	// AddSubName — название опции по тарифу пользователя (пусто — фронт
 	// показывает стандартное «Доп-сервер»).
 	AddSubName string `json:"addsub_name,omitempty"`
+}
+
+// MiniDeviceDTO — одно подключённое устройство. Сервер уже собрал обе строки
+// по набору полей из админки: фронт ничего не решает и не знает про тумблеры.
+type MiniDeviceDTO struct {
+	Name string `json:"name"`
+	Meta string `json:"meta,omitempty"`
 }
 
 // MiniPlanDTO — один ТАРИФ витрины (v2: раньше это был один срок «Базового»;

@@ -176,6 +176,9 @@ type BotConfig struct {
 
 	MiniApp MiniAppConfig `json:"miniapp"`
 
+	// Devices — обзор подключённых устройств на клиентских экранах.
+	Devices DevicesConfig `json:"devices"`
+
 	Cabinet CabinetConfig `json:"cabinet"`
 
 	Mail MailConfig `json:"mail"`
@@ -902,6 +905,47 @@ func (c *BotConfig) NormalizeMiniApp() {
 	if !c.MiniApp.Init {
 		c.MiniApp.Enabled = false
 		c.MiniApp.Init = true
+	}
+}
+
+// DevicesConfig — что человек видит про свои подключённые устройства. Панель
+// отдаёт по каждому отпечаток, платформу, версию ОС, модель и две даты; какие
+// из них показывать клиенту, решает владелец бота: отпечаток никому ни о чём
+// не говорит, а кому-то он единственный способ опознать устройство, когда
+// клиент не прислал ни модели, ни платформы.
+type DevicesConfig struct {
+	// List — показывать сам список (иначе остаётся только счётчик, как было
+	// до появления обзора).
+	List     bool `json:"list"`
+	Platform bool `json:"platform"`
+	Model    bool `json:"model"`
+	HWID     bool `json:"hwid"`
+	Dates    bool `json:"dates"`
+	Init     bool `json:"init"`
+}
+
+// AnyField — есть ли хоть одно поле к показу. Список из строк «Устройство»
+// без единой приметы не помогает никому, поэтому при пустом наборе обзор
+// не выводится вовсе.
+func (d DevicesConfig) AnyField() bool {
+	return d.Platform || d.Model || d.HWID || d.Dates
+}
+
+// Show — показывать ли обзор устройств на клиентских экранах.
+func (d DevicesConfig) Show() bool { return d.List && d.AnyField() }
+
+// NormalizeDevices включает обзор тем, кто обновился с версии без этой
+// настройки: платформа, модель и даты. Отпечаток по умолчанию скрыт — он
+// техническая строка и на экране только мешает, пока владелец сам его не
+// включит.
+func (c *BotConfig) NormalizeDevices() {
+	if !c.Devices.Init {
+		c.Devices.List = true
+		c.Devices.Platform = true
+		c.Devices.Model = true
+		c.Devices.Dates = true
+		c.Devices.HWID = false
+		c.Devices.Init = true
 	}
 }
 

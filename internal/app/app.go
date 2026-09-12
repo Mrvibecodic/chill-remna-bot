@@ -346,6 +346,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeUpdateCheck()
 		cfg.NormalizeAddSub()
 		cfg.NormalizeMiniApp()
+		cfg.NormalizeDevices()
 		cfg.NormalizeWallet()
 		cfg.NormalizeCabinet()
 		cfg.NormalizeMail()

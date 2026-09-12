@@ -1,0 +1,194 @@
+package app
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
+)
+
+// devicesPanel — панель, отдающая заданный список HWID-устройств.
+func devicesPanel(t *testing.T, devicesJSON string, total int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/users/by-telegram-id/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":[{"uuid":"u-1","telegramId":42,"status":"ACTIVE","hwidDeviceLimit":3,"subscriptionUrl":"https://s/ex","expireAt":"2030-01-02T03:04:05Z"}]}`))
+	})
+	mux.HandleFunc("/api/hwid/devices/u-1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":{"total":` + itoa(total) + `,"devices":[` + devicesJSON + `]}}`))
+	})
+	return httptest.NewServer(mux)
+}
+
+func devicesApp(base string, cfg model.DevicesConfig) *App {
+	return &App{
+		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		panel:  remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: base, APIToken: "t"}),
+		botCfg: &model.BotConfig{Language: model.LangRU, Devices: cfg},
+	}
+}
+
+const twoDevices = `{"hwid":"aaaabbbbccccdddd1111","userId":1,"platform":"iOS","osVersion":"18.2","deviceModel":"iPhone 15","userAgent":null,"requestIp":null,"createdAt":"2026-09-01T10:00:00Z","updatedAt":"2026-09-05T10:00:00Z"},` +
+	`{"hwid":"eeeeffff000011112222","userId":1,"platform":"Windows","osVersion":null,"deviceModel":null,"userAgent":null,"requestIp":null,"createdAt":"2026-09-02T10:00:00Z","updatedAt":"2026-09-09T10:00:00Z"}`
+
+// Панель отдаёт список — клиент обязан его разобрать, пропустить запись без
+// отпечатка и положить сверху то, что заходило последним.
+func TestDevicesByTelegramID_ParsesList(t *testing.T) {
+	srv := devicesPanel(t, twoDevices+`,{"hwid":"","userId":1,"platform":null,"osVersion":null,"deviceModel":null,"userAgent":null,"requestIp":null,"createdAt":"2026-09-03T10:00:00Z","updatedAt":"2026-09-03T10:00:00Z"}`, 3)
+	defer srv.Close()
+	cl := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	info, ok := cl.DevicesByTelegramID(context.Background(), 42)
+	if !ok {
+		t.Fatal("панель не ответила")
+	}
+	if info.Used != 3 || info.Limit != 3 || !info.HasLimit {
+		t.Fatalf("счётчик: %+v", info)
+	}
+	if len(info.List) != 2 {
+		t.Fatalf("устройств в списке %d, ждали 2 (запись без отпечатка пропускается)", len(info.List))
+	}
+	if info.List[0].Platform != "Windows" {
+		t.Fatalf("сверху должно быть последнее заходившее, а там %q", info.List[0].Platform)
+	}
+	if info.List[1].Model != "iPhone 15" || info.List[1].OSVersion != "18.2" {
+		t.Fatalf("поля разобраны неверно: %+v", info.List[1])
+	}
+	if info.List[1].FirstSeen.IsZero() || info.List[1].LastSeen.IsZero() {
+		t.Fatalf("даты не разобраны: %+v", info.List[1])
+	}
+}
+
+// Набор полей выбирает админ: выключенное поле не должно просачиваться.
+func TestDeviceParts_Fields(t *testing.T) {
+	d := remnawave.Device{
+		HWID:      "aaaabbbbccccdddd1111",
+		Platform:  "iOS",
+		OSVersion: "18.2",
+		Model:     "iPhone 15",
+		FirstSeen: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
+		LastSeen:  time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC),
+	}
+	head, meta := deviceParts(model.LangRU, d, model.DevicesConfig{Model: true, Platform: true, HWID: true, Dates: true})
+	if head != "iPhone 15" || !strings.Contains(meta, "iOS 18.2") || !strings.Contains(meta, "aaaa…1111") || !strings.Contains(meta, "01.09.2026") {
+		t.Fatalf("полный набор: head=%q meta=%q", head, meta)
+	}
+	head, meta = deviceParts(model.LangRU, d, model.DevicesConfig{Platform: true})
+	if head != "iOS 18.2" || meta != "" {
+		t.Fatalf("только платформа: head=%q meta=%q", head, meta)
+	}
+	if _, meta := deviceParts(model.LangRU, d, model.DevicesConfig{Model: true}); meta != "" {
+		t.Fatalf("модель включена, остальное нет, а приписка не пуста: %q", meta)
+	}
+	// Клиент не прислал ничего, а отпечаток скрыт — строка всё равно нужна.
+	empty := remnawave.Device{HWID: "zzzz"}
+	if head, _ := deviceParts(model.LangRU, empty, model.DevicesConfig{Model: true, Platform: true, Dates: true}); head == "" {
+		t.Fatal("пустое устройство осталось без заголовка")
+	}
+	// Чужой текст в модели не должен уезжать в разметку как есть.
+	evil := remnawave.Device{HWID: "zzzz", Model: "<b>hack</b>"}
+	if line := deviceLine(model.LangRU, evil, model.DevicesConfig{Model: true}); strings.Contains(line, "<b>hack") {
+		t.Fatalf("разметка клиента не экранирована: %q", line)
+	}
+}
+
+// Длинную модель обрезаем: заголовок с клиента не должен занимать экран.
+func TestDeviceParts_CutsLongField(t *testing.T) {
+	long := strings.Repeat("я", 200)
+	head, _ := deviceParts(model.LangRU, remnawave.Device{HWID: "z", Model: long}, model.DevicesConfig{Model: true})
+	if len([]rune(head)) > deviceFieldMaxLen+1 {
+		t.Fatalf("заголовок длиной %d знаков", len([]rune(head)))
+	}
+}
+
+// Список идёт под счётчиком, но подпись под баннером кончается на 1000 знаках:
+// лишние устройства сворачиваются в «… и ещё N».
+func TestDevicesLine_BudgetAndToggles(t *testing.T) {
+	var many []string
+	for i := 0; i < 12; i++ {
+		many = append(many, `{"hwid":"hwid`+itoa(i)+`0000000000000","userId":1,"platform":"Windows 11 Профессиональная сборка","osVersion":"10.0.22631","deviceModel":"Ноутбук рабочий очень длинное имя","userAgent":null,"requestIp":null,"createdAt":"2026-09-0`+itoa(i%9+1)+`T10:00:00Z","updatedAt":"2026-09-0`+itoa(i%9+1)+`T10:00:00Z"}`)
+	}
+	srv := devicesPanel(t, strings.Join(many, ","), 12)
+	defer srv.Close()
+
+	on := model.DevicesConfig{List: true, Platform: true, Model: true, HWID: true, Dates: true, Init: true}
+	a := devicesApp(srv.URL, on)
+	out := a.devicesLine(context.Background(), 42, a.panel, 0)
+	if !strings.Contains(out, "Устройства: <b>12 / 3</b>") {
+		t.Fatalf("счётчик пропал: %q", out)
+	}
+	if !strings.Contains(out, "и ещё") {
+		t.Fatal("длинный список не свернулся")
+	}
+	if n := len([]rune(out)); n > deviceCaptionBudget {
+		t.Fatalf("текст на %d знаков — подпись под баннером не влезет", n)
+	}
+
+	// Уже занятая часть экрана учитывается: остаётся один счётчик.
+	if tight := a.devicesLine(context.Background(), 42, a.panel, deviceCaptionBudget-20); strings.Contains(tight, "•") {
+		t.Fatalf("список вылез за остаток длины: %q", tight)
+	}
+
+	// Тумблер списка выключен — остаётся только счётчик.
+	off := devicesApp(srv.URL, model.DevicesConfig{List: false, Platform: true, Init: true})
+	if out := off.devicesLine(context.Background(), 42, off.panel, 0); strings.Contains(out, "•") {
+		t.Fatalf("список показан при выключенном тумблере: %q", out)
+	}
+	// Список включён, но ни одного поля не выбрано — строк «Устройство» не будет.
+	bare := devicesApp(srv.URL, model.DevicesConfig{List: true, Init: true})
+	if out := bare.devicesLine(context.Background(), 42, bare.panel, 0); strings.Contains(out, "•") {
+		t.Fatalf("список показан без единого поля: %q", out)
+	}
+}
+
+// Мини-апп и кабинет получают тот же список и по тем же правилам.
+func TestMiniSubscription_Devices(t *testing.T) {
+	srv := devicesPanel(t, twoDevices, 2)
+	defer srv.Close()
+
+	a := devicesApp(srv.URL, model.DevicesConfig{List: true, Model: true, Platform: true, Init: true})
+	dto := a.MiniSubscription(context.Background(), 42)
+	if !dto.DevicesOK || dto.DevicesUsed != 2 {
+		t.Fatalf("счётчик: %+v", dto)
+	}
+	if len(dto.Devices) != 2 || dto.Devices[0].Name == "" {
+		t.Fatalf("устройства не доехали: %+v", dto.Devices)
+	}
+	off := devicesApp(srv.URL, model.DevicesConfig{List: false, Model: true, Init: true})
+	if dto := off.MiniSubscription(context.Background(), 42); len(dto.Devices) != 0 {
+		t.Fatalf("обзор выключен, а устройства отданы: %+v", dto.Devices)
+	}
+}
+
+// Обновление с версии без настройки: обзор включается, отпечаток остаётся
+// скрытым, повторная нормализация чужой выбор не переписывает.
+func TestNormalizeDevices(t *testing.T) {
+	var c model.BotConfig
+	c.NormalizeDevices()
+	if !c.Devices.List || !c.Devices.Platform || !c.Devices.Model || !c.Devices.Dates {
+		t.Fatalf("по умолчанию: %+v", c.Devices)
+	}
+	if c.Devices.HWID {
+		t.Fatal("отпечаток не должен включаться сам")
+	}
+	if !c.Devices.Show() {
+		t.Fatal("обзор с полями обязан показываться")
+	}
+	c.Devices.Platform, c.Devices.Model, c.Devices.Dates = false, false, false
+	if c.Devices.Show() {
+		t.Fatal("без единого поля обзор показывать нечем")
+	}
+	c.Devices.List = false
+	c.NormalizeDevices()
+	if c.Devices.List {
+		t.Fatal("нормализация переписала выбор владельца")
+	}
+}

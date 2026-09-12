@@ -1026,7 +1026,11 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + a.devicesLine(ctx, chatID, panel) + a.addSubLine(ctx, chatID)
+	// Список устройств режется по остатку длины, поэтому соседние куски текста
+	// считаются до него, а не после.
+	base := a.subActiveText(ctx, chatID, url, expireAt)
+	add := a.addSubLine(ctx, chatID)
+	text := base + a.devicesLine(ctx, chatID, panel, len([]rune(base+add))) + add
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 
@@ -1074,7 +1078,11 @@ func formatGB(b int64) string {
 // (unlimited / limit disabled) it shows ONLY the connected count. Returns ""
 // when the panel is unavailable or HWID data cannot be fetched, so the screen
 // degrades gracefully. View-only: it never registers or removes devices.
-func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client) string {
+//
+// Под счётчиком идёт сам список устройств — но только теми полями, которые
+// разрешил владелец бота, и только пока текст экрана остаётся подписью под
+// баннером: used — длина уже занятой части экрана.
+func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client, used int) string {
 	if panel == nil {
 		return ""
 	}
@@ -1082,11 +1090,41 @@ func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Cl
 	if !ok {
 		return ""
 	}
+	lang := a.lang(chatID)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
 		val += " / " + strconv.Itoa(info.Limit)
 	}
-	return "\n\n" + i18n.T(a.lang(chatID), "sub.devices", val)
+	head := "\n\n" + i18n.T(lang, "sub.devices", val)
+	cfg := a.devicesConfig()
+	if !cfg.Show() || len(info.List) == 0 {
+		return head
+	}
+	budget := deviceCaptionBudget - used - len([]rune(head))
+	var b strings.Builder
+	shown := 0
+	for _, d := range info.List {
+		if shown >= deviceListMax {
+			break
+		}
+		line := "\n" + deviceLine(lang, d, cfg)
+		tail := ""
+		if rest := len(info.List) - shown - 1; rest > 0 {
+			tail = "\n" + i18n.T(lang, "dev.more", rest)
+		}
+		if len([]rune(b.String()+line+tail)) > budget {
+			break
+		}
+		b.WriteString(line)
+		shown++
+	}
+	if shown == 0 {
+		return head
+	}
+	if rest := len(info.List) - shown; rest > 0 {
+		b.WriteString("\n" + i18n.T(lang, "dev.more", rest))
+	}
+	return head + b.String()
 }
 
 // subDeadKey — подписка не работает: какой текст показать. Пустая строка —
