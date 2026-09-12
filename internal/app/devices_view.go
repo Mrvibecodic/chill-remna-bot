@@ -14,15 +14,6 @@ import (
 // весь экран подписки, а при разметке HTML — ещё и сломать сообщение.
 const deviceFieldMaxLen = 32
 
-// deviceListMax — потолок числа строк в чате. Лимит устройств у тарифов
-// обычно однозначный; потолок здесь на случай панели, где лимита нет вовсе.
-const deviceListMax = 10
-
-// deviceCaptionBudget — сколько знаков экрана подписки можно занять, оставаясь
-// подписью под баннером: свыше 1000 знаков sendKBSection уходит на обычное
-// сообщение и картинка раздела пропадает.
-const deviceCaptionBudget = 950
-
 // devicesConfig — набор полей, разрешённых владельцем бота к показу.
 func (a *App) devicesConfig() model.DevicesConfig {
 	a.mu.Lock()

@@ -1314,6 +1314,44 @@ func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]mo
 	a.emit(ctx, chatID, func() int { return a.msg.SendKB(ctx, chatID, t, rows) })
 }
 
+// sendKBParts отправляет экран, не влезающий в одно сообщение Telegram.
+// Части уходят подряд, клавиатура — на последней, и ВСЕ они запоминаются как
+// экран: иначе следующий переход стёр бы только последнее сообщение, а хвост
+// остался бы висеть в чате навсегда.
+func (a *App) sendKBParts(ctx context.Context, chatID int64, parts []string, rows [][]models.InlineKeyboardButton) {
+	switch len(parts) {
+	case 0:
+		return
+	case 1:
+		a.sendKB(ctx, chatID, parts[0], rows)
+		return
+	}
+	last := len(parts) - 1
+	// Первая часть идёт через emit: он и снимает предыдущий экран.
+	a.emit(ctx, chatID, func() int { return a.msg.Send(ctx, chatID, a.applyPremium(parts[0])) })
+	for i := 1; i <= last; i++ {
+		t := a.applyPremium(parts[i])
+		var id int
+		if i == last {
+			id = a.msg.SendKB(ctx, chatID, t, rows)
+		} else {
+			id = a.msg.Send(ctx, chatID, t)
+		}
+		if id == 0 {
+			continue
+		}
+		a.scrMu.Lock()
+		if a.screen == nil {
+			a.screen = map[int64][]int{}
+		}
+		a.screen[chatID] = append(a.screen[chatID], id)
+		a.scrMu.Unlock()
+		if i == last && a.store != nil {
+			_ = a.store.SetScreenMsg(ctx, chatID, id)
+		}
+	}
+}
+
 // sendBanner отправляет экран с картинкой и НИКОГДА не оставляет человека без
 // экрана: Telegram отвергает баннер целиком, если картинка ему не понравилась
 // (битый file_id, недоступная ссылка), и главное меню тогда просто не

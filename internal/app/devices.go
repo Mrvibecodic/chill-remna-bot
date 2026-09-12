@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -20,6 +21,8 @@ import (
 func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
 	switch val {
+	case "list":
+		a.showDevices(ctx, chatID)
 	case "reset":
 		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.reset_confirm"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "dev.btn_reset_yes"), "dev:confirm")},
@@ -50,6 +53,75 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 			navBack(lang, "menu:mysubs"),
 		})
 	}
+}
+
+// showDevices — отдельный экран со списком подключённых устройств.
+//
+// Отдельный он не для красоты: на экране подписки список живёт подписью под
+// баннером, а она кончается на 1000 знаках, и у человека с десятком устройств
+// хвост обрезался. Здесь картинки нет, сообщение — обычное (лимит 4096), а
+// если и в него не влезает, список уходит несколькими сообщениями.
+func (a *App) showDevices(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.mu.Lock()
+	panel := a.panel
+	a.mu.Unlock()
+	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")},
+		navBack(lang, "menu:mysubs"),
+	}
+	if panel == nil {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.list_empty"), rows)
+		return
+	}
+	info, ok := panel.DevicesByTelegramID(ctx, chatID)
+	cfg := a.devicesConfig()
+	if !ok || !cfg.Show() || len(info.List) == 0 {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.list_empty"), rows)
+		return
+	}
+	val := strconv.Itoa(info.Used)
+	if info.HasLimit {
+		val += " / " + strconv.Itoa(info.Limit)
+	}
+	head := i18n.T(lang, "dev.list_title", val)
+	lines := make([]string, 0, len(info.List))
+	for _, d := range info.List {
+		lines = append(lines, deviceLine(lang, d, cfg))
+	}
+	parts := devicePages(head, lines, i18n.T(lang, "dev.list_note"))
+	a.sendKBParts(ctx, chatID, parts, rows)
+}
+
+// devicePages нарезает список на сообщения по границам устройств: разрыв
+// посреди строки оставил бы незакрытый тег, и Telegram отверг бы разметку
+// целиком. Приписка идёт в конец последней части.
+func devicePages(head string, lines []string, note string) []string {
+	const budget = 3500
+	var parts []string
+	cur := head
+	for _, line := range lines {
+		add := "\n\n" + line
+		if len([]rune(cur+add)) > budget && cur != head {
+			parts = append(parts, cur)
+			cur = line
+			continue
+		}
+		if cur == head {
+			cur += "\n\n" + line
+			continue
+		}
+		cur += add
+	}
+	if note != "" {
+		if len([]rune(cur+"\n\n"+note)) > budget {
+			parts = append(parts, cur)
+			cur = note
+		} else {
+			cur += "\n\n" + note
+		}
+	}
+	return append(parts, cur)
 }
 
 // MiniResetDevices resets the caller's own devices from the Mini App or the web

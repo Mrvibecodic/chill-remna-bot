@@ -122,43 +122,69 @@ func TestDeviceParts_CutsLongField(t *testing.T) {
 	}
 }
 
-// Список идёт под счётчиком, но подпись под баннером кончается на 1000 знаках:
-// лишние устройства сворачиваются в «… и ещё N».
-func TestDevicesLine_BudgetAndToggles(t *testing.T) {
-	var many []string
-	for i := 0; i < 12; i++ {
-		many = append(many, `{"hwid":"hwid`+itoa(i)+`0000000000000","userId":1,"platform":"Windows 11 Профессиональная сборка","osVersion":"10.0.22631","deviceModel":"Ноутбук рабочий очень длинное имя","userAgent":null,"requestIp":null,"createdAt":"2026-09-0`+itoa(i%9+1)+`T10:00:00Z","updatedAt":"2026-09-0`+itoa(i%9+1)+`T10:00:00Z"}`)
-	}
-	srv := devicesPanel(t, strings.Join(many, ","), 12)
+// На экране подписки остаётся счётчик и подсказка: сам список живёт на
+// отдельном экране, потому что подпись под баннером кончается на 1000 знаках.
+func TestDevicesLine_CounterAndHint(t *testing.T) {
+	srv := devicesPanel(t, twoDevices, 2)
 	defer srv.Close()
 
 	on := model.DevicesConfig{List: true, Platform: true, Model: true, UA: true, HWID: true, Dates: true, Init: true}
 	a := devicesApp(srv.URL, on)
-	out := a.devicesLine(context.Background(), 42, a.panel, 0)
-	if !strings.Contains(out, "Устройства: <b>12 / 3</b>") {
-		t.Fatalf("счётчик пропал: %q", out)
+	line, has := a.devicesLine(context.Background(), 42, a.panel)
+	if !strings.Contains(line, "Устройства: <b>2 / 3</b>") {
+		t.Fatalf("счётчик пропал: %q", line)
 	}
-	if !strings.Contains(out, "и ещё") {
-		t.Fatal("длинный список не свернулся")
+	if !has || !strings.Contains(line, "Мои устройства") {
+		t.Fatalf("подсказки про кнопку нет: %q (кнопка=%v)", line, has)
 	}
-	if n := len([]rune(out)); n > deviceCaptionBudget {
-		t.Fatalf("текст на %d знаков — подпись под баннером не влезет", n)
-	}
-
-	// Уже занятая часть экрана учитывается: остаётся один счётчик.
-	if tight := a.devicesLine(context.Background(), 42, a.panel, deviceCaptionBudget-20); strings.Contains(tight, "•") {
-		t.Fatalf("список вылез за остаток длины: %q", tight)
+	if strings.Contains(line, "•") {
+		t.Fatalf("список уехал на экран подписки: %q", line)
 	}
 
-	// Тумблер списка выключен — остаётся только счётчик.
+	// Тумблер списка выключен — ни подсказки, ни кнопки, экран как раньше.
 	off := devicesApp(srv.URL, model.DevicesConfig{List: false, Platform: true, Init: true})
-	if out := off.devicesLine(context.Background(), 42, off.panel, 0); strings.Contains(out, "•") {
-		t.Fatalf("список показан при выключенном тумблере: %q", out)
+	line, has = off.devicesLine(context.Background(), 42, off.panel)
+	if has || strings.Contains(line, "Мои устройства") {
+		t.Fatalf("кнопка предложена при выключенном списке: %q (%v)", line, has)
 	}
-	// Список включён, но ни одного поля не выбрано — строк «Устройство» не будет.
+	// Список включён, но ни одного поля не выбрано — показывать нечего.
 	bare := devicesApp(srv.URL, model.DevicesConfig{List: true, Init: true})
-	if out := bare.devicesLine(context.Background(), 42, bare.panel, 0); strings.Contains(out, "•") {
-		t.Fatalf("список показан без единого поля: %q", out)
+	if _, has := bare.devicesLine(context.Background(), 42, bare.panel); has {
+		t.Fatal("кнопка предложена без единого поля")
+	}
+}
+
+// Экран устройств не обрезает список: что не влезло в сообщение, уходит
+// следующим, и разрыв всегда по границе устройства.
+func TestDevicePages_SplitsWholeList(t *testing.T) {
+	var lines []string
+	for i := 0; i < 60; i++ {
+		lines = append(lines, "• <b>Устройство "+itoa(i)+"</b>\n   <i>Windows 11 · подключено 01.09.2026</i>")
+	}
+	parts := devicePages("ЗАГОЛОВОК", lines, "приписка")
+	if len(parts) < 2 {
+		t.Fatalf("длинный список уместился в %d сообщение — нарезки нет", len(parts))
+	}
+	joined := strings.Join(parts, "\n")
+	for _, l := range lines {
+		if !strings.Contains(joined, l) {
+			t.Fatalf("устройство потерялось при нарезке: %q", l)
+		}
+	}
+	if !strings.HasPrefix(parts[0], "ЗАГОЛОВОК") {
+		t.Fatalf("первая часть без заголовка: %q", parts[0][:40])
+	}
+	if !strings.Contains(parts[len(parts)-1], "приписка") {
+		t.Fatal("приписка не доехала до последней части")
+	}
+	for i, p := range parts {
+		if n := len([]rune(p)); n > 4096 {
+			t.Fatalf("часть %d на %d знаков — Telegram не примет", i, n)
+		}
+	}
+	// Короткий список остаётся одним сообщением.
+	if got := devicePages("ЗАГОЛОВОК", lines[:2], ""); len(got) != 1 {
+		t.Fatalf("два устройства разъехались на %d сообщения", len(got))
 	}
 }
 

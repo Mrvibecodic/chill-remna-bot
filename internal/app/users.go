@@ -1021,16 +1021,18 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 			i18n.T(lang, key, formatExpire(expireAt, lang)), rows)
 		return
 	}
+	// Сам список устройств живёт на отдельном экране: здесь подпись под
+	// баннером, а в неё длинный список не влезает.
+	devLine, devList := a.devicesLine(ctx, chatID, panel)
+	if devList {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_list"), "dev:list")})
+	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")})
 	if row := a.autoPayRow(ctx, chatID, lang); row != nil {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	// Список устройств режется по остатку длины, поэтому соседние куски текста
-	// считаются до него, а не после.
-	base := a.subActiveText(ctx, chatID, url, expireAt)
-	add := a.addSubLine(ctx, chatID)
-	text := base + a.devicesLine(ctx, chatID, panel, len([]rune(base+add))) + add
+	text := a.subActiveText(ctx, chatID, url, expireAt) + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 
@@ -1079,52 +1081,27 @@ func formatGB(b int64) string {
 // when the panel is unavailable or HWID data cannot be fetched, so the screen
 // degrades gracefully. View-only: it never registers or removes devices.
 //
-// Под счётчиком идёт сам список устройств — но только теми полями, которые
-// разрешил владелец бота, и только пока текст экрана остаётся подписью под
-// баннером: used — длина уже занятой части экрана.
-func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client, used int) string {
+// Второе значение — есть ли что показать на экране «Устройства»: по нему
+// экран подписки решает, рисовать ли кнопку. Считается из того же ответа
+// панели, что и счётчик, — второй запрос ради кнопки не нужен.
+func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Client) (line string, hasList bool) {
 	if panel == nil {
-		return ""
+		return "", false
 	}
 	info, ok := panel.DevicesByTelegramID(ctx, chatID)
 	if !ok {
-		return ""
+		return "", false
 	}
 	lang := a.lang(chatID)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
 		val += " / " + strconv.Itoa(info.Limit)
 	}
-	head := "\n\n" + i18n.T(lang, "sub.devices", val)
-	cfg := a.devicesConfig()
-	if !cfg.Show() || len(info.List) == 0 {
-		return head
+	line = "\n\n" + i18n.T(lang, "sub.devices", val)
+	if !a.devicesConfig().Show() || len(info.List) == 0 {
+		return line, false
 	}
-	budget := deviceCaptionBudget - used - len([]rune(head))
-	var b strings.Builder
-	shown := 0
-	for _, d := range info.List {
-		if shown >= deviceListMax {
-			break
-		}
-		line := "\n" + deviceLine(lang, d, cfg)
-		tail := ""
-		if rest := len(info.List) - shown - 1; rest > 0 {
-			tail = "\n" + i18n.T(lang, "dev.more", rest)
-		}
-		if len([]rune(b.String()+line+tail)) > budget {
-			break
-		}
-		b.WriteString(line)
-		shown++
-	}
-	if shown == 0 {
-		return head
-	}
-	if rest := len(info.List) - shown; rest > 0 {
-		b.WriteString("\n" + i18n.T(lang, "dev.more", rest))
-	}
-	return head + b.String()
+	return line + "\n" + i18n.T(lang, "sub.devices_hint"), true
 }
 
 // subDeadKey — подписка не работает: какой текст показать. Пустая строка —
