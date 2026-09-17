@@ -23,7 +23,20 @@ import (
 // продаётся: иначе цена «10» уходила счётом на 10 ₽, и увидеть это было негде
 // — и на экране, и в журнале стоял тот же рубль.
 func (a *App) plGridCurrencyOK() bool {
-	return rubCurrency(a.pricing().Currency)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.plGridCurrencyOKLocked()
+}
+
+// plGridCurrencyOKLocked — то же для вызывающих, которые УЖЕ держат a.mu.
+// Отдельный вход обязателен: a.mu не рекурсивный, и повторный захват из-под
+// замка вешает горутину навсегда вместе со всем, что ждёт этот замок.
+func (a *App) plGridCurrencyOKLocked() bool {
+	if a.botCfg == nil {
+		return rubCurrency("")
+	}
+	a.botCfg.NormalizePricing()
+	return rubCurrency(a.botCfg.Pricing.Currency)
 }
 
 func (a *App) plConfig() model.PlategaConfig {

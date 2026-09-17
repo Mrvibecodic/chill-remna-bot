@@ -83,7 +83,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		// Platega выставляет счёт только в рублях (см. plGridCurrencyOK):
 		// при нерублёвой сетке способ не показываем, а не показываем и продаём
 		// по курсу один к одному.
-		if c.Platega.Enabled && a.plGridCurrencyOK() {
+		if c.Platega.Enabled && a.plGridCurrencyOKLocked() {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodPlatega)
 		}
 		if c.Heleket.Enabled {
