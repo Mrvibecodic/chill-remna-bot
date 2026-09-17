@@ -13,6 +13,9 @@ type uiState struct {
 	priceMonths int
 	linkUID     int64
 
+	// panelPending — адрес или токен панели, не прошедшие проверку связи.
+	panelPending *panelPending
+
 	// userQuery — последний поисковый запрос по пользователям, userPage —
 	// страница его выдачи. В callback-данные запрос не положить (64 байта на
 	// всё, а искать будут и по кириллице), поэтому он живёт здесь: по нему
