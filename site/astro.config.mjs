@@ -76,6 +76,7 @@ export default defineConfig({
           items: [
             { label: 'Команды бота', slug: 'reference/commands' },
             { label: 'Переменные окружения', slug: 'reference/env' },
+            { label: 'Права токена панели', slug: 'reference/panel-scopes' },
           ],
         },
         {
