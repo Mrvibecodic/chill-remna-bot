@@ -357,3 +357,15 @@ func TestCutHTML(t *testing.T) {
 		t.Errorf("короткий текст изменён: %q", got)
 	}
 }
+
+// Отказ «бот не настроен» показывается на языке админа, а не по-русски.
+func TestPanelConnNotConfiguredLocalized(t *testing.T) {
+	a, fm, _ := newTestApp(t)
+	a.wiz[100] = &wizard{cfg: model.BotConfig{Language: model.LangEN}}
+	a.getUI(100).panelPending = &panelPending{field: "panel_token", value: "x"}
+	a.forcePanelConn(context.Background(), 100)
+	last := fm.lastLive()
+	if !strings.Contains(last, "not set up yet") || strings.Contains(last, "не настроен") {
+		t.Fatalf("отказ не переведён:\n%s", last)
+	}
+}

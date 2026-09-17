@@ -486,7 +486,7 @@ func (a *App) setPanelConn(ctx context.Context, chatID int64, field, text string
 		return
 	}
 	if err := a.commitPanelConn(ctx, field, value); err != nil {
-		a.showPanelAuth(ctx, chatID, i18n.T(lang, "panelauth.save_fail", shortErr(err)))
+		a.showPanelAuth(ctx, chatID, saveFailNote(lang, err))
 		return
 	}
 	a.showPanelAuth(ctx, chatID, i18n.T(lang, "panelauth.conn_ok", count))
@@ -511,7 +511,7 @@ func (a *App) forcePanelConn(ctx context.Context, chatID int64) {
 	applyConnField(&cand, p.field, p.value)
 	a.joinPanelNetwork(ctx, cand)
 	if err := a.commitPanelConn(ctx, p.field, p.value); err != nil {
-		a.showPanelAuth(ctx, chatID, i18n.T(lang, "panelauth.save_fail", shortErr(err)))
+		a.showPanelAuth(ctx, chatID, saveFailNote(lang, err))
 		return
 	}
 	a.showPanelAuth(ctx, chatID, i18n.T(lang, "panelauth.saved_unchecked"))
@@ -536,6 +536,15 @@ func checkPanel(ctx context.Context, c *remnawave.Client) (int, error) {
 }
 
 var errNotConfigured = errors.New("бот не настроен")
+
+// saveFailNote — пояснение к несохранённой правке на языке админа: своя ошибка
+// «бот не настроен» переводится, остальные идут как есть.
+func saveFailNote(lang string, err error) string {
+	if errors.Is(err, errNotConfigured) {
+		return i18n.T(lang, "panelauth.not_configured")
+	}
+	return i18n.T(lang, "panelauth.save_fail", shortErr(err))
+}
 
 // commitPanelConn пишет адрес или токен в конфиг и базу и пересобирает
 // клиента. На ошибке записи откатывает только своё поле: остальное за это

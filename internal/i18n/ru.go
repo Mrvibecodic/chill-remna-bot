@@ -1211,6 +1211,7 @@ var ru = map[string]string{
 	"panelauth.conn_ok":          "✅ Сохранено, панель на связи. Пользователей в панели: %d.",
 	"panelauth.saved_unchecked":  "⚠️ Сохранено без проверки — бот уже ходит в панель с новым значением. Проверьте связь, когда панель будет готова.",
 	"panelauth.checking":         "⏳ Проверяю связь с панелью…",
+	"panelauth.not_configured":   "❌ Бот ещё не настроен — сначала пройдите мастер (/setup).",
 	"panelauth.key_none":         "не задан",
 	"panelauth.key_set":          "задан (<code>%s</code>)",
 	"panelauth.key_env":          "из переменной <code>CADDY_AUTH_API_TOKEN</code>",

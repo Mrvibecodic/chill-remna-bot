@@ -1211,6 +1211,7 @@ var en = map[string]string{
 	"panelauth.conn_ok":          "✅ Saved, the panel is reachable. Users in panel: %d.",
 	"panelauth.saved_unchecked":  "⚠️ Saved without check — the bot already uses the new value. Check the connection once the panel is ready.",
 	"panelauth.checking":         "⏳ Checking the panel connection…",
+	"panelauth.not_configured":   "❌ The bot is not set up yet — run the wizard first (/setup).",
 	"panelauth.key_none":         "not set",
 	"panelauth.key_set":          "set (<code>%s</code>)",
 	"panelauth.key_env":          "from the <code>CADDY_AUTH_API_TOKEN</code> variable",
