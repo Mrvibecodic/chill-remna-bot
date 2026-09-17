@@ -250,7 +250,7 @@ var en = map[string]string{
 		"• 📊 Status — panel connectivity and summary.\n" +
 		"• ⬆️ Update — pull new image and restart.\n" +
 		"• 🔗 Webhooks — receive panel and payment events.\n" +
-		"• 🌐 Subscription domain — single external host in subscription links.\n" +
+		"• 🔌 Panel connection — address, API token, proxy key and cookie, subscription domain.\n" +
 		"• 📡 API log — last 200 bot→panel requests.\n" +
 		"• 🔧 Reconfigure — restart DB and panel wizard.",
 	"btn.users":        "👥 Users",
@@ -523,12 +523,12 @@ var en = map[string]string{
 	"banners.need_photo":           "🖼 An image is required: send a photo (upload or file). Text cannot become a banner.",
 	"banners.btn_upload":           "📤 Upload new",
 	"banners.btn_reset":            "↩️ Reset to default",
-	"btn.subdomain":                "🧭 Sub-domain",
 	"subdomain.title":              "🌐 <b>Subscription domain override</b>\n\nStatus: %s\nCurrent domain: <code>%s</code>\n\nWhen enabled, the bot rewrites the host in the subscription link, keeping the path and shortId. Useful if you want to expose subscriptions via a single brand domain, hiding the panel host.",
 	"subdomain.on":                 "on ✅",
 	"subdomain.off":                "off ❌",
 	"subdomain.btn_change":         "✏️ Change domain",
 	"subdomain.btn_clear":          "↩️ Clear (use panel host)",
+	"subdomain.bad":                "❌ That doesn't look like a domain, nothing saved. Example: <code>vpn.mybrand.io</code>.",
 	"subdomain.ask":                "✏️ Send the subscription domain (e.g. <code>vpn.mybrand.io</code>), or «-» to disable rewriting.",
 	"btn.apilog":                   "📡 API log",
 	"apilog.title":                 "📡 <b>Outgoing API calls log (panel)</b>\nTotal: %d · page %d/%d",
@@ -1187,19 +1187,38 @@ var en = map[string]string{
 	"rsimp.report_access": "⚠️ Access mode: %s. Imported users did NOT get access — grant it in «Access» or from a user card, otherwise they cannot enter the bot.",
 	"rsimp.report_hint":   "Nothing else to do: panel subscriptions stay in place, the bot links them to the user on their first visit.",
 
-	// Экран «Доступ к панели» (секреты прокси перед панелью).
-	"btn.panelauth": "🔐 Panel access",
-	"panelauth.title": "🔐 <b>Panel access</b>\n\n" +
+	// Экран «Подключение к панели».
+	"btn.panelauth": "🔌 Panel connection",
+	"panelauth.title": "🔌 <b>Panel connection</b>\n\n" +
+		"Address: %s\n" +
+		"API token: %s\n" +
 		"X-Api-Key («Caddy with security» addon): %s\n" +
-		"Cookie (eGames installer proxy): %s\n\n" +
-		"These are secrets of the proxy in front of the panel, not of the panel itself: the panel may be locked down after the bot was installed, and the key may be rotated in the portal. Change them here without rerunning the wizard. The panel's own API token lives in «Reconfigure».",
+		"Cookie (eGames installer proxy): %s\n" +
+		"Subscription domain: %s\n\n" +
+		"Address and token are checked against the panel before saving. Key and cookie are secrets of the proxy in front of the panel: they are saved at once, then the bot checks the connection.",
+	"panelauth.addr_local":       "local, <code>%s</code>",
+	"panelauth.addr_set":         "<code>%s</code>",
+	"panelauth.btn_url":          "🌐 Panel address",
+	"panelauth.btn_token":        "🔑 API token",
+	"panelauth.btn_sub":          "🧭 Subscription domain",
+	"panelauth.btn_force":        "💾 Save without check",
+	"panelauth.btn_drop":         "✖️ Discard",
+	"panelauth.ask_url":          "🌐 Send the panel address, e.g. <code>https://panel.example.com</code>.\n\nFor a panel on this server in the shared docker network — <code>%s</code>.\n\nI'll check the connection with the current token before saving. The proxy key and cookie are reset when the server changes.",
+	"panelauth.ask_token":        "🔑 Send the new panel API token (Remnawave dashboard → API tokens).\n\nI'll check it against the panel before saving. Revoke the old token only after the bot confirms the connection.",
+	"panelauth.url_bad":          "❌ That doesn't look like a panel address, nothing saved. Expected <code>https://panel.example.com</code> — no spaces, parameters or login.",
+	"panelauth.token_bad":        "❌ The token is empty or contains spaces — nothing saved.",
+	"panelauth.conn_fail":        "❌ The panel does not answer with the new value, nothing saved. If the panel is down right now or you change address and token one by one — «Save without check».\n\n%s",
+	"panelauth.conn_ok":          "✅ Saved, the panel is reachable. Users in panel: %d.",
+	"panelauth.saved_unchecked":  "⚠️ Saved without check — the bot already uses the new value. Check the connection once the panel is ready.",
+	"panelauth.checking":         "⏳ Checking the panel connection…",
+	"panelauth.not_configured":   "❌ The bot is not set up yet — run the wizard first (/setup).",
 	"panelauth.key_none":         "not set",
 	"panelauth.key_set":          "set (<code>%s</code>)",
 	"panelauth.key_env":          "from the <code>CADDY_AUTH_API_TOKEN</code> variable",
 	"panelauth.key_env_stale":    "from the <code>CADDY_AUTH_API_TOKEN</code> variable; an old key is still stored in the database — remove it, or it comes back into use once the variable is gone",
 	"panelauth.cookie_none":      "not set",
 	"panelauth.cookie_set":       "set (<code>%s</code>)",
-	"panelauth.btn_key":          "🔑 Caddy key",
+	"panelauth.btn_key":          "🔐 Caddy key",
 	"panelauth.btn_key_clear":    "🗑 Remove key",
 	"panelauth.btn_cookie":       "🍪 eGames cookie",
 	"panelauth.btn_cookie_clear": "🗑 Remove cookie",

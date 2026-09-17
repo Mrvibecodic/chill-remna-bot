@@ -108,6 +108,7 @@ func TestAdminButtonWalk(t *testing.T) {
 		"menu:payments",
 		"menu:status",
 		"menu:subdomain", "subd:edit", "subd:cancel",
+		"menu:panelauth", "pauth:url", "pauth:token", "pauth:force", "pauth:drop", "pauth:check",
 		"menu:apilog", "alog:refresh",
 		"menu:webhooks", "wh:guide", "wh:public", "wh:domain", "wh:apply", "wh:base", "wh:secret",
 		"torj:home", "torj:tadm", "torj:tusr", "torj:log", "torj:text", "torj:strike",

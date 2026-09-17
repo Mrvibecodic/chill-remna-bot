@@ -401,16 +401,10 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
 		{btn(updLabel, "upd:toggle"), btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
-		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.subdomain"), "menu:subdomain")},
+		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
 		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
 		{btn(i18n.T(lang, "btn.mail"), "menu:mail")},
 		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
-	}
-	// Ключ/кука доступа к панели — только там, где панель вообще чем-то закрыта.
-	if a.panelAuthRelevant() {
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth"),
-		})
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
@@ -700,7 +694,7 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		}
 	case "subdomain":
 		if isAdmin {
-			a.showSubdomain(ctx, chatID)
+			a.showSubdomain(ctx, chatID, "")
 		}
 	case "panelauth":
 		if isAdmin {

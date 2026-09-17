@@ -2046,7 +2046,7 @@ func proxyGateErr(status int, where string) error {
 	}
 	return fmt.Errorf("запрос не дошёл до API панели (HTTP %d%s) — его увёл в сторону прокси перед ней. "+
 		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
-		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в «Система → Подключение к панели»; "+
 		"если панель ничем не закрыта — проверьте адрес панели, по нему отвечает не она", status, where)
 }
 
@@ -2056,7 +2056,7 @@ func proxyGateErr(status int, where string) error {
 func notPanelErr(status int) error {
 	return fmt.Errorf("по адресу панели отвечает веб-страница, а не API (HTTP %d). "+
 		"Если панель закрыта аддоном «Caddy with security» — задайте ключ в переменной CADDY_AUTH_API_TOKEN; "+
-		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в /setup; "+
+		"если прокси установщика eGames — укажите куку ИМЯ=ЗНАЧЕНИЕ в «Система → Подключение к панели»; "+
 		"иначе проверьте адрес панели", status)
 }
 
@@ -2088,7 +2088,7 @@ func classifyHTTP(resp *http.Response) error {
 		if httpsUpgrade(resp.Request, loc) {
 			return fmt.Errorf("панель отвечает только по https (HTTP %d → %s): "+
 				"адрес панели записан через http. Исправьте его на https:// — "+
-				"«Система → Перенастроить» или /setup", resp.StatusCode, loc)
+				"«Система → Подключение к панели»", resp.StatusCode, loc)
 		}
 		return proxyGateErr(resp.StatusCode, loc)
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:

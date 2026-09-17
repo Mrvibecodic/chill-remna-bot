@@ -24,7 +24,7 @@ func TestPanelAuthEditsSecrets(t *testing.T) {
 	ctx := context.Background()
 
 	a.handleCallback(ctx, cb(100, "menu:panelauth"))
-	if !strings.Contains(fm.joined(), "Доступ к панели") {
+	if !strings.Contains(fm.joined(), "Подключение к панели") {
 		t.Fatalf("экран не открылся; лог:\n%s", fm.joined())
 	}
 	// Старый ключ показан замаскированным, а не целиком.
@@ -141,7 +141,7 @@ func TestPanelAuthVerdictSurvives(t *testing.T) {
 	if !strings.Contains(last, "Панель на связи") {
 		t.Fatalf("вердикт не в экране; последнее живое сообщение:\n%s", last)
 	}
-	if !strings.Contains(last, "Доступ к панели") {
+	if !strings.Contains(last, "Подключение к панели") {
 		t.Fatalf("экран не отрисован вместе с вердиктом:\n%s", last)
 	}
 }
