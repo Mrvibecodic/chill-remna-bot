@@ -877,3 +877,30 @@ func TestTributeSubTakenTexts(t *testing.T) {
 		t.Fatalf("прежняя подписка: %q", fm.last())
 	}
 }
+
+// Оплата без Telegram ID (вход в Tribute по почте) не выдаётся, но админ о ней
+// узнаёт; бесплатное событие без ID его не беспокоит.
+func TestTributeNoTelegramID_NotifiesAdmin(t *testing.T) {
+	a, _, fm, _, patched := trbSaleApp(t)
+	ev := trbPaid(99, "monthly", 0)
+	delete(ev, "telegram_user_id")
+	ev["trb_user_id"] = "W-15408"
+	if handled, err := tributeEvent(t, a, ev); err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if *patched != nil {
+		t.Fatal("выдано без получателя")
+	}
+	if all := strings.Join(fm.texts, "\n"); !strings.Contains(all, "W-15408") || !strings.Contains(all, "990.00") {
+		t.Fatalf("админ не получил уведомление: %q", all)
+	}
+	fm2 := &fakeMsg{}
+	a.msg = fm2
+	ev["type"], ev["price"] = "trial", 0
+	if _, err := tributeEvent(t, a, ev); err != nil {
+		t.Fatal(err)
+	}
+	if len(fm2.texts) != 0 {
+		t.Fatalf("бесплатное событие потревожило админа: %v", fm2.texts)
+	}
+}

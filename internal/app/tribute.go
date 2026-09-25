@@ -289,6 +289,17 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	if chatID == 0 {
 		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "в вебхуке нет telegram_user_id — получатель неизвестен (событие %s)%s", wh.Name, wh.who())
 		a.log.Warn("tribute webhook: no telegram_user_id")
+		// Покупатель вошёл в Tribute по почте (веб-ссылка): деньги приняты, а
+		// выдать некому. Без уведомления это видно только в журнале.
+		paid := wh.Payload.Price
+		if paid == 0 {
+			paid = wh.Payload.Amount
+		}
+		if kind := strings.ToLower(strings.TrimSpace(wh.Payload.Type)); paid > 0 && kind != "trial" && kind != "gift" {
+			alang := a.lang(a.cfg.AdminID)
+			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.trb_no_tg",
+				html.EscapeString(tributeAmount(paid, wh.Payload.Currency)), html.EscapeString(strings.TrimSpace(wh.who()))))
+		}
 		return true, nil
 	}
 	days, months, periodOK := tributePeriod(wh.Payload.Period)

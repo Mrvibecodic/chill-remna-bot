@@ -1134,6 +1134,7 @@ var en = map[string]string{
 	"trb.btn_url":           "🔗 Basic plan link",
 	"trb.ask_key":           "Send the Tribute API key (it verifies the webhook signature and reads the subscription list):",
 	"trb.ask_url":           "Send the Tribute subscription link for the Basic plan (shown to the user):",
+	"admin.trb_no_tg":       "⚠️ Tribute payment without the buyer's Telegram ID — no subscription was issued.\nAmount: %s\nCustomer: %s\n\nMost likely they signed in to Tribute by e-mail via the web link: the bot cannot match such a payment to an account. Find the customer in the Tribute dashboard and grant access manually.",
 	"trb.sub_taken_old":     "❌ This subscription is a former subscription of the plan «%s» (its renewals grant that plan). Release it with the ♻️ button in the plan list.",
 	"trb.base_strict_note":  "ℹ️ The Basic plan has a subscription ID: unbound subscriptions grant nothing. The Basic plan link must point to exactly this subscription. «Unbind» restores the previous mode — unbound subscriptions will grant the Basic plan again.",
 	"trb.fg_base_link":      "⚠️ If the Basic plan link points to this subscription, replace it: after forgetting, payments on it may be rejected.",

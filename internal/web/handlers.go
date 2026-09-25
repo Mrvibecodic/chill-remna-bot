@@ -165,5 +165,8 @@ func (s *Server) handleTribute(w http.ResponseWriter, r *http.Request) {
 	if !handled {
 		s.log.Info("tribute webhook ignored")
 	}
+	// Tribute ждёт в ответ {"status":"ok"}.
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
