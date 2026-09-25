@@ -68,6 +68,8 @@ type fakeMsg struct {
 	// текстом, поэтому экранирование в них — ошибка, и проверять их надо
 	// отдельно от текста сообщения.
 	btnText []string
+	// urls — адреса URL-кнопок (ссылки оплаты).
+	urls []string
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -90,8 +92,20 @@ func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
 			if b.Text != "" {
 				f.btnText = append(f.btnText, b.Text)
 			}
+			if b.URL != "" {
+				f.urls = append(f.urls, b.URL)
+			}
 		}
 	}
+}
+
+// allURLs возвращает адреса всех отправленных URL-кнопок.
+func (f *fakeMsg) allURLs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.urls))
+	copy(out, f.urls)
+	return out
 }
 
 // buttonLabels возвращает подписи всех отправленных кнопок.

@@ -1618,6 +1618,10 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		a.onAccess(ctx, chatID, val)
 	case cbTorrent:
 		a.onTorrentAdmin(ctx, chatID, val)
+	case cbTribute:
+		if isAdmin {
+			a.onTributeAdmin(ctx, chatID, val)
+		}
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}

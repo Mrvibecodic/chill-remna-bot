@@ -191,6 +191,13 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 		if a.planAddSubOn(p) {
 			pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
 		}
+		// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
+		// получатель — telegram_user_id покупателя.
+		if tgID > 0 {
+			url, terms := a.tributeOffer(lang, p, p.Code)
+			pd.Tribute = url != ""
+			pd.TributeTerms = terms
+		}
 		cur := planCurrencyOr(p, fallbackCur)
 		// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
 		// подсвечивал третью из четырёх позиций).
@@ -329,7 +336,8 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// фронт кэширует до перезагрузки страницы, поэтому здесь окно расхождения
 	// шире, чем в чате: не секунды, а часы. Молча выставлять другую сумму
 	// нельзя; фронт по этой ошибке перечитывает тарифы.
-	if now := a.saleBase(s); priceMoved(shownPrice, now) {
+	// Tribute списывает свою цену, а не цену бота, — сверять нечего.
+	if now := a.saleBase(s); method != model.PayMethodTribute && priceMoved(shownPrice, now) {
 		cur := curSuffix(curSymbol(a.pricing().Currency))
 		a.payLog(ctx, "", "", tgID, "price_changed", "было %s стало %s plan=%s months=%d",
 			shownPrice, now, s.planCode(), s.Months)

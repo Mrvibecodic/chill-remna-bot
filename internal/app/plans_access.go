@@ -291,32 +291,60 @@ func (a *App) prunePlanAccess(ctx context.Context) {
 	}
 }
 
-// notifyPlanGateBreach — третья точка гейта: счёт выставлен, деньги приняты, а
-// доступ к тарифу к моменту финализации отозван (режим сменили, из списка
-// убрали, тариф выключили или удалили). Решение владельца: подписка ВЫДАЁТСЯ
-// по снимку — деньги уже приняты, клиент получает то, за что платил, — а админ
-// получает уведомление и разбирается сам.
-func (a *App) notifyPlanGateBreach(ctx context.Context, tgID int64, snap *model.PlanSnapshot) {
+// snapCodeOr — код тарифа снимка или запасной (снимок ещё не снят).
+func snapCodeOr(snap *model.PlanSnapshot, fallback string) string {
 	if snap == nil || snap.Code == "" {
-		return
+		return fallback
 	}
-	p, err := a.planByCode(ctx, snap.Code)
+	return snap.Code
+}
+
+// planGateBreach — причина, по которой тариф code сейчас закрыт покупателю
+// (пусто — открыт). Считается ДО финализации: после неё покупатель уже
+// «платил» и уже «на этом тарифе».
+func (a *App) planGateBreach(ctx context.Context, tgID int64, code string) string {
+	if code == "" {
+		return ""
+	}
+	p, err := a.planByCode(ctx, code)
 	if err != nil {
-		// База только что финализировала платёж — недоступность строки тарифа
-		// здесь маловероятна и не повод молчать о продаже.
-		return
+		// Недоступность строки тарифа здесь маловероятна и не повод
+		// молчать о продаже — но и выдумывать причину нельзя.
+		return ""
 	}
-	reason := ""
+	alang := a.lang(a.cfg.AdminID)
 	switch {
 	case p == nil:
-		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_deleted")
+		if code == model.PlanCodeBase {
+			// «Базовый» без строки — сбой стартовой синхронизации, продаёт
+			// сетка.
+			return ""
+		}
+		return i18n.T(alang, "plans.breach_deleted")
 	case !p.Enabled:
 		// «Базовый» теперь тоже выключается по-настоящему: продажа, успевшая
 		// проскочить до остановки, — такой же пробой гейта.
-		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_disabled")
+		return i18n.T(alang, "plans.breach_disabled")
 	case !a.planAccessibleFor(ctx, p, tgID):
-		reason = i18n.T(a.lang(a.cfg.AdminID), "plans.breach_revoked")
-	default:
+		// «Только новым»: платил до появления кодов тарифов (снимок без кода)
+		// — значит, был на «Базовом», и его продление «Базового» — не пробой.
+		// Для списка исключения нет: там продление без места в списке закрыто.
+		if p.Code == model.PlanCodeBase && model.NormalizeAvailability(p.Availability) == model.PlanAvailNew && a.userPlanCode(ctx, tgID) == "" {
+			if paid, err := a.hasPaidPayment(ctx, tgID); err == nil && paid {
+				return ""
+			}
+		}
+		return i18n.T(alang, "plans.breach_revoked")
+	}
+	return ""
+}
+
+// notifyPlanGateBreach — третья точка гейта: счёт оплачен, а тариф к этому
+// моменту закрыт покупателю. Подписка уже выдана по снимку (деньги приняты —
+// клиент получает то, за что платил), админ узнаёт и разбирается. reason
+// посчитан planGateBreach до финализации.
+func (a *App) notifyPlanGateBreach(ctx context.Context, tgID int64, snap *model.PlanSnapshot, reason string) {
+	if snap == nil || snap.Code == "" || reason == "" {
 		return
 	}
 	alang := a.lang(a.cfg.AdminID)

@@ -312,6 +312,54 @@ func (a *App) autoPayFollowPurchase(ctx context.Context, tgID int64, applied *mo
 	}
 }
 
+// dayDealResets — сбрасывать ли трафик при покупке срока в днях. Лимит в таком
+// снимке — месячного срока тарифа, поэтому продление того же тарифа, пока
+// подписка идёт, трафик не трогает: иначе месячный объём выдавался бы каждую
+// неделю, а обнуляет его стратегия сброса. Сброс — когда начинается новый
+// период: первая покупка, смена тарифа (израсходованное по старому лимиту
+// сразу упёрлось бы в новый), истёкшая подписка и стратегия без сброса.
+func dayDealResets(prev *model.PlanSnapshot, prevExpire string, snap *model.PlanSnapshot) bool {
+	if prev == nil || snap == nil || prev.Code != snap.Code || snap.Strategy == "NO_RESET" {
+		return true
+	}
+	exp, err := time.Parse(time.RFC3339, prevExpire)
+	return err != nil || !exp.After(time.Now())
+}
+
+// autoPayYield — оплата пришла способом, который продлевает подписку сам
+// (Tribute): включённое автосписание картой выключается, иначе за один срок
+// списывались бы оба. Снимок автосписания при этом переезжает на купленный
+// тариф (молча — человеку хватит одного сообщения): включив автопродление
+// обратно, он продлевал бы прежний тариф. Карта остаётся сохранённой.
+func (a *App) autoPayYield(ctx context.Context, tgID int64, method string, applied *model.PlanSnapshot) {
+	ap := a.getAutoPay(ctx, tgID)
+	if ap == nil {
+		return
+	}
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return
+	}
+	if applied != nil && applied.Code != "" && planCodeOf(ap.Snapshot) != applied.Code {
+		if err := st.UpdateAutoPaySnapshot(ctx, tgID, applied); err != nil {
+			a.log.Warn("autopay: снимок не обновлён после смены тарифа", "tg_id", tgID, "err", err)
+		} else {
+			a.payLog(ctx, ap.Method, "", tgID, "autopay_plan", "автосписание переведено на тариф %s", applied.Code)
+		}
+	}
+	if !ap.Enabled {
+		return
+	}
+	if err := st.SetAutoPayEnabled(ctx, tgID, false); err != nil {
+		a.log.Warn("autopay: не выключено после оплаты с автопродлением", "tg_id", tgID, "err", err)
+		return
+	}
+	a.payLog(ctx, ap.Method, "", tgID, "autopay_off", "выключено: подписку продлевает %s", methodLabel(method))
+	a.notify(ctx, tgID, i18n.T(a.lang(tgID), "ap.off_self_renew", methodLabel(method)))
+}
+
 // paidRub — сумма платежа в валюте сетки: «990 ₽» → «990». Пусто — сумма не в
 // рублях (звёзды, чужая валюта) или не разобрана. Кладётся в снимок сделки как
 // Paid: по ней потом считается зачёт остатка при смене тарифа.
