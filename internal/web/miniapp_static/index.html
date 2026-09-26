@@ -651,9 +651,9 @@ function buyPlan(code,months){
   if(!p||!d){boot();return;}
   var methods=[];
   if(STATE.balanceK>0)methods.push('balance');
-  // Tribute сам определяет период и цену и о тарифе не знает — кнопка только
-  // у «Базового» (сервер такой счёт всё равно не создаст).
-  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&code!=='base'))methods.push(m);});
+  // Tribute продаёт тариф своей подпиской: кнопка только у тарифов, к которым
+  // она привязана (сервер отмечает их полем tribute).
+  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&!p.tribute))methods.push(m);});
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
   // Согласие с документами: тот же гейт, что в чате (сервер всё равно откажет
   // в счёте, поэтому спрашиваем до выбора способа).
@@ -688,6 +688,9 @@ function buyPlan(code,months){
     // тарифов кэшируется до перезагрузки, и сервер обязан отличить показанную
     // цену от сегодняшней, а не списать молча другую сумму.
     h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this,\''+jsq(String(d.price||''))+'\')">'+(METHOD_LABELS[m]||m)+'</button>';
+    if(m==='tribute'&&p.tribute_terms&&p.tribute_terms.length){
+      h+='<div class="hint">Срок выбирается на странице Tribute. Подходят: '+esc(p.tribute_terms.join(', '))+' — другой срок доступа не выдаст.</div>';
+    }
     if(m==='yookassa'&&apOn){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }

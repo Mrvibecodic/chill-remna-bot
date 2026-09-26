@@ -69,7 +69,10 @@ export default defineConfig({
         },
         {
           label: 'Платежи',
-          items: [{ label: 'Вебхуки и reverse-proxy', slug: 'payments/webhooks' }],
+          items: [
+            { label: 'Вебхуки и reverse-proxy', slug: 'payments/webhooks' },
+            { label: 'Tribute', slug: 'payments/tribute' },
+          ],
         },
         {
           label: 'Справочник',

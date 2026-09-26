@@ -1062,6 +1062,35 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
+// ExtendUserDays — покупка срока в днях (недельная подписка Tribute). Поправка
+// зачёта extraDays сдвигает конец срока, но не раньше «сейчас + days» — как у
+// CreateOrUpdateUser. Трафик сбрасывается только при reset: лимит в снимке —
+// месячного срока тарифа, и сброс на каждом недельном продлении выдавал бы
+// месячный объём каждую неделю. Когда сбрасывать, решает вызывающий.
+func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, extraDays int, limits UserLimits, reset bool) (string, string, error) {
+	existing, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return "", "", err
+	}
+	expire := nextExpireDays(existing, days, extraDays)
+
+	if existing != nil && !existing.ref().Empty() {
+		if !ownedByBot(existing, telegramID) {
+			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
+		}
+		patch := existing.ref().apply(map[string]any{"expireAt": expire})
+		applyLimits(patch, limits)
+		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
+		if err == nil && reset {
+			_ = c.ResetTraffic(ctx, existing.ref())
+		}
+		return link, expireAt, err
+	}
+	body := newUserBody(telegramID, expire)
+	applyLimits(body, limits)
+	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+}
+
 func applyLimits(body map[string]any, l UserLimits) {
 	if l.TrafficSet || l.TrafficBytes > 0 {
 		body["trafficLimitBytes"] = l.TrafficBytes
@@ -1994,6 +2023,22 @@ func nextExpire(existing *panelUser, months, extraDays int) string {
 	// Поправка зачёта не может съесть купленные месяцы: как бы ни был мал
 	// остаток, оплаченный срок отсчитывается минимум от «сейчас».
 	if floor := now.AddDate(0, months, 0); next.Before(floor) {
+		next = floor
+	}
+	return next.Format(time.RFC3339)
+}
+
+// nextExpireDays — nextExpire для срока в днях.
+func nextExpireDays(existing *panelUser, days, extraDays int) string {
+	now := time.Now().UTC()
+	base := now
+	if existing != nil && existing.ExpireAt != "" {
+		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
+			base = t
+		}
+	}
+	next := base.AddDate(0, 0, days+extraDays)
+	if floor := now.AddDate(0, 0, days); next.Before(floor) {
 		next = floor
 	}
 	return next.Format(time.RFC3339)

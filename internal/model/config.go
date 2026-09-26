@@ -872,7 +872,73 @@ func (c HeleketConfig) LifetimeOrDefault() int {
 type TributeConfig struct {
 	Enabled bool   `json:"enabled"`
 	APIKey  string `json:"api_key"`
-	PayURL  string `json:"pay_url"`
+	// PayURL — ссылка на подписку Tribute тарифа «Базовый».
+	PayURL string `json:"pay_url"`
+	// Links — привязки тарифов к подпискам Tribute. По subscription_id из
+	// вебхука бот узнаёт, какой тариф оплачен. Подписка без привязки выдаёт
+	// «Базовый» по периоду — пока у самого «Базового» не задан ID подписки.
+	// У тарифа одна текущая подписка и сколько угодно прежних (Old).
+	Links []TributeLink `json:"links,omitempty"`
+}
+
+// TributeLink — подписка Tribute, продающая тариф.
+type TributeLink struct {
+	Plan  string `json:"plan"`
+	SubID int64  `json:"sub_id"`
+	// Name и Periods — название и периоды подписки на момент привязки, для
+	// экрана админки. На выдачу не влияют.
+	Name    string   `json:"name,omitempty"`
+	Periods []string `json:"periods,omitempty"`
+	// URL — ссылка оплаты тарифа. У «Базового» не используется: его ссылка —
+	// PayURL.
+	URL string `json:"url,omitempty"`
+	// Old — прежняя подписка тарифа (тариф перепривязали или отвязали):
+	// кнопки оплаты у неё нет, но продления её подписчиков по-прежнему выдают
+	// тариф — они платят именно за него.
+	Old bool `json:"old,omitempty"`
+}
+
+// Clone — копия с собственным срезом привязок: конфиг читают без замка.
+func (c TributeConfig) Clone() TributeConfig {
+	if c.Links != nil {
+		links := make([]TributeLink, len(c.Links))
+		for i, l := range c.Links {
+			l.Periods = append([]string(nil), l.Periods...)
+			links[i] = l
+		}
+		c.Links = links
+	}
+	return c
+}
+
+// LinkFor — текущая привязка тарифа или nil.
+func (c TributeConfig) LinkFor(plan string) *TributeLink {
+	for i := range c.Links {
+		if c.Links[i].Plan == plan && !c.Links[i].Old {
+			return &c.Links[i]
+		}
+	}
+	return nil
+}
+
+// LinkBySub — привязка подписки Tribute (текущая или прежняя) или nil.
+func (c TributeConfig) LinkBySub(subID int64) *TributeLink {
+	if subID == 0 {
+		return nil
+	}
+	for i := range c.Links {
+		if c.Links[i].SubID == subID {
+			return &c.Links[i]
+		}
+	}
+	return nil
+}
+
+// StrictSubs — задан ли ID подписки у «Базового». Тогда подписки без
+// привязки не выдают ничего: их продают чужие каналы автора.
+func (c TributeConfig) StrictSubs() bool {
+	l := c.LinkFor(PlanCodeBase)
+	return l != nil && l.SubID != 0
 }
 
 // MiniAppConfig toggles the Telegram Mini App / web cabinet. Disabled by

@@ -526,7 +526,8 @@ func (a *App) forgetPlanInput(chatID int64) {
 	case "plan_name", "plan_desc", "plan_icon", "plan_access",
 		"plan_addsub_name", "plan_addsub_desc",
 		"baseprice", "price", "ykprice", "starprice",
-		"traffic_gb", "device_per", "device_limit", "currency":
+		"traffic_gb", "device_per", "device_limit", "currency",
+		"trb_plid", "trb_plurl":
 		ui.adminInput = ""
 		ui.inputBack = ""
 		ui.priceMonths = 0

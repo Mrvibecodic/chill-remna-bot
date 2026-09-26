@@ -112,6 +112,12 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 // и возвращает nil. Прямой наследник buyMonthsOrAsk: фолбэков «считаем, что
 // месяц» здесь нет и не будет.
 func (a *App) saleOrAsk(ctx context.Context, chatID int64) *sale {
+	return a.saleOrAskPrice(ctx, chatID, true)
+}
+
+// saleOrAskPrice — то же, что saleOrAsk; checkPrice=false отключает сверку
+// показанной цены — для способов, где платят не цену бота (Tribute).
+func (a *App) saleOrAskPrice(ctx context.Context, chatID int64, checkPrice bool) *sale {
 	s, err := a.saleFor(ctx, chatID)
 	if err != nil {
 		// Хранилище недоступно: витрина замкнула бы человека в круг без единого
@@ -127,7 +133,7 @@ func (a *App) saleOrAsk(ctx context.Context, chatID int64) *sale {
 	}
 	// Единственная точка, через которую идут ВСЕ способы оплаты в чате, —
 	// здесь и стоит сверка показанной цены с текущей.
-	if a.askPriceMoved(ctx, chatID, s) {
+	if checkPrice && a.askPriceMoved(ctx, chatID, s) {
 		return nil
 	}
 	return s

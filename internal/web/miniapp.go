@@ -307,6 +307,12 @@ type MiniPlanDTO struct {
 	// «опция продаётся с тарифом», иначе фронт её не показывает.
 	AddSubName string `json:"addsub_name,omitempty"`
 	AddSubDesc string `json:"addsub_desc,omitempty"`
+	// Tribute — тариф продаётся через Tribute (привязана подписка). Способ
+	// общий в списке, но кнопка есть только у таких тарифов.
+	Tribute bool `json:"tribute,omitempty"`
+	// TributeTerms — сроки, которые бот выдаёт по подписке Tribute тарифа
+	// (пусто — периоды подписки неизвестны).
+	TributeTerms []string `json:"tribute_terms,omitempty"`
 	// Durations — продаваемые сроки тарифа.
 	Durations []MiniDurationDTO `json:"durations"`
 }

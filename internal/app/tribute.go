@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/storage"
 	"remnabot/internal/web"
 )
 
@@ -23,32 +27,115 @@ func (a *App) tributeCfg() model.TributeConfig {
 	if a.botCfg == nil {
 		return model.TributeConfig{}
 	}
-	return a.botCfg.Tribute
+	return a.botCfg.Tribute.Clone()
+}
+
+// tributeURLFor — ссылка оплаты тарифа через Tribute или "", если Tribute им
+// не торгует. Тариф без ID подписки ссылку не получает: вебхук по такой оплате
+// не узнал бы тариф и выдал бы «Базовый».
+func (a *App) tributeURLFor(code string) string {
+	cfg := a.tributeCfg()
+	if !cfg.Enabled {
+		return ""
+	}
+	if code == "" || code == model.PlanCodeBase {
+		if validButtonURL(cfg.PayURL) {
+			return cfg.PayURL
+		}
+		return ""
+	}
+	l := cfg.LinkFor(code)
+	if l == nil || l.SubID == 0 || !validButtonURL(l.URL) {
+		return ""
+	}
+	return l.URL
+}
+
+// tributeOffer — ссылка оплаты тарифа через Tribute и сроки, которые бот по
+// ней выдаст. p — строка тарифа (nil у «Базового» из сетки). Пустая ссылка —
+// Tribute у тарифа нет, в том числе когда периоды подписки известны и ни один
+// не выдаётся: такая оплата ушла бы в отказ. Сроки пустые — периоды
+// подписки неизвестны (ID введён вручную или у «Базового» подписки нет).
+func (a *App) tributeOffer(lang string, p *model.Plan, code string) (string, []string) {
+	url := a.tributeURLFor(code)
+	if url == "" {
+		return "", nil
+	}
+	l := a.tributeCfg().LinkFor(code)
+	if l == nil || len(l.Periods) == 0 {
+		return url, nil
+	}
+	if p == nil && code != "" && code != model.PlanCodeBase {
+		return "", nil
+	}
+	var terms []string
+	seen := map[string]bool{}
+	for _, per := range l.Periods {
+		days, months, ok := tributePeriod(per)
+		if !ok {
+			continue
+		}
+		sale, term := months, monthsWord(lang, months)
+		if days > 0 {
+			sale, term = 1, i18n.T(lang, "trb.week")
+		}
+		if !a.tributeCovers(p, sale) || seen[term] {
+			continue
+		}
+		seen[term] = true
+		terms = append(terms, term)
+	}
+	if len(terms) == 0 {
+		return "", nil
+	}
+	return url, terms
+}
+
+// saleTitleHTML — имя продаваемого тарифа для текста сообщения.
+func (a *App) saleTitleHTML(ctx context.Context, lang string, s *sale) string {
+	if s != nil && s.Plan != nil {
+		return planTitleHTML(lang, s.Plan)
+	}
+	if p := a.basePlanRow(ctx); p != nil {
+		return planTitleHTML(lang, p)
+	}
+	a.mu.Lock()
+	_, name := a.basePlanIdentLocked()
+	a.mu.Unlock()
+	return html.EscapeString(name)
 }
 
 func (a *App) startTribute(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	cfg := a.tributeCfg()
-	// Второй рубеж: битая ссылка могла попасть в настройки до появления
-	// проверки при вводе. Кнопку с ней Telegram отвергает вместе со всем
-	// сообщением, и человек не получает НИЧЕГО — честнее сказать «не
-	// настроено».
-	if !cfg.Enabled || !validButtonURL(cfg.PayURL) {
-		a.sendHome(ctx, chatID, i18n.T(lang, "trb.not_configured"))
+	// Тариф и срок — из намерения покупки, с тем же гейтом доступности, что у
+	// остальных способов: счёт живёт на стороне Tribute, и вторая точка гейта
+	// здесь, при выдаче ссылки. Цену бота не сверяем: платят цену Tribute.
+	s := a.saleOrAskPrice(ctx, chatID, false)
+	if s == nil {
 		return
 	}
-	// Tribute продаёт только «Базовый», и счёт живёт на стороне Tribute —
-	// вторая точка гейта здесь, при выдаче ссылки.
-	if !a.baseSaleAllowed(ctx, chatID) {
-		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"))
-		a.showPlans(ctx, chatID)
+	// Битая ссылка (сохранённая до проверки при вводе) сюда не попадает:
+	// кнопку с ней Telegram отвергает вместе со всем сообщением.
+	url, terms := a.tributeOffer(lang, s.Plan, s.planCode())
+	if url == "" {
+		if !a.tributeCfg().Enabled {
+			a.sendHome(ctx, chatID, i18n.T(lang, "trb.not_configured"))
+			return
+		}
+		// Старая кнопка с экрана другого тарифа: у выбранного Tribute нет.
+		a.notify(ctx, chatID, i18n.T(lang, "trb.plan_unavailable"))
+		a.showMethodsSale(ctx, chatID, s)
 		return
 	}
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "trb.pay_prompt"), [][]models.InlineKeyboardButton{
-		{{Text: i18n.T(lang, "trb.btn_pay"), URL: cfg.PayURL}},
+	text := i18n.T(lang, "trb.pay_prompt", a.saleTitleHTML(ctx, lang, s))
+	if len(terms) > 0 {
+		text += "\n\n" + i18n.T(lang, "trb.pay_terms", html.EscapeString(strings.Join(terms, ", ")))
+	}
+	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
+		{{Text: i18n.T(lang, "trb.btn_pay"), URL: url}},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -91,8 +178,11 @@ func tributePeriod(period string) (days, months int, ok bool) {
 type tributeWebhook struct {
 	Name    string `json:"name"`
 	Payload struct {
-		SubscriptionID int    `json:"subscription_id"`
-		Period         string `json:"period"`
+		// SubscriptionID — подписка автора (общая для всех её подписчиков):
+		// по ней находится тариф. SubscriptionName — для журнала.
+		SubscriptionID   int64  `json:"subscription_id"`
+		SubscriptionName string `json:"subscription_name"`
+		Period           string `json:"period"`
 		// Price — сколько заплатил клиент, Amount — сколько осталось после
 		// комиссии Tribute. Обе суммы в минимальных единицах валюты.
 		Price    int64  `json:"price"`
@@ -118,7 +208,14 @@ type tributeWebhook struct {
 // who — приписка к журналу, по которой платёж сопоставляется с кабинетом
 // Tribute, даже если Telegram ID не пришёл.
 func (wh tributeWebhook) who() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
+	if wh.Payload.SubscriptionID != 0 {
+		sub := "подписка #" + strconv.FormatInt(wh.Payload.SubscriptionID, 10)
+		if n := strings.TrimSpace(wh.Payload.SubscriptionName); n != "" {
+			sub += " «" + truncRunes(n, 64) + "»"
+		}
+		parts = append(parts, sub)
+	}
 	if wh.Payload.TrbUserID != "" {
 		parts = append(parts, "trb="+wh.Payload.TrbUserID)
 	}
@@ -192,6 +289,17 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	if chatID == 0 {
 		a.payLog(ctx, model.PayMethodTribute, "", 0, "error", "в вебхуке нет telegram_user_id — получатель неизвестен (событие %s)%s", wh.Name, wh.who())
 		a.log.Warn("tribute webhook: no telegram_user_id")
+		// Покупатель вошёл в Tribute по почте (веб-ссылка): деньги приняты, а
+		// выдать некому. Без уведомления это видно только в журнале.
+		paid := wh.Payload.Price
+		if paid == 0 {
+			paid = wh.Payload.Amount
+		}
+		if kind := strings.ToLower(strings.TrimSpace(wh.Payload.Type)); paid > 0 && kind != "trial" && kind != "gift" {
+			alang := a.lang(a.cfg.AdminID)
+			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.trb_no_tg",
+				html.EscapeString(tributeAmount(paid, wh.Payload.Currency)), html.EscapeString(strings.TrimSpace(wh.who()))))
+		}
 		return true, nil
 	}
 	days, months, periodOK := tributePeriod(wh.Payload.Period)
@@ -212,6 +320,16 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	}
 	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "webhook", "%s period=%s amount=%s%s", wh.Name, wh.Payload.Period, amount, wh.who())
 
+	// Повтор уже выданной оплаты отсекается раньше всех отказов: иначе
+	// повторная доставка после смены привязок звала бы админа и покупателя по
+	// подписке, которая давно выдана.
+	if a.store != nil {
+		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
+			a.payLog(ctx, model.PayMethodTribute, extID, chatID, "duplicate", "уже финализирован, вебхук пропущен")
+			return true, nil
+		}
+	}
+
 	// Триал и подарок подпиской НЕ являются. Триал у нас бесплатный, свой,
 	// выдаётся ботом без всякой платёжки и помечается «использован»; выдавать
 	// за него полный оплаченный месяц — это раздача подписок за ноль рублей по
@@ -226,36 +344,58 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	// Неизвестный период не продаётся. Раньше он молча становился месяцем —
 	// то есть бот продавал срок, которого не понимает.
 	if !periodOK {
-		a.tributeRejected(ctx, extID, chatID, "неизвестный период %q — подписка не выдана", wh.Payload.Period)
+		a.tributeRejected(ctx, extID, chatID, amount, "неизвестный период %q%s", wh.Payload.Period, wh.who())
 		return true, nil
 	}
-	// Срок обязан быть в сетке: из неё берутся трафик, лимит устройств и
-	// сквады. Для срока вне сетки трафик равен нулю, а ноль в панели означает
-	// БЕЗЛИМИТ — покупатель получал безлимитный трафик по цене базового
-	// тарифа. Проверка та же, что у всех остальных путей продажи.
 	saleMonths := months
 	if saleMonths == 0 {
 		// Недельная подписка: условия берём по ближайшему проданному сроку —
-		// месячному. Если и его нет в сетке, продавать нечего.
+		// месячному. Если и его нет, продавать нечего.
 		saleMonths = 1
 	}
-	if !a.periodOnSale(saleMonths) {
-		a.tributeRejected(ctx, extID, chatID, "срок %d мес. не продаётся (period=%q) — подписка не выдана", saleMonths, wh.Payload.Period)
+	plan, reason, err := a.tributePlanFor(ctx, cfg, wh.Payload.SubscriptionID)
+	if err != nil {
+		// Хранилище недоступно: ошибка уходит в 5xx, и Tribute повторит доставку.
+		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "error", "тариф подписки не прочитан: %v", err)
+		return false, fmt.Errorf("tribute plan %s: %w", extID, err)
+	}
+	if reason != "" {
+		a.tributeRejected(ctx, extID, chatID, amount, "%s%s", reason, wh.who())
 		return true, nil
 	}
-	if a.store != nil {
-		if done, _ := a.store.PaymentByExtID(ctx, extID); done {
-			a.payLog(ctx, model.PayMethodTribute, extID, chatID, "duplicate", "уже финализирован, вебхук пропущен")
+	// Срок обязан продаваться в тарифе: из него берутся трафик, лимит
+	// устройств и сквады. Для срока вне сетки трафик равен нулю, а ноль в
+	// панели означает БЕЗЛИМИТ — покупатель получал бы безлимит по чужой цене.
+	// Проверка та же, что у всех остальных путей продажи.
+	var snap *model.PlanSnapshot
+	if plan == nil {
+		if !a.periodOnSale(saleMonths) {
+			a.tributeRejected(ctx, extID, chatID, amount, "в тарифе «Базовый» нет срока %d мес. (period=%q)%s", saleMonths, wh.Payload.Period, wh.who())
 			return true, nil
 		}
+		snap = a.planSnapshot(saleMonths)
+	} else {
+		d := plan.Duration(saleMonths)
+		if d == nil || d.Base == "" {
+			a.tributeRejected(ctx, extID, chatID, amount, "в тарифе %q нет срока %d мес. (period=%q)%s", plan.Code, saleMonths, wh.Payload.Period, wh.who())
+			return true, nil
+		}
+		snap = a.planSnapshotOf(plan, d, saleMonths)
 	}
-	// Снимок собирается явно, чтобы проставить в него фактический срок в днях:
-	// ядро выдачи по нему продлевает днями, а не календарными месяцами.
-	snap := a.planSnapshot(saleMonths)
+	// Фактический срок в днях — в снимок: ядро выдачи по нему продлевает днями,
+	// а не календарными месяцами. Цена снимка — цена месячного срока тарифа,
+	// поэтому стоимость недели оценивается долей от неё (Paid): иначе при
+	// смене тарифа неделя зачлась бы как месяц. Рублёвая оплата в рублёвый
+	// тариф перезапишет оценку фактической суммой.
 	if snap != nil && days > 0 {
 		snap.Days = days
+		snap.Paid = scaledPrice(snap.Price, days, saleMonths*30)
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, saleMonths, model.PayMethodTribute, amount, extID, snap)
+	if errors.Is(err, storage.ErrDuplicateExtID) {
+		// Параллельная доставка того же события уже выдала подписку.
+		return true, nil
+	}
 	if err != nil {
 		a.payLog(ctx, model.PayMethodTribute, extID, chatID, "finalize_error", "%v", err)
 		return false, fmt.Errorf("tribute finalize %s: %w", extID, err)
@@ -265,14 +405,57 @@ func (a *App) HandleTributeWebhook(ctx context.Context, signatureHex string, bod
 	return true, nil
 }
 
+// scaledPrice — доля цены срока в periodDays дней на days дней. Пусто, если
+// цену не разобрать.
+func scaledPrice(price string, days, periodDays int) string {
+	k, ok := rubToKopecks(price)
+	if !ok || k <= 0 || days <= 0 || periodDays <= 0 {
+		return ""
+	}
+	v := (k*int64(days) + int64(periodDays)/2) / int64(periodDays)
+	if v <= 0 {
+		return ""
+	}
+	return kopecksToRub(v)
+}
+
+// tributePlanFor — какой тариф продаёт подписка Tribute. nil без причины —
+// «Базовый» (сетка конфига); непустая причина — оплату выдавать нельзя;
+// ошибка — хранилище недоступно.
+func (a *App) tributePlanFor(ctx context.Context, cfg model.TributeConfig, subID int64) (*model.Plan, string, error) {
+	l := cfg.LinkBySub(subID)
+	if l == nil {
+		// Подписки без привязки выдают «Базовый» по периоду, как до появления
+		// привязок, — пока у «Базового» не задан ID своей подписки. Тогда
+		// непривязанная подписка — чужой канал автора, и выдавать по ней нечего.
+		if cfg.StrictSubs() {
+			return nil, fmt.Sprintf("подписка Tribute #%d не привязана ни к одному тарифу", subID), nil
+		}
+		return nil, "", nil
+	}
+	if l.Plan == model.PlanCodeBase {
+		return nil, "", nil
+	}
+	p, err := a.planByCode(ctx, l.Plan)
+	if err != nil {
+		return nil, "", err
+	}
+	if p == nil {
+		return nil, fmt.Sprintf("подписка Tribute #%d привязана к тарифу %q, которого больше нет", subID, l.Plan), nil
+	}
+	return p, "", nil
+}
+
 // tributeRejected — оплата принята Tribute, но выдать по ней нечего. Отвечаем
 // 200: ретраи сутки подряд ничего не изменят, а человека и админа надо звать
 // сейчас.
-func (a *App) tributeRejected(ctx context.Context, extID string, chatID int64, format string, args ...any) {
-	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "error", format, args...)
+func (a *App) tributeRejected(ctx context.Context, extID string, chatID int64, amount, format string, args ...any) {
+	reason := fmt.Sprintf(format, args...)
+	a.payLog(ctx, model.PayMethodTribute, extID, chatID, "error", "%s — подписка не выдана", reason)
 	alang := a.lang(a.cfg.AdminID)
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pay_no_period", model.PayMethodTribute, extID, a.userLabelByID(ctx, chatID)))
-	a.notify(ctx, chatID, i18n.T(a.lang(chatID), "pay.no_period"))
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.trb_rejected",
+		html.EscapeString(extID), html.EscapeString(amount), html.EscapeString(reason), a.userLabelByID(ctx, chatID)))
+	a.notify(ctx, chatID, i18n.T(a.lang(chatID), "trb.user_rejected"))
 }
 
 // tributeRefunded — Tribute вернул деньги по цифровому товару. Событий возврата
@@ -297,70 +480,4 @@ func (a *App) tributeRefunded(ctx context.Context, wh tributeWebhook) {
 	alang := a.lang(a.cfg.AdminID)
 	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.refunded",
 		model.PayMethodTribute, extID, a.userLabelByID(ctx, chatID), amount))
-}
-
-func (a *App) showTributeAdmin(ctx context.Context, chatID int64) {
-	lang := a.lang(chatID)
-	cfg := a.tributeCfg()
-	status := i18n.T(lang, "admin.off")
-	if cfg.Enabled {
-		status = i18n.T(lang, "admin.on")
-	}
-	key := i18n.T(lang, "admin.no")
-	if cfg.APIKey != "" {
-		key = i18n.T(lang, "admin.yes")
-	}
-	url := cfg.PayURL
-	if url == "" {
-		url = i18n.T(lang, "admin.none")
-	}
-	text := i18n.T(lang, "trb.title", status, key, url)
-	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
-		{toggleBtn(lang, cfg.Enabled, "trb:toggle")},
-		{btn(i18n.T(lang, "trb.btn_key"), "trb:key"), btn(i18n.T(lang, "trb.btn_url"), "trb:url")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
-	})
-}
-
-func (a *App) onTributeAdmin(ctx context.Context, chatID int64, val string) {
-	lang := a.lang(chatID)
-	switch val {
-	case "toggle":
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.Tribute.Enabled = !a.botCfg.Tribute.Enabled
-		}
-		a.mu.Unlock()
-		_ = a.saveBotConfig(ctx)
-		a.showTributeAdmin(ctx, chatID)
-	case "key":
-		a.getUI(chatID).adminInput = "trb_key"
-		a.askInput(ctx, chatID, i18n.T(lang, "trb.ask_key"), "menu:tribute")
-	case "url":
-		a.getUI(chatID).adminInput = "trb_url"
-		a.askInput(ctx, chatID, i18n.T(lang, "trb.ask_url"), "menu:tribute")
-	}
-}
-
-func (a *App) setTributeField(ctx context.Context, chatID int64, field, text string) {
-	text = strings.TrimSpace(text)
-	// Ссылка оплаты уходит в кнопку: битый адрес Telegram отвергает вместе со
-	// ВСЕМ сообщением, и человек, нажавший «оплатить через Tribute», не
-	// получает ничего.
-	if field == "trb_url" && text != "" && !validButtonURL(text) {
-		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "trb.url_bad"))
-		return
-	}
-	a.mu.Lock()
-	if a.botCfg != nil {
-		switch field {
-		case "trb_key":
-			a.botCfg.Tribute.APIKey = text
-		case "trb_url":
-			a.botCfg.Tribute.PayURL = text
-		}
-	}
-	a.mu.Unlock()
-	_ = a.saveBotConfig(ctx)
-	a.showTributeAdmin(ctx, chatID)
 }

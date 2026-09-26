@@ -103,19 +103,21 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		return url, false, err
 
 	case model.PayMethodTribute:
-		// Tribute — внешняя фиксированная ссылка: код тарифа и его цену в неё
-		// не передать, поэтому через Tribute продаётся только «Базовый».
-		if s.Plan != nil {
-			return "", false, errors.New("оплата недоступна")
+		// Tribute выдаёт подписку по telegram_user_id покупателя: аккаунту
+		// кабинета без Telegram (отрицательный ID) её не сопоставить.
+		if tgID <= 0 {
+			return "", false, errUserText(i18n.T(a.lang(tgID), "trb.mini_tg_only"))
 		}
-		cfg := a.tributeCfg()
-		if !cfg.Enabled || !validButtonURL(cfg.PayURL) {
-			return "", false, errors.New("оплата недоступна")
+		// Ссылка — подписка Tribute, привязанная к тарифу; тариф по ней
+		// узнаёт вебхук.
+		url, _ := a.tributeOffer(a.lang(tgID), s.Plan, s.planCode())
+		if url == "" {
+			return "", false, errUserText(i18n.T(a.lang(tgID), "trb.plan_unavailable"))
 		}
 		if a.store != nil {
 			_ = a.store.UpsertUser(ctx, tgID)
 		}
-		return cfg.PayURL, false, nil
+		return url, false, nil
 	}
 	return "", false, errors.New("неизвестный способ оплаты")
 }

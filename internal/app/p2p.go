@@ -322,9 +322,10 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
-	// Tribute сам определяет период и цену и о выбранном тарифе не знает —
-	// кнопка остаётся только у «Базового».
-	if s.Plan == nil && a.tributeCfg().Enabled && a.tributeCfg().PayURL != "" {
+	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
+	// привязанной подпиской (у «Базового» — со ссылкой оплаты). Сравнивается
+	// код: «Базовый» с витрины приходит строкой тарифа, а не пустым Plan.
+	if url, _ := a.tributeOffer(lang, s.Plan, s.planCode()); url != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
 	}
 
@@ -1056,6 +1057,10 @@ func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnap
 // текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
 // созданные до появления снимков).
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
+	// Доступность тарифа оценивается по состоянию ДО покупки: после неё
+	// человек уже «платил» и уже «на этом тарифе», и гейты «только новым» /
+	// «только действующим» задним числом всегда сходились бы.
+	breach := a.planGateBreach(ctx, telegramID, snapCodeOr(snap, model.PlanCodeBase))
 	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap)
 	if err == nil {
 		// Доп-подписка применяется ПОСЛЕ ядра: это ещё один поход в панель, а
@@ -1066,13 +1071,19 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		a.syncAddSubSnap(ctx, telegramID, true, applied)
 		// Автосписание следует за последней сделкой: купил другой тариф любым
 		// способом — продлеваться должен ОН, а не молча возвращаться прежний.
-		a.autoPayFollowPurchase(ctx, telegramID, applied)
+		// Tribute продлевает подписку сам: автосписание картой рядом с ним
+		// списывало бы второй раз за тот же срок.
+		if method == model.PayMethodTribute {
+			a.autoPayYield(ctx, telegramID, method, applied)
+		} else {
+			a.autoPayFollowPurchase(ctx, telegramID, applied)
+		}
 		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
 		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
 		// владельца: деньги приняты — клиент получает то, за что платил), админ
 		// узнаёт и разбирается. Вызов ПОСЛЕ ядра — по той же причине, что и
 		// доп-подписка: чтения базы и поход в Telegram под замком не живут.
-		a.notifyPlanGateBreach(ctx, telegramID, applied)
+		a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
 	}
 	return link, expireAt, err
 }
@@ -1112,7 +1123,11 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// Фактически уплаченная цена — в снимок: по ней считается зачёт остатка
 	// при БУДУЩЕЙ смене тарифа (скидочные переопределения способа не должны
 	// зачитываться по полной цене).
-	if paid := paidRub(amount); paid != "" {
+	// У Tribute валюта суммы — его собственная, а не валюта тарифа: рубли,
+	// уплаченные за долларовый тариф, в Paid превратились бы в доллары.
+	// Остальные способы подписывают сумму «₽» и в нерублёвой сетке, число в
+	// ней — в валюте сетки, поэтому проверка только для Tribute.
+	if paid := paidRub(amount); paid != "" && (method != model.PayMethodTribute || rubCurrency(snap.Currency)) {
 		snap.Paid = paid
 	}
 	limits := remnawave.UserLimits{
@@ -1162,16 +1177,12 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// Снимок с явной длительностью в днях выдаётся днями, а не календарными
 	// месяцами: Tribute продаёт недельную подписку, и «месяцев × 30» превращало
 	// неделю в месяц. Остальные способы Days не ставят и идут прежней веткой.
+	// Поправка зачёта и нижняя граница «сейчас + купленное» — те же, что у
+	// продления месяцами.
 	var link, expireAt string
 	var err error
 	if snap.Days > 0 {
-		days := snap.Days + extraDays
-		if days < 1 {
-			// Зачёт при смене тарифа не может съесть весь оплаченный срок:
-			// человек заплатил, значит хотя бы день он получает.
-			days = 1
-		}
-		link, expireAt, err = panel.CreateOrUpdateUserDays(ctx, telegramID, days, limits)
+		link, expireAt, err = panel.ExtendUserDays(ctx, telegramID, snap.Days, extraDays, limits, dayDealResets(prevSnap, prevExpire, snap))
 	} else {
 		link, expireAt, err = panel.CreateOrUpdateUser(ctx, telegramID, months, extraDays, limits)
 	}
@@ -1555,6 +1566,11 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setTributeField(ctx, chatID, field, text)
+	case "trb_plid", "trb_plurl":
+		field, code := ui.adminInput, ui.planCode
+		ui.adminInput = ""
+		ui.planCode = ""
+		a.setTributeLinkField(ctx, chatID, code, field, text)
 	case "panel_apikey", "panel_cookie":
 		field := ui.adminInput
 		ui.adminInput = ""
