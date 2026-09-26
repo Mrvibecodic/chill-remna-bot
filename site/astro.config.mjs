@@ -44,7 +44,8 @@ export default defineConfig({
           content: `(function(){if(location.pathname!=='/'&&location.pathname!=='/index.html')return;var m={'#features':'/start/features/','#channels':'/ops/channels/','#install':'/start/install/','#wizard':'/start/wizard/','#admin':'/admin/overview/','#payments':'/start/features/','#webhooks':'/payments/webhooks/','#commands':'/reference/commands/','#env':'/reference/env/','#update':'/ops/update/','#faq':'/ops/faq/'};var t=m[location.hash];if(t)location.replace(t);})();`,
         },
 
-        { tag: 'meta', attrs: { property: 'og:image', content: 'https://remna.shop/icon-512.png' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://remna.shop/og.png' } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
       ],
       sidebar: [
         {
