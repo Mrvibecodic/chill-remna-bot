@@ -372,12 +372,14 @@
   {
    "name": "minimal_cabinet_login",
    "src": "/screens/dark/minimal/minimal_cabinet_login.webp",
-   "caption": "Веб-кабинет: вход"
+   "caption": "Веб-кабинет: вход",
+   "wide": true
   },
   {
    "name": "minimal_cabinet_home",
    "src": "/screens/dark/minimal/minimal_cabinet_home.webp",
-   "caption": "Веб-кабинет: главный экран"
+   "caption": "Веб-кабинет: главный экран",
+   "wide": true
   }
  ],
  "miniapp": [
@@ -431,7 +433,8 @@
   {
    "name": "cabinet_main_desktop",
    "src": "/screens/cabinet/cabinet_main_desktop.webp",
-   "caption": "Главный экран кабинета (десктоп)"
+   "caption": "Главный экран кабинета (десктоп)",
+   "wide": true
   },
   {
    "name": "cabinet_main_mobile",
@@ -441,7 +444,8 @@
   {
    "name": "cabinet_login_desktop",
    "src": "/screens/cabinet/cabinet_login_desktop.webp",
-   "caption": "Вход: Telegram или e-mail"
+   "caption": "Вход: Telegram или e-mail",
+   "wide": true
   },
   {
    "name": "cabinet_login_mobile",
@@ -451,12 +455,14 @@
   {
    "name": "cabinet_checkout_desktop",
    "src": "/screens/cabinet/cabinet_checkout_desktop.webp",
-   "caption": "Оплата тарифа в браузере"
+   "caption": "Оплата тарифа в браузере",
+   "wide": true
   },
   {
    "name": "cabinet_connect_desktop",
    "src": "/screens/cabinet/cabinet_connect_desktop.webp",
-   "caption": "Подключение приложений"
+   "caption": "Подключение приложений",
+   "wide": true
   },
   {
    "name": "cabinet_connect_mobile",
@@ -466,12 +472,14 @@
   {
    "name": "cabinet_more_desktop",
    "src": "/screens/cabinet/cabinet_more_desktop.webp",
-   "caption": "Рефералка и промокод"
+   "caption": "Рефералка и промокод",
+   "wide": true
   },
   {
    "name": "cabinet_topup_desktop",
    "src": "/screens/cabinet/cabinet_topup_desktop.webp",
-   "caption": "Пополнение баланса"
+   "caption": "Пополнение баланса",
+   "wide": true
   }
  ]
 }
