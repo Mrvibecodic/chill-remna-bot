@@ -308,6 +308,78 @@
    "caption": "Проверка оплаты по скриншоту"
   }
  ],
+ "minimal": [
+  {
+   "name": "minimal_home",
+   "src": "/screens/dark/minimal/minimal_home.webp",
+   "caption": "Главный экран: подписка, подключение и продление"
+  },
+  {
+   "name": "minimal_home_new",
+   "src": "/screens/dark/minimal/minimal_home_new.webp",
+   "caption": "Без подписки: пробный период и выбор тарифа"
+  },
+  {
+   "name": "minimal_plans",
+   "src": "/screens/dark/minimal/minimal_plans.webp",
+   "caption": "Тарифы"
+  },
+  {
+   "name": "minimal_plan",
+   "src": "/screens/dark/minimal/minimal_plan.webp",
+   "caption": "Тариф: сроки, состав и страны"
+  },
+  {
+   "name": "minimal_checkout",
+   "src": "/screens/dark/minimal/minimal_checkout.webp",
+   "caption": "Способы оплаты"
+  },
+  {
+   "name": "minimal_wait",
+   "src": "/screens/dark/minimal/minimal_wait.webp",
+   "caption": "Ожидание оплаты и «Проверить оплату»"
+  },
+  {
+   "name": "minimal_p2p",
+   "src": "/screens/dark/minimal/minimal_p2p.webp",
+   "caption": "Перевод на карту и загрузка чека"
+  },
+  {
+   "name": "minimal_wallet",
+   "src": "/screens/dark/minimal/minimal_wallet.webp",
+   "caption": "Кошелёк: своя сумма пополнения и прогноз"
+  },
+  {
+   "name": "minimal_connect",
+   "src": "/screens/dark/minimal/minimal_connect.webp",
+   "caption": "Подключение: приложения, добавление в один тап и QR"
+  },
+  {
+   "name": "minimal_ref",
+   "src": "/screens/dark/minimal/minimal_ref.webp",
+   "caption": "Пригласить друга"
+  },
+  {
+   "name": "minimal_devices",
+   "src": "/screens/dark/minimal/minimal_devices.webp",
+   "caption": "Подключённые устройства"
+  },
+  {
+   "name": "minimal_brand",
+   "src": "/screens/dark/minimal/minimal_brand.webp",
+   "caption": "Брендирование: логотип провайдера и фирменный цвет"
+  },
+  {
+   "name": "minimal_cabinet_login",
+   "src": "/screens/dark/minimal/minimal_cabinet_login.webp",
+   "caption": "Веб-кабинет: вход"
+  },
+  {
+   "name": "minimal_cabinet_home",
+   "src": "/screens/dark/minimal/minimal_cabinet_home.webp",
+   "caption": "Веб-кабинет: главный экран"
+  }
+ ],
  "miniapp": [
   {
    "name": "miniapp_main",

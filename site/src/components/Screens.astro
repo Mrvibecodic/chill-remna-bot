@@ -4,8 +4,9 @@ import screens from '../assets/screens.json';
 const groups = [
   { key: 'user', label: 'Пользователь', themed: true },
   { key: 'admin', label: 'Админка', themed: true },
-  { key: 'miniapp', label: 'Mini App', themed: false },
-  { key: 'cabinet', label: 'Веб-кабинет', themed: false },
+  { key: 'minimal', label: 'Новый дизайн', themed: true },
+  { key: 'miniapp', label: 'Mini App (классический)', themed: false },
+  { key: 'cabinet', label: 'Веб-кабинет (классический)', themed: false },
 ];
 ---
 
@@ -163,9 +164,10 @@ const groups = [
 </style>
 
 <script>
-  // Переключатели группы и темы + просмотр по клику. Светлые варианты есть
-  // только у чата (user/admin) — у мини-аппа и кабинета переключатель прячется.
-  const groups = ['user', 'admin', 'miniapp', 'cabinet'];
+  // Переключатели группы и темы + просмотр по клику. Светлые варианты есть у
+  // чата (user/admin) и нового дизайна — у классических мини-аппа и кабинета
+  // переключатель прячется.
+  const groups = ['user', 'admin', 'minimal', 'miniapp', 'cabinet'];
   let group = 'user';
   let theme = 'dark';
 
