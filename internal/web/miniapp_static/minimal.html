@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Кабинет</title>
+<script>window.BRAND=/*BRAND*/{};</script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+/* Тема ставится до первой отрисовки: иначе страница моргнёт чужой темой. */
+(function(){
+  var B=window.BRAND||{},pref='';
+  try{pref=localStorage.getItem('ui_theme')||'';}catch(e){}
+  if(pref!=='light'&&pref!=='dark'&&pref!=='auto')pref=B.theme||'auto';
+  var t=pref;
+  if(t==='auto'){
+    var tg=window.Telegram&&window.Telegram.WebApp;
+    if(tg&&tg.colorScheme)t=tg.colorScheme;
+    else t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+  }
+  document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'light');
+})();
+</script>
+<script src="qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--text:#0f1115;--muted:#667085;--faint:#98a2b3;--line:#e4e7ec;--soft:#eef0f3;--off:#b9c0cb;
+  --accent:#2f6bff;--on-accent:#fff;--acc-ink:#2f6bff;--ok:#067647;--bad:#b42318;--warn:#b54708;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  --top-bg:rgba(244,245,247,.88);--ok-soft:#ecfdf3;--bad-soft:#fef3f2;--warn-soft:#fffaeb;--warn-line:#fedf89;--acc-soft:rgba(47,107,255,.10);--shimmer:rgba(15,17,21,.05);
+  --r:18px;--r-sm:12px;
+  --safe-top:env(safe-area-inset-top,0px);--safe-bot:env(safe-area-inset-bottom,0px);
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --bg:#0d0e11;--card:#17191e;--text:#f1f3f6;--muted:#9aa1ad;--faint:#6b7280;--line:#262930;--soft:#1f2228;--off:#4a505b;
+  --accent:#5b8dff;--acc-ink:#7aa2ff;--ok:#34d399;--bad:#f87171;--warn:#fbbf24;
+  --shadow:none;color-scheme:dark;
+  --top-bg:rgba(13,14,17,.88);--ok-soft:rgba(52,211,153,.14);--bad-soft:rgba(248,113,113,.14);--warn-soft:rgba(251,191,36,.10);--warn-line:rgba(251,191,36,.28);--acc-soft:rgba(91,141,255,.16);--shimmer:rgba(241,243,246,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);color:var(--text);font-size:15px;line-height:1.45;overflow-x:hidden;
+  transition:background-color .2s,color .2s}
+button,input{font:inherit;color:inherit}
+svg{width:20px;height:20px;flex:none;vertical-align:middle}
+a{color:var(--acc-ink)}
+.wrap{max-width:560px;margin:0 auto;padding:0 16px calc(var(--safe-bot) + 28px)}
+body.web .wrap{max-width:980px}
+
+/* шапка */
+.top{position:sticky;top:0;z-index:20;background:var(--top-bg);
+  backdrop-filter:saturate(160%) blur(14px);-webkit-backdrop-filter:saturate(160%) blur(14px)}
+.top .in{max-width:560px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:calc(var(--safe-top) + 10px) 16px 10px}
+body.web .top .in{max-width:980px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer}
+.brand img{height:28px;max-width:150px;width:auto;object-fit:contain;display:block}
+.brand .nm{font-weight:700;font-size:17px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.logo-d{display:none!important}
+:root[data-theme="dark"] .has-dark .logo-l{display:none!important}
+:root[data-theme="dark"] .has-dark .logo-d{display:block!important}
+.tools{display:flex;align-items:center;gap:8px;flex:none}
+.pill{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--line);
+  background:var(--card);font-weight:600;font-size:14px;cursor:pointer;font-variant-numeric:tabular-nums}
+.pill svg{width:16px;height:16px;color:var(--muted)}
+.ibtn{width:36px;height:36px;border-radius:999px;border:1px solid var(--line);background:var(--card);display:inline-flex;
+  align-items:center;justify-content:center;cursor:pointer;color:var(--text)}
+.ibtn svg{width:18px;height:18px}
+
+/* появление экрана */
+#app{animation:vin .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes vin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* карточки и списки */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-top:12px;box-shadow:var(--shadow)}
+.card.flat{box-shadow:none}
+.h1{font-size:26px;font-weight:750;letter-spacing:-.5px;line-height:1.15}
+.h2{font-size:19px;font-weight:700;letter-spacing:-.3px}
+.lbl{font-size:12.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.sect{font-size:13px;font-weight:600;color:var(--muted);margin:22px 4px 8px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.hint{color:var(--muted);font-size:13.5px;margin-top:8px}
+.center{text-align:center}
+.stack>*+*{margin-top:10px}
+.list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-top:12px;box-shadow:var(--shadow)}
+.item{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;min-height:54px;width:100%;
+  background:none;border:0;text-align:left}
+.item+.item{border-top:1px solid var(--line)}
+.item:active{background:var(--soft)}
+.item .ic{width:34px;height:34px;border-radius:10px;background:var(--soft);display:flex;align-items:center;justify-content:center;flex:none;color:var(--text)}
+.item .ic svg{width:18px;height:18px}
+.item .tx{flex:1;min-width:0}
+.item .t{font-weight:600}
+.item .s{font-size:13px;color:var(--muted);margin-top:1px}
+.item .v{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.item .chev{color:var(--faint);width:18px;height:18px}
+.item.static{cursor:default}.item.static:active{background:none}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:12px 16px;font-size:14.5px}
+.kv+.kv{border-top:1px solid var(--line)}
+.kv .k{color:var(--muted)}
+.kv .v{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+
+/* кнопки */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;border-radius:14px;border:0;
+  background:var(--accent);color:var(--on-accent);font-weight:650;font-size:15.5px;cursor:pointer;transition:transform .1s,opacity .15s;padding:0 16px}
+.btn:active{transform:scale(.985)}
+.btn svg{width:18px;height:18px}
+.btn.sec{background:var(--soft);color:var(--text)}
+.btn.line{background:transparent;border:1px solid var(--line);color:var(--text)}
+.btn.ghost{background:transparent;color:var(--muted);height:42px}
+.btn.danger{background:transparent;border:1px solid var(--line);color:var(--bad)}
+.btn[disabled]{opacity:.55;pointer-events:none}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.back{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-weight:600;font-size:14.5px;background:none;border:0;cursor:pointer;padding:14px 0 2px}
+.back svg{width:18px;height:18px}
+
+/* подписка */
+.sub .st{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:650;padding:5px 10px;border-radius:999px;background:var(--soft);color:var(--muted)}
+.badge .d{width:7px;height:7px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--ok);background:var(--ok-soft)}
+.badge.bad{color:var(--bad);background:var(--bad-soft)}
+.badge.warn{color:var(--warn);background:var(--warn-soft)}
+.badge.acc{color:var(--acc-ink);background:var(--acc-soft)}
+.days{display:flex;align-items:baseline;gap:8px;margin:14px 0 2px}
+.days b{font-size:44px;font-weight:750;letter-spacing:-1.5px;line-height:1;font-variant-numeric:tabular-nums}
+.days span{color:var(--muted);font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;color:var(--muted);font-size:13.5px}
+.meta b{color:var(--text);font-weight:650}
+.link{display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 12px;border-radius:12px;background:var(--soft);cursor:pointer}
+.link code{flex:1;min-width:0;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.link svg{width:16px;height:16px;color:var(--muted)}
+.mono{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;background:var(--soft);border-radius:12px;padding:12px}
+.note{border-radius:14px;padding:12px 14px;margin-top:12px;font-size:14px;background:var(--warn-soft);border:1px solid var(--warn-line);color:var(--text)}
+.note b{color:var(--warn)}
+.note .btn.sec{background:var(--card);border:1px solid var(--warn-line)}
+.note.info{background:var(--card);border-color:var(--line)}
+
+/* тарифы */
+.plan{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-top:10px;cursor:pointer;box-shadow:var(--shadow)}
+.plan:active{transform:scale(.99)}
+.plan .pt{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.plan .pn{font-weight:700;font-size:16.5px}
+.plan .pp{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.plan .pd{color:var(--muted);font-size:13.5px;margin-top:4px}
+.opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 16px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;margin-top:8px;cursor:pointer}
+.opt .rd{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center}
+.opt.on{border-color:var(--acc-ink)}
+.opt.on .rd{border-color:var(--acc-ink)}
+.opt.on .rd::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--acc-ink)}
+.opt .tx{flex:1;min-width:0}
+.opt .t{font-weight:650}
+.opt .s{font-size:12.5px;color:var(--muted)}
+.opt .p{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--soft);font-size:13.5px;font-weight:600;border:1.5px solid transparent;cursor:default}
+button.chip{cursor:pointer}
+.chip.on{border-color:var(--acc-ink);color:var(--acc-ink);background:var(--acc-soft)}
+.flag{width:20px;height:14px;border-radius:3px;object-fit:cover}
+.cols{display:grid;grid-template-columns:1fr;gap:0}
+.field{width:100%;height:50px;border-radius:14px;border:1px solid var(--line);background:var(--card);padding:0 14px;font-size:15.5px;outline:none}
+.field:focus{border-color:var(--acc-ink)}
+input[type=file].field{padding:12px;height:auto}
+.seg{display:flex;gap:4px;background:var(--soft);border-radius:12px;padding:4px;margin-top:12px;flex-wrap:wrap}
+.seg button{flex:1 1 auto;min-width:80px;height:36px;border:0;border-radius:9px;background:transparent;font-weight:600;font-size:14px;color:var(--muted);cursor:pointer}
+.seg button.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+.switch{width:46px;height:28px;border-radius:999px;background:var(--off);position:relative;flex:none;transition:background .2s;border:0;cursor:pointer}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s}
+.switch.on{background:var(--accent)}
+.switch.on::after{transform:translateX(18px)}
+.qr{display:flex;justify-content:center;margin-top:14px}
+.qr div{background:#fff;padding:10px;border-radius:14px;line-height:0}
+.legal{font-size:14.5px;line-height:1.6;overflow-wrap:anywhere}
+.legal p+p{margin-top:8px}
+.big{font-size:40px;font-weight:750;letter-spacing:-1.2px;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
+.empty{padding:26px 16px;text-align:center;color:var(--muted)}
+.ava{width:40px;height:40px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+.hero-logo{display:flex;justify-content:center;margin:26px 0 6px}
+.hero-logo img{height:48px;max-width:220px;object-fit:contain}
+.tgw{display:flex;justify-content:center;min-height:48px;margin-top:12px}
+
+/* скелетоны, всплывашки, диалог */
+.sk{background:var(--card);border:1px solid var(--line);border-radius:var(--r);margin-top:12px;position:relative;overflow:hidden}
+.sk::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--shimmer),transparent);transform:translateX(-100%);animation:sh 1.3s infinite}
+@keyframes sh{to{transform:translateX(100%)}}
+.toast{position:fixed;left:50%;bottom:calc(var(--safe-bot) + 20px);transform:translate(-50%,16px);max-width:92vw;background:var(--text);color:var(--bg);
+  padding:11px 16px;border-radius:14px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;display:flex;gap:8px;align-items:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast svg{width:18px;height:18px}
+.modal{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.45)}
+.modal.show{display:flex}
+.modal .box{width:100%;max-width:380px;background:var(--card);border-radius:20px;padding:20px;border:1px solid var(--line)}
+.modal .msg{white-space:pre-line;font-size:15px;margin-bottom:16px}
+.spin{width:36px;height:36px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--acc-ink);animation:rot 1s linear infinite;margin:6px auto 0}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+@media(min-width:760px){
+  body.web .cols{grid-template-columns:1fr 1fr;gap:0 16px;align-items:start}
+  body.web .plans-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  body.web .narrow{max-width:520px;margin:0 auto}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <div class="brand" id="brand" onclick="goHome()"></div>
+  <div class="tools">
+    <span id="bal" class="pill" style="display:none" onclick="go('wallet')"></span>
+    <button id="themeBtn" class="ibtn" onclick="cycleTheme()" aria-label="theme"></button>
+  </div>
+</div></header>
+<main class="wrap"><div id="app"><div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div></div></main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="modal" class="modal"><div class="box" role="dialog" aria-modal="true"><div class="msg"></div><div class="row2"><button class="btn sec" data-no></button><button class="btn" data-yes></button></div></div></div>
+<script>
+'use strict';
+/* Иконки нарисованы в стиле Feather Icons (MIT, (c) 2013-2023 Cole Bemis) и
+   Lucide (ISC, (c) Lucide Icons and Contributors). Тексты лицензий — в
+   THIRD-PARTY-NOTICES.md в корне репозитория. */
+function sv(p,w){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="'+(w||2)+'" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';}
+var IC={
+  wallet:sv('<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/><path d="M21 12h-6a2 2 0 0 0 0 4h6v-4Z"/>'),
+  device:sv('<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'),
+  copy:sv('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
+  gift:sv('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v9h14v-9"/><path d="M12 8v13"/><path d="M12 8H8.5a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8Z"/><path d="M12 8h3.5a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8Z"/>'),
+  bolt:sv('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/>'),
+  help:sv('<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'),
+  check:sv('<path d="m20 6-11 11-5-5"/>',2.4),
+  plus:sv('<path d="M12 5v14M5 12h14"/>'),
+  tag:sv('<path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><path d="M7 7h.01"/>'),
+  download:sv('<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>'),
+  users:sv('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  life:sv('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m4.93 19.07 4.24-4.24"/>'),
+  chev:sv('<path d="m9 18 6-6-6-6"/>'),
+  left:sv('<path d="m15 18-6-6 6-6"/>'),
+  sun:sv('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
+  moon:sv('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>'),
+  auto:sv('<circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/>'),
+  card:sv('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>'),
+  coins:sv('<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>'),
+  star:sv('<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"/>'),
+  send:sv('<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>'),
+  doc:sv('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>'),
+  user:sv('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+  logout:sv('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
+  palette:sv('<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a6 6 0 0 0 6-6c0-4.4-4.5-8.6-10-8.6Z"/>'),
+  refresh:sv('<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.5 5.8L21 8"/><path d="M21 3v5h-5"/>'),
+  link:sv('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+  upload:sv('<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>'),
+  repeat:sv('<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>')
+};
+
+var CHEV=IC.chev.replace('<svg','<svg class="chev"');
+var tg=window.Telegram&&window.Telegram.WebApp;
+var BRAND=window.BRAND||{};
+var WEB=!(tg&&tg.initData);
+if(WEB)document.body.classList.add('web');
+var app=document.getElementById('app');
+var TOKEN=null;
+var STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:BRAND.lang||'ru'};
+var STACK=[]; // история экранов для «Назад»
+var CUR=null; // текущий экран {name,arg}
+var POLL=null;
+
+/* ---------- тексты ---------- */
+var L={ru:{
+ cabinet:'Кабинет',account_title:'Личный\u00a0кабинет',loading_fail:'Не удалось загрузить',open_tg:'Откройте через Telegram',
+ back:'Назад',copy:'Копировать',opening:'Открываем страницу оплаты…',gb:'ГБ',dev1:'устройство',dev2:'устройства',dev5:'устройств',bind_only:'Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.',choose_file:'Выбрать файл',home:'Главная',copied:'Скопировано',copy_fail:'Не удалось скопировать',error:'Ошибка',done:'Готово',
+ sub:'Подписка',sub_active:'Активна',sub_limited:'Трафик исчерпан',sub_expired:'Истекла',sub_disabled:'Отключена',
+ days_left:'осталось',until:'до',devices:'Устройства',addsub:'Доп-сервер',addsub_off:'выкл',addsub_out:'исчерпан',unlimited:'безлимит',
+ connect:'Подключить',renew:'Продлить',
+ no_sub:'Нет активной подписки',no_sub_hint:'Выберите тариф — подключение займёт минуту.',
+ try_free:'Попробовать бесплатно',choose_plan:'Выбрать тариф',trial_fail:'Не удалось активировать пробный период',trial_ok:'Пробный период активирован',
+ plans:'Тарифы',from:'от',your_plan:'Ваш тариф',best:'Выгодно',period:'Срок',whats_in:'Что входит',
+ traffic:'Трафик',traffic_unl:'Безлимит',reset:'Сброс трафика',countries:'Страны',configs:'Конфигураций',hwid:'Устройств',included:'включено',
+ switch_credit:'Зачёт остатка',switch_hint:'Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен.',
+ checkout:'Оформить за',pay_with:'Способ оплаты',no_methods:'Оплата сейчас недоступна. Попробуйте в боте.',
+ legal_pay:'Оплачивая, вы принимаете',and:'и',
+ tribute_hint:'Срок выбирается на странице Tribute. Подходят: %s — другой срок доступа не выдаст.',
+ ap_hint:'После оплаты картой можно будет включить автопродление (%s). Только с вашего согласия.',
+ m_balance:'С баланса',m_stars:'Telegram Stars',m_yookassa:'Банковская карта',m_cryptobot:'Криптовалюта',m_platega:'Platega',m_heleket:'Криптовалюта (Heleket)',m_tribute:'Tribute',m_p2p:'Перевод на карту',
+ m_balance_s:'На балансе %s',m_yk:'Банковская карта',m_cb:'Криптовалюта',m_hl:'Криптовалюта (Heleket)',
+ pay_fail:'Не удалось создать оплату',paid_ok:'Оплата получена',
+ wait_title:'Ожидаем оплату',wait_text:'Завершите оплату на открывшейся странице. Как только платёж пройдёт, подписка обновится сама.',
+ wait_check:'Проверить оплату',wait_again:'Открыть оплату снова',wait_none:'Оплата пока не поступила. Если вы уже заплатили, подождите минуту.',
+ p2p_title:'Перевод на карту',p2p_text:'Переведите точную сумму на карту и загрузите подтверждение — скриншот или PDF-чек. Администратор проверит платёж вручную.',
+ p2p_card:'Карта для перевода',copy_card:'Скопировать номер',p2p_proof:'Подтверждение оплаты',p2p_send:'Отправить чек',p2p_pick:'Выберите скриншот или PDF-чек',
+ p2p_sent:'Чек отправлен на проверку',p2p_sent_text:'Подписка обновится сразу после проверки администратором.',upload_fail:'Ошибка загрузки',
+ wallet:'Кошелёк',balance:'Баланс',topup_amount:'Сумма пополнения',topup_custom:'Своя сумма',topup_max:'до %s',topup_method:'Способ пополнения',
+ topup_bad:'Введите сумму',topup_big:'Максимум — %s',
+ forecast:'На сколько хватит',forecast_plan:'По ценам тарифа %s',forecast_max:'Хватит максимум на %s',
+ no_withdraw:'Баланс тратится только на подписку. Вывод средств невозможен.',
+ promo:'Промокод',promo_ph:'Введите код',apply:'Применить',promo_hint:'Промокод добавит дни, трафик или деньги на баланс.',
+ ref:'Пригласить друга',ref_you:'Вам',ref_friend:'Другу',ref_pct:'С каждой его оплаты',ref_first:'за первую оплату друга',ref_reg:'за регистрацию друга',
+ ref_count:'Приглашено',ref_earned:'Заработано',share:'Поделиться',ref_share_text:'Подключайся по моей ссылке — будет бонус 🎁',days_short:'дн.',
+ devices_title:'Устройства',devices_reset:'Сбросить устройства',devices_ask:'Сбросить все устройства?\n\nОни отключатся, а ключи доступа обновятся. Чтобы снова подключиться, обновите подписку на каждом нужном устройстве.',
+ devices_done:'Готово. Обновите подписку на устройствах',devices_none:'Подключённых устройств пока нет',devices_fail:'Не удалось сбросить устройства',
+ cancel:'Отмена',do_reset:'Сбросить',
+ conn_title:'Подключение',conn_text:'Установите приложение и нажмите «Добавить подписку» — она импортируется сама.',conn_qr:'Наведите камеру другого устройства, чтобы перенести подписку',
+ conn_empty:'Список приложений недоступен. Скопируйте ссылку и добавьте её в приложение вручную.',add_sub:'Добавить подписку',install:'Установить',recommended:'Рекомендуем',
+ docs:'Документы',docs_gate:'Документы сервиса',docs_gate_text:'Ознакомьтесь и подтвердите согласие — это нужно сделать один раз.',docs_pay:'Перед оплатой',accept:'Принимаю',open_full:'Открыть полностью',
+ support:'Поддержка',group:'Наша группа',
+ ap:'Автопродление',ap_on:'Включено — спишем %s%s.',ap_off_can:'Карта сохранена — включите, и подписка будет продлеваться сама (%s).',
+ ap_day:'в день окончания подписки',ap_before:'за %s до окончания',ap_for:' за %s',
+ ap_enabled:'Автопродление включено',ap_disabled:'Автопродление отключено',ap_fail:'Не удалось изменить автопродление',
+ theme:'Оформление',th_auto:'Авто',th_light:'Светлая',th_dark:'Тёмная',th_hint:'«Авто» повторяет тему Telegram или системы.',
+ acct:'Аккаунт',email:'Почта',addr:'Адрес',verified:'подтверждён',not_verified:'не подтверждён',tg_linked:'привязан',tg_not:'не привязан',
+ verify_title:'Подтвердите почту',verify_text:'Письмо со ссылкой отправлено на %s. Пока адрес не подтверждён, оплата и пополнение недоступны.',resend:'Отправить письмо ещё раз',mail_sent:'Письмо отправлено',
+ bind_tg:'Привязать Telegram',bind_text:'После привязки в кабинет можно входить кнопкой Telegram, а бот в чате покажет эту же подписку. Ссылка подписки не изменится.',bind_ok:'Telegram привязан',bind_fail:'Не удалось привязать',
+ pass_change:'Сменить пароль',pass_old:'Текущий пароль',pass_new:'Новый пароль (мин. 8)',pass_new2:'Новый пароль ещё раз',pass_note:'Все остальные входы в аккаунт будут завершены.',
+ pass_fill:'Заполните все поля',pass_mismatch:'Пароли не совпадают',pass_short:'Пароль слишком короткий',pass_ok:'Пароль изменён',
+ logout:'Выйти',login:'Вход',login_text:'Войдите через Telegram или по почте.',via_tg:'Через Telegram',via_email:'По почте',password:'Пароль',
+ sign_in:'Войти',register:'Зарегистрироваться',forgot:'Забыли пароль?',reg_mail:'После регистрации на адрес придёт письмо. Пока адрес не подтверждён, оплата недоступна.',
+ reg_nomail:'Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.',
+ fill_login:'Заполните почту и пароль',login_fail:'Не удалось войти',
+ restore:'Восстановление',restore_text:'Пришлём ссылку на смену пароля.',send:'Отправить',to_login:'К входу',restore_sent:'Если такой адрес есть, письмо отправлено',
+ new_pass:'Новый пароль',new_pass_text:'Задайте новый пароль для входа.',save:'Сохранить',link_bad:'Ссылка недействительна',email_ok:'Адрес подтверждён',
+ month1:'месяц',month2:'месяца',month5:'месяцев',day1:'день',day2:'дня',day5:'дней',
+ strat_NO_RESET:'не сбрасывается',strat_DAY:'ежедневно',strat_WEEK:'еженедельно',strat_MONTH:'ежемесячно',strat_MONTH_ROLLING:'ежемесячно',
+ renew_gone:'Тариф, которым вы пользовались, больше недоступен. Выберите новый — действующая подписка не пострадает.',
+ plan_link_fail:'Тариф по этой ссылке недоступен',per_month:'%s / мес'
+},en:{
+ cabinet:'Account',account_title:'Account',loading_fail:'Failed to load',open_tg:'Open it from Telegram',
+ back:'Back',copy:'Copy',opening:'Opening the payment page…',gb:'GB',dev1:'device',dev2:'devices',dev5:'devices',bind_only:'Linking works only if this Telegram has no bot account yet.',choose_file:'Choose file',home:'Home',copied:'Copied',copy_fail:'Could not copy',error:'Error',done:'Done',
+ sub:'Subscription',sub_active:'Active',sub_limited:'Traffic used up',sub_expired:'Expired',sub_disabled:'Disabled',
+ days_left:'left',until:'until',devices:'Devices',addsub:'Add-on',addsub_off:'off',addsub_out:'used up',unlimited:'unlimited',
+ connect:'Connect',renew:'Renew',
+ no_sub:'No active subscription',no_sub_hint:'Pick a plan — connecting takes a minute.',
+ try_free:'Try for free',choose_plan:'Choose a plan',trial_fail:'Could not activate the trial',trial_ok:'Trial activated',
+ plans:'Plans',from:'from',your_plan:'Your plan',best:'Best value',period:'Period',whats_in:'What’s included',
+ traffic:'Traffic',traffic_unl:'Unlimited',reset:'Traffic reset',countries:'Countries',configs:'Configs',hwid:'Devices',included:'included',
+ switch_credit:'Remaining credit',switch_hint:'The rest of your current plan is not lost: it is converted into days of this plan by price ratio.',
+ checkout:'Pay',pay_with:'Payment method',no_methods:'Payment is unavailable right now. Try in the bot.',
+ legal_pay:'By paying you accept',and:'and',
+ tribute_hint:'The period is chosen on the Tribute page. Accepted: %s — other periods won’t grant access.',
+ ap_hint:'After paying by card you can turn on auto-renewal (%s). Only with your consent.',
+ m_balance:'From balance',m_stars:'Telegram Stars',m_yookassa:'Bank card',m_cryptobot:'Crypto',m_platega:'Platega',m_heleket:'Crypto (Heleket)',m_tribute:'Tribute',m_p2p:'Card transfer',
+ m_balance_s:'Balance %s',m_yk:'Bank card',m_cb:'Crypto',m_hl:'Crypto (Heleket)',
+ pay_fail:'Could not create the payment',paid_ok:'Payment received',
+ wait_title:'Waiting for payment',wait_text:'Complete the payment in the opened window. As soon as it goes through, your subscription updates by itself.',
+ wait_check:'Check payment',wait_again:'Open payment again',wait_none:'No payment yet. If you have already paid, wait a minute.',
+ p2p_title:'Card transfer',p2p_text:'Transfer the exact amount to the card and upload a proof — a screenshot or a PDF receipt. An admin checks it manually.',
+ p2p_card:'Card number',copy_card:'Copy number',p2p_proof:'Payment proof',p2p_send:'Send receipt',p2p_pick:'Pick a screenshot or a PDF receipt',
+ p2p_sent:'Receipt sent for review',p2p_sent_text:'Your subscription updates right after an admin confirms it.',upload_fail:'Upload failed',
+ wallet:'Wallet',balance:'Balance',topup_amount:'Top-up amount',topup_custom:'Custom amount',topup_max:'up to %s',topup_method:'Top-up method',
+ topup_bad:'Enter an amount',topup_big:'Maximum is %s',
+ forecast:'How long it lasts',forecast_plan:'At %s prices',forecast_max:'Lasts up to %s',
+ no_withdraw:'Balance is spent on the subscription only. Withdrawals are not possible.',
+ promo:'Promo code',promo_ph:'Enter code',apply:'Apply',promo_hint:'A promo code adds days, traffic or balance.',
+ ref:'Invite a friend',ref_you:'You get',ref_friend:'Your friend gets',ref_pct:'From each of their payments',ref_first:'for the friend’s first payment',ref_reg:'for the friend’s sign-up',
+ ref_count:'Invited',ref_earned:'Earned',share:'Share',ref_share_text:'Join with my link — you get a bonus 🎁',days_short:'d',
+ devices_title:'Devices',devices_reset:'Reset devices',devices_ask:'Reset all devices?\n\nThey will be disconnected and access keys will change. To reconnect, update the subscription on each device you need.',
+ devices_done:'Done. Update the subscription on your devices',devices_none:'No connected devices yet',devices_fail:'Could not reset devices',
+ cancel:'Cancel',do_reset:'Reset',
+ conn_title:'Connect',conn_text:'Install an app and tap “Add subscription” — it imports itself.',conn_qr:'Scan with another device to move the subscription',
+ conn_empty:'The app list is unavailable. Copy the link and add it to an app manually.',add_sub:'Add subscription',install:'Install',recommended:'Recommended',
+ docs:'Documents',docs_gate:'Service documents',docs_gate_text:'Please read and accept — you only need to do it once.',docs_pay:'Before paying',accept:'I accept',open_full:'Open in full',
+ support:'Support',group:'Our group',
+ ap:'Auto-renewal',ap_on:'On — we charge %s%s.',ap_off_can:'Your card is saved — turn it on and the subscription renews itself (%s).',
+ ap_day:'on the expiry day',ap_before:'%s before expiry',ap_for:' for %s',
+ ap_enabled:'Auto-renewal is on',ap_disabled:'Auto-renewal is off',ap_fail:'Could not change auto-renewal',
+ theme:'Appearance',th_auto:'Auto',th_light:'Light',th_dark:'Dark',th_hint:'“Auto” follows Telegram or the system theme.',
+ acct:'Account',email:'Email',addr:'Address',verified:'verified',not_verified:'not verified',tg_linked:'linked',tg_not:'not linked',
+ verify_title:'Confirm your email',verify_text:'A link was sent to %s. Until the address is confirmed, payments and top-ups are unavailable.',resend:'Send again',mail_sent:'Email sent',
+ bind_tg:'Link Telegram',bind_text:'After linking you can sign in with Telegram, and the bot chat shows the same subscription. The subscription link stays the same.',bind_ok:'Telegram linked',bind_fail:'Could not link',
+ pass_change:'Change password',pass_old:'Current password',pass_new:'New password (min. 8)',pass_new2:'Repeat new password',pass_note:'All other sign-ins will be ended.',
+ pass_fill:'Fill in all fields',pass_mismatch:'Passwords do not match',pass_short:'Password is too short',pass_ok:'Password changed',
+ logout:'Sign out',login:'Sign in',login_text:'Sign in with Telegram or email.',via_tg:'With Telegram',via_email:'With email',password:'Password',
+ sign_in:'Sign in',register:'Sign up',forgot:'Forgot password?',reg_mail:'After signing up you get an email. Until the address is confirmed, payments are unavailable.',
+ reg_nomail:'Sign-up without email confirmation. Password recovery is unavailable — keep your password.',
+ fill_login:'Enter email and password',login_fail:'Sign-in failed',
+ restore:'Recovery',restore_text:'We will send a password reset link.',send:'Send',to_login:'Back to sign in',restore_sent:'If this address exists, an email was sent',
+ new_pass:'New password',new_pass_text:'Set a new password.',save:'Save',link_bad:'The link is invalid',email_ok:'Address confirmed',
+ month1:'month',month2:'months',month5:'months',day1:'day',day2:'days',day5:'days',
+ strat_NO_RESET:'never',strat_DAY:'daily',strat_WEEK:'weekly',strat_MONTH:'monthly',strat_MONTH_ROLLING:'monthly',
+ renew_gone:'The plan you used is no longer available. Pick a new one — your current subscription is not affected.',
+ plan_link_fail:'The plan from this link is unavailable',per_month:'%s / mo'
+}};
+function T(k){var d=L[STATE.lang]||L.ru;var s=(k in d)?d[k]:(L.ru[k]||k);for(var i=1;i<arguments.length;i++)s=s.replace('%s',arguments[i]);return s;}
+function plural(n,a,b,c){if(STATE.lang==='en')return Math.abs(n)===1?a:c;n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return c;if(d>1&&d<5)return b;if(d===1)return a;return c;}
+function monthsW(n){return n+' '+plural(n,T('month1'),T('month2'),T('month5'));}
+function daysW(n){return plural(n,T('day1'),T('day2'),T('day5'));}
+
+/* ---------- утилиты ---------- */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'\\n').replace(/\r/g,'\\r');}
+function loc(){return STATE.lang==='en'?'en-US':'ru-RU';}
+function rub(k){return (Math.round(k)/100).toLocaleString(loc())+' ₽';}
+function num(s){var v=parseFloat(String(s==null?'':s).replace(/[\s\u00a0]/g,'').replace(',','.'));return isFinite(v)?v:NaN;}
+function price(d){return (String(d.price||'')+' '+(d.currency||'')).trim();}
+function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
+function dateS(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
+function haptic(k){try{if(tg&&tg.HapticFeedback){if(k==='ok')tg.HapticFeedback.notificationOccurred('success');else if(k==='err')tg.HapticFeedback.notificationOccurred('error');else tg.HapticFeedback.impactOccurred('light');}}catch(e){}}
+function busy(el,on){if(el&&el.tagName)el.disabled=!!on;}
+var toastT=null;
+function toast(msg,kind){var t=document.getElementById('toast');t.innerHTML=(kind==='ok'?IC.check:kind==='err'?IC.help:'')+'<span>'+esc(msg)+'</span>';t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(function(){t.classList.remove('show');},2800);if(kind)haptic(kind);}
+function fallbackCopy(t){try{var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.left='-9999px';document.body.appendChild(a);a.select();a.setSelectionRange(0,String(t).length);var ok=document.execCommand('copy');document.body.removeChild(a);return ok;}catch(e){return false;}}
+function copy(t){var done=function(ok){toast(ok?T('copied'):T('copy_fail'),ok?'ok':'err');};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){done(true);},function(){done(fallbackCopy(t));});return;}done(fallbackCopy(t));}
+/* Ссылки приходят с сервера, но часть — из конфига страницы подписки: исполняемые схемы не открываем. */
+function safeURL(u){return !/^\s*(javascript|data|vbscript|file):/i.test(String(u||''));}
+function openL(u){if(!safeURL(u))return;if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank','noopener');}
+function isTgLink(u){return /^(https:\/\/t\.me\/|tg:\/\/)/i.test(String(u||''));}
+function openSmart(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return true;}catch(e){}}openL(u);return false;}
+function openDeep(u){if(!safeURL(u))return;try{window.location.href=u;}catch(e){}}
+function guardOn(){try{if(tg&&tg.enableClosingConfirmation)tg.enableClosingConfirmation();}catch(e){}}
+function guardOff(){try{if(tg&&tg.disableClosingConfirmation)tg.disableClosingConfirmation();}catch(e){}}
+function store(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){}}
+function load(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+
+/* ---------- тема и бренд ---------- */
+function themePref(){var p=load('ui_theme');return (p==='light'||p==='dark'||p==='auto')?p:(BRAND.theme||'auto');}
+function themeNow(){var p=themePref();if(p!=='auto')return p;if(tg&&tg.initData&&tg.colorScheme)return tg.colorScheme;return (window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';}
+function applyTheme(){
+  var t=themeNow()==='dark'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',t);
+  applyAccent(t==='dark');
+  var p=themePref(),b=document.getElementById('themeBtn');
+  if(b)b.innerHTML=p==='auto'?IC.auto:(p==='dark'?IC.moon:IC.sun);
+  var bg=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||(t==='dark'?'#0d0e11':'#f5f6f8');
+  if(tg)['setHeaderColor','setBackgroundColor','setBottomBarColor'].forEach(function(f){try{if(tg[f])tg[f](bg);}catch(e){}});
+}
+function setTheme(p){
+  store('ui_theme',p);
+  try{if(tg&&tg.CloudStorage&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9'))tg.CloudStorage.setItem('ui_theme',p,function(){});}catch(e){}
+  applyTheme();
+}
+function cycleTheme(){haptic();var p=themePref();setTheme(p==='auto'?'light':p==='light'?'dark':'auto');toast(T('theme')+': '+T('th_'+themePref()));if(CUR&&(CUR.name==='theme'||CUR.name==='home'))rerender();}
+/* Фирменный цвет с поправкой на тему. Контраст считается по WCAG: текст на
+   кнопке — тот из тёмного и белого, что читается лучше; «чернила» (текст,
+   рамки и отметки цветом бренда) затемняются на светлой теме и высветляются на
+   тёмной, пока не наберут 4.5:1 к своей подложке. Без цвета из админки
+   поправка применяется к цвету дизайна. */
+function hexRGB(h){return [parseInt(h.substr(1,2),16),parseInt(h.substr(3,2),16),parseInt(h.substr(5,2),16)];}
+function lum(c){var v=c.map(function(x){x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2];}
+function contrast(a,b){var x=lum(a),y=lum(b);return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05);}
+function mixRGB(c,t,k){return c.map(function(v,i){return Math.round(v+(t[i]-v)*k);});}
+function rgbHex(c){return '#'+c.map(function(v){return (v<16?'0':'')+v.toString(16);}).join('');}
+function applyAccent(dark){
+  var a=BRAND.accent,s=document.documentElement.style;
+  if(!a||!/^#[0-9a-f]{6}$/i.test(a))a=dark?'#5b8dff':'#2f6bff';
+  var card=dark?[23,25,30]:[255,255,255],to=dark?[255,255,255]:[0,0,0];
+  var c=hexRGB(a);
+  // Кнопка почти цвета фона не видна: такой цвет высветляется или затемняется.
+  for(var i=0;i<12&&contrast(c,card)<1.6;i++)c=mixRGB(c,to,0.12);
+  var dk=[17,17,17],wh=[255,255,255];
+  var on=contrast(c,wh)>=contrast(c,dk)?'#fff':'#111';
+  var ink=c,soft;
+  for(var j=0;j<20;j++){soft=mixRGB(card,ink,dark?0.16:0.10);if(contrast(ink,soft)>=4.5)break;ink=mixRGB(ink,to,0.1);}
+  s.setProperty('--accent',rgbHex(c));s.setProperty('--on-accent',on);
+  s.setProperty('--acc-ink',rgbHex(ink));s.setProperty('--acc-soft',rgbHex(soft));
+}
+function brandHTML(big){
+  var h='',cls=BRAND.logo_dark?' class="has-dark"':'';
+  if(BRAND.logo){
+    h+='<img class="logo-l" alt="" src="'+esc(BRAND.logo)+'" onerror="this.remove()">';
+    if(BRAND.logo_dark)h+='<img class="logo-d" alt="" src="'+esc(BRAND.logo_dark)+'" onerror="this.remove()">';
+  }
+  var name=BRAND.name||(!BRAND.logo?(BRAND.title||T(WEB?'account_title':'cabinet')):'');
+  if(big)return BRAND.logo?'<div class="hero-logo"'+cls+'>'+h+'</div>':'';
+  return '<span'+cls+' style="display:flex;align-items:center;gap:10px;min-width:0">'+h+(name?'<span class="nm">'+esc(name)+'</span>':'')+'</span>';
+}
+function paintBrand(){document.getElementById('brand').innerHTML=brandHTML(false);}
+function paintBalance(){var b=document.getElementById('bal');if(TOKEN&&STATE.me){b.style.display='inline-flex';b.innerHTML=IC.wallet+esc(rub(STATE.balanceK));}else{b.style.display='none';b.innerHTML='';}}
+
+/* ---------- API ---------- */
+function mkErr(st,m){var e=new Error(m||('HTTP '+st));e.status=st;return e;}
+async function authenticate(){
+  var a=await api('/api/miniapp/auth',{method:'POST',body:JSON.stringify({init_data:tg.initData}),noRetry:true});
+  TOKEN=a.token;if(a.notice&&!STATE.noticeShown){STATE.noticeShown=true;setTimeout(function(){toast(a.notice);},400);}return TOKEN;
+}
+async function api(path,opts){
+  opts=opts||{};
+  var h=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  if(TOKEN)h.Authorization='Bearer '+TOKEN;
+  var r=await fetch(path,Object.assign({},opts,{headers:h}));
+  if(r.status===401&&!opts.noRetry&&!WEB&&tg&&tg.initData){
+    await authenticate();
+    var h2=Object.assign({},h,{Authorization:'Bearer '+TOKEN});
+    r=await fetch(path,Object.assign({},opts,{headers:h2}));
+  }
+  // Истёкший пропуск кабинета — на вход, а не ошибка на каждом нажатии.
+  if(r.status===401&&WEB&&TOKEN&&path.indexOf('/api/cabinet/auth/')<0){logout();throw mkErr(401,T('login'));}
+  if(!r.ok){var m=null;try{var j=await r.json();if(j&&j.error)m=j.error;}catch(e){}throw mkErr(r.status,m);}
+  return r.json();
+}
+function post(p,b){return api(p,{method:'POST',body:JSON.stringify(b||{})});}
+
+/* ---------- навигация ---------- */
+function setBack(on){try{if(tg&&tg.BackButton){if(on)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}}
+function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();app.innerHTML=html;app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
+var SCREENS={};
+function go(name,arg,opt){
+  haptic();
+  if(CUR&&CUR.name===name&&arg===undefined)return SCREENS[name](CUR.arg);
+  if(CUR&&!(opt&&opt.replace))STACK.push(CUR);
+  CUR={name:name,arg:arg};
+  return SCREENS[name](arg);
+}
+function goBack(){haptic();if(!STACK.length){goHome();return;}CUR=STACK.pop();SCREENS[CUR.name](CUR.arg);}
+function goHome(){if(WEB&&!TOKEN){renderLogin();return;}STACK=[];CUR={name:'home'};SCREENS.home();}
+function rerender(){if(CUR)SCREENS[CUR.name](CUR.arg);}
+function backBtn(){return STACK.length?'<button class="back" onclick="goBack()">'+IC.left+esc(T('back'))+'</button>':'';}
+if(tg){try{tg.ready();tg.expand();}catch(e){}try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes();}catch(e){}
+  try{tg.BackButton&&tg.BackButton.onClick(function(){goBack();});}catch(e){}
+  try{tg.onEvent&&tg.onEvent('themeChanged',function(){if(themePref()==='auto')applyTheme();});}catch(e){}}
+if(window.matchMedia){try{var mq=matchMedia('(prefers-color-scheme: dark)'),onmq=function(){if(themePref()==='auto')applyTheme();};if(mq.addEventListener)mq.addEventListener('change',onmq);else if(mq.addListener)mq.addListener(onmq);}catch(e){}}
+
+function item(icon,title,sub,val,onclick){
+  return '<button class="item" onclick="'+onclick+'"><span class="ic">'+icon+'</span><span class="tx"><div class="t">'+esc(title)+'</div>'+(sub?'<div class="s">'+esc(sub)+'</div>':'')+'</span>'+(val?'<span class="v">'+esc(val)+'</span>':'')+CHEV+'</button>';
+}
+function confirmAsk(msg,yes,cb){
+  if(tg&&tg.initData&&tg.showConfirm){try{tg.showConfirm(msg,function(ok){cb(!!ok);});return;}catch(e){}}
+  var m=document.getElementById('modal'),done=false;
+  m.querySelector('.msg').textContent=msg;
+  var y=m.querySelector('[data-yes]'),n=m.querySelector('[data-no]');
+  y.textContent=yes;n.textContent=T('cancel');
+  function fin(v){if(done)return;done=true;m.classList.remove('show');document.removeEventListener('keydown',key);cb(v);}
+  function key(e){if(e.key==='Escape')fin(false);else if(e.key==='Enter')fin(true);}
+  y.onclick=function(){fin(true);};n.onclick=function(){fin(false);};m.onclick=function(e){if(e.target===m)fin(false);};
+  document.addEventListener('keydown',key);m.classList.add('show');y.focus();
+}
+
+/* ---------- данные ---------- */
+function planBy(c){for(var i=0;i<STATE.plans.length;i++)if(STATE.plans[i].code===c)return STATE.plans[i];return null;}
+function durBy(p,m){var l=(p&&p.durations)||[];for(var i=0;i<l.length;i++)if(l[i].months==m)return l[i];return null;}
+function planTitle(p){return (p.icon?p.icon+' ':'')+(p.name||p.code);}
+function planMin(p){var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)};});return b?b.l:'';}
+function trafficT(d){return d&&d.traffic_gb>0?d.traffic_gb+' '+T('gb'):T('traffic_unl');}
+function planSubT(d){return trafficT(d)+(d&&d.devices>0?' · '+d.devices+' '+plural(d.devices,T('dev1'),T('dev2'),T('dev5')):'');}
+function legalDocs(){return (STATE.menu&&STATE.menu.legal)||[];}
+function methods(p){
+  var out=[];if(STATE.balanceK>0)out.push('balance');
+  (STATE.methods||[]).forEach(function(m){if(m==='balance')return;if(WEB&&m==='stars')return;if(m==='tribute'&&!p.tribute)return;out.push(m);});
+  return out;
+}
+function apWhen(){var ap=STATE.ap||{};if(!ap.days||ap.days<=0)return T('ap_day');return T('ap_before',ap.days+' '+daysW(ap.days));}
+function gb(b){var g=(Number(b)||0)/1073741824,s=g.toFixed(1);return (s.slice(-2)==='.0'?s.slice(0,-2):s)+' '+T('gb');}
+function addsubT(s){if(!s.addsub_ok)return null;if(s.addsub_off)return T('addsub_off');if(s.addsub_exhausted)return T('addsub_out');if(!s.addsub_limit)return T('unlimited');var l=Number(s.addsub_limit)-Number(s.addsub_used||0);return gb(l>0?l:0);}
+
+/* ---------- главная ---------- */
+function statusBadge(s){
+  var st=String(s.status||'').toUpperCase();
+  if(st==='LIMITED')return '<span class="badge warn"><span class="d"></span>'+esc(T('sub_limited'))+'</span>';
+  if(st==='EXPIRED')return '<span class="badge bad"><span class="d"></span>'+esc(T('sub_expired'))+'</span>';
+  if(st==='DISABLED')return '<span class="badge bad"><span class="d"></span>'+esc(T('sub_disabled'))+'</span>';
+  return '<span class="badge ok"><span class="d"></span>'+esc(T('sub_active'))+'</span>';
+}
+function subCard(){
+  var s=STATE.sub||{},m=STATE.menu||{},h='';
+  if(s.active){
+    h+='<div class="card sub"><div class="st"><span class="lbl">'+esc(T('sub'))+'</span>'+statusBadge(s)+'</div>';
+    if(s.expire_ts){var dl=daysLeft(s.expire_ts);h+='<div class="days"><b>'+dl+'</b><span>'+esc(daysW(dl))+' '+esc(T('days_left'))+'</span></div><div class="muted small">'+esc(T('until'))+' '+esc(dateS(s.expire_ts))+'</div>';}
+    else if(s.expire_at)h+='<div class="h2" style="margin-top:10px">'+esc(T('until'))+' '+esc(s.expire_at)+'</div>';
+    var meta='';
+    if(s.devices_ok)meta+='<span>'+esc(T('devices'))+': <b>'+esc(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used))+'</b></span>';
+    var at=addsubT(s);if(at!==null)meta+='<span>'+esc(s.addsub_name||T('addsub'))+': <b>'+esc(at)+'</b></span>';
+    if(meta)h+='<div class="meta">'+meta+'</div>';
+    if(s.sub_url){
+      h+='<div class="link" onclick="copy(\''+jsq(s.sub_url)+'\')"><code>'+esc(s.sub_url)+'</code>'+IC.copy+'</div>';
+      h+='<div class="stack" style="margin-top:14px"><button class="btn" onclick="go(\'connect\')">'+IC.download+esc(T('connect'))+'</button>';
+      if(m.can_renew||m.own_plan)h+='<button class="btn sec" onclick="openRenew()">'+IC.repeat+esc(T('renew'))+'</button>';
+      h+='</div>';
+    }
+    h+='</div>';
+  }else{
+    h+='<div class="card"><span class="lbl">'+esc(T('sub'))+'</span><div class="h2" style="margin-top:8px">'+esc(T('no_sub'))+'</div><div class="hint">'+esc(T('no_sub_hint'))+'</div><div class="stack" style="margin-top:14px">';
+    if(m.trial_available)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+esc(T('try_free'))+'</button>';
+    if(STATE.plans.length)h+='<button class="btn'+(m.trial_available?' sec':'')+'" onclick="openPlans()">'+IC.bolt+esc(T('choose_plan'))+'</button>';
+    h+='</div></div>';
+  }
+  if(!STATE.plans.length&&STATE.plansNotice)h+='<div class="note info">'+esc(STATE.plansNotice)+'</div>';
+  h+=apBlock();
+  return h;
+}
+function apBlock(){
+  var ap=STATE.ap||{};
+  if(!ap.available&&!ap.on)return '';
+  if(!ap.on&&!ap.can_enable)return '';
+  var txt=ap.on?T('ap_on',apWhen(),(ap.months?T('ap_for',monthsW(ap.months)):'')+(ap.title?' · '+ap.title:'')):T('ap_off_can',apWhen());
+  return '<div class="card"><div style="display:flex;align-items:center;gap:12px"><div style="flex:1"><div class="t" style="font-weight:650">'+esc(T('ap'))+'</div><div class="hint" style="margin-top:2px">'+esc(txt)+'</div></div>'+
+    '<button class="switch'+(ap.on?' on':'')+'" aria-label="'+esc(T('ap'))+'" onclick="setAP('+(!ap.on)+',this)"></button></div></div>';
+}
+function homeList(){
+  var m=STATE.menu||{},s=STATE.sub||{},h='<div class="list">';
+  if(STATE.plans.length)h+=item(IC.bolt,T('plans'),'','','openPlans()');
+  h+=item(IC.wallet,T('wallet'),'',rub(STATE.balanceK),'go(\'wallet\')');
+  if(m.referral_on)h+=item(IC.gift,T('ref'),'','','go(\'ref\')');
+  h+=item(IC.tag,T('promo'),'','','go(\'promo\')');
+  if(s.active)h+=item(IC.device,T('devices_title'),'',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'','go(\'devices\')');
+  h+='</div><div class="list">';
+  if(legalDocs().length&&m.legal_in_menu)h+=item(IC.doc,T('docs'),'','','go(\'docs\')');
+  if(m.support_url)h+=item(IC.life,T('support'),'','','openSmart(\''+jsq(m.support_url)+'\')');
+  if(m.group_url)h+=item(IC.users,T('group'),'','','openSmart(\''+jsq(m.group_url)+'\')');
+  h+=item(IC.palette,T('theme'),'',T('th_'+themePref()),'go(\'theme\')');
+  if(WEB)h+=item(IC.user,T('acct'),STATE.me_email||STATE.me_name||'','','go(\'account\')');
+  return h+'</div>';
+}
+function verifyBanner(){
+  if(!WEB)return '';var a=STATE.acct;if(!a||!a.money_blocked)return '';
+  return '<div class="note"><b>'+esc(T('verify_title'))+'</b><div style="margin-top:4px">'+esc(T('verify_text',a.email||''))+'</div><button class="btn sec" style="margin-top:10px" onclick="resend(this)">'+esc(T('resend'))+'</button></div>';
+}
+SCREENS.home=function(){
+  var m=STATE.menu||{};
+  if(m.legal_accept&&m.legal_gate_start&&legalDocs().length){legalGate();return;}
+  var h=verifyBanner();
+  if(WEB)h+='<div class="cols"><div>'+subCard()+'</div><div>'+homeList()+'</div></div>';
+  else h+=subCard()+homeList();
+  view(h);
+};
+
+/* ---------- тарифы ---------- */
+function openPlans(){
+  if(STATE.plans.length===1){go('plan',{code:STATE.plans[0].code});return;}
+  go('plans');
+}
+function openRenew(){
+  var m=STATE.menu||{};
+  if(m.renew_gone){toast(T('renew_gone'));openPlans();return;}
+  if(m.own_plan&&planBy(m.own_plan)){go('plan',{code:m.own_plan,renew:true});return;}
+  openPlans();
+}
+SCREENS.plans=function(){
+  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('plans'))+'</div><div class="plans-grid">';
+  STATE.plans.forEach(function(p){
+    var d=(p.durations||[])[0];
+    h+='<button class="plan" onclick="go(\'plan\',{code:\''+jsq(p.code)+'\'})"><div class="pt"><span class="pn">'+esc(planTitle(p))+'</span><span class="pp">'+esc(T('from'))+' '+esc(planMin(p))+'</span></div>'+
+      '<div class="pd">'+esc(p.description||(d?planSubT(d):''))+'</div>'+(p.own?'<div style="margin-top:8px"><span class="badge acc">'+esc(T('your_plan'))+'</span></div>':'')+'</button>';
+  });
+  view(h+'</div>');
+};
+SCREENS.plan=function(a){
+  var p=planBy(a.code);if(!p){goHome();return;}
+  var ds=p.durations||[];if(!ds.length){goHome();return;}
+  var sel=a.months&&durBy(p,a.months)?a.months:null;
+  if(!sel){for(var i=0;i<ds.length;i++)if(ds[i].best){sel=ds[i].months;break;}}
+  if(!sel)sel=ds[0].months;
+  a.months=sel;var d=durBy(p,sel);
+  var h=backBtn()+'<div style="margin-top:8px"><div class="h1">'+esc(planTitle(p))+'</div>'+(p.description?'<div class="hint">'+esc(p.description)+'</div>':'')+'</div>';
+  if(p.own&&a.renew&&STATE.menu.renew_note)h+='<div class="note">'+esc(STATE.menu.renew_note)+'</div>';
+  h+='<div class="sect">'+esc(T('period'))+'</div>';
+  ds.forEach(function(x){
+    var pm='';var v=num(x.price);if(x.months>1&&isFinite(v))pm=T('per_month',(Math.round(v/x.months*100)/100).toLocaleString(loc())+' '+(x.currency||''));
+    h+='<button class="opt'+(x.months===sel?' on':'')+'" onclick="pickDur(\''+jsq(p.code)+'\','+x.months+')"><span class="rd"></span><span class="tx"><div class="t">'+esc(monthsW(x.months))+(x.best?' <span class="badge acc" style="margin-left:6px;padding:2px 8px">'+esc(T('best'))+'</span>':'')+'</div>'+(pm?'<div class="s">'+esc(pm)+'</div>':'')+'</span><span class="p">'+esc(price(x))+'</span></button>';
+  });
+  h+='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list">';
+  h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
+  if(d.devices>0)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+d.devices+'</span></div>';
+  if(p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
+  if(d.configs>0)h+='<div class="kv"><span class="k">'+esc(T('configs'))+'</span><span class="v">'+d.configs+'</span></div>';
+  if(p.addsub_name)h+='<div class="kv"><span class="k">'+esc(p.addsub_name)+'</span><span class="v">'+esc(T('included'))+'</span></div>';
+  if(d.switch_days)h+='<div class="kv"><span class="k">'+esc(T('switch_credit'))+'</span><span class="v">'+(d.switch_days>0?'+':'')+d.switch_days+' '+esc(daysW(d.switch_days))+'</span></div>';
+  h+='</div>';
+  if(d.switch_days)h+='<div class="hint">'+esc(T('switch_hint'))+'</div>';
+  if(p.addsub_name&&p.addsub_desc)h+='<div class="hint">'+esc(p.addsub_desc)+'</div>';
+  if(d.countries&&d.countries.length){
+    h+='<div class="sect">'+esc(T('countries'))+' · '+d.countries.length+'</div><div class="chips">';
+    d.countries.forEach(function(c){h+='<span class="chip">'+(c.code?'<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">':esc(c.flag||''))+esc(c.name||c.flag||'')+'</span>';});
+    h+='</div>';
+  }
+  h+='<div style="margin-top:18px"><button class="btn" onclick="toCheckout(\''+jsq(p.code)+'\','+sel+')">'+esc(T('checkout'))+' '+esc(price(d))+'</button></div>';
+  view(h);
+};
+function pickDur(code,m){haptic();CUR.arg.months=m;rerender();}
+function toCheckout(code,months){
+  var p=planBy(code);if(!p)return;
+  if(!methods(p).length){toast(T('no_methods'),'err');return;}
+  if(STATE.menu.legal_accept&&legalDocs().length){go('legalgate',{code:code,months:months});return;}
+  go('checkout',{code:code,months:months});
+}
+var M_IC={balance:'wallet',stars:'star',yookassa:'card',cryptobot:'coins',platega:'card',heleket:'coins',tribute:'card',p2p:'send'};
+SCREENS.checkout=function(a){
+  var p=planBy(a.code),d=durBy(p,a.months);if(!p||!d){goHome();return;}
+  var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(planTitle(p))+' · '+esc(monthsW(a.months))+'</span><div class="big">'+esc(price(d))+'</div></div>';
+  h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list">';
+  methods(p).forEach(function(m){
+    var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):'';
+    h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(T('m_'+m))+'</div>'+(sub?'<div class="s">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
+  });
+  h+='</div>';
+  if(p.tribute&&p.tribute_terms&&p.tribute_terms.length&&methods(p).indexOf('tribute')>=0)h+='<div class="hint">'+esc(T('tribute_hint',p.tribute_terms.join(', ')))+'</div>';
+  if(STATE.ap&&STATE.ap.available&&methods(p).indexOf('yookassa')>=0)h+='<div class="hint">'+esc(T('ap_hint',apWhen()))+'</div>';
+  if(STATE.menu.legal_on_pay&&legalDocs().length)h+='<div class="hint">'+esc(T('legal_pay'))+' '+legalLinks()+'.</div>';
+  view(h);
+};
+/* Браузер пускает новую вкладку только прямо в обработчике нажатия: после
+   ожидания ответа сервера (счёт создаётся не мгновенно) window.open уже
+   блокируется. Поэтому в кабинете вкладка открывается сразу по нажатию, а
+   адрес оплаты подставляется в неё, когда счёт готов. */
+function payTab(){
+  if(!WEB)return null;
+  try{var w=window.open('','_blank');if(!w)return null;
+    try{w.opener=null;w.document.title='…';w.document.body.innerHTML='<p style="font:16px/1.5 system-ui,sans-serif;padding:32px;color:#667085">'+esc(T('opening'))+'</p>';}catch(e){}
+    return w;}catch(e){return null;}
+}
+function payTabGo(w,url){
+  if(!w||w.closed||!safeURL(url))return false;
+  try{w.location.href=url;return true;}catch(e){return false;}
+}
+function payTabDrop(w){try{if(w&&!w.closed)w.close();}catch(e){}}
+async function pay(code,months,method,el,shown){
+  haptic();busy(el,true);
+  var tab=(method==='balance'||method==='p2p')?null:payTab();
+  try{
+    var r=await post('/api/miniapp/checkout',{plan:code,months:months,method:method,price:shown||'',p2p_inapp:true});
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
+    if(r.ok&&r.sub_url){toast(T('paid_ok'),'ok');await refresh();goHome();return;}
+    if(r.ok&&r.p2p_card){go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id},{replace:true});return;}
+    if(r.ok&&r.pay_url){
+      guardOn();
+      if(r.invoice&&tg&&tg.openInvoice){tg.openInvoice(r.pay_url,function(st){guardOff();if(st==='paid'){toast(T('paid_ok'),'ok');refresh().then(goHome,goHome);}});return;}
+      if(openSmart(r.pay_url))return;
+      go('wait',{url:r.pay_url});return;
+    }
+    if(r.redirect){toast(r.message||T('pay_fail'));return;}
+    toast(r.error||T('pay_fail'),'err');
+    if(r.error&&/цен|price/i.test(r.error))refresh().then(rerender,function(){});
+  }catch(e){toast(e.message||T('error'),'err');}
+  finally{payTabDrop(tab);busy(el,false);}
+}
+
+/* ---------- ожидание оплаты ---------- */
+function stopPoll(){if(POLL){clearInterval(POLL);POLL=null;}}
+SCREENS.wait=function(a){
+  var h='<div class="card center" style="margin-top:18px">'+'<div class="spin"></div><div class="h2" style="margin-top:14px">'+esc(T('wait_title'))+'</div><div class="hint">'+esc(T('wait_text'))+'</div>'+
+    '<div class="stack" style="margin-top:16px"><button class="btn" onclick="payCheck(this,true)">'+IC.refresh+esc(T('wait_check'))+'</button>'+
+    (a&&a.url?'<button class="btn sec" onclick="openL(\''+jsq(a.url)+'\')">'+esc(T('wait_again'))+'</button>':'')+
+    '<button class="btn ghost" onclick="guardOff();refresh().then(goHome,goHome)">'+esc(T('home'))+'</button></div></div>';
+  view(h);
+  var n=0;POLL=setInterval(function(){if(document.hidden)return;if(++n>30){stopPoll();return;}payCheck(null,false);},6000);
+};
+async function payCheck(el,manual){
+  if(el)busy(el,true);
+  try{var r=await post('/api/miniapp/paycheck',{});
+    if(r.paid){stopPoll();guardOff();toast(T('paid_ok'),'ok');await refresh();goHome();return;}
+    if(manual)toast(T('wait_none'));
+  }catch(e){if(manual)toast(e.message||T('error'),'err');}
+  finally{if(el)busy(el,false);}
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&CUR&&CUR.name==='wait')setTimeout(function(){payCheck(null,false);},700);});
+
+/* ---------- P2P ---------- */
+SCREENS.p2p=function(a){
+  var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('p2p_title'))+'</span><div class="big">'+esc(a.amount||'')+'</div><div class="hint">'+esc(T('p2p_text'))+'</div></div>';
+  h+='<div class="sect">'+esc(T('p2p_card'))+'</div><div class="card flat" style="margin-top:0"><div class="mono">'+esc(a.card)+'</div><button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(a.card)+'\')">'+IC.copy+esc(T('copy_card'))+'</button></div>';
+  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(a.req||0)+',this)">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
+  view(h);
+};
+async function p2pUpload(req,el){
+  var f=document.getElementById('p2pf');f=f&&f.files&&f.files[0];
+  if(!f){toast(T('p2p_pick'),'err');return;}
+  busy(el,true);
+  try{
+    var fd=new FormData();fd.append('req_id',String(req));fd.append('photo',f);
+    var send=function(){return fetch('/api/cabinet/p2p/screenshot',{method:'POST',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{},body:fd});};
+    var r=await send();
+    // Пропуск мини-аппа живёт полчаса, а перевод в банке бывает дольше.
+    if(r.status===401&&!WEB&&tg&&tg.initData){await authenticate();r=await send();}
+    if(r.status===401&&WEB){logout();return;}
+    if(r.ok){view('<div class="card center" style="margin-top:18px">'+IC.check.replace('<svg','<svg style="width:40px;height:40px;color:var(--ok)"')+'<div class="h2" style="margin-top:10px">'+esc(T('p2p_sent'))+'</div><div class="hint">'+esc(T('p2p_sent_text'))+'</div><button class="btn" style="margin-top:16px" onclick="goHome()">'+esc(T('home'))+'</button></div>');STACK=[];setBack(false);haptic('ok');return;}
+    var j={};try{j=await r.json();}catch(e){}toast(j.error||T('upload_fail'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+
+/* ---------- кошелёк ---------- */
+SCREENS.wallet=async function(a){
+  a=a||{};CUR.arg=a;
+  if(!a.w){view(backBtn()+'<div class="sk" style="height:150px"></div><div class="sk" style="height:200px"></div>');
+    try{a.w=await api('/api/miniapp/wallet');}catch(e){a.w={balance_kopecks:STATE.balanceK,topup_on:STATE.menu.topup_on};}
+    if(STATE.menu.topup_on){try{a.o=await api('/api/miniapp/topup/options');}catch(e){a.o=null;}}
+    if(!CUR||CUR.arg!==a)return;
+  }
+  var w=a.w,o=a.o||{},h=backBtn();
+  h+='<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('balance'))+'</span><div class="big">'+esc(rub(w.balance_kopecks||0))+'</div><div class="hint">'+esc(T('no_withdraw'))+'</div></div>';
+  var canTop=w.topup_on&&o.methods&&o.methods.length&&((o.amounts&&o.amounts.length)||o.max_kopecks>0);
+  if(canTop){
+    h+='<div class="sect">'+esc(T('topup_amount'))+'</div><div class="card flat" style="margin-top:0">';
+    if(o.amounts&&o.amounts.length){h+='<div class="chips" style="margin-top:0">';o.amounts.forEach(function(x){h+='<button class="chip'+(a.k===x.kopecks&&!a.custom?' on':'')+'" onclick="tuPick('+x.kopecks+')">'+esc(x.label)+'</button>';});h+='</div>';}
+    if(o.max_kopecks>0)h+='<input id="tuAmt" class="field" style="margin-top:10px" inputmode="decimal" placeholder="'+esc(T('topup_custom')+', '+T('topup_max',rub(o.max_kopecks)))+'" value="'+(a.custom&&a.k?esc(String(a.k/100)):'')+'" oninput="tuCustom(this.value)">';
+    h+='<div id="tuM">'+tuMethods(a)+'</div></div>';
+  }
+  if(w.rows&&w.rows.length){
+    h+='<div class="sect">'+esc(T('forecast'))+'</div><div class="list" style="margin-top:0">';
+    w.rows.forEach(function(r){h+='<div class="kv"><span class="k">'+esc(monthsW(r.months))+' · '+esc(r.price)+' '+esc(w.currency||'₽')+'</span><span class="v">'+(r.count>0?(r.count+'× ≈ '+esc(monthsW(r.total))):'—')+'</span></div>';});
+    h+='</div>';
+    if(w.plan_name)h+='<div class="hint">'+esc(T('forecast_plan',w.plan_name))+'</div>';
+    if(w.max_months>0)h+='<div class="hint">'+esc(T('forecast_max',monthsW(w.max_months)))+'</div>';
+  }
+  h+='<div class="list">'+item(IC.tag,T('promo'),T('promo_hint'),'','go(\'promo\')')+'</div>';
+  view(h);
+};
+function tuMethods(a){
+  var o=a.o||{};if(!(a.k>0)||!o.methods)return '';
+  var h='<div class="sect" style="margin-top:14px">'+esc(T('topup_method'))+'</div><div class="list" style="margin-top:0">';
+  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(T('m_'+m))+'</div><div class="s">'+esc(rub(a.k))+'</div></span>'+CHEV+'</button>';});
+  return h+'</div>';
+}
+function tuPick(k){haptic();CUR.arg.k=k;CUR.arg.custom=false;rerender();}
+var tuT=null;
+function tuCustom(v){
+  var a=CUR.arg;clearTimeout(tuT);
+  tuT=setTimeout(function(){
+    var k=Math.round(num(v)*100);a.custom=true;a.k=isFinite(k)&&k>0?k:0;
+    if(a.o&&a.o.max_kopecks>0&&a.k>a.o.max_kopecks){toast(T('topup_big',rub(a.o.max_kopecks)),'err');a.k=0;}
+    var cs=app.querySelectorAll('.chips .chip.on');for(var i=0;i<cs.length;i++)cs[i].classList.remove('on');
+    var m=document.getElementById('tuM');if(m)m.innerHTML=tuMethods(a);
+  },350);
+}
+/* Согласие с документами перед любым действием — как в чате. */
+function needLegal(){
+  if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){go('legalgate',{act:true});return true;}
+  return false;
+}
+async function tuPay(m,el){
+  var a=CUR.arg;if(!(a.k>0)){toast(T('topup_bad'),'err');return;}
+  if(needLegal())return;
+  busy(el,true);
+  var tab=payTab();
+  try{var r=await post('/api/miniapp/topup',{kopecks:a.k,method:m});
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
+    if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url});return;}
+    toast(r.error||T('pay_fail'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  finally{payTabDrop(tab);busy(el,false);}
+}
+
+/* ---------- промокод ---------- */
+SCREENS.promo=function(){
+  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('promo'))+'</div><div class="hint">'+esc(T('promo_hint'))+'</div>'+
+    '<div class="card flat"><input id="promoIn" class="field" autocomplete="off" autocapitalize="characters" placeholder="'+esc(T('promo_ph'))+'"><button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+esc(T('apply'))+'</button></div>';
+  view(h);
+};
+async function promoApply(el,codeArg){
+  var inp=document.getElementById('promoIn');var code=codeArg||(inp?inp.value.trim():'');
+  if(!code)return;if(!codeArg&&needLegal())return;busy(el,true);
+  try{var r=await post('/api/miniapp/promo',{code:code});
+    if(r.ok){toast(r.message||T('done'),'ok');await refresh();if(!codeArg)goHome();return;}
+    toast(r.message||T('error'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  finally{busy(el,false);}
+}
+
+/* ---------- рефералка ---------- */
+SCREENS.ref=async function(a){
+  a=a||{};CUR.arg=a;
+  if(!a.r){view(backBtn()+'<div class="sk" style="height:260px"></div>');try{a.r=await api('/api/miniapp/referral');}catch(e){a.r={enabled:false};}if(!CUR||CUR.arg!==a)return;}
+  var r=a.r,h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('ref'))+'</div>';
+  if(!r.enabled){view(h+'<div class="empty">—</div>');return;}
+  var val=function(kind,v){return kind==='days'?(v+' '+T('days_short')):(v+' ₽');};
+  h+='<div class="list"><div class="kv"><span class="k">'+esc(T('ref_you'))+'</span><span class="v">'+esc(val(r.bonus_kind,r.bonus_value))+' <span class="muted small" style="font-weight:500">'+esc(r.on_first_pay?T('ref_first'):T('ref_reg'))+'</span></span></div>';
+  if(r.invitee_value>0&&r.invitee_kind)h+='<div class="kv"><span class="k">'+esc(T('ref_friend'))+'</span><span class="v">'+esc(val(r.invitee_kind,r.invitee_value))+'</span></div>';
+  if(r.percent>0)h+='<div class="kv"><span class="k">'+esc(T('ref_pct'))+'</span><span class="v">'+r.percent+'%</span></div>';
+  h+='<div class="kv"><span class="k">'+esc(T('ref_count'))+'</span><span class="v">'+(r.count||0)+'</span></div><div class="kv"><span class="k">'+esc(T('ref_earned'))+'</span><span class="v">'+esc(rub(r.earned_kopecks||0))+'</span></div></div>';
+  if(r.link)h+='<div class="link" onclick="copy(\''+jsq(r.link)+'\')"><code>'+esc(r.link)+'</code>'+IC.copy+'</div><div class="row2" style="margin-top:12px"><button class="btn" onclick="shareRef(\''+jsq(r.link)+'\')">'+IC.send+esc(T('share'))+'</button><button class="btn sec" onclick="copy(\''+jsq(r.link)+'\')">'+IC.copy+esc(T('copy'))+'</button></div>';
+  view(h);
+};
+function shareRef(link){haptic();var u='https://t.me/share/url?url='+encodeURIComponent(link)+'&text='+encodeURIComponent(T('ref_share_text'));openSmart(u);}
+
+/* ---------- устройства ---------- */
+SCREENS.devices=function(){
+  var s=STATE.sub||{},h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('devices_title'))+'</div>';
+  if(s.devices_ok)h+='<div class="hint">'+esc(T('devices'))+': '+esc(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used))+'</div>';
+  var l=s.devices||[];
+  if(l.length){h+='<div class="list">';l.forEach(function(d){h+='<div class="item static"><span class="ic">'+IC.device+'</span><span class="tx"><div class="t">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="s">'+esc(d.meta)+'</div>':'')+'</span></div>';});h+='</div>';}
+  else if(!s.devices_used)h+='<div class="card empty">'+esc(T('devices_none'))+'</div>';
+  if(s.active)h+='<button class="btn danger" style="margin-top:16px" onclick="askReset(this)">'+esc(T('devices_reset'))+'</button>';
+  view(h);
+};
+function askReset(el){if(needLegal())return;confirmAsk(T('devices_ask'),T('do_reset'),function(ok){if(ok)doReset(el);});}
+async function doReset(el){
+  busy(el,true);
+  try{var r=await post('/api/miniapp/devices/reset');
+    if(r.ok){toast(T('devices_done'),'ok');await refresh();goHome();return;}
+    toast(r.error||T('devices_fail'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+
+/* ---------- подключение ---------- */
+function detectOS(){
+  try{var p=(tg&&tg.platform)||'';if(p==='ios')return 'ios';if(p==='android'||p==='android_x')return 'android';if(p==='windows'||p==='tdesktop'&&/win/i.test(navigator.userAgent))return 'windows';if(p==='macos')return 'macos';}catch(e){}
+  var ua=(navigator.userAgent||'').toLowerCase();
+  if(/iphone|ipad|ipod/.test(ua))return 'ios';if(/android/.test(ua))return 'android';if(/windows|win64|win32/.test(ua))return 'windows';if(/mac os|macintosh/.test(ua))return 'macos';if(/linux|x11|cros/.test(ua))return 'linux';
+  return WEB?'windows':'android';
+}
+function cnPlatforms(c){
+  if(c&&c.platforms&&c.platforms.length)return c.platforms;
+  var o=[];if(c&&c.android&&c.android.length)o.push({key:'android',label:'Android',apps:c.android});if(c&&c.ios&&c.ios.length)o.push({key:'ios',label:'iOS',apps:c.ios});return o;
+}
+SCREENS.connect=async function(a){
+  a=a||{};CUR.arg=a;
+  if(!a.c){view(backBtn()+'<div class="sk" style="height:240px"></div><div class="sk" style="height:160px"></div>');
+    try{a.c=await api('/api/miniapp/connect');}catch(e){toast(e.message||T('error'),'err');a.c={};}
+    var ps=cnPlatforms(a.c),want=detectOS();a.key=ps.some(function(p){return p.key===want;})?want:((ps[0]&&ps[0].key)||'');
+    if(!CUR||CUR.arg!==a)return;}
+  var c=a.c,ps=cnPlatforms(c),cur=null;ps.forEach(function(p){if(p.key===a.key)cur=p;});if(!cur)cur=ps[0]||null;
+  var sub=c.sub_url||(STATE.sub&&STATE.sub.sub_url)||'';
+  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('conn_title'))+'</div><div class="hint">'+esc(T('conn_text'))+'</div>';
+  if(ps.length>1){h+='<div class="seg">';ps.forEach(function(p){h+='<button class="'+(cur&&p.key===cur.key?'on':'')+'" onclick="cnPlat(\''+jsq(p.key)+'\')">'+esc(p.label)+'</button>';});h+='</div>';}
+  var apps=(cur&&cur.apps)||[];
+  if(!apps.length)h+='<div class="card empty">'+esc(T('conn_empty'))+'</div>';
+  h+='<div class="plans-grid">';
+  apps.forEach(function(x){
+    h+='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span class="h2" style="font-size:17px">'+esc(x.name)+'</span>'+(x.featured?'<span class="badge acc">'+esc(T('recommended'))+'</span>':'')+'</div>';
+    if(x.add_desc)h+='<div class="hint">'+esc(x.add_desc)+'</div>';
+    h+='<div class="stack" style="margin-top:12px">';
+    if(x.deeplink)h+='<button class="btn" onclick="openDeep(\''+jsq(x.deeplink)+'\')">'+IC.plus+esc(T('add_sub'))+'</button>';
+    (x.installs||[]).forEach(function(b){h+='<button class="btn sec" onclick="openL(\''+jsq(b.url)+'\')">'+IC.download+esc(b.text||T('install'))+'</button>';});
+    h+='</div></div>';
+  });
+  h+='</div>';
+  if(sub){h+='<div class="card"><div class="link" style="margin-top:0" onclick="copy(\''+jsq(sub)+'\')"><code>'+esc(sub)+'</code>'+IC.copy+'</div><div class="qr" id="qrw"><div id="qr"></div></div><div class="hint center">'+esc(T('conn_qr'))+'</div></div>';}
+  view(h);
+  if(sub)drawQR(sub);
+};
+function cnPlat(k){haptic();CUR.arg.key=k;rerender();}
+function drawQR(text){
+  var el=document.getElementById('qr');if(!el)return;
+  try{if(typeof qrcode==='undefined')throw 0;var q=qrcode(0,'M');q.addData(text);q.make();el.innerHTML=q.createSvgTag({cellSize:4,margin:1,scalable:true});
+    var s=el.querySelector('svg');if(s){s.removeAttribute('width');s.removeAttribute('height');s.style.width='168px';s.style.height='168px';s.style.display='block';}
+  }catch(e){var w=document.getElementById('qrw');if(w)w.style.display='none';}
+}
+
+/* ---------- документы ---------- */
+function legalLinks(){
+  return legalDocs().map(function(x,i){var oc=x.html?'go(\'doc\','+i+')':'openSmart(\''+jsq(x.url)+'\')';return '<a href="#" onclick="'+oc+';return false">'+esc(x.title)+'</a>';}).join(' '+esc(T('and'))+' ');
+}
+function legalItems(){var h='<div class="list">';legalDocs().forEach(function(x,i){h+=x.html?item(IC.doc,x.title,'','','go(\'doc\','+i+')'):item(IC.doc,x.title,'','','openSmart(\''+jsq(x.url)+'\')');});return h+'</div>';}
+SCREENS.docs=function(){view(backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('docs'))+'</div>'+legalItems());};
+SCREENS.doc=function(i){
+  var x=legalDocs()[i];if(!x){goBack();return;}
+  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(x.title)+'</div><div class="card legal">'+(x.html||'')+'</div>';
+  if(x.url)h+='<button class="btn sec" style="margin-top:12px" onclick="openSmart(\''+jsq(x.url)+'\')">'+IC.link+esc(T('open_full'))+'</button>';
+  view(h);
+};
+function legalGate(){STACK=[];CUR={name:'legalgate',arg:null};SCREENS.legalgate(null);}
+SCREENS.legalgate=function(t){
+  var h=backBtn()+'<div class="h1" style="margin-top:'+(STACK.length?'8':'18')+'px">'+esc(t&&t.code?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+legalItems()+
+    '<button class="btn" style="margin-top:16px" onclick="legalAccept(this)">'+IC.check+esc(T('accept'))+'</button>';
+  if(WEB&&!t)h+='<button class="btn ghost" style="margin-top:8px" onclick="logout()">'+esc(T('logout'))+'</button>';
+  view(h);
+};
+async function legalAccept(el){
+  busy(el,true);
+  try{var r=await post('/api/miniapp/legal/accept',{});
+    if(r.ok){STATE.menu.legal_accept=false;
+      if(STATE.pendingPromo){var pc=STATE.pendingPromo;STATE.pendingPromo='';promoApply(null,pc);}
+      var t=CUR&&CUR.arg;if(t&&t.code){go('checkout',t,{replace:true});}else if(t&&t.act){toast(T('done'),'ok');goBack();}else{goHome();}return;}
+    toast(r.error||T('error'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  finally{busy(el,false);}
+}
+
+/* ---------- автопродление, триал ---------- */
+async function setAP(on,el){
+  if(needLegal())return;busy(el,true);
+  try{var r=await post('/api/miniapp/autopay',{on:!!on});
+    if(r.ok){toast(on?T('ap_enabled'):T('ap_disabled'),'ok');try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){}rerender();return;}
+    toast(r.error||T('ap_fail'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+async function doTrial(el){
+  if(needLegal())return;busy(el,true);
+  try{var r=await post('/api/miniapp/trial');
+    if(r.ok){toast(T('trial_ok'),'ok');await refresh();goHome();return;}
+    toast(r.error||T('trial_fail'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+
+/* ---------- оформление ---------- */
+SCREENS.theme=function(){
+  var p=themePref(),h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('theme'))+'</div><div class="seg">';
+  ['auto','light','dark'].forEach(function(k){h+='<button class="'+(p===k?'on':'')+'" onclick="setTheme(\''+k+'\');rerender()">'+esc(T('th_'+k))+'</button>';});
+  view(h+'</div><div class="hint">'+esc(T('th_hint'))+'</div>');
+};
+
+/* ---------- аккаунт кабинета ---------- */
+async function resend(el){busy(el,true);try{await post('/api/cabinet/email/verify/send',{});toast(T('mail_sent'),'ok');}catch(e){toast(e.message||T('error'),'err');}busy(el,false);}
+SCREENS.account=async function(){
+  var a=STATE.acct||{};try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
+  if(!CUR||CUR.name!=='account')return;
+  var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava">'+esc(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
+  if(a.email){h+='<div class="kv"><span class="k">'+esc(T('email'))+'</span><span class="v">'+esc(a.email)+'</span></div><div class="kv"><span class="k">'+esc(T('addr'))+'</span><span class="v" style="color:'+(a.email_verified?'var(--ok)':'var(--bad)')+'">'+esc(a.email_verified?T('verified'):T('not_verified'))+'</span></div>';}
+  h+='<div class="kv"><span class="k">Telegram</span><span class="v">'+esc(a.tg_linked?T('tg_linked'):T('tg_not'))+'</span></div></div>';
+  if(a.email&&!a.email_verified&&a.mail_on)h+='<button class="btn sec" style="margin-top:12px" onclick="resend(this)">'+esc(T('resend'))+'</button>';
+  if(!a.tg_linked)h+='<div class="sect">'+esc(T('bind_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="hint" style="margin-top:0">'+esc(T('bind_text'))+'</div><div class="hint">'+esc(T('bind_only'))+'</div><div class="tgw" id="tgbind"></div></div>';
+  if(a.has_password)h+='<div class="sect">'+esc(T('pass_change'))+'</div><div class="card flat stack" style="margin-top:0"><input id="pw0" class="field" type="password" autocomplete="current-password" placeholder="'+esc(T('pass_old'))+'"><input id="pw1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="pw2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="changePass(this)">'+esc(T('save'))+'</button><div class="hint">'+esc(T('pass_note'))+'</div></div>';
+  h+='<button class="btn danger" style="margin-top:16px" onclick="logout()">'+IC.logout+esc(T('logout'))+'</button>';
+  view(h);
+  if(!a.tg_linked)mountTG('tgbind','onTGBind(user)');
+};
+function mountTG(id,cb){
+  var put=function(u){if(!u)return;var m=document.getElementById(id);if(!m)return;var s=document.createElement('script');s.async=true;s.src='https://telegram.org/js/telegram-widget.js?22';
+    s.setAttribute('data-telegram-login',u);s.setAttribute('data-size','large');s.setAttribute('data-radius','12');s.setAttribute('data-onauth',cb);s.setAttribute('data-request-access','write');m.appendChild(s);};
+  if(STATE.botUser){put(STATE.botUser);return;}
+  api('/api/cabinet/config').then(function(c){STATE.botUser=c&&c.bot_username;put(STATE.botUser);},function(){});
+}
+window.onTGBind=function(u){post('/api/cabinet/tg/bind',u).then(function(r){if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);toast(T('bind_ok'),'ok');STATE.acct=null;boot();return;}toast(T('bind_fail'),'err');}).catch(function(e){toast(e.message||T('bind_fail'),'err');});};
+async function changePass(el){
+  var v=function(i){var e=document.getElementById(i);return e?e.value:'';};
+  var o=v('pw0'),n=v('pw1'),n2=v('pw2');
+  if(!o||!n)return toast(T('pass_fill'),'err');if(n!==n2)return toast(T('pass_mismatch'),'err');if(n.length<8)return toast(T('pass_short'),'err');
+  busy(el,true);
+  try{var r=await post('/api/cabinet/password/change',{old:o,new:n});if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);}toast(T('pass_ok'),'ok');rerender();return;}
+  catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang,botUser:STATE.botUser};paintBalance();renderLogin();}
+
+/* ---------- вход в кабинет ---------- */
+function startParams(){
+  var p={};try{var q=new URLSearchParams(location.search);['start','promo','plan','ref','inv'].forEach(function(k){var v=q.get(k);if(v)p[k]=v.slice(0,64);});}catch(e){}
+  if(p.promo)p.start='promo_'+p.promo;else if(p.plan)p.start='plan_'+p.plan;else if(p.ref)p.start='ref_'+p.ref;else if(p.inv)p.start='inv_'+p.inv;
+  return p.start||'';
+}
+async function renderLogin(){
+  STACK=[];CUR={name:'login'};setBack(false);paintBalance();
+  var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
+  if(BRAND.logo)document.getElementById('brand').innerHTML='';
+  STATE.botUser=cfg.bot_username;
+  var h='<div class="narrow">'+brandHTML(true)+'<div class="h1 center" style="margin-top:'+(BRAND.logo?'8':'28')+'px">'+esc(T('login'))+'</div><div class="hint center">'+esc(T('login_text'))+'</div>';
+  if(cfg.bot_username)h+='<div class="sect">'+esc(T('via_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="tgw" id="tglogin" style="margin-top:0"></div></div>';
+  h+='<div class="sect">'+esc(T('via_email'))+'</div><div class="card flat stack" style="margin-top:0"><input id="le" class="field" type="email" autocomplete="email" placeholder="'+esc(T('email'))+'"><input id="lp" class="field" type="password" autocomplete="current-password" placeholder="'+esc(T('password'))+'">'+
+    '<button class="btn" onclick="cabAuth(\'login\',this)">'+esc(T('sign_in'))+'</button><button class="btn sec" onclick="cabAuth(\'register\',this)">'+esc(T('register'))+'</button>';
+  if(cfg.mail_on)h+='<button class="btn ghost" onclick="go(\'forgot\')">'+esc(T('forgot'))+'</button><div class="hint">'+esc(T('reg_mail'))+'</div>';
+  else h+='<div class="hint">'+esc(T('reg_nomail'))+'</div>';
+  view(h+'</div></div>');
+  if(cfg.bot_username)mountTG('tglogin','onTGAuth(user)');
+}
+window.onTGAuth=function(u){
+  var body=Object.assign({},u);var st=load('cab_start');if(st)body.start=st;
+  view('<div class="sk" style="height:200px"></div>');
+  post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);boot();}else{toast(T('login_fail'),'err');renderLogin();}}).catch(function(e){toast(e.message||T('login_fail'),'err');renderLogin();});
+};
+async function cabAuth(kind,el){
+  var e=document.getElementById('le'),p=document.getElementById('lp');var em=e?e.value.trim():'',pw=p?p.value:'';
+  if(!em||!pw){toast(T('fill_login'),'err');return;}
+  busy(el,true);
+  try{var r=await post('/api/cabinet/auth/'+kind,{email:em,password:pw});if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);boot();return;}toast(T('login_fail'),'err');}
+  catch(x){toast(x.message||T('login_fail'),'err');}
+  busy(el,false);
+}
+SCREENS.login=function(){renderLogin();};
+SCREENS.forgot=function(){
+  view('<div class="narrow">'+backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('restore'))+'</div><div class="hint">'+esc(T('restore_text'))+'</div><div class="card flat stack"><input id="fe" class="field" type="email" autocomplete="email" placeholder="'+esc(T('email'))+'"><button class="btn" onclick="doForgot(this)">'+esc(T('send'))+'</button></div></div>');
+};
+async function doForgot(el){var e=document.getElementById('fe');var v=e?e.value.trim():'';if(!v)return;busy(el,true);try{await post('/api/cabinet/password/forgot',{email:v});}catch(x){}busy(el,false);toast(T('restore_sent'),'ok');}
+function openReset(tok){
+  STACK=[];CUR={name:'reset',arg:tok};setBack(false);
+  view('<div class="narrow">'+brandHTML(true)+'<div class="h1" style="margin-top:18px">'+esc(T('new_pass'))+'</div><div class="hint">'+esc(T('new_pass_text'))+'</div><div class="card flat stack"><input id="r1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="r2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="doReset2(this,\''+jsq(tok)+'\')">'+esc(T('save'))+'</button><button class="btn ghost" onclick="renderLogin()">'+esc(T('to_login'))+'</button></div></div>');
+}
+SCREENS.reset=function(t){openReset(t);};
+async function doReset2(el,tok){
+  var a=document.getElementById('r1'),b=document.getElementById('r2');var v=a?a.value:'',v2=b?b.value:'';
+  if(v!==v2)return toast(T('pass_mismatch'),'err');if(v.length<8)return toast(T('pass_short'),'err');
+  busy(el,true);
+  try{var r=await post('/api/cabinet/password/reset',{token:tok,password:v});if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);toast(T('pass_ok'),'ok');boot();return;}toast(T('error'),'err');}
+  catch(e){toast(e.message||T('link_bad'),'err');}
+  busy(el,false);
+}
+function dropQuery(){try{history.replaceState({},'',location.pathname);}catch(e){}}
+
+/* ---------- загрузка ---------- */
+async function refresh(){
+  var r=await Promise.all([api('/api/miniapp/me'),api('/api/miniapp/menu'),api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
+  var me=r[0],menu=r[1],sub=r[2],plans=r[3];
+  var extra=(STATE.plans||[]).filter(function(p){return p.link&&!(plans.plans||[]).some(function(q){return q.code===p.code;});});
+  STATE.me=me;STATE.menu=menu||{};STATE.sub=sub||{};STATE.plans=((plans&&plans.plans)||[]).concat(extra);STATE.plansNotice=(plans&&plans.notice)||'';
+  STATE.balanceK=me.balance_kopecks||0;STATE.methods=menu.pay_methods||[];STATE.me_name=me.name||'';STATE.me_email=me.email||'';
+  if(me.lang&&L[me.lang])STATE.lang=me.lang;
+  try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
+  if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
+  paintBalance();paintBrand();
+}
+async function handleStart(p){
+  if(!p)return false;
+  if(p.indexOf('promo_')===0){
+    // Сначала документы, если их нужно принять: промокод применится после.
+    if(STATE.menu.legal_accept&&legalDocs().length){STATE.pendingPromo=p.slice(6);return false;}
+    await promoApply(null,p.slice(6));return false;
+  }
+  if(p.indexOf('plan_')===0){
+    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(p.slice(5)));
+      if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;STATE.plans=STATE.plans.filter(function(x){return x.code!==lp.code;}).concat([lp]);STACK=[{name:'home'}];CUR={name:'plan',arg:{code:lp.code}};SCREENS.plan(CUR.arg);return true;}
+      toast(r.notice||T('plan_link_fail'),'err');
+    }catch(e){toast(e.message||T('error'),'err');}
+  }
+  return false;
+}
+async function boot(){
+  guardOff();stopPoll();
+  applyTheme();paintBrand();
+  try{
+    var start='';
+    if(WEB){
+      var q=new URLSearchParams(location.search);
+      var sp=startParams();if(sp)store('cab_start',sp);
+      var vt=q.get('verify');if(vt){dropQuery();try{await post('/api/cabinet/email/verify',{token:vt});toast(T('email_ok'),'ok');}catch(e){toast(e.message||T('link_bad'),'err');}}
+      var rt=q.get('reset');if(rt){dropQuery();openReset(rt);return;}
+      if(sp)dropQuery();
+      if(!TOKEN)TOKEN=load('cab_tok');
+      if(!TOKEN){renderLogin();return;}
+      start=load('cab_start')||'';store('cab_start',null);
+    }else{
+      if(!tg||!tg.initData){view('<div class="card empty">'+esc(T('open_tg'))+'</div>');return;}
+      if(!TOKEN)await authenticate();
+      if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
+    }
+    if(!STATE.me)view('<div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div>');
+    await refresh();
+    if(start&&await handleStart(start))return;
+    goHome();
+  }catch(e){
+    if(WEB&&e.status===401){store('cab_tok',null);TOKEN=null;renderLogin();return;}
+    view('<div class="card empty">'+esc(T('loading_fail'))+': '+esc(e.message)+'<button class="btn sec" style="margin-top:14px" onclick="boot()">'+IC.refresh+'</button></div>');
+  }
+}
+try{if(tg&&tg.CloudStorage&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9')&&!load('ui_theme')){tg.CloudStorage.getItem('ui_theme',function(err,v){if(!err&&(v==='light'||v==='dark'||v==='auto')){store('ui_theme',v);applyTheme();}});}}catch(e){}
+boot();
+</script>
+</body>
+</html>

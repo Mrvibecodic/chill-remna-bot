@@ -206,6 +206,19 @@ type App struct {
 	// после выдачи конец срока уже другой, и ключ сделки не совпадёт.
 	recentBuy map[string]time.Time
 
+	// webMu защищает состояние веб-интерфейса ниже: кэш логотипов, открытые
+	// по ссылке тарифы и отметки ручной проверки оплаты.
+	webMu sync.Mutex
+	// brandCache — скачанные у Telegram логотипы по идентификатору файла.
+	brandCache map[string]brandLogoEntry
+	// brandFetchMu — одно скачивание логотипа за раз.
+	brandFetchMu sync.Mutex
+	// linkPlans — тарифы «по ссылке», открытые человеком в мини-аппе или
+	// кабинете: покупка такого тарифа разрешена только после открытия.
+	linkPlans map[int64]map[string]time.Time
+	// payChecks — когда человек последний раз просил перепроверить оплату.
+	payChecks map[int64]time.Time
+
 	// p2pRotate — очередь реквизитов перевода. В памяти, а не в конфиге:
 	// см. nextP2PCardIdx.
 	p2pRotate atomic.Uint64
@@ -912,6 +925,14 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		a.handleWizardText(ctx, chatID, text)
 		return
 	}
+	if ui.awaitLogo != "" && ui.adminInput == "" {
+		// Логотип принимается только картинкой — как и баннер раздела.
+		lang := a.lang(chatID)
+		a.sendKB(ctx, chatID, i18n.T(lang, "webui.ask_logo"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.cancel"), cbWebUI+":cancel")},
+		})
+		return
+	}
 	if ui.awaitSectionBanner != "" && ui.adminInput == "" {
 		// Баннер раздела принимается только картинкой: сохранить сюда текст
 		// нельзя, а молча съесть сообщение — оставить человека в непонимании.
@@ -1580,6 +1601,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	ui.linkUID = 0
 	ui.inputBack = ""
 	ui.awaitPromo = false
+	ui.awaitLogo = ""
 	ui.userQuery = ""
 	ui.userPage = 0
 	if back == "" {

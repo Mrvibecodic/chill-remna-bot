@@ -1871,6 +1871,18 @@ func (s *fakeStore) ListUnresolvedPending(_ context.Context, createdBefore strin
 	}
 	return out, nil
 }
+func (s *fakeStore) ListUserPending(_ context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error) {
+	var out []model.PendingInvoice
+	for _, p := range s.pending {
+		if !p.Resolved && p.TelegramID == telegramID && p.CreatedAt >= since {
+			out = append(out, *p)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
 func (s *fakeStore) ResolvePending(_ context.Context, id int64) error {
 	if p, ok := s.pending[id]; ok {
 		p.Resolved = true

@@ -44,7 +44,7 @@ func (f *fakeMini) CabinetForgotPassword(_ context.Context, e string) {
 	f.forgot = append(f.forgot, e)
 }
 func (f *fakeMini) MiniAutoPay(context.Context, int64) MiniAutoPayDTO { return MiniAutoPayDTO{} }
-func (f *fakeMini) MiniCheckout(context.Context, int64, string, int, string, string, bool) MiniActionDTO {
+func (f *fakeMini) MiniCheckout(context.Context, int64, string, int, string, string, bool, bool) MiniActionDTO {
 	return MiniActionDTO{OK: true}
 }
 func (f *fakeMini) CabinetAccount(_ context.Context, id int64) CabinetAccountDTO {

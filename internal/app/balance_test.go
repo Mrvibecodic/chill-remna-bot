@@ -113,7 +113,7 @@ func TestMiniCheckoutBalance_NoDoubleCharge(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			oks[i] = a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false).OK
+			oks[i] = a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false).OK
 		}(i)
 	}
 	wg.Wait()

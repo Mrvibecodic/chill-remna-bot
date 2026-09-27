@@ -107,7 +107,7 @@ Telegram Web K (GPL-3.0) — это иллюстрация, а не съёмка
 
 ### Feather Icons
 
-Часть иконок в `internal/web/miniapp_static/index.html` (объект `IC`) нарисована
+Часть иконок в `internal/web/miniapp_static/index.html` и `minimal.html` (объект `IC`) нарисована
 на основе набора Feather Icons.
 
 ```

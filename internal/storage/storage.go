@@ -186,6 +186,9 @@ type Storage interface {
 	AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error
 
 	ListUnresolvedPending(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error)
+	// ListUserPending — незакрытые счета одного человека не старше since,
+	// свежие первыми.
+	ListUserPending(ctx context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error)
 	ResolvePending(ctx context.Context, id int64) error
 
 	PendingByExtID(ctx context.Context, extID string) (*model.PendingInvoice, error)
@@ -2083,6 +2086,28 @@ func (b *base) ListUnresolvedPending(ctx context.Context, createdBefore string, 
 		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks, plan_snapshot FROM pending_invoices "+
 			"WHERE resolved = 0 AND created_at <= "+b.ph(1)+" ORDER BY created_at ASC LIMIT "+b.ph(2),
 		createdBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.PendingInvoice
+	for rows.Next() {
+		var p model.PendingInvoice
+		var snapRaw string
+		if err := rows.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Months, &p.CreatedAt, &p.Purpose, &p.Kopecks, &snapRaw); err != nil {
+			return nil, err
+		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) ListUserPending(ctx context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT id, method, ext_id, telegram_id, months, created_at, purpose, kopecks, plan_snapshot FROM pending_invoices "+
+			"WHERE resolved = 0 AND telegram_id = "+b.ph(1)+" AND created_at >= "+b.ph(2)+" ORDER BY created_at DESC LIMIT "+b.ph(3),
+		telegramID, since, limit)
 	if err != nil {
 		return nil, err
 	}

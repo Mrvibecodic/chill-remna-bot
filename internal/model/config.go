@@ -181,6 +181,9 @@ type BotConfig struct {
 
 	Cabinet CabinetConfig `json:"cabinet"`
 
+	// WebUI — дизайн мини-аппа и веб-кабинета и брендирование страниц.
+	WebUI WebUIConfig `json:"webui"`
+
 	Mail MailConfig `json:"mail"`
 
 	Wallet WalletConfig `json:"wallet"`
@@ -1052,6 +1055,74 @@ type CabinetConfig struct {
 	// приниматься немедленно.
 	SessionVer int  `json:"session_ver,omitempty"`
 	Init       bool `json:"init"`
+}
+
+// WebUIConfig — какой дизайн отдают мини-апп и веб-кабинет и как брендированы
+// страницы. Нулевое значение — классический дизайн, как до появления выбора:
+// существующие установки после обновления не меняются.
+type WebUIConfig struct {
+	// Design — "classic" (прежний) или "minimal" (новый).
+	Design string `json:"design,omitempty"`
+	// Theme — тема по умолчанию для нового дизайна: "auto" (как в Telegram или
+	// в системе), "light", "dark". Человек может переключить её сам.
+	Theme string `json:"theme,omitempty"`
+	// Name — название сервиса в шапке страниц.
+	Name string `json:"name,omitempty"`
+	// Accent — фирменный цвет кнопок, #rrggbb. Пусто — цвет дизайна.
+	Accent string `json:"accent,omitempty"`
+	// Логотип задаётся ссылкой или загрузкой в бота. Загруженный хранится
+	// идентификатором файла Telegram (байты скачиваются при первом показе) и
+	// перекрывает ссылку. Второй логотип — для тёмной темы: светлый знак на
+	// тёмном фоне часто нужен отдельно.
+	LogoURL      string `json:"logo_url,omitempty"`
+	LogoFile     string `json:"logo_file,omitempty"`
+	LogoDarkURL  string `json:"logo_dark_url,omitempty"`
+	LogoDarkFile string `json:"logo_dark_file,omitempty"`
+}
+
+// Дизайны и темы веб-интерфейса.
+const (
+	WebDesignClassic = "classic"
+	WebDesignMinimal = "minimal"
+
+	WebThemeAuto  = "auto"
+	WebThemeLight = "light"
+	WebThemeDark  = "dark"
+)
+
+// Normalized возвращает копию с допустимыми значениями: неизвестный дизайн —
+// классический, неизвестная тема — автоматическая, цвет — только #rrggbb.
+func (w WebUIConfig) Normalized() WebUIConfig {
+	if w.Design != WebDesignMinimal {
+		w.Design = WebDesignClassic
+	}
+	switch w.Theme {
+	case WebThemeLight, WebThemeDark:
+	default:
+		w.Theme = WebThemeAuto
+	}
+	w.Accent = NormalizeHexColor(w.Accent)
+	return w
+}
+
+// NormalizeHexColor приводит цвет к виду #rrggbb; всё прочее — пустая строка.
+// Цвет попадает в CSS страницы, поэтому пропускается только этот вид.
+func NormalizeHexColor(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimPrefix(s, "#")
+	if len(s) == 3 {
+		s = string([]byte{s[0], s[0], s[1], s[1], s[2], s[2]})
+	}
+	if len(s) != 6 {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return "#" + s
 }
 
 // Cabinet approval modes.

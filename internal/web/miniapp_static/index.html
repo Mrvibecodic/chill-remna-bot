@@ -726,9 +726,17 @@ async function p2pUpload(reqID,el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   busy(el,false);
 }
+// Браузер пускает новую вкладку только прямо в обработчике нажатия, а не
+// после ожидания ответа сервера: в кабинете вкладка оплаты открывается сразу,
+// адрес подставляется, когда счёт готов.
+function payTab(){if(!WEB)return null;try{var w=window.open('','_blank');if(w){try{w.opener=null;}catch(e){}}return w;}catch(e){return null;}}
+function payTabGo(w,u){if(!w||w.closed||!/^(https?:|tg:)/i.test(String(u||'')))return false;try{w.location.href=u;return true;}catch(e){return false;}}
+function payTabDrop(w){try{if(w&&!w.closed)w.close();}catch(e){}}
 async function pay(plan,months,method,el,shownPrice){
   haptic('tap');busy(el,true);
+  var tab=(method==='balance'||method==='p2p')?null:payTab();
   try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
     if(r.ok&&r.pay_url){
@@ -741,7 +749,7 @@ async function pay(plan,months,method,el,shownPrice){
     if(r.redirect){toast(r.message||'Этот способ оплаты доступен в боте','ok');if(tg&&tg.close)setTimeout(function(){try{tg.close();}catch(e){}},2200);return;}
     haptic('err');toast(r.error||'Не удалось оплатить','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
-  finally{busy(el,false);}
+  finally{payTabDrop(tab);busy(el,false);}
 }
 
 /* ---- "more": balance, promo, referral ---- */
@@ -874,11 +882,13 @@ function topupPick(kopecks,label){
 }
 async function topupPay(kopecks,method,el){
   haptic('tap');busy(el,true);
+  var tab=payTab();
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
     if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
-  finally{busy(el,false);}
+  finally{payTabDrop(tab);busy(el,false);}
 }
 
 /* ---- connect (apps + deeplinks + QR) ---- */

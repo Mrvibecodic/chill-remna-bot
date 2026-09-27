@@ -276,7 +276,7 @@ func (a *App) CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filen
 	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
 		return err
 	}
-	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), tgID, "screenshot_submitted", "из веб-кабинета, ожидает проверки")
+	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), tgID, "screenshot_submitted", "из мини-аппа или кабинета, ожидает проверки")
 	lang := a.lang(a.cfg.AdminID)
 	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 	id := strconv.FormatInt(req.ID, 10)

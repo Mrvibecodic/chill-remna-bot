@@ -49,7 +49,29 @@ type MiniProvider interface {
 	// shownPrice — цена, которую фронт НАРИСОВАЛ человеку. Список тарифов
 	// кэшируется до перезагрузки страницы, поэтому показанная цена может
 	// отстать от прайса на часы; списание сверяется с ней.
-	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web bool) MiniActionDTO
+	//
+	// p2pInApp — перевод на карту оформляется прямо в мини-аппе (реквизиты и
+	// загрузка чека на странице), а не уводом в чат. Старый фронт его не
+	// присылает и получает прежнее поведение.
+	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web, p2pInApp bool) MiniActionDTO
+	// MiniPlanLink открывает тариф по его ссылке (start-параметр plan_<код>):
+	// тот же лимит перебора и тот же единственный ответ «недоступен», что в
+	// чате. Открытый тариф после этого можно купить.
+	MiniPlanLink(ctx context.Context, tgID int64, code string) MiniPlansDTO
+	// MiniWallet — кошелёк: баланс и на сколько его хватит по своему тарифу.
+	MiniWallet(ctx context.Context, tgID int64) MiniWalletDTO
+	// MiniPayCheck перепроверяет у платёжек незакрытые счета человека — то же,
+	// что кнопка «Проверить оплату» в чате.
+	MiniPayCheck(ctx context.Context, tgID int64) MiniPayCheckDTO
+	// MiniStart разбирает start-параметр входа (inv_, ref_) и привязывает
+	// аккаунт панели новичку — как /start в чате. Возвращает текст для
+	// человека (пусто — сказать нечего).
+	// cabinet — вход через кабинет (там новичков может одобрять админ).
+	MiniStart(ctx context.Context, tgID int64, param string, cabinet bool) string
+	// WebUI — выбранный дизайн и брендирование страниц.
+	WebUI() WebUIDTO
+	// BrandLogo — логотип, загруженный в бота (dark — для тёмной темы).
+	BrandLogo(ctx context.Context, dark bool) ([]byte, bool)
 
 	// MiniAutoPay reports the user's automatic-renewal state.
 	MiniAutoPay(ctx context.Context, tgID int64) MiniAutoPayDTO
@@ -154,6 +176,41 @@ type MiniAmountDTO struct {
 type MiniTopUpOptionsDTO struct {
 	Amounts []MiniAmountDTO `json:"amounts"`
 	Methods []string        `json:"methods"`
+	// MaxKopecks — потолок произвольной суммы (как в чате); 0 — своя сумма
+	// недоступна.
+	MaxKopecks int64 `json:"max_kopecks,omitempty"`
+}
+
+// MiniWalletDTO — кошелёк: баланс и прогноз «на сколько хватит» по тарифу
+// покупателя (или по сетке, если своего тарифа нет) — тот же, что в чате.
+type MiniWalletDTO struct {
+	BalanceK int64 `json:"balance_kopecks"`
+	TopUpOn  bool  `json:"topup_on"`
+	// PlanName — тариф, по ценам которого считан прогноз ("" — по сетке).
+	PlanName  string               `json:"plan_name,omitempty"`
+	Rows      []MiniForecastRowDTO `json:"rows,omitempty"`
+	MaxMonths int                  `json:"max_months"`
+	Currency  string               `json:"currency"`
+}
+
+// MiniForecastRowDTO — один срок прогноза: сколько раз его можно оплатить
+// балансом и сколько это месяцев.
+type MiniForecastRowDTO struct {
+	Months int    `json:"months"`
+	Price  string `json:"price"`
+	Count  int    `json:"count"`
+	Total  int    `json:"total"`
+}
+
+// MiniPayCheckDTO — итог ручной перепроверки счетов.
+type MiniPayCheckDTO struct {
+	OK bool `json:"ok"`
+	// Paid — хотя бы один счёт оказался оплаченным (подписка или баланс уже
+	// обновлены).
+	Paid bool `json:"paid"`
+	// Pending — сколько счетов всё ещё ждут оплаты.
+	Pending int    `json:"pending"`
+	Error   string `json:"error,omitempty"`
 }
 
 // MiniActionDTO is the result of an action (trial/checkout): on success it
@@ -248,6 +305,13 @@ type MiniMenuDTO struct {
 	// LegalGateStart — согласие спрашивается на входе, а не только перед
 	// оплатой: мини-апп и кабинет держат тот же гейт, что и чат.
 	LegalGateStart bool `json:"legal_gate_start,omitempty"`
+
+	// OwnPlan — код тарифа последней покупки: «Продлить» ведёт на него, как в
+	// чате. RenewNote — условия этого тарифа изменились с прошлой оплаты;
+	// RenewGone — тарифа больше нет или он закрыт покупателю.
+	OwnPlan   string `json:"own_plan,omitempty"`
+	RenewNote string `json:"renew_note,omitempty"`
+	RenewGone bool   `json:"renew_gone,omitempty"`
 }
 
 // MiniLegalDTO — один документ сервиса: ссылка на страницу и/или текст,
@@ -315,6 +379,9 @@ type MiniPlanDTO struct {
 	TributeTerms []string `json:"tribute_terms,omitempty"`
 	// Durations — продаваемые сроки тарифа.
 	Durations []MiniDurationDTO `json:"durations"`
+	// Own — тариф последней покупки человека (показывается и тогда, когда
+	// витрина прячет его режимом «по ссылке»: продление своего не отрезается).
+	Own bool `json:"own,omitempty"`
 }
 
 // MiniDurationDTO — один срок тарифа.
@@ -436,8 +503,19 @@ func (s *Server) handleMiniAuth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	// start_param входит в подписанные данные — подделать его нельзя.
+	notice := ""
+	if p := initDataStartParam(req.InitData); p != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		notice = s.mini.MiniStart(ctx, tgID, p, false)
+		cancel()
+	}
 	tok := issueJWT(tgID, false, jwtKey(s.mini.MiniBotToken()), jwtTTL, s.mini.SessionVersion(), s.mini.SessionEpoch(r.Context(), tgID))
-	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "expires_in": int(jwtTTL.Seconds())})
+	resp := map[string]any{"token": tok, "expires_in": int(jwtTTL.Seconds())}
+	if notice != "" {
+		resp["notice"] = notice
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // legalFreePaths — ручки, доступные до принятия документов. Без них человек не
@@ -507,7 +585,12 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	// Гейт документов — одной точкой на все ручки. Раньше он стоял только на
 	// оформлении счёта, и триал, промокод, пополнение и сброс устройств
 	// проходили мимо согласия целиком.
-	if !legalFreePaths(r.URL.Path) && s.mini.MiniLegalRequired(r.Context(), id) {
+	//
+	// Только на действиях: чтение (витрина, кошелёк, рефералка) согласия не
+	// требует. Раньше гейт стоял и на чтении, и при «согласии перед покупкой»
+	// мини-апп не открывался вовсе — стартовая загрузка витрины получала отказ
+	// раньше, чем человек видел экран с документами.
+	if r.Method != http.MethodGet && !legalFreePaths(r.URL.Path) && s.mini.MiniLegalRequired(r.Context(), id) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "сначала примите документы сервиса"})
 		return 0, false, false
 	}
@@ -572,6 +655,10 @@ func (s *Server) handleMiniPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	if code := strings.TrimSpace(r.URL.Query().Get("link")); code != "" {
+		writeJSON(w, http.StatusOK, s.mini.MiniPlanLink(ctx, id, code))
+		return
+	}
 	writeJSON(w, http.StatusOK, s.mini.MiniPlans(ctx, id))
 }
 
@@ -580,7 +667,10 @@ func (s *Server) handleMiniTrial(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if web {
+	// В кабинете пробный период доступен только тем, кто вошёл через
+	// Telegram: это тот же проверенный аккаунт, что и в чате. Аккаунт по почте
+	// заводится на любой ящик — ему триал не выдаётся никогда.
+	if web && id < 0 {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "триал недоступен в веб-кабинете"})
 		return
 	}
@@ -607,6 +697,8 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		// Price — цена, показанная на экране оформления. Пусто у старого
 		// фронта из кэша: тогда сверять не с чем и поведение прежнее.
 		Price string `json:"price"`
+		// P2PInApp — фронт умеет принять реквизиты перевода и чек на месте.
+		P2PInApp bool `json:"p2p_inapp"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -614,7 +706,7 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web))
+	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp))
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.
@@ -734,4 +826,26 @@ func (s *Server) handleMiniResetDevices(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniResetDevices(ctx, id))
+}
+
+// handleMiniWallet — кошелёк: баланс и прогноз по своему тарифу.
+func (s *Server) handleMiniWallet(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniWallet(ctx, id))
+}
+
+// handleMiniPayCheck — ручная перепроверка незакрытых счетов человека.
+func (s *Server) handleMiniPayCheck(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniPayCheck(ctx, id))
 }

@@ -30,12 +30,13 @@ func (a *App) syncPanelAccount(ctx context.Context, chatID int64) bool {
 	if u, _ := a.store.GetUser(ctx, chatID); u != nil && (u.TrialUsedAt != "" || u.SubExpireAt != "") {
 		return false
 	}
-	ui := a.getUI(chatID)
-	if ui.panelSyncDone {
+	// Поиск занимается сразу и под замком: его зовут и чат, и запросы
+	// мини-аппа и кабинета, и два одновременных входа запускали бы два полных
+	// перебора панели.
+	if !a.claimPanelSync(chatID) {
 		return false
 	}
 	pu := a.findPanelAccount(ctx, panel, chatID)
-	ui.panelSyncDone = true
 	if pu == nil {
 		return false
 	}
@@ -44,7 +45,16 @@ func (a *App) syncPanelAccount(ctx context.Context, chatID int64) bool {
 			a.log.Warn("panel sync: link telegramId", "tg_id", chatID, "panel_ref", pu.Ref.Key(), "err", err)
 		}
 	}
+	// Пока шёл перебор, человек мог взять триал или купить подписку в другой
+	// поверхности — тогда найденный срок устарел и записывать его нельзя.
+	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(chatID, 10))]
+	lk.Lock()
+	if u, _ := a.store.GetUser(ctx, chatID); u != nil && (u.TrialUsedAt != "" || u.SubExpireAt != "") {
+		lk.Unlock()
+		return false
+	}
 	a.markPanelLinked(ctx, chatID, pu.ExpireAt)
+	lk.Unlock()
 	a.log.Info("panel sync: account linked", "tg_id", chatID, "panel_user", pu.Username, "panel_ref", pu.Ref.Key())
 	return true
 }
@@ -266,5 +276,18 @@ func looksLikeUUID(s string) bool {
 			}
 		}
 	}
+	return true
+}
+
+// claimPanelSync занимает поиск аккаунта в панели для пользователя: true —
+// поиск ещё не делался в этом процессе и теперь за вызывающим.
+func (a *App) claimPanelSync(chatID int64) bool {
+	ui := a.getUI(chatID)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if ui.panelSyncDone {
+		return false
+	}
+	ui.panelSyncDone = true
 	return true
 }

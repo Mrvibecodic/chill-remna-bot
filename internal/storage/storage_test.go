@@ -1148,3 +1148,31 @@ func TestAddPaymentAndBalanceAtomic(t *testing.T) {
 		}
 	})
 }
+
+// Незакрытые счета одного человека: только его, только свежие, без закрытых.
+func TestListUserPending(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		add := func(id, uid int64, ext, created string) {
+			if err := st.AddPendingInvoice(ctx, &model.PendingInvoice{
+				ID: id, Method: PayMethodTest, ExtID: ext, TelegramID: uid, Months: 1, CreatedAt: created,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		add(8001, 701, "up_old", "2020-01-01T00:00:00Z")
+		add(8002, 701, "up_new", "2030-01-02T00:00:00Z")
+		add(8003, 701, "up_done", "2030-01-03T00:00:00Z")
+		add(8004, 702, "up_other", "2030-01-04T00:00:00Z")
+		if err := st.ResolvePending(ctx, 8003); err != nil {
+			t.Fatal(err)
+		}
+		list, err := st.ListUserPending(ctx, 701, "2030-01-01T00:00:00Z", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].ExtID != "up_new" {
+			t.Fatalf("счета человека: %+v", list)
+		}
+	})
+}

@@ -13,7 +13,7 @@ func TestReadIndexHTML_Overlay(t *testing.T) {
 
 	// Без кастомных файлов — вшитый index.html.
 	s := &Server{staticDir: dir}
-	b, err := s.readIndexHTML("cabinet.html")
+	b, err := s.readIndexHTML("cabinet.html", "")
 	if err != nil {
 		t.Fatalf("embedded fallback: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestReadIndexHTML_Overlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, specific := range []string{"cabinet.html", "miniapp.html"} {
-		b, err = s.readIndexHTML(specific)
+		b, err = s.readIndexHTML(specific, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -40,20 +40,20 @@ func TestReadIndexHTML_Overlay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "cabinet.html"), []byte("CUSTOM-CABINET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ = s.readIndexHTML("cabinet.html"); string(b) != "CUSTOM-CABINET" {
+	if b, _ = s.readIndexHTML("cabinet.html", ""); string(b) != "CUSTOM-CABINET" {
 		t.Fatalf("cabinet.html должен перекрывать index.html, получено %q", b)
 	}
-	if b, _ = s.readIndexHTML("miniapp.html"); string(b) != "CUSTOM-COMMON" {
+	if b, _ = s.readIndexHTML("miniapp.html", ""); string(b) != "CUSTOM-COMMON" {
 		t.Fatalf("miniapp без miniapp.html должен получать общий index.html, получено %q", b)
 	}
 
 	// Пустая/несуществующая папка — вшитый файл.
 	s2 := &Server{staticDir: filepath.Join(dir, "nope")}
-	if b, err = s2.readIndexHTML("cabinet.html"); err != nil || string(b) != embedded {
+	if b, err = s2.readIndexHTML("cabinet.html", ""); err != nil || string(b) != embedded {
 		t.Fatalf("несуществующая папка должна отдавать вшитый index.html (err=%v)", err)
 	}
 	s3 := &Server{}
-	if b, err = s3.readIndexHTML("cabinet.html"); err != nil || string(b) != embedded {
+	if b, err = s3.readIndexHTML("cabinet.html", ""); err != nil || string(b) != embedded {
 		t.Fatalf("пустой staticDir должен отдавать вшитый index.html (err=%v)", err)
 	}
 }

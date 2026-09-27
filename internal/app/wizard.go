@@ -170,6 +170,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onWalletAdmin(ctx, chatID, val)
 		}
+	case cbWebUI:
+		if isAdmin {
+			a.onWebUIAdmin(ctx, chatID, val)
+		}
 	case cbP2P:
 		a.onP2PUser(ctx, chatID, val)
 	case cbAdm:

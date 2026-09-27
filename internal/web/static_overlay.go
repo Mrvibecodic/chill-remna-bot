@@ -71,8 +71,9 @@ func (s *Server) staticFS() (fs.FS, error) {
 
 // readIndexHTML returns the SPA entry page. `specific` is the per-surface
 // override filename (miniapp.html / cabinet.html); a generic custom index.html
-// is tried next; the embedded index.html is the final fallback.
-func (s *Server) readIndexHTML(specific string) ([]byte, error) {
+// is tried next; the embedded page of the chosen design is the final fallback.
+// Свой дизайн оператора из папки перекрывает выбор дизайна в админке.
+func (s *Server) readIndexHTML(specific, design string) ([]byte, error) {
 	if s.staticDir != "" {
 		for _, n := range []string{specific, "index.html"} {
 			if n == "" {
@@ -84,5 +85,15 @@ func (s *Server) readIndexHTML(specific string) ([]byte, error) {
 			}
 		}
 	}
+	if design == designMinimal {
+		return miniStaticFS.ReadFile("miniapp_static/minimal.html")
+	}
 	return miniStaticFS.ReadFile("miniapp_static/index.html")
+}
+
+// webUI — настройки оформления для страницы указанной поверхности.
+func (s *Server) webUI(surface string) WebUIDTO {
+	ui := s.mini.WebUI()
+	ui.Surface = surface
+	return ui
 }
