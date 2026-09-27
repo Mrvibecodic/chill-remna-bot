@@ -241,10 +241,10 @@ var en = map[string]string{
 		"• 🛟 Contacts & documents — channel/support links, user agreement and privacy policy.",
 	"menu.marketing_title": "📣 <b>Marketing</b>\n\n" +
 		"Attract and retain customers:\n" +
-		"• 🎟 Promo codes — balance or subscription-day bonuses.\n" +
+		"• 🎟 Promo codes — balance, subscription-day or traffic bonuses.\n" +
 		"• 👥 Referrals — bonus for invited users.\n" +
 		"• 📣 Broadcast — message to all bot users.\n" +
-		"• 🔔 Reminders — auto-notifications about expiring subscriptions and trials.",
+		"• 🔔 Notifications — auto-reminders about expiring subscriptions and trials.",
 	"menu.system_title": "🏠 Home › 🛠 <b>System</b>\n\n" +
 		"Utility functions:\n" +
 		"• 📊 Status — panel connectivity and summary.\n" +
@@ -265,8 +265,8 @@ var en = map[string]string{
 	"btn.next":         "Next ›",
 
 	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
-		"People registered in the bot. Block and delete affect the bot ONLY and do NOT touch " +
-		"panel accounts.\n\nChoose a user:",
+		"People registered in the bot. On block and delete the bot asks " +
+		"whether to touch the panel subscription too.\n\nChoose a user:",
 	"users.empty": "👥 No users yet.",
 	"user.card": "👤 <b>%s</b>\nRegistered: %s\nP2P access: %s\nStatus: %s\n\n%s\n\n" +
 		"🗑 «Delete» will ask whether to remove from the bot only or together with the panel subscription (only this user's account is deleted).",
@@ -379,7 +379,7 @@ var en = map[string]string{
 	"cabinet.btn_path":         "✏️ Change path",
 	"cabinet.url":              "🔗 URL: %s\n\nOpen it in a browser. You can also put a dedicated subdomain in front via a reverse proxy to the bot's port.",
 	"cabinet.no_url":           "⚠️ No public URL set. Configure the domain/public URL in the Webhooks section.",
-	"cabinet.steps":            "📋 <b>How to launch:</b>\n1. Enable the cabinet below.\n2. Set the domain/public URL in Webhooks.\n3. Open the URL in a browser.\n4. Sign in via Telegram or email+password. Trial is not available on the web.",
+	"cabinet.steps":            "📋 <b>How to launch:</b>\n1. Enable the cabinet below.\n2. Set the domain/public URL in Webhooks.\n3. Open the URL in a browser.\n4. Sign in via Telegram or email+password. On the web, the trial is available only with Telegram sign-in.",
 	"cabinet.ask_path":         "Enter the web cabinet path (e.g. /cabinet/):",
 	"cabinet.approval":         "🛡 Approval of new: <b>%s</b>",
 	"cabinet.btn_approval":     "🛡 Approve new",
@@ -637,8 +637,7 @@ var en = map[string]string{
 	"plans.no_durations":           "not set",
 	"plans.mo":                     "mo",
 	"plans.d":                      "d",
-	"plans.note_base":              "\n\nℹ️ This is the live plan — the storefront sells it. Prices, limits and squads are edited here; the legacy screens («Prices and limits», Stars, YooKassa, Squads) edit the same plan.",
-	"plans.note_idle":              "\n\nℹ️ This plan is not selling yet: the storefront only sells «Basic». You can already fill in prices and limits — availability modes of the next stage will put it on sale.",
+	"plans.note_idle":              "\n\nℹ️ This plan is not on sale: enable it and set a price for at least one term.",
 	"plans.btn_enable":             "✅ Enable",
 	"plans.btn_disable":            "❌ Disable",
 	"plans.btn_name":               "✏️ Name",
