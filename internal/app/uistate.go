@@ -44,7 +44,9 @@ type uiState struct {
 
 	welcomeAwait       string
 	awaitSectionBanner string
-	awaitEmojiFor      string
+	// awaitLogo — ждём логотип для веб-интерфейса: "light" или "dark".
+	awaitLogo     string
+	awaitEmojiFor string
 	// torAwait — админ вводит текст сообщения о снятии торрент-блокировки
 	// (сохраняется вместе с entities, поэтому не через adminInput).
 	torAwait bool

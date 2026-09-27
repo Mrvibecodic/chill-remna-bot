@@ -15,13 +15,17 @@ func (s *Server) handleMiniStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	rel := strings.TrimPrefix(r.URL.Path, "/miniapp/")
 	if rel == "" || rel == "index.html" {
-		data, err := s.readIndexHTML("miniapp.html")
+		ui := s.webUI("miniapp")
+		data, err := s.readIndexHTML("miniapp.html", ui.Design)
 		if err != nil {
 			http.Error(w, "internal", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
+		// Настройки оформления меняются в админке на лету: страницу с ними
+		// кэшировать нельзя.
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(injectBrand(data, ui))
 		return
 	}
 	fsys, err := s.staticFS()

@@ -165,7 +165,7 @@ func TestSwitchCredit_AppliedAndShown(t *testing.T) {
 	// Покупка применяет поправку: 15 дней по 5₽/д = 75₽ → 75/33 = 2.27 дня
 	// нового (990₽/30д) → поправка −13. Ожидание: конец срока плюс месяц
 	// минус 13 дней.
-	dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false)
+	dto := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false)
 	if !dto.OK {
 		t.Fatalf("покупка не прошла: %+v", dto)
 	}

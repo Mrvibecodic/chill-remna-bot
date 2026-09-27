@@ -93,33 +93,10 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 // выключенного, удалённого или тарифа в чужой валюте — по сетке, как раньше.
 // Третье значение — подпись тарифа для заголовка ("" — прогноз по сетке).
 func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, balKopecks int64) (string, int, string) {
-	type entry struct {
-		months int
-		price  string
-	}
-	var list []entry
+	list, plan := a.forecastEntries(ctx, chatID)
 	title := ""
-	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
-		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
-			for i := range p.Durations {
-				d := &p.Durations[i]
-				if d.Months > 0 && d.Base != "" {
-					list = append(list, entry{d.Months, d.Base})
-				}
-			}
-			if len(list) > 0 {
-				title = planTitleHTML(lang, p)
-			}
-		}
-	}
-	if len(list) == 0 {
-		title = ""
-		pr := a.pricing()
-		for _, mo := range model.PlanMonths {
-			if base := pr.Base[mo]; base != "" {
-				list = append(list, entry{mo, base})
-			}
-		}
+	if plan != nil {
+		title = planTitleHTML(lang, plan)
 	}
 	var sb strings.Builder
 	sb.WriteString("<pre>")
@@ -149,6 +126,40 @@ func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, ba
 		return "", 0, ""
 	}
 	return sb.String(), best, title
+}
+
+// forecastEntry — срок и его цена для прогноза «на сколько хватит баланса».
+type forecastEntry struct {
+	months int
+	price  string
+}
+
+// forecastEntries — сроки для прогноза: по тарифу покупателя (снимок последней
+// сделки), а без своего тарифа — а также для «Базового», выключенного,
+// удалённого или тарифа в чужой валюте — по сетке. Второе значение — тариф,
+// по которому посчитано (nil — по сетке).
+func (a *App) forecastEntries(ctx context.Context, chatID int64) ([]forecastEntry, *model.Plan) {
+	var list []forecastEntry
+	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
+		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
+			for i := range p.Durations {
+				d := &p.Durations[i]
+				if d.Months > 0 && d.Base != "" {
+					list = append(list, forecastEntry{d.Months, d.Base})
+				}
+			}
+			if len(list) > 0 {
+				return list, p
+			}
+		}
+	}
+	pr := a.pricing()
+	for _, mo := range model.PlanMonths {
+		if base := pr.Base[mo]; base != "" {
+			list = append(list, forecastEntry{mo, base})
+		}
+	}
+	return list, nil
 }
 
 // topUpAmounts — пресеты пополнения и потолок произвольной суммы.

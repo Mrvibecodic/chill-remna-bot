@@ -144,6 +144,11 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		PhotoURL  string `json:"photo_url"`
 		AuthDate  int64  `json:"auth_date"`
 		Hash      string `json:"hash"`
+		// Start — параметр ссылки, по которой открыли кабинет (ref_, inv_).
+		// В подпись виджета не входит, поэтому доверия к нему не больше, чем к
+		// /start в чате: действует только для нового аккаунта и по тем же
+		// правилам.
+		Start string `json:"start"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -164,8 +169,13 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "не удалось проверить вход через Telegram"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	// До заведения пользователя: привязка к пригласившему действует только
+	// для новичка.
+	if st := strings.TrimSpace(req.Start); st != "" && len(st) <= 64 {
+		s.mini.MiniStart(ctx, tgID, st, true)
+	}
 	s.mini.CabinetEnsureUser(ctx, tgID)
 	if err := s.mini.CabinetGate(ctx, tgID, false); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
@@ -217,12 +227,10 @@ func (s *Server) handleCabinetLogin(w http.ResponseWriter, r *http.Request) {
 // handleCabinetP2PScreenshot accepts a payment screenshot uploaded from the web
 // cabinet (multipart) and forwards it to the admin for approval.
 func (s *Server) handleCabinetP2PScreenshot(w http.ResponseWriter, r *http.Request) {
-	id, web, ok := s.miniGuard(w, r)
+	// Чек принимается и из мини-аппа: заявка сверяется с владельцем пропуска
+	// (CabinetP2PScreenshot), чужую заявку так не закрыть.
+	id, _, ok := s.miniGuard(w, r)
 	if !ok {
-		return
-	}
-	if !web {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
 	}
 	// Дедлайн записи для этой одной ручки. Общий WriteTimeout отсчитывается от
@@ -310,13 +318,15 @@ func randToken(n int) string {
 // injected, and (in anti-fingerprint mode) randomized markers so the page is
 // harder to identify as this bot's cabinet.
 func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
-	data, err := s.readIndexHTML("cabinet.html")
+	ui := s.webUI("cabinet")
+	data, err := s.readIndexHTML("cabinet.html", ui.Design)
 	if err != nil {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return
 	}
 	out := string(data)
 	antifp := s.mini.CabinetAntiFP()
+	branded := hasBrandMarker(data)
 
 	// Title drives BOTH the browser tab (<title>) and the visible page heading.
 	// Description is ONLY a <meta> tag — it never alters a page element.
@@ -333,15 +343,29 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		}
 	}
 	out = strings.Replace(out, "<title>Кабинет</title>", "<title>"+html.EscapeString(tabTitle)+"</title>", 1)
-	// Always reflect the configured title in the visible heading (login screen +
-	// header), regardless of anti-fingerprint mode.
-	out = strings.ReplaceAll(out, "Личный кабинет", html.EscapeString(heading))
+	if branded {
+		// Страница нового образца берёт заголовок из подставленных настроек:
+		// замена текста по всей разметке задела бы строки внутри скрипта.
+		if title != "" || antifp {
+			ui.Title = heading
+		}
+		out = string(injectBrand([]byte(out), ui))
+	} else {
+		// Always reflect the configured title in the visible heading (login
+		// screen + header), regardless of anti-fingerprint mode.
+		out = strings.ReplaceAll(out, "Личный кабинет", html.EscapeString(heading))
+	}
 
 	head := ""
 	if d := s.mini.CabinetDescription(); d != "" {
 		head += "<meta name=\"description\" content=\"" + html.EscapeString(d) + "\">\n"
 	}
-	if fav := s.mini.CabinetFavicon(); fav != "" {
+	fav := s.mini.CabinetFavicon()
+	if fav == "" && branded {
+		// Без отдельного фавикона вкладку подписывает логотип сервиса.
+		fav = ui.Logo
+	}
+	if fav != "" {
 		head += "<link rel=\"icon\" href=\"" + html.EscapeString(fav) + "\">\n"
 	}
 	if antifp {
@@ -355,6 +379,8 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if antifp {
 		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	_, _ = w.Write([]byte(out))
 }

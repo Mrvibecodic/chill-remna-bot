@@ -59,6 +59,12 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 	if dto.HasSub {
 		dto.CanRenew = a.renewEligible(ctx, tgID)
 	}
+	// Аккаунту по почте триал не выдаётся (см. handleMiniTrial) — и не
+	// предлагается.
+	if web_ && tgID < 0 {
+		dto.TrialAvailable = false
+	}
+	dto.OwnPlan, dto.RenewNote, dto.RenewGone = a.ownPlanView(ctx, tgID, a.lang(tgID))
 	dto.Legal = a.miniLegalDocs(tgID)
 	if len(dto.Legal) > 0 {
 		cfgLegal := a.legalCfg()
@@ -168,84 +174,110 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 		a.log.Warn("мини-апп: тарифы не прочитаны", "err", err, "user", tgID)
 		return dto
 	}
-	lang := a.lang(tgID)
-	fallbackCur := a.pricing().Currency
-	// Снимок последней сделки и конец срока — один раз на витрину, а не на
-	// каждый срок каждого тарифа: зачёт остатка считается чистой функцией.
-	var oldSnap *model.PlanSnapshot
-	oldExpire := ""
-	if a.store != nil {
-		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
-			oldSnap, oldExpire = u.Snapshot, u.SubExpireAt
-		}
+	// Свой тариф в режиме «по ссылке» витрина прячет, но продлевать его
+	// человек вправе — как из чата по кнопке «Продлить».
+	pc := a.miniPlanCtx(ctx, tgID)
+	if own := a.ownLinkPlan(ctx, pc.own); own != nil {
+		plans = append(plans, *own)
 	}
 	for i := range plans {
-		p := &plans[i]
-		pd := web.MiniPlanDTO{
-			Code:        p.Code,
-			Name:        p.Name,
-			Description: p.Description,
-			Icon:        p.Icon,
-			Strategy:    p.Strategy,
+		if pd, ok := a.miniPlanDTO(ctx, tgID, &plans[i], pc); ok {
+			dto.Plans = append(dto.Plans, pd)
 		}
-		if a.planAddSubOn(p) {
-			pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
-		}
-		// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
-		// получатель — telegram_user_id покупателя.
-		if tgID > 0 {
-			url, terms := a.tributeOffer(lang, p, p.Code)
-			pd.Tribute = url != ""
-			pd.TributeTerms = terms
-		}
-		cur := planCurrencyOr(p, fallbackCur)
-		// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
-		// подсвечивал третью из четырёх позиций).
-		bestIdx, bestRate := -1, int64(0)
-		for j := range p.Durations {
-			d := &p.Durations[j]
-			if d.Months <= 0 || d.Base == "" {
-				continue
-			}
-			// squadCountries ходит в панель (кэш) и сам берёт a.mu.
-			cs, configs := a.squadCountries(ctx, p.IntSquadsFor(d))
-			var countries []web.MiniCountryDTO
-			for _, c := range cs {
-				countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
-			}
-			pd.Durations = append(pd.Durations, web.MiniDurationDTO{
-				Months:    d.Months,
-				Price:     d.Base,
-				Currency:  cur,
-				TrafficGB: p.TrafficGBFor(d),
-				Devices:   p.DeviceLimitFor(d),
-				Countries: countries,
-				Configs:   configs,
-				// Зачёт остатка при смене тарифа — та же математика, что
-				// применит финализация (см. plans_switch.go).
-				SwitchDays: switchCredit(oldSnap, oldExpire, a.planSnapshotOf(p, d, d.Months)),
-			})
-			if k, ok := rubToKopecks(d.Base); ok && k > 0 {
-				rate := k / int64(d.Months)
-				if bestIdx < 0 || rate < bestRate {
-					bestIdx, bestRate = len(pd.Durations)-1, rate
-				}
-			}
-		}
-		if bestIdx >= 0 && len(pd.Durations) > 1 {
-			pd.Durations[bestIdx].Best = true
-		}
-		if len(pd.Durations) == 0 {
-			continue
-		}
-		dto.Plans = append(dto.Plans, pd)
 	}
 	return dto
+}
+
+// miniPlanCtxT — общее для всех тарифов витрины: считается один раз.
+type miniPlanCtxT struct {
+	lang        string
+	fallbackCur string
+	oldSnap     *model.PlanSnapshot
+	oldExpire   string
+	own         string
+}
+
+func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
+	pc := miniPlanCtxT{lang: a.lang(tgID), fallbackCur: a.pricing().Currency}
+	// Снимок последней сделки и конец срока — один раз на витрину, а не на
+	// каждый срок каждого тарифа: зачёт остатка считается чистой функцией.
+	if a.store != nil {
+		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
+			pc.oldSnap, pc.oldExpire = u.Snapshot, u.SubExpireAt
+		}
+	}
+	pc.own = planCodeOf(pc.oldSnap)
+	return pc
+}
+
+// miniPlanDTO — один тариф витрины со сроками и условиями. false — продавать
+// у тарифа нечего.
+func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc miniPlanCtxT) (web.MiniPlanDTO, bool) {
+	lang := pc.lang
+	pd := web.MiniPlanDTO{
+		Code:        p.Code,
+		Name:        p.Name,
+		Description: p.Description,
+		Icon:        p.Icon,
+		Strategy:    p.Strategy,
+		Own:         pc.own != "" && pc.own == p.Code,
+	}
+	if a.planAddSubOn(p) {
+		pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
+	}
+	// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
+	// получатель — telegram_user_id покупателя.
+	if tgID > 0 {
+		url, terms := a.tributeOffer(lang, p, p.Code)
+		pd.Tribute = url != ""
+		pd.TributeTerms = terms
+	}
+	cur := planCurrencyOr(p, pc.fallbackCur)
+	// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
+	// подсвечивал третью из четырёх позиций).
+	bestIdx, bestRate := -1, int64(0)
+	for j := range p.Durations {
+		d := &p.Durations[j]
+		if d.Months <= 0 || d.Base == "" {
+			continue
+		}
+		// squadCountries ходит в панель (кэш) и сам берёт a.mu.
+		cs, configs := a.squadCountries(ctx, p.IntSquadsFor(d))
+		var countries []web.MiniCountryDTO
+		for _, c := range cs {
+			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+		}
+		pd.Durations = append(pd.Durations, web.MiniDurationDTO{
+			Months:    d.Months,
+			Price:     d.Base,
+			Currency:  cur,
+			TrafficGB: p.TrafficGBFor(d),
+			Devices:   p.DeviceLimitFor(d),
+			Countries: countries,
+			Configs:   configs,
+			// Зачёт остатка при смене тарифа — та же математика, что
+			// применит финализация (см. plans_switch.go).
+			SwitchDays: switchCredit(pc.oldSnap, pc.oldExpire, a.planSnapshotOf(p, d, d.Months)),
+		})
+		if k, ok := rubToKopecks(d.Base); ok && k > 0 {
+			rate := k / int64(d.Months)
+			if bestIdx < 0 || rate < bestRate {
+				bestIdx, bestRate = len(pd.Durations)-1, rate
+			}
+		}
+	}
+	if bestIdx >= 0 && len(pd.Durations) > 1 {
+		pd.Durations[bestIdx].Best = true
+	}
+	return pd, len(pd.Durations) > 0
 }
 
 // MiniTrial activates the free trial (mirrors activateTrial's core). Read of
 // availability uses the same predicate as the chat bot.
 func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
+	// Как activateTrial в чате: сначала найти аккаунт, заведённый в панели
+	// раньше бота, — у такого человека триала быть не должно.
+	a.syncPanelAccount(ctx, tgID)
 	link, expireAt, ok, err := a.trialOnce(ctx, tgID)
 	if !ok {
 		return web.MiniActionDTO{Error: "триал недоступен"}
@@ -267,10 +299,9 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 		if !a.periodOnSale(months) {
 			return nil
 		}
-		// Гейт здесь — baseSaleAllowed, а не planAccessibleFor: у мини-аппа нет
-		// экрана тарифа по ссылке, поэтому «Базовый» в режиме «по ссылке» из
-		// него не продаётся вовсе (покупка по ссылке живёт в чате).
-		if !a.baseSaleAllowed(ctx, tgID) {
+		// Гейт здесь — baseSaleAllowed: «Базовый» в режиме «по ссылке»
+		// продаётся только тому, кто открыл его ссылку или продлевает свой.
+		if !a.baseSaleAllowed(ctx, tgID) && !a.baseLinkSale(ctx, tgID) {
 			return nil
 		}
 		return baseSale(months)
@@ -279,9 +310,10 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 	if err != nil || p == nil || !p.Enabled {
 		return nil
 	}
-	// «По ссылке» продаётся только со своего экрана в чате: мини-апп такие
-	// тарифы не показывает, и API не должен становиться обходом скрытности.
-	if model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
+	// «По ссылке» продаётся только тому, кто открыл ссылку тарифа (в чате или
+	// в мини-аппе — MiniPlanLink) или продлевает свой: API не должен
+	// становиться обходом скрытности.
+	if model.NormalizeAvailability(p.Availability) == model.PlanAvailLink && !a.linkSaleAllowed(ctx, tgID, p.Code) {
 		return nil
 	}
 	if !a.planAccessibleFor(ctx, p, tgID) {
@@ -315,7 +347,7 @@ func (a *App) MiniLegalRequired(ctx context.Context, tgID int64) bool {
 // MiniCheckout buys/renews a plan duration. Only the "balance" method
 // completes in-app (reuses finalizePurchase, the same provisioning core as
 // the chat flow); other methods return a payment URL or Redirect=true.
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_ bool) web.MiniActionDTO {
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_, p2pInApp bool) web.MiniActionDTO {
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
 		return web.MiniActionDTO{Error: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
@@ -344,7 +376,9 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur)}
 	}
 	if method == model.PayMethodP2P {
-		if web_ {
+		// Реквизиты на странице — кабинету всегда, мини-аппу, если фронт
+		// умеет принять чек на месте. Допуск тот же, что в чате (MiniP2PWeb).
+		if web_ || p2pInApp {
 			return a.MiniP2PWeb(ctx, tgID, s)
 		}
 		return a.MiniP2P(ctx, tgID, s)

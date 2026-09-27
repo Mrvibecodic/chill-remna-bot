@@ -496,11 +496,11 @@ func TestMiniCheckoutBalance_SecondTapAfterSuccess(t *testing.T) {
 	p := vipPlan(t, fs, model.PlanAvailAll)
 	start := int64(99000 * 3)
 
-	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false); !r.OK {
+	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false); !r.OK {
 		t.Fatalf("первая покупка не прошла: %+v", r)
 	}
 	// Второе нажатие — уже после того, как выдача сдвинула срок подписки.
-	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false); r.OK {
+	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false); r.OK {
 		t.Fatalf("второе нажатие прошло как отдельная покупка")
 	}
 	u, _ := fs.GetUser(ctx, uid)

@@ -82,6 +82,21 @@ func validateInitData(initData, botToken string, ttl time.Duration) (int64, erro
 	return u.ID, nil
 }
 
+// initDataStartParam — start_param из данных запуска мини-аппа (ссылка вида
+// t.me/<бот>/<приложение>?startapp=…). Вызывать только после успешной
+// validateInitData: иначе значение ничем не подтверждено.
+func initDataStartParam(initData string) string {
+	vals, err := url.ParseQuery(initData)
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(vals.Get("start_param"))
+	if len(p) > 64 {
+		return ""
+	}
+	return p
+}
+
 func hmacSHA256(key, msg []byte) []byte {
 	m := hmac.New(sha256.New, key)
 	m.Write(msg)

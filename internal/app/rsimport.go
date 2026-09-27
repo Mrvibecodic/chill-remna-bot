@@ -110,6 +110,11 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 		return
 	}
 	ui := a.getUI(chatID)
+	// Логотип лучше присылать файлом: так сохраняется прозрачный фон и SVG.
+	if ui.awaitLogo != "" && m.Document != nil {
+		a.setWebUILogoFile(ctx, chatID, m.Document.FileID, m.Document.FileSize)
+		return
+	}
 	// Картинку часто шлют файлом («без сжатия»), но file_id документа Telegram
 	// в sendPhoto не принимает — просим переслать фотографией, а не сохраняем
 	// заведомо негодную ссылку.

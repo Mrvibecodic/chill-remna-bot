@@ -124,6 +124,8 @@ func (a *App) openPlanLink(ctx context.Context, chatID int64, code string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.link_unknown"))
 		return
 	}
+	// Открытый в чате тариф можно купить и в мини-аппе.
+	a.linkPlanOpen(chatID, p.Code)
 	a.showPlanOffer(ctx, chatID, p)
 }
 

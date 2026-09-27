@@ -229,10 +229,12 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 	if !a.topUpEnabled() {
 		return dto
 	}
-	amts, _ := a.topUpAmounts(ctx)
+	amts, maxK := a.topUpAmounts(ctx)
 	for _, k := range amts {
 		dto.Amounts = append(dto.Amounts, web.MiniAmountDTO{Kopecks: k, Label: kopecksToRub(k) + curSuffix(curRUB)})
 	}
+	// Своя сумма — с тем же потолком, что в чате.
+	dto.MaxKopecks = maxK
 	a.mu.Lock()
 	if a.botCfg != nil {
 		if a.botCfg.YooKassa.Enabled {
@@ -249,21 +251,15 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 	return dto
 }
 
-// MiniTopUp creates a balance top-up payment (preset amount + yk/cb) via the
-// shared topUpCreate core and returns the payment URL.
+// MiniTopUp creates a balance top-up payment via the shared topUpCreate core
+// and returns the payment URL. Сумма — пресет или своя, с тем же потолком, что
+// у произвольной суммы в чате (setTopUpCustom).
 func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string, web_ bool) web.MiniActionDTO {
 	if !a.topUpEnabled() {
 		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "topup.disabled")}
 	}
-	amts, maxK := a.topUpAmounts(ctx)
-	valid := false
-	for _, k := range amts {
-		if k == kopecks {
-			valid = true
-			break
-		}
-	}
-	if !valid || (maxK > 0 && kopecks > maxK) {
+	_, maxK := a.topUpAmounts(ctx)
+	if kopecks <= 0 || maxK <= 0 || kopecks > maxK {
 		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: "недопустимая сумма"}
 	}

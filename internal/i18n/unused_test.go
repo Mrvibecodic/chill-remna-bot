@@ -20,6 +20,9 @@ var dynamicPrefixes = []string{
 	"plans.av_",
 	"plans.avd_",
 	"lang.name_",
+	"webui.design_",
+	"webui.theme_",
+	"webui.ask_",
 }
 
 // Осиротевшие после рефакторингов ключи накапливаются незаметно: компилятор их

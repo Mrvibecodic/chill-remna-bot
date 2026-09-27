@@ -620,6 +620,11 @@ func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
 	ui := a.getUI(chatID)
+	if ui.awaitLogo != "" && chatID == a.cfg.AdminID {
+		ph := m.Photo[len(m.Photo)-1]
+		a.setWebUILogoFile(ctx, chatID, ph.FileID, int64(ph.FileSize))
+		return
+	}
 	if ui.awaitSectionBanner != "" {
 		section := ui.awaitSectionBanner
 		ui.awaitSectionBanner = ""
@@ -1679,6 +1684,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	case "cab_favicon":
 		ui.adminInput = ""
 		a.setCabinetField(ctx, chatID, "favicon", text)
+	case "wui_name", "wui_accent", "wui_logourl", "wui_logodurl":
+		field := strings.TrimPrefix(ui.adminInput, "wui_")
+		ui.adminInput = ""
+		a.setWebUIText(ctx, chatID, field, text)
 	case "mail_from", "mail_fromname", "mail_host", "mail_user", "mail_pass", "mail_apiurl", "mail_apikey":
 		field := strings.TrimPrefix(ui.adminInput, "mail_")
 		ui.adminInput = ""

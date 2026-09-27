@@ -292,6 +292,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
 		{btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
+		{btn(i18n.T(lang, "btn.webui"), "menu:webui")},
 		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
 		homeRow(lang),
 	})
@@ -740,6 +741,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "iface":
 		if isAdmin {
 			a.showIface(ctx, chatID)
+		}
+	case "webui":
+		if isAdmin {
+			a.showWebUIAdmin(ctx, chatID)
 		}
 	case "botlang":
 		if isAdmin {
