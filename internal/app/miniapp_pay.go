@@ -137,10 +137,10 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDT
 	}
 	if !a.p2pAllowed(u) {
 		a.notifyAdminUserRequest(ctx, tgID)
-		return web.MiniActionDTO{Redirect: true, Message: "Доступ к P2P ещё не подтверждён. Запрос отправлен администратору — откройте бота."}
+		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_request"))}
 	}
 	a.issueCardSale(ctx, tgID, s)
-	return web.MiniActionDTO{Redirect: true, Message: "Реквизиты для оплаты отправлены в бот. Откройте чат и завершите оплату."}
+	return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_sent"))}
 }
 
 // MiniP2PWeb runs the P2P flow for the web cabinet: it returns the card + amount
@@ -163,11 +163,17 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActio
 	}
 	if !allowed {
 		a.notifyAdminUserRequest(ctx, tgID)
-		return web.MiniActionDTO{Redirect: true, Message: "Доступ к оплате переводом ещё не подтверждён администратором — запрос отправлен. Попробуйте позже."}
+		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_pending"))}
 	}
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, tgID, s)
 	if err != nil {
-		return web.MiniActionDTO{Error: "оплата переводом недоступна"}
+		// Готовый текст для человека («реквизиты не настроены») показываем
+		// как есть, остальное — общей фразой.
+		var ut userText
+		if errors.As(err, &ut) {
+			return web.MiniActionDTO{Error: stripHTMLTags(ut.msg)}
+		}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_unavailable"))}
 	}
 	return web.MiniActionDTO{OK: true, P2PCard: card, P2PAmount: price + curSuffix(curRUB), P2PReqID: reqID}
 }
@@ -263,11 +269,11 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 	_, maxK := a.topUpAmounts(ctx)
 	if kopecks <= 0 || maxK <= 0 || kopecks > maxK {
 		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
-		return web.MiniActionDTO{Error: "недопустимая сумма"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.bad_amount"))}
 	}
 	if method != "yk" && method != "cb" && method != "hl" {
 		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
-		return web.MiniActionDTO{Error: "способ пополнения недоступен"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.topup_method"))}
 	}
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method, web_)
 	if err != nil {

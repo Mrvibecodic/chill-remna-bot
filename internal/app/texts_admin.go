@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,17 +19,28 @@ import (
 const (
 	cbTexts      = "tx"
 	txtPageSize  = 8
-	txtLabelMax  = 42
+	txtLabelMax  = 34
 	txtButtonMax = 64
 	// txtMessageMax — предел видимой длины сообщения с примерами значений.
-	// У Telegram 4096, но экран часто собран из нескольких текстов сразу.
-	txtMessageMax = 2000
+	// У Telegram 4096, но экран часто собран из нескольких текстов сразу, а
+	// значения бывают длиннее примеров.
+	txtMessageMax = 1500
 )
 
 func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
 	lang := a.lang(chatID)
 	ui := a.getUI(chatID)
+	// Уход с экрана правки внутри редактора (другой текст, список, поиск)
+	// снимает ожидание: иначе присланный потом текст сохранился бы не в тот
+	// ключ, на который админ смотрит.
+	switch action {
+	case "ok", "x", "noop", "t", "d":
+	default:
+		if ui.txtKey != "" {
+			a.clearTextInput(ctx, chatID)
+		}
+	}
 	switch action {
 	case "home":
 		a.showTextsHome(ctx, chatID)
@@ -38,6 +50,7 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 		a.showTextsSection(ctx, chatID, sec, page)
 	case "q":
 		a.clearTextInput(ctx, chatID)
+		resetPendingInputs(ui)
 		ui.adminInput = "tx_search"
 		a.askInput(ctx, chatID, i18n.T(lang, "tx.search_ask"), "tx:home")
 	case "f":
@@ -80,19 +93,28 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 			a.showTextsHome(ctx, chatID)
 			return
 		}
-		_ = a.setTextOverride(ctx, a.botLang(), arg, "")
-		a.showTextCard(ctx, chatID, arg, i18n.T(lang, "tx.reset_done"))
+		note := i18n.T(lang, "tx.reset_done")
+		if err := a.setTextOverride(ctx, a.botLang(), arg, ""); err != nil {
+			note = i18n.T(lang, "tx.save_failed")
+		}
+		a.showTextCard(ctx, chatID, arg, note)
 	case "kp":
-		_ = a.keepTextOverride(ctx, a.botLang(), arg)
-		a.showTextCard(ctx, chatID, arg, i18n.T(lang, "tx.kept"))
+		note := i18n.T(lang, "tx.kept")
+		if err := a.keepTextOverride(ctx, a.botLang(), arg); err != nil {
+			note = i18n.T(lang, "tx.save_failed")
+		}
+		a.showTextCard(ctx, chatID, arg, note)
 	case "ra":
 		n := len(a.textOverrides(a.botLang()))
 		a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.reset_all_ask", n), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "tx.btn_yes_reset"), "tx:ray"), btn(i18n.T(lang, "btn.cancel"), "tx:home")},
 		})
 	case "ray":
-		_ = a.resetAllTexts(ctx, a.botLang())
-		a.showTextsHomeNote(ctx, chatID, i18n.T(lang, "tx.reset_all_done"))
+		note := i18n.T(lang, "tx.reset_all_done")
+		if err := a.resetAllTexts(ctx, a.botLang()); err != nil {
+			note = i18n.T(lang, "tx.save_failed")
+		}
+		a.showTextsHomeNote(ctx, chatID, note)
 	case "noop":
 	default:
 		a.showTextsHome(ctx, chatID)
@@ -242,7 +264,8 @@ func (a *App) showTextsAttention(ctx context.Context, chatID int64, page int) {
 // searchTexts ищет по тексту, который видит пользователь, по стандартному
 // тексту, по подсказке «где видно», по именам переменных и по ключу.
 func (a *App) searchTexts(q string) []string {
-	q = strings.ToLower(strings.TrimSpace(q))
+	norm := func(s string) string { return strings.ReplaceAll(strings.ToLower(s), "ё", "е") }
+	q = norm(strings.TrimSpace(q))
 	if q == "" {
 		return nil
 	}
@@ -260,7 +283,7 @@ func (a *App) searchTexts(q string) []string {
 			hay = append(hay, v.Ru, v.Name)
 		}
 		for _, h := range hay {
-			if strings.Contains(strings.ToLower(h), q) {
+			if strings.Contains(norm(h), q) {
 				out = append(out, e.Key)
 				break
 			}
@@ -292,6 +315,14 @@ func (a *App) applyTextSearch(ctx context.Context, chatID int64, q string) {
 	a.showTextsSearch(ctx, chatID, q, 0)
 }
 
+// txtHTMLLimit — предел видимой длины сообщения.
+func txtHTMLLimit(e *i18n.Editable) int {
+	if e.MaxLen > 0 {
+		return e.MaxLen
+	}
+	return txtMessageMax
+}
+
 // txtKindLine — строка «формат» карточки.
 func txtKindLine(lang string, e *i18n.Editable) string {
 	switch e.Kind {
@@ -303,10 +334,7 @@ func txtKindLine(lang string, e *i18n.Editable) string {
 		}
 		return i18n.T(lang, "tx.kind_plain")
 	}
-	if e.MaxLen > 0 {
-		return i18n.T(lang, "tx.kind_html") + "\n" + i18n.T(lang, "tx.rules_max", e.MaxLen)
-	}
-	return i18n.T(lang, "tx.kind_html")
+	return i18n.T(lang, "tx.kind_html_max", txtHTMLLimit(e))
 }
 
 // txtPreviewHTML — текст с примерами значений в виде, пригодном для
@@ -338,7 +366,10 @@ func (a *App) txtVarsBlock(lang string, e *i18n.Editable) string {
 	for _, v := range vars {
 		b.WriteString("\n")
 		desc := txtKeyRefRe.ReplaceAllString(escapeHTMLText(v.Desc[idx]), "<code>$1</code>")
-		b.WriteString(i18n.T(lang, "tx.var_line", escapeHTMLText(v.VarName(lang)), desc, escapeHTMLText(v.Example[idx])))
+		// Пример бывает целым фрагментом с разметкой и переносами — в строке
+		// списка он показывается как его увидит человек.
+		ex := strings.Join(strings.Fields(visibleText(v.Example[idx])), " ")
+		b.WriteString(i18n.T(lang, "tx.var_line", escapeHTMLText(v.VarName(lang)), desc, escapeHTMLText(ex)))
 	}
 	return b.String()
 }
@@ -432,10 +463,7 @@ func (a *App) txtRules(lang string, e *i18n.Editable) string {
 			rules += "\n" + i18n.T(lang, "tx.rules_max", e.MaxLen)
 		}
 	default:
-		rules = i18n.T(lang, "tx.rules_html")
-		if e.MaxLen > 0 {
-			rules += "\n" + i18n.T(lang, "tx.rules_max", e.MaxLen)
-		}
+		rules = i18n.T(lang, "tx.rules_html") + "\n" + i18n.T(lang, "tx.rules_max", txtHTMLLimit(e))
 	}
 	vars := e.UniqueVars()
 	if len(vars) == 0 {
@@ -446,6 +474,39 @@ func (a *App) txtRules(lang string, e *i18n.Editable) string {
 		names = append(names, "<code>{"+escapeHTMLText(v.VarName(lang))+"}</code>")
 	}
 	return rules + "\n\n" + i18n.T(lang, "tx.rules_vars", strings.Join(names, ", "))
+}
+
+// hrefLinkRe — ссылка, адрес которой — переменная.
+var hrefLinkRe = regexp.MustCompile(`<a href="\{([a-z0-9_]+)\}">`)
+
+// hrefVars — переменные, стоящие адресом ссылки, но адресом не являющиеся:
+// ссылку «на имя» Telegram не примет.
+func hrefVars(canon string, e *i18n.Editable) []string {
+	var bad []string
+	for _, m := range hrefLinkRe.FindAllStringSubmatch(canon, -1) {
+		if !e.IsLinkVar(m[1]) {
+			bad = append(bad, m[1])
+		}
+	}
+	return bad
+}
+
+// resetPendingInputs снимает ожидания ввода других разделов: они проверяются
+// раньше редактора текстов и перехватили бы присланный текст (запрос поиска
+// ушёл бы в приветствие или в причину отказа по заявке).
+func resetPendingInputs(ui *uiState) {
+	ui.adminInput = ""
+	ui.inputBack = ""
+	ui.welcomeAwait = ""
+	ui.torAwait = false
+	ui.awaitEmojiFor = ""
+	ui.rejectReq = 0
+	ui.awaitTopUp = false
+	ui.awaitPromo = false
+	ui.awaitLogo = ""
+	ui.awaitSectionBanner = ""
+	ui.awaitRSDump = false
+	ui.awaitPlanImport = false
 }
 
 // clearTextInput снимает ожидание текста и убирает сообщение-шаблон.
@@ -468,13 +529,7 @@ func (a *App) startTextEdit(ctx context.Context, chatID int64, key string) {
 	}
 	a.clearTextInput(ctx, chatID)
 	ui := a.getUI(chatID)
-	// Другие ожидания ввода перехватили бы присланный текст раньше.
-	ui.adminInput = ""
-	ui.inputBack = ""
-	ui.welcomeAwait = ""
-	ui.torAwait = false
-	ui.awaitEmojiFor = ""
-	ui.rejectReq = 0
+	resetPendingInputs(ui)
 	ui.txtKey = key
 	a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.edit_ask", a.txtRules(lang, e)), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.cancel"), "tx:x")},
@@ -509,6 +564,14 @@ func (a *App) textDraftFromMessage(lang, key string, m *models.Message) (canon s
 	if raw == "" {
 		return "", []string{i18n.T(lang, "tx.err_empty")}, nil
 	}
+	bl := a.botLang()
+	// Telegram обрезает пробелы и переносы по краям сообщения, а у части
+	// текстов они смысловые: « и » между названиями, пустая строка перед
+	// дописанной строкой. Края берутся у стандартного текста.
+	def := i18n.DefaultCanonical(bl, key)
+	lead := def[:len(def)-len(strings.TrimLeft(def, " \t\r\n"))]
+	trail := def[len(strings.TrimRight(def, " \t\r\n")):]
+	raw = lead + raw + trail
 	canon, unknown := i18n.Canonicalize(key, raw)
 	if len(unknown) > 0 {
 		quoted := make([]string, len(unknown))
@@ -525,7 +588,19 @@ func (a *App) textDraftFromMessage(lang, key string, m *models.Message) (canon s
 			errs = append(errs, i18n.T(lang, "tx.err_unknown", strings.Join(quoted, ", "), strings.Join(have, ", ")))
 		}
 	}
-	bl := a.botLang()
+	if bad := hrefVars(canon, e); len(bad) > 0 {
+		var links []string
+		for _, v := range e.UniqueVars() {
+			if e.IsLinkVar(v.Name) {
+				links = append(links, "{"+escapeHTMLText(v.VarName(lang))+"}")
+			}
+		}
+		if len(links) == 0 {
+			errs = append(errs, i18n.T(lang, "tx.err_link_none"))
+		} else {
+			errs = append(errs, i18n.T(lang, "tx.err_link_var", strings.Join(links, ", ")))
+		}
+	}
 	example := i18n.RenderWorst(bl, key, canon)
 	switch e.Kind {
 	case i18n.KindButton:
@@ -548,17 +623,21 @@ func (a *App) textDraftFromMessage(lang, key string, m *models.Message) (canon s
 			}
 		}
 	default:
-		limit := txtMessageMax
-		if e.MaxLen > 0 {
-			limit = e.MaxLen
-		}
+		limit := txtHTMLLimit(e)
 		if n := utf8.RuneCountInString(visibleText(example)); n > limit {
 			errs = append(errs, i18n.T(lang, "tx.err_len", n, limit))
 		}
 	}
 	if len(errs) == 0 {
 		if err := i18n.Compile(key, canon); err != nil {
-			errs = append(errs, i18n.T(lang, "tx.err_empty"))
+			switch {
+			case errors.Is(err, i18n.ErrBadChars):
+				errs = append(errs, i18n.T(lang, "tx.err_chars"))
+			case errors.Is(err, i18n.ErrUnknownVar):
+				errs = append(errs, i18n.T(lang, "tx.err_bad_var"))
+			default:
+				errs = append(errs, i18n.T(lang, "tx.err_empty"))
+			}
 		}
 	}
 	if len(errs) > 0 {
@@ -589,7 +668,7 @@ func (a *App) onTextInput(ctx context.Context, chatID int64, m *models.Message) 
 	ui.txtDraft = canon
 	e, _ := i18n.EditableByKey(key)
 	var b strings.Builder
-	b.WriteString(i18n.T(lang, "tx.preview_title"))
+	b.WriteString(i18n.T(lang, "tx.preview_title", key))
 	var rows [][]models.InlineKeyboardButton
 	if e.Kind == i18n.KindButton {
 		b.WriteString("\n" + i18n.T(lang, "tx.preview_button"))
@@ -624,11 +703,17 @@ func (a *App) saveTextDraft(ctx context.Context, chatID int64) {
 	if draft == i18n.DefaultCanonical(bl, key) {
 		draft = ""
 	}
-	a.clearTextInput(ctx, chatID)
+	note := i18n.T(lang, "tx.saved")
 	if err := a.setTextOverride(ctx, bl, key, draft); err != nil {
+		// Черновик и шаблон остаются: админ повторит «Сохранить».
 		a.log.Warn("тексты: не сохранено", "key", key, "err", err)
+		a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.save_failed"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "tx.btn_save"), "tx:ok"), btn(i18n.T(lang, "btn.cancel"), "tx:x")},
+		})
+		return
 	}
-	a.showTextCard(ctx, chatID, key, i18n.T(lang, "tx.saved"))
+	a.clearTextInput(ctx, chatID)
+	a.showTextCard(ctx, chatID, key, note)
 }
 
 func (a *App) sendTextTest(ctx context.Context, chatID int64, key string) {

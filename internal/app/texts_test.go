@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -25,7 +26,11 @@ func TestEntitiesToHTML(t *testing.T) {
 		}, "<b>a<i>bc</i>d</b>"},
 		{"пересекающиеся", "abcd", []models.MessageEntity{
 			{Type: "bold", Offset: 0, Length: 3}, {Type: "italic", Offset: 1, Length: 3},
-		}, "<b>a<i>bc</i></b><i>d</i>"},
+		}, "<b>a</b><i><b>bc</b>d</i>"},
+		// Короткое внутри длинного: цитата не распадается на две.
+		{"цитата длиннее жирного", "abcdef", []models.MessageEntity{
+			{Type: "bold", Offset: 0, Length: 4}, {Type: "blockquote", Offset: 2, Length: 4},
+		}, "<b>ab</b><blockquote><b>cd</b>ef</blockquote>"},
 		// Эмодзи — две единицы UTF-16: смещения после него обязаны сойтись.
 		{"эмодзи", "😀 x y", []models.MessageEntity{{Type: "code", Offset: 3, Length: 1}}, "😀 <code>x</code> y"},
 		{"ссылка", "тут", []models.MessageEntity{{Type: "text_link", Offset: 0, Length: 3, URL: `https://e.test/?a=1&b="2"`}},
@@ -320,5 +325,133 @@ func TestTextKindCheckedOnLoad(t *testing.T) {
 	}}})
 	if got := i18n.T("ru", "btn.buy"); strings.Contains(got, "<b>") {
 		t.Fatalf("разметка в кнопке применена: %q", got)
+	}
+}
+
+// Пробелы и переносы по краям стандартного текста сохраняются: Telegram их
+// обрезает, а у « и » они смысловые.
+func TestTextKeepsEdgeWhitespace(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:legal.and"))
+	a.handleMessage(ctx, adminMsg("и также"))
+	if got := a.getUI(100).txtDraft; got != " и также " {
+		t.Fatalf("края потеряны: %q", got)
+	}
+}
+
+// Адресом ссылки может быть только переменная-адрес.
+func TestTextLinkOnlyAddressVar(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:legal.read_full"))
+	a.handleMessage(ctx, adminMsg("[Весь текст]({ссылка})"))
+	if got := a.getUI(100).txtDraft; got != `<a href="{link}">Весь текст</a>` {
+		t.Fatalf("ссылка на адрес не принята: %q", got)
+	}
+	a.handleCallback(ctx, cb(100, "tx:e:ap.on_title"))
+	a.handleMessage(ctx, adminMsg("[Карта]({карта}) {срок} {сумма} {момент_списания}"))
+	if a.getUI(100).txtDraft != "" {
+		t.Fatal("ссылка на не-адрес принята")
+	}
+}
+
+// Поиск снимает чужие ожидания ввода: запрос не должен уйти в приветствие.
+func TestTextSearchDropsOtherInputs(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.getUI(100).welcomeAwait = "txt"
+	a.handleCallback(ctx, cb(100, "tx:q"))
+	a.handleMessage(ctx, adminMsg("покупка"))
+	if a.botCfg.Welcome.Text != "" {
+		t.Fatalf("запрос поиска ушёл в приветствие: %q", a.botCfg.Welcome.Text)
+	}
+	if a.getUI(100).txtQuery != "покупка" {
+		t.Fatal("поиск не выполнен")
+	}
+}
+
+// Переход к другому тексту внутри редактора снимает ожидание: присланный
+// потом текст не должен сохраниться в прежний ключ.
+func TestTextEditCancelledByEditorNavigation(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:buy.traffic"))
+	a.handleCallback(ctx, cb(100, "tx:k:buy.devices"))
+	if a.getUI(100).txtKey != "" {
+		t.Fatal("ожидание пережило переход к другому тексту")
+	}
+}
+
+// Текст, начинающийся с «/», пока редактор ждёт текст, — это текст.
+func TestTextEditAcceptsSlash(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:cmd.support_none"))
+	a.handleMessage(ctx, adminMsg("/support пока не работает"))
+	if got := a.getUI(100).txtDraft; got != "/support пока не работает" {
+		t.Fatalf("текст со «/» не принят: %q", got)
+	}
+}
+
+type failSaveStore struct{ *fakeStore }
+
+func (failSaveStore) SaveConfig(context.Context, *model.BotConfig) error {
+	return errors.New("база недоступна")
+}
+
+// Не записался — не применился: иначе текст пропал бы после перезапуска.
+func TestTextSaveFailureRollsBack(t *testing.T) {
+	a, fm, fs := newTextsApp(t)
+	a.store = failSaveStore{fs}
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:buy.traffic"))
+	a.handleMessage(ctx, adminMsg("Свой {трафик}"))
+	a.handleCallback(ctx, cb(100, "tx:ok"))
+	if got := i18n.T("ru", "buy.traffic", "5 ГБ"); strings.Contains(got, "Свой") {
+		t.Fatal("несохранённый текст применён")
+	}
+	if a.getUI(100).txtDraft == "" || !strings.Contains(fm.last(), "⚠️") {
+		t.Fatal("админ не предупреждён или черновик потерян")
+	}
+	if _, ok := a.botCfg.Texts.Overrides["ru"]["buy.traffic"]; ok {
+		t.Fatal("конфиг в памяти не откатан")
+	}
+}
+
+// Недоставленное уведомление повторяется на следующем запуске.
+func TestTextsNoticeRetriesAfterFailedDelivery(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.botCfg.Texts.Overrides = map[string]map[string]model.TextOverride{"ru": {"buy.traffic": {Text: "Т {traffic}", Base: "old"}}}
+	a.applyTexts(a.botCfg)
+	fm.kbFail = true
+	a.sendTextsNotice(ctx)
+	if a.botCfg.Texts.NotifiedStale != "" {
+		t.Fatal("недоставленное уведомление помечено отправленным")
+	}
+	fm.kbFail = false
+	a.sendTextsNotice(ctx)
+	if a.botCfg.Texts.NotifiedStale == "" {
+		t.Fatal("уведомление не отправлено повторно")
+	}
+}
+
+// «Реквизиты не настроены» доходит до человека как есть, а не общей ошибкой.
+func TestP2PNoCardsShownToUser(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	_, _, _, err := a.prepareP2PCard(ctx, 555, 1)
+	if got := a.clientErr(ctx, 555, "перевод", err); got != i18n.T("ru", "p2p.no_cards") {
+		t.Fatalf("пользователь видит %q", got)
+	}
+}
+
+func TestDisplayNameFallbackByLang(t *testing.T) {
+	if got := displayName("en", "", ""); got != "friend" {
+		t.Fatalf("en: %q", got)
+	}
+	if got := displayName("ru", "", ""); got != "друг" {
+		t.Fatalf("ru: %q", got)
 	}
 }

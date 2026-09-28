@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -753,6 +754,16 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		}
 	}
 	if a.denyAccess(ctx, chatID, isAdmin) {
+		return
+	}
+
+	// Новый текст бота может начинаться с «/» (например, подсказка про
+	// команду). Пока редактор ждёт текст, это не команда — кроме /start и
+	// /setup, которыми из любого состояния выходят в меню.
+	if isAdmin && strings.HasPrefix(text, "/") && a.getUI(chatID).txtKey != "" &&
+		!strings.HasPrefix(text, "/start") && !strings.HasPrefix(text, "/setup") {
+		a.msg.Delete(ctx, chatID, m.ID)
+		a.onTextInput(ctx, chatID, m)
 		return
 	}
 
@@ -1666,7 +1677,7 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 }
 
 func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstName, username string) {
-	name := displayName(firstName, username)
+	name := displayName(a.lang(chatID), firstName, username)
 	a.clearPanelInput(chatID)
 	if isAdmin {
 		a.showMenu(ctx, chatID, true, name)
@@ -2140,11 +2151,63 @@ func applyPremiumEmoji(text string, m map[string]string) string {
 	if len(m) == 0 {
 		return text
 	}
+	keys := make([]string, 0, len(m))
 	for emoji, id := range m {
-		if id == "" {
+		if emoji != "" && id != "" {
+			keys = append(keys, emoji)
+		}
+	}
+	if len(keys) == 0 {
+		return text
+	}
+	// Длинные первыми: «❤️» не должен разбиться заменой «❤».
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	// Замена идёт только в тексте: не внутри тегов (адрес ссылки) и не
+	// внутри <code>, <pre> и уже стоящего <tg-emoji> — там вложенный тег
+	// сломал бы разметку, и сообщение ушло бы без оформления.
+	var b strings.Builder
+	skip := 0
+	for i := 0; i < len(text); {
+		if text[i] == '<' {
+			j := strings.IndexByte(text[i:], '>')
+			if j < 0 {
+				b.WriteString(text[i:])
+				break
+			}
+			tag := text[i : i+j+1]
+			name := strings.ToLower(strings.TrimLeft(tag[1:len(tag)-1], "/"))
+			if k := strings.IndexAny(name, " \t\n"); k >= 0 {
+				name = name[:k]
+			}
+			if name == "code" || name == "pre" || name == "tg-emoji" {
+				if strings.HasPrefix(tag, "</") {
+					if skip > 0 {
+						skip--
+					}
+				} else {
+					skip++
+				}
+			}
+			b.WriteString(tag)
+			i += j + 1
 			continue
 		}
-		text = strings.ReplaceAll(text, emoji, "<tg-emoji emoji-id=\""+id+"\">"+emoji+"</tg-emoji>")
+		if skip == 0 {
+			hit := ""
+			for _, k := range keys {
+				if strings.HasPrefix(text[i:], k) {
+					hit = k
+					break
+				}
+			}
+			if hit != "" {
+				b.WriteString("<tg-emoji emoji-id=\"" + m[hit] + "\">" + hit + "</tg-emoji>")
+				i += len(hit)
+				continue
+			}
+		}
+		b.WriteByte(text[i])
+		i++
 	}
-	return text
+	return b.String()
 }

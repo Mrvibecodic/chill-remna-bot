@@ -25,10 +25,10 @@ func (a *App) sendSubActive(ctx context.Context, chatID int64, link, expireAt st
 func (a *App) displayNameByID(ctx context.Context, id int64) string {
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, id); u != nil {
-			return displayName(u.FirstName, u.Username)
+			return displayName(a.lang(id), u.FirstName, u.Username)
 		}
 	}
-	return displayName("", "")
+	return displayName(a.lang(id), "", "")
 }
 
 func (a *App) supportURL() string {

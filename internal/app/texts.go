@@ -78,20 +78,56 @@ func textStale(lang, key string, o model.TextOverride) bool {
 	return o.Base != "" && o.Base != i18n.DefaultHash(lang, key)
 }
 
-// setTextOverride сохраняет свой текст (canonical == "" — вернуть стандартный).
-func (a *App) setTextOverride(ctx context.Context, lang, key, canonical string) error {
+// updateTexts меняет свои тексты и пишет конфиг. Если запись не удалась,
+// изменение откатывается: иначе пользователи видели бы текст, который
+// исчезнет после перезапуска.
+func (a *App) updateTexts(ctx context.Context, change func(tc *model.TextsConfig)) error {
 	a.mu.Lock()
 	if a.botCfg == nil {
 		a.mu.Unlock()
 		return nil
 	}
-	tc := &a.botCfg.Texts
-	if canonical == "" {
-		delete(tc.Overrides[lang], key)
-		if len(tc.Overrides[lang]) == 0 {
-			delete(tc.Overrides, lang)
+	prev := cloneTexts(a.botCfg.Texts)
+	change(&a.botCfg.Texts)
+	a.applyTexts(a.botCfg)
+	a.mu.Unlock()
+	err := a.saveConfigOnly(ctx)
+	if err != nil {
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Texts = prev
+			a.applyTexts(a.botCfg)
 		}
-	} else {
+		a.mu.Unlock()
+	}
+	return err
+}
+
+func cloneTexts(tc model.TextsConfig) model.TextsConfig {
+	out := model.TextsConfig{NotifiedStale: tc.NotifiedStale}
+	if tc.Overrides != nil {
+		out.Overrides = map[string]map[string]model.TextOverride{}
+		for lang, m := range tc.Overrides {
+			cp := make(map[string]model.TextOverride, len(m))
+			for k, v := range m {
+				cp[k] = v
+			}
+			out.Overrides[lang] = cp
+		}
+	}
+	return out
+}
+
+// setTextOverride сохраняет свой текст (canonical == "" — вернуть стандартный).
+func (a *App) setTextOverride(ctx context.Context, lang, key, canonical string) error {
+	return a.updateTexts(ctx, func(tc *model.TextsConfig) {
+		if canonical == "" {
+			delete(tc.Overrides[lang], key)
+			if len(tc.Overrides[lang]) == 0 {
+				delete(tc.Overrides, lang)
+			}
+			return
+		}
 		if tc.Overrides == nil {
 			tc.Overrides = map[string]map[string]model.TextOverride{}
 		}
@@ -103,38 +139,24 @@ func (a *App) setTextOverride(ctx context.Context, lang, key, canonical string) 
 			Base: i18n.DefaultHash(lang, key),
 			At:   time.Now().UTC().Format(time.RFC3339),
 		}
-	}
-	a.applyTexts(a.botCfg)
-	a.mu.Unlock()
-	return a.saveConfigOnly(ctx)
+	})
 }
 
 // keepTextOverride — «оставить мой»: свой текст сверен с новым стандартным.
 func (a *App) keepTextOverride(ctx context.Context, lang, key string) error {
-	a.mu.Lock()
-	if a.botCfg == nil {
-		a.mu.Unlock()
-		return nil
-	}
-	if o, ok := a.botCfg.Texts.Overrides[lang][key]; ok {
-		o.Base = i18n.DefaultHash(lang, key)
-		a.botCfg.Texts.Overrides[lang][key] = o
-	}
-	a.mu.Unlock()
-	return a.saveConfigOnly(ctx)
+	return a.updateTexts(ctx, func(tc *model.TextsConfig) {
+		if o, ok := tc.Overrides[lang][key]; ok {
+			o.Base = i18n.DefaultHash(lang, key)
+			tc.Overrides[lang][key] = o
+		}
+	})
 }
 
 // resetAllTexts возвращает стандартные тексты языка.
 func (a *App) resetAllTexts(ctx context.Context, lang string) error {
-	a.mu.Lock()
-	if a.botCfg == nil {
-		a.mu.Unlock()
-		return nil
-	}
-	delete(a.botCfg.Texts.Overrides, lang)
-	a.applyTexts(a.botCfg)
-	a.mu.Unlock()
-	return a.saveConfigOnly(ctx)
+	return a.updateTexts(ctx, func(tc *model.TextsConfig) {
+		delete(tc.Overrides, lang)
+	})
 }
 
 // textsAttention — свои тексты, требующие внимания: у них обновился
@@ -163,23 +185,40 @@ func (a *App) sendTextsNotice(ctx context.Context) {
 	if len(stale) == 0 && len(broken) == 0 {
 		return
 	}
-	sum := sha256.Sum256([]byte(lang + "|" + strings.Join(stale, ",") + "|" + strings.Join(broken, ",")))
+	// Отпечаток включает стандартный текст и свой: новое обновление того же
+	// ключа — новое предупреждение.
+	var parts []string
+	for _, k := range stale {
+		parts = append(parts, "s:"+k+":"+i18n.DefaultHash(lang, k))
+	}
+	own := a.textOverrides(lang)
+	for _, k := range broken {
+		parts = append(parts, "b:"+k+":"+own[k].Text)
+	}
+	sum := sha256.Sum256([]byte(lang + "|" + strings.Join(parts, "|")))
 	mark := hex.EncodeToString(sum[:6])
 	a.mu.Lock()
-	if a.botCfg == nil || a.botCfg.Texts.NotifiedStale == mark {
-		a.mu.Unlock()
+	done := a.botCfg == nil || a.botCfg.Texts.NotifiedStale == mark
+	a.mu.Unlock()
+	if done {
 		return
 	}
-	a.botCfg.Texts.NotifiedStale = mark
-	a.mu.Unlock()
-	_ = a.saveConfigOnly(ctx)
-	var parts []string
+	var lines []string
 	if len(stale) > 0 {
-		parts = append(parts, i18n.T(lang, "tx.notice_stale", len(stale)))
+		lines = append(lines, i18n.T(lang, "tx.notice_stale", len(stale)))
 	}
 	if len(broken) > 0 {
-		parts = append(parts, i18n.T(lang, "tx.notice_broken", len(broken)))
+		lines = append(lines, i18n.T(lang, "tx.notice_broken", len(broken)))
 	}
-	a.notifyKB(ctx, a.cfg.AdminID, i18n.T(lang, "tx.notice_title")+"\n\n"+strings.Join(parts, "\n\n"),
-		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "tx.btn_check"), "tx:att:0")}})
+	if a.notifyKB(ctx, a.cfg.AdminID, i18n.T(lang, "tx.notice_title")+"\n\n"+strings.Join(lines, "\n\n"),
+		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "tx.btn_check"), "tx:att:0")}}) == 0 {
+		// Не доставлено — повторим на следующем запуске.
+		return
+	}
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.Texts.NotifiedStale = mark
+	}
+	a.mu.Unlock()
+	_ = a.saveConfigOnly(ctx)
 }

@@ -100,7 +100,7 @@ func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, ba
 	}
 	var sb strings.Builder
 	sb.WriteString("<pre>")
-	sb.WriteString(padRight("Plan", 6) + "  " + padRight("Price", 11) + "  " + i18n.T(lang, "balance.col_lasts") + "\n")
+	sb.WriteString(padRight(i18n.T(lang, "balance.col_plan"), 6) + "  " + padRight(i18n.T(lang, "balance.col_price"), 11) + "  " + i18n.T(lang, "balance.col_lasts") + "\n")
 	sb.WriteString(strings.Repeat("─", 34) + "\n")
 	best := 0
 	rows := 0

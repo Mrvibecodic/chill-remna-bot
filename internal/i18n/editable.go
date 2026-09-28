@@ -132,6 +132,16 @@ func (v EditVar) VarName(lang string) string {
 	return v.Name
 }
 
+// IsLinkVar — переменная подставляет адрес (её можно ставить в ссылку).
+func (e *Editable) IsLinkVar(name string) bool {
+	i, ok := e.varByName(name)
+	if !ok {
+		return false
+	}
+	ex := e.Vars[i].Example[0]
+	return strings.HasPrefix(ex, "https://") || strings.HasPrefix(ex, "http://") || strings.HasPrefix(ex, "tg://")
+}
+
 // UniqueVars — переменные без повторов (одно значение может стоять дважды).
 func (e *Editable) UniqueVars() []EditVar {
 	seen := map[string]bool{}

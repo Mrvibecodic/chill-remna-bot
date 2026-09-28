@@ -311,7 +311,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", a.saleStars(s)), "method:stars")})
 	}
 	if cb.Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curRUB))
+		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
 	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
@@ -319,7 +319,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
 	if a.hlConfig().Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curRUB))
+		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
 	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
@@ -533,7 +533,7 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 	p2p := a.botCfg.P2P
 	if len(p2p.Cards) == 0 {
 		a.mu.Unlock()
-		return "", "", 0, errors.New(i18n.T(a.lang(chatID), "p2p.no_cards"))
+		return "", "", 0, errUserText(i18n.T(a.lang(chatID), "p2p.no_cards"))
 	}
 	if price == "" {
 		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек

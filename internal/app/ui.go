@@ -51,14 +51,14 @@ func (a *App) botLang() string {
 	return i18n.Fallback
 }
 
-func displayName(first, username string) string {
+func displayName(lang, first, username string) string {
 	if first != "" {
 		return escapeName(first)
 	}
 	if username != "" {
 		return "@" + escapeName(username)
 	}
-	return "друг"
+	return i18n.T(lang, "menu.friend")
 }
 
 func userLabel(u *model.User) string {
@@ -598,11 +598,11 @@ func (a *App) registerUser(ctx context.Context, chatID int64, firstName, usernam
 		a.askLegal(ctx, chatID)
 		return
 	}
-	a.showMenu(ctx, chatID, false, displayName(firstName, username))
+	a.showMenu(ctx, chatID, false, displayName(a.lang(chatID), firstName, username))
 }
 
 func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, firstName, username string) {
-	name := displayName(firstName, username)
+	name := displayName(a.lang(chatID), firstName, username)
 	// Уход в меню отменяет ожидание секрета доступа к панели: см. clearPanelInput.
 	a.clearPanelInput(chatID)
 	switch val {

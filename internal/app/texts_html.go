@@ -93,8 +93,23 @@ func entitiesToHTML(text string, ents []models.MessageEntity) string {
 			}
 		}
 		for _, s := range starts[p] {
-			stack = append(stack, s)
+			// Открытые диапазоны, которые кончаются раньше нового, уходят
+			// внутрь него: так режется короткий (жирный), а не длинный
+			// (цитата) — иначе одна цитата распалась бы на две.
+			k := len(stack)
+			for k > 0 && spans[stack[k-1]].end < spans[s].end {
+				k--
+			}
+			inner := append([]int(nil), stack[k:]...)
+			for i := len(inner) - 1; i >= 0; i-- {
+				b.WriteString(closeTag(spans[inner[i]].e))
+			}
+			stack = append(stack[:k], s)
 			b.WriteString(openTag(spans[s].e))
+			for _, in := range inner {
+				stack = append(stack, in)
+				b.WriteString(openTag(spans[in].e))
+			}
 		}
 	}
 	flush(last, len(u))
