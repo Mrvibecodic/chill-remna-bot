@@ -129,6 +129,11 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		return
 	}
 	key, val, _ := strings.Cut(cq.Data, ":")
+	// Любая кнопка вне редактора текстов снимает ожидание нового текста:
+	// иначе ответ на вопрос другого раздела ушёл бы в текст бота.
+	if isAdmin && key != cbTexts && key != cbClose && a.getUI(chatID).txtKey != "" {
+		a.clearTextInput(ctx, chatID)
+	}
 
 	switch key {
 	case "botlang":
@@ -271,6 +276,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbWelcome:
 		if isAdmin {
 			a.onWelcome(ctx, chatID, val)
+		}
+	case cbTexts:
+		if isAdmin {
+			a.onTexts(ctx, chatID, val)
 		}
 	case cbUsers:
 		if isAdmin {
@@ -700,6 +709,7 @@ func (a *App) verify(ctx context.Context, chatID int64, w *wizard) {
 	saved := *cfg
 	saved.NormalizeUpdateCheck()
 	a.botCfg = &saved
+	a.applyTexts(&saved)
 	a.panel = client
 	delete(a.wiz, chatID)
 	a.mu.Unlock()

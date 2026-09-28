@@ -51,6 +51,16 @@ type uiState struct {
 	// (сохраняется вместе с entities, поэтому не через adminInput).
 	torAwait bool
 
+	// Редактор текстов: txtKey — текст, чью новую версию ждём сообщением,
+	// txtDraft — присланный и проверенный вариант до «Сохранить», txtBack —
+	// список, куда возвращает «Назад» из карточки, txtQuery — последний поиск,
+	// txtTplMsg — сообщение-шаблон для копирования (убирается после правки).
+	txtKey    string
+	txtDraft  string
+	txtBack   string
+	txtQuery  string
+	txtTplMsg int
+
 	inputBack string
 
 	broadcastText string

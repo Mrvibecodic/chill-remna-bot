@@ -106,6 +106,10 @@ type App struct {
 	// восстановило её (след отката). Уведомить админа надо, но в момент
 	// загрузки конфига мессенджера ещё нет — флаг ждёт запуска бота.
 	healNotice bool
+	// txtRejected — свои тексты, которые i18n не принял (язык → ключ →
+	// причина). Под отдельным замком: заполняется и под a.mu, и без него.
+	txtMu       sync.Mutex
+	txtRejected map[string]map[string]error
 	// basePlanRef — тариф «Базовый», прочитанный при последней синхронизации.
 	// Нужен там, где тариф требуется под замком и лезть в базу нельзя (снимок
 	// условий сделки). nil до первой синхронизации.
@@ -367,6 +371,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
 		a.botCfg = cfg
+		a.applyTexts(cfg)
 		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
 			if err := a.ctl.ConnectPanelNetwork(ctx); err != nil {
@@ -565,6 +570,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
 	a.sendHealNotice(ctx)
+	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
@@ -756,10 +762,16 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		// снимаем здесь же: экран ввода команда затрёт, а состояние осталось бы
 		// взведённым, и следующий обычный текст молча стал бы ключом панели.
 		a.clearPanelInput(chatID)
+		if isAdmin {
+			a.clearTextInput(ctx, chatID)
+		}
 	}
 
 	if a.installed() && isHomeText(text) {
 		a.msg.Delete(ctx, chatID, m.ID)
+		if isAdmin {
+			a.clearTextInput(ctx, chatID)
+		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
 		return
 	}
@@ -893,6 +905,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	if ui.torAwait {
 		a.setTorrentUnblockText(ctx, chatID, m)
+		return
+	}
+	if ui.txtKey != "" {
+		a.onTextInput(ctx, chatID, m)
 		return
 	}
 	if ui.welcomeAwait == "img" {

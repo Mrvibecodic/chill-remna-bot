@@ -10,6 +10,11 @@ var bundles = map[string]map[string]string{
 }
 
 func T(lang, key string, args ...any) string {
+	if c, ok := override(lang, key); ok {
+		if s, ok := c.render(lang, key, args); ok {
+			return s
+		}
+	}
 	tmpl := lookup(lang, key)
 	if tmpl == "" {
 		tmpl = lookup(Fallback, key)

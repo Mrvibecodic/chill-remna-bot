@@ -291,6 +291,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
+		{btn(i18n.T(lang, "btn.texts"), "tx:home")},
 		{btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
 		{btn(i18n.T(lang, "btn.webui"), "menu:webui")},
 		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
