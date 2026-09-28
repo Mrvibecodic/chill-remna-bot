@@ -164,7 +164,7 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 	// чтобы его дни не сгорали (админ может разрешить покупку тумблером).
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
-		dto.Notice = i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))
+		dto.Notice = stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))
 		return dto
 	}
 	// Первая точка гейта доступности — сама витрина: тарифы фильтруются по
@@ -350,7 +350,7 @@ func (a *App) MiniLegalRequired(ctx context.Context, tgID int64) bool {
 func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_, p2pInApp bool) web.MiniActionDTO {
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
-		return web.MiniActionDTO{Error: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))}
 	}
 	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
 	// пользователь покупал бы тариф, недоступный ему по режиму, прямым
@@ -373,7 +373,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		cur := curSuffix(curSymbol(a.pricing().Currency))
 		a.payLog(ctx, "", "", tgID, "price_changed", "было %s стало %s plan=%s months=%d",
 			shownPrice, now, s.planCode(), s.Months)
-		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur)}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur))}
 	}
 	if method == model.PayMethodP2P {
 		// Реквизиты на странице — кабинету всегда, мини-аппу, если фронт
@@ -413,7 +413,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	defer clk.Unlock()
 	if a.boughtJustNow(buyKey) {
 		a.payLog(ctx, "balance", "", tgID, "duplicate", "повторное нажатие: покупка только что выполнена")
-		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.just_bought")}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "buy.just_bought"))}
 	}
 
 	// Ключ сделки против двойного нажатия. Намерения покупки здесь нет (счёт

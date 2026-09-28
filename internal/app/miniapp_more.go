@@ -166,7 +166,7 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 		return unknown
 	}
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
-		return web.MiniPlansDTO{Notice: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
+		return web.MiniPlansDTO{Notice: stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))}
 	}
 	p, err := a.planByCode(ctx, code)
 	if err != nil {

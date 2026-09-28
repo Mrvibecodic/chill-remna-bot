@@ -362,7 +362,7 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 		return
 	}
 	if err != nil {
-		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", err.Error()))
+		a.sendHome(ctx, chatID, i18n.T(lang, "trial.fail", html_(err.Error())))
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)

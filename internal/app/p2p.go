@@ -1273,7 +1273,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 			Amount: req.Price + curSuffix(a.curFor(model.PayMethodP2P)), Status: model.PaymentRejected, Comment: text,
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
-		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
+		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
 		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
 	}

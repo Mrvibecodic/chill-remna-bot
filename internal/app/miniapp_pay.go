@@ -219,7 +219,9 @@ func (a *App) MiniReferral(ctx context.Context, tgID int64) web.MiniReferralDTO 
 // MiniPromo applies a promo code via the shared redeemPromo core.
 func (a *App) MiniPromo(ctx context.Context, tgID int64, code string) web.MiniPromoDTO {
 	msg, ok := a.redeemPromo(ctx, tgID, code)
-	return web.MiniPromoDTO{OK: ok, Message: msg}
+	// Страница показывает сообщение обычным текстом: разметка чата там видна
+	// тегами.
+	return web.MiniPromoDTO{OK: ok, Message: stripHTMLTags(msg)}
 }
 
 // MiniTopUpOptions returns the same preset amounts as the chat top-up screen,
@@ -256,7 +258,7 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 // у произвольной суммы в чате (setTopUpCustom).
 func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string, web_ bool) web.MiniActionDTO {
 	if !a.topUpEnabled() {
-		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "topup.disabled")}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "topup.disabled"))}
 	}
 	_, maxK := a.topUpAmounts(ctx)
 	if kopecks <= 0 || maxK <= 0 || kopecks > maxK {
