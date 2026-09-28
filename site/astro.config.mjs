@@ -64,6 +64,7 @@ export default defineConfig({
             { label: 'Продажи', slug: 'admin/sales' },
             { label: 'Маркетинг', slug: 'admin/marketing' },
             { label: 'Интерфейс', slug: 'admin/interface' },
+            { label: 'Тексты бота', slug: 'admin/texts' },
             { label: 'Пользователи', slug: 'admin/users' },
             { label: 'Система', slug: 'admin/system' },
           ],
