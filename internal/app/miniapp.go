@@ -103,6 +103,9 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		}
 	}
 	a.mu.Unlock()
+	// Названия и описания способов — те же, что в чате (правятся в «Тексты
+	// бота»); страница без них показывает свои встроенные.
+	dto.PayLabels, dto.PayNotes = payMethodWebTexts(a.lang(tgID))
 	return dto
 }
 

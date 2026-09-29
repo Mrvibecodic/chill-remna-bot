@@ -81,19 +81,28 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 	case "d":
 		a.sendTextDefault(ctx, chatID, arg)
 	case "r":
-		if _, ok := i18n.EditableByKey(arg); !ok {
+		e, ok := i18n.EditableByKey(arg)
+		if !ok {
 			a.showTextsHome(ctx, chatID)
 			return
 		}
-		a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.reset_ask"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "tx.btn_yes_reset"), "tx:ry:"+arg), btn(i18n.T(lang, "btn.cancel"), "tx:k:"+arg)},
+		ask, yes := "tx.reset_ask", "tx.btn_yes_reset"
+		if e.Optional {
+			ask, yes = "tx.clear_ask", "tx.btn_yes_clear"
+		}
+		a.sendIfaceKB(ctx, chatID, i18n.T(lang, ask), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, yes), "tx:ry:"+arg), btn(i18n.T(lang, "btn.cancel"), "tx:k:"+arg)},
 		})
 	case "ry":
-		if _, ok := i18n.EditableByKey(arg); !ok {
+		e, ok := i18n.EditableByKey(arg)
+		if !ok {
 			a.showTextsHome(ctx, chatID)
 			return
 		}
 		note := i18n.T(lang, "tx.reset_done")
+		if e.Optional {
+			note = i18n.T(lang, "tx.cleared")
+		}
 		if err := a.setTextOverride(ctx, a.botLang(), arg, ""); err != nil {
 			note = i18n.T(lang, "tx.save_failed")
 		}
@@ -115,6 +124,8 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 			note = i18n.T(lang, "tx.save_failed")
 		}
 		a.showTextsHomeNote(ctx, chatID, note)
+	case "pm":
+		a.showPayMethodTexts(ctx, chatID, arg)
 	case "noop":
 	default:
 		a.showTextsHome(ctx, chatID)
@@ -137,7 +148,10 @@ func (a *App) showTextsHomeNote(ctx context.Context, chatID int64, note string) 
 			perSec[e.Section]++
 		}
 	}
-	rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "tx.btn_search"), "tx:q")}}
+	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "tx.btn_search"), "tx:q")},
+		{btn(i18n.T(lang, "tx.btn_methods"), "tx:pm:t")},
+	}
 	var row []models.InlineKeyboardButton
 	for _, sec := range i18n.EditSections() {
 		label := txtSectionTitle(lang, sec)
@@ -191,6 +205,13 @@ func (a *App) txtLabel(lang, key string) string {
 	body = strings.Join(strings.Fields(body), " ")
 	if utf8.RuneCountInString(body) > txtLabelMax {
 		body = string([]rune(body)[:txtLabelMax]) + "…"
+	}
+	if body == "" && e != nil {
+		// Пустой необязательный текст узнаётся по подсказке «где видно».
+		body = e.WhereText(lang)
+		if utf8.RuneCountInString(body) > txtLabelMax {
+			body = string([]rune(body)[:txtLabelMax]) + "…"
+		}
 	}
 	if body == "" {
 		body = key
@@ -404,7 +425,11 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 			b.WriteString("\n\n" + i18n.T(lang, "tx.st_stale"))
 		}
 	default:
-		b.WriteString("\n" + i18n.T(lang, "tx.st_default"))
+		if e.Optional {
+			b.WriteString("\n" + i18n.T(lang, "tx.st_empty"))
+		} else {
+			b.WriteString("\n" + i18n.T(lang, "tx.st_default"))
+		}
 	}
 	b.WriteString("\n\n" + a.txtVarsBlock(lang, e))
 	head := b.String()
@@ -413,7 +438,11 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	if e.Kind == i18n.KindButton {
 		preview += "\n" + i18n.T(lang, "tx.preview_button")
 	} else {
-		preview += "\n——————\n" + txtPreviewHTML(bl, key, canon) + "\n——————"
+		body := txtPreviewHTML(bl, key, canon)
+		if strings.TrimSpace(canon) == "" {
+			body = i18n.T(lang, "tx.preview_empty")
+		}
+		preview += "\n——————\n" + body + "\n——————"
 	}
 
 	var rows [][]models.InlineKeyboardButton
@@ -421,8 +450,13 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.RenderExample(bl, key, canon), "tx:noop")})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_edit"), "tx:e:"+key), btn(i18n.T(lang, "tx.btn_test"), "tx:t:"+key)})
-	if stored {
+	switch {
+	case stored && e.Optional:
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_clear"), "tx:r:"+key)})
+	case stored:
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_default"), "tx:d:"+key), btn(i18n.T(lang, "tx.btn_reset"), "tx:r:"+key)})
+	}
+	if stored {
 		if own && textStale(bl, key, o) {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_keep"), "tx:kp:"+key)})
 		}
@@ -464,6 +498,9 @@ func (a *App) txtRules(lang string, e *i18n.Editable) string {
 		}
 	default:
 		rules = i18n.T(lang, "tx.rules_html") + "\n" + i18n.T(lang, "tx.rules_max", txtHTMLLimit(e))
+	}
+	if e.Optional {
+		rules += "\n• " + i18n.T(lang, "tx.optional_hint")
 	}
 	vars := e.UniqueVars()
 	if len(vars) == 0 {
@@ -531,11 +568,19 @@ func (a *App) startTextEdit(ctx context.Context, chatID int64, key string) {
 	ui := a.getUI(chatID)
 	resetPendingInputs(ui)
 	ui.txtKey = key
-	a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.edit_ask", a.txtRules(lang, e)), [][]models.InlineKeyboardButton{
+	canon, _ := i18n.Effective(a.botLang(), key)
+	// Пустому тексту шаблон не нужен: пустое сообщение Telegram не примет.
+	empty := strings.TrimSpace(canon) == ""
+	ask := "tx.edit_ask"
+	if empty {
+		ask = "tx.edit_ask_empty"
+	}
+	a.sendIfaceKB(ctx, chatID, i18n.T(lang, ask, a.txtRules(lang, e)), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.cancel"), "tx:x")},
 	})
-	canon, _ := i18n.Effective(a.botLang(), key)
-	ui.txtTplMsg = a.msg.Send(ctx, chatID, txtTemplate(lang, key, canon))
+	if !empty {
+		ui.txtTplMsg = a.msg.Send(ctx, chatID, txtTemplate(lang, key, canon))
+	}
 }
 
 // textDraftFromMessage превращает сообщение админа в канонический текст.
@@ -725,6 +770,11 @@ func (a *App) sendTextTest(ctx context.Context, chatID int64, key string) {
 	bl := a.botLang()
 	canon, _ := i18n.Effective(bl, key)
 	closeRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_close"), "x:close")}
+	if strings.TrimSpace(canon) == "" {
+		a.msg.SendKB(ctx, chatID, i18n.T(lang, "tx.test_head")+"\n\n"+i18n.T(lang, "tx.preview_empty"),
+			[][]models.InlineKeyboardButton{closeRow})
+		return
+	}
 	if e.Kind == i18n.KindButton {
 		a.msg.SendKB(ctx, chatID, i18n.T(lang, "tx.test_button"), [][]models.InlineKeyboardButton{
 			{btn(i18n.RenderExample(bl, key, canon), "tx:noop")}, closeRow,

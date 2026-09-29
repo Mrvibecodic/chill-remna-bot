@@ -87,6 +87,15 @@ func TestEditableCatalog(t *testing.T) {
 			}
 			inKey[v.Name] = v.Ru
 		}
+		if (ruT == "" || enT == "") != e.Optional {
+			t.Errorf("%s: пустой стандартный текст бывает только у необязательного", e.Key)
+		}
+		if e.Optional {
+			if len(e.Vars) != 0 {
+				t.Errorf("%s: у необязательного текста переменных не бывает", e.Key)
+			}
+			continue
+		}
 		for _, lang := range []string{"ru", "en"} {
 			canon := DefaultCanonical(lang, e.Key)
 			if len(e.Vars) > 0 && len(canonRe.FindAllString(canon, -1)) != len(e.Vars) {
@@ -248,5 +257,16 @@ func TestMissingVars(t *testing.T) {
 	miss := MissingVars(e.Key, "только {"+e.Vars[0].Name+"}")
 	if len(miss) != len(e.UniqueVars())-1 {
 		t.Fatalf("пропущенные: %v", miss)
+	}
+}
+
+// Необязательный текст по умолчанию пуст: T отдаёт пустую строку, а не ключ.
+func TestOptionalEmptyByDefault(t *testing.T) {
+	if got := T("ru", "method.yk_note"); got != "" {
+		t.Fatalf("got %q", got)
+	}
+	withOverrides(t, map[string]map[string]string{"ru": {"method.yk_note": "Карты МИР и СБП"}})
+	if got := T("ru", "method.yk_note"); got != "Карты МИР и СБП" {
+		t.Fatalf("got %q", got)
 	}
 }

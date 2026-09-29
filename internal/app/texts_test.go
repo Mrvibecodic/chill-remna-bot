@@ -455,3 +455,147 @@ func TestDisplayNameFallbackByLang(t *testing.T) {
 		t.Fatalf("ru: %q", got)
 	}
 }
+
+// Одно название способа — в кнопке чата, в списке мини-аппа и в описании.
+func TestPayMethodNameAndNote(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.botCfg.YooKassa.Enabled = true
+	before := i18n.T("ru", "method.yk_btn", methodName("ru", model.PayMethodYooKassa), "990 ₽")
+	if before != "💳 Картой (ЮKassa) — 990 ₽" {
+		t.Fatalf("кнопка по умолчанию изменилась: %q", before)
+	}
+	// Пока название не изменено, мини-апп показывает свои встроенные названия.
+	if dto := a.MiniMenu(ctx, 555, false); len(dto.PayLabels) != 0 {
+		t.Fatalf("без правки мини-апп получил названия: %v", dto.PayLabels)
+	}
+	if n := ownMethodName("ru", model.PayMethodTribute); n != "" {
+		t.Fatalf("незаданное название считается своим: %q", n)
+	}
+	_ = a.setTextOverride(ctx, "ru", "method.yk_name", "Карты МИР, СБП")
+	_ = a.setTextOverride(ctx, "ru", "method.yk_note", "Оплата <b>любой</b> картой")
+
+	a.getUI(555).topUpKopecks = 50000
+	a.showTopUpMethods(ctx, 555)
+	found := false
+	for _, l := range fm.buttonLabels() {
+		if strings.Contains(l, "Карты МИР, СБП") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("новое название не на кнопке: %v", fm.buttonLabels())
+	}
+	if got := withPayNote("ru", model.PayMethodYooKassa, "Экран"); got != "Экран\n\nОплата <b>любой</b> картой" {
+		t.Fatalf("описание не добавлено к экрану оплаты: %q", got)
+	}
+	if got := withPayNote("ru", model.PayMethodCryptoBot, "Экран"); got != "Экран" {
+		t.Fatalf("пустое описание что-то добавило: %q", got)
+	}
+	dto := a.MiniMenu(ctx, 555, false)
+	if dto.PayLabels[model.PayMethodYooKassa] != "Карты МИР, СБП" || dto.PayLabels["yk"] != "Карты МИР, СБП" {
+		t.Fatalf("мини-апп не получил название: %v", dto.PayLabels)
+	}
+	if dto.PayNotes[model.PayMethodYooKassa] != "Оплата любой картой" {
+		t.Fatalf("описание для страницы — без разметки: %v", dto.PayNotes)
+	}
+	if _, ok := dto.PayNotes[model.PayMethodCryptoBot]; ok {
+		t.Fatal("пустое описание ушло в мини-апп")
+	}
+}
+
+// Необязательный текст: пустой по умолчанию, правится и убирается.
+func TestOptionalNoteEditAndClear(t *testing.T) {
+	a, fm, fs := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:k:method.pl_note"))
+	if !strings.Contains(fm.joined(), i18n.T("ru", "tx.st_empty")) {
+		t.Fatal("карточка пустого описания не говорит, что оно пусто")
+	}
+	sent := len(fm.texts)
+	a.handleCallback(ctx, cb(100, "tx:e:method.pl_note"))
+	if a.getUI(100).txtTplMsg != 0 || len(fm.texts) != sent+1 {
+		t.Fatal("для пустого текста отправлен шаблон")
+	}
+	a.handleMessage(ctx, adminMsg("Карты любых банков"))
+	a.handleCallback(ctx, cb(100, "tx:ok"))
+	if methodNote("ru", model.PayMethodPlatega) != "Карты любых банков" {
+		t.Fatal("описание не сохранено")
+	}
+	if hasCB(fm.allCallbackData(), "tx:d:method.pl_note") {
+		t.Fatal("у необязательного текста кнопка «Стандартный текст» вместо «Убрать»")
+	}
+	a.handleCallback(ctx, cb(100, "tx:r:method.pl_note"))
+	a.handleCallback(ctx, cb(100, "tx:ry:method.pl_note"))
+	if methodNote("ru", model.PayMethodPlatega) != "" {
+		t.Fatal("описание не убрано")
+	}
+	if _, ok := fs.cfg.Texts.Overrides["ru"]["method.pl_note"]; ok {
+		t.Fatal("убранное описание осталось в конфиге")
+	}
+}
+
+// Экран «Способы оплаты»: вход из продаж и из текстов, «Назад» — туда же.
+func TestPayMethodsScreen(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "menu:pay"))
+	if !hasCB(fm.allCallbackData(), "tx:pm") {
+		t.Fatal("в продажах нет входа в названия способов")
+	}
+	a.handleCallback(ctx, cb(100, "tx:pm"))
+	cbs := fm.allCallbackData()
+	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.yk_note", "tx:k:method.trb_name", "menu:pay"} {
+		if !hasCB(cbs, want) {
+			t.Fatalf("на экране нет %s", want)
+		}
+	}
+	a.handleCallback(ctx, cb(100, "tx:k:method.yk_name"))
+	if !hasCB(fm.allCallbackData(), "tx:pm:") {
+		t.Fatal("из карточки не вернуться к способам оплаты")
+	}
+	a.handleCallback(ctx, cb(100, "tx:pm:t"))
+	if !hasCB(fm.allCallbackData(), "tx:home") {
+		t.Fatal("из текстов «Назад» не ведёт в тексты")
+	}
+}
+
+// Кнопка со своим текстом без {способ_оплаты} не подхватит новое название —
+// экран способов об этом предупреждает.
+func TestPayMethodsScreenWarnsFixedButton(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	_ = a.setTextOverride(ctx, "ru", "method.pl_btn", "💠 Платёж — {amount}")
+	a.handleCallback(ctx, cb(100, "tx:pm"))
+	if !strings.Contains(fm.joined(), "{способ_оплаты}") {
+		t.Fatal("нет предупреждения о кнопке со своим текстом")
+	}
+}
+
+// Новое название приходит на все кнопки способов при покупке.
+func TestPayMethodNamesOnPurchaseButtons(t *testing.T) {
+	t.Cleanup(i18n.ResetOverrides)
+	a, fs := snapApp(t, "http://127.0.0.1:1")
+	fm := &fakeMsg{}
+	a.msg = fm
+	ctx := context.Background()
+	c := a.botCfg
+	c.P2P.Enabled, c.P2P.Cards = true, []string{"0000"}
+	c.Stars.Enabled = true
+	c.YooKassa.Enabled = true
+	c.CryptoBot.Enabled = true
+	c.Platega.Enabled = true
+	c.Heleket.Enabled = true
+	for _, m := range payMethodOrder {
+		_ = a.setTextOverride(ctx, "ru", payMethodKeys[m].name, "Своё "+m)
+	}
+	_ = fs.UpsertUser(ctx, 555)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	a.showMethodsSale(ctx, 555, &sale{Plan: p, D: p.Duration(1), Months: 1})
+	labels := strings.Join(fm.buttonLabels(), " | ")
+	for _, m := range []string{model.PayMethodP2P, model.PayMethodStars, model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodPlatega, model.PayMethodHeleket} {
+		if !strings.Contains(labels, "Своё "+m) {
+			t.Errorf("на кнопке %s нет нового названия: %s", m, labels)
+		}
+	}
+}

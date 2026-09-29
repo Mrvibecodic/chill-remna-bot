@@ -301,32 +301,32 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
 	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" && gridCur {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, model.PayMethodP2P)), "method:p2p")})
 	}
 	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" && a.ykSaleCurrencyOK(s) {
-		label := i18n.T(lang, "method.yk_btn", a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
+		label := i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
 	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", a.saleStars(s)), "method:stars")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", methodName(lang, model.PayMethodStars), a.saleStars(s)), "method:stars")})
 	}
 	if cb.Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curSymbol(a.hlCurrency())))
+		label := i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
 	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
-		label := i18n.T(lang, "method.pl_btn", a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
+		label := i18n.T(lang, "method.pl_btn", methodName(lang, model.PayMethodPlatega), a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
 	if a.hlConfig().Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curSymbol(a.hlCurrency())))
+		label := i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
 	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
 	// привязанной подпиской (у «Базового» — со ссылкой оплаты). Сравнивается
 	// код: «Базовый» с витрины приходит строкой тарифа, а не пустым Plan.
 	if url, _ := a.tributeOffer(lang, s.Plan, s.planCode()); url != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn", methodName(lang, model.PayMethodTribute)), "method:trb")})
 	}
 
 	bal := a.userBalance(ctx, chatID)
@@ -483,7 +483,7 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 		return
 	}
 	idStr := strconv.FormatInt(reqID, 10)
-	a.sendKB(ctx, chatID, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card),
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card)),
 		[][]models.InlineKeyboardButton{{
 			btn(i18n.T(lang, "p2p.paid_btn"), "p2p:paid:"+idStr),
 			btn(i18n.T(lang, "btn.cancel"), "p2p:cancel:"+idStr),

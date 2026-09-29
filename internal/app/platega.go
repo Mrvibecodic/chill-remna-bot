@@ -130,7 +130,7 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Platega", err))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "pl.pay_prompt", months, value+curSuffix(curRUB)), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodPlatega, i18n.T(lang, "pl.pay_prompt", months, value+curSuffix(curRUB))), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "pl.btn_pay"), URL: redirect}},
 		{btn(i18n.T(lang, "pl.btn_check"), "plc:"+txID)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},

@@ -43,8 +43,11 @@ type Editable struct {
 	Kind    Kind
 	// MaxLen — предел длины для текстов, уходящих во внешние API (0 — нет).
 	MaxLen int
-	Where  [2]string
-	Vars   []EditVar
+	// Optional — текст по умолчанию пуст и тогда не показывается; «убрать»
+	// возвращает его к пустому.
+	Optional bool
+	Where    [2]string
+	Vars     []EditVar
 }
 
 // Разделы в порядке показа.

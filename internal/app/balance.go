@@ -328,13 +328,13 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 	a.mu.Unlock()
 	var rows [][]models.InlineKeyboardButton
 	if ykOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.yk_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:yk")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), kopecksToRub(k)+curSuffix(curRUB)), "top:m:yk")})
 	}
 	if cbOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.cb_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:cb")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), kopecksToRub(k)+curSuffix(curRUB)), "top:m:cb")})
 	}
 	if hlOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.hl_btn", kopecksToRub(k)+curSuffix(curRUB)), "top:m:hl")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), kopecksToRub(k)+curSuffix(curRUB)), "top:m:hl")})
 	}
 	if len(rows) == 0 {
 		// Админу — что включить, покупателю — куда писать. Раньше все видели
@@ -387,7 +387,8 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		payBtn = i18n.T(lang, "hl.btn_pay")
 		checkBtn = i18n.T(lang, "hl.btn_check")
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "topup.pay_prompt", rub), [][]models.InlineKeyboardButton{
+	full := map[string]string{"yk": model.PayMethodYooKassa, "cb": model.PayMethodCryptoBot, "hl": model.PayMethodHeleket}[method]
+	a.sendKB(ctx, chatID, withPayNote(lang, full, i18n.T(lang, "topup.pay_prompt", rub)), [][]models.InlineKeyboardButton{
 		{{Text: payBtn, URL: payURL}},
 		{btn(checkBtn, checkCB)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},

@@ -288,8 +288,12 @@ type MiniMenuDTO struct {
 	// на баланс приходят реферальные начисления, тратить их можно всегда.
 	TopUpOn    bool     `json:"topup_on"`
 	PayMethods []string `json:"pay_methods"`
-	SupportURL string   `json:"support_url"`
-	GroupURL   string   `json:"group_url"`
+	// PayLabels / PayNotes — названия и описания способов оплаты по коду
+	// способа (и по коротким кодам пополнения yk, cb, hl).
+	PayLabels  map[string]string `json:"pay_labels,omitempty"`
+	PayNotes   map[string]string `json:"pay_notes,omitempty"`
+	SupportURL string            `json:"support_url"`
+	GroupURL   string            `json:"group_url"`
 
 	// Legal — документы сервиса (соглашение, политика конфиденциальности) в
 	// том же составе, что показывает чат-бот.
