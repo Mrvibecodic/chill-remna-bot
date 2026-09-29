@@ -648,7 +648,7 @@ function daysWord(n){return plural(n,'день','дня','дней');}
 // бота»); встроенные ниже — запасные для старого сервера.
 var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',hl:'🪙'};
 function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]?(METHOD_EMOJI[m]?METHOD_EMOJI[m]+' ':'')+esc(L[m]):fb;}
-function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line">'+esc(N[m])+'</div>':'';}
+function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(code,months){
   haptic('tap');

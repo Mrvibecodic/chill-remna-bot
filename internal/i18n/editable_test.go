@@ -101,7 +101,7 @@ func TestEditableCatalog(t *testing.T) {
 			if len(e.Vars) > 0 && len(canonRe.FindAllString(canon, -1)) != len(e.Vars) {
 				t.Errorf("%s/%s: в шаблоне остались подстановки: %q", e.Key, lang, canon)
 			}
-			if err := Compile(e.Key, canon); err != nil {
+			if err := Compile(lang, e.Key, canon); err != nil {
 				t.Errorf("%s/%s: стандартный текст не собирается: %v", e.Key, lang, err)
 			}
 			if miss := MissingVars(e.Key, canon); len(miss) != 0 {

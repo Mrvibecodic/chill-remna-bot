@@ -82,6 +82,11 @@ func textStale(lang, key string, o model.TextOverride) bool {
 // изменение откатывается: иначе пользователи видели бы текст, который
 // исчезнет после перезапуска.
 func (a *App) updateTexts(ctx context.Context, change func(tc *model.TextsConfig)) error {
+	// Правка, запись и откат — под одним замком записи конфига: иначе откат
+	// неудачной записи стирал бы правку, успевшую сохраниться в промежутке, а
+	// чужое сохранение увозило бы в базу правку, которую потом откатят.
+	a.cfgSaveMu.Lock()
+	defer a.cfgSaveMu.Unlock()
 	a.mu.Lock()
 	if a.botCfg == nil {
 		a.mu.Unlock()
@@ -91,7 +96,7 @@ func (a *App) updateTexts(ctx context.Context, change func(tc *model.TextsConfig
 	change(&a.botCfg.Texts)
 	a.applyTexts(a.botCfg)
 	a.mu.Unlock()
-	err := a.saveConfigOnly(ctx)
+	err := a.saveConfigHeld(ctx)
 	if err != nil {
 		a.mu.Lock()
 		if a.botCfg != nil {

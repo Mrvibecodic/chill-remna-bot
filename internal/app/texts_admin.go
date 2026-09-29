@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
@@ -20,7 +21,7 @@ const (
 	cbTexts      = "tx"
 	txtPageSize  = 8
 	txtLabelMax  = 34
-	txtButtonMax = 64
+	txtButtonMax = i18n.ButtonMax
 	// txtMessageMax — предел видимой длины сообщения с примерами значений.
 	// У Telegram 4096, но экран часто собран из нескольких текстов сразу, а
 	// значения бывают длиннее примеров.
@@ -616,6 +617,11 @@ func (a *App) textDraftFromMessage(lang, key string, m *models.Message) (canon s
 	def := i18n.DefaultCanonical(bl, key)
 	lead := def[:len(def)-len(strings.TrimLeft(def, " \t\r\n"))]
 	trail := def[len(strings.TrimRight(def, " \t\r\n")):]
+	// Знак препинания в начале прилипает к предыдущему слову: «, » между
+	// названиями, а не « , ».
+	if r, _ := utf8.DecodeRuneInString(raw); unicode.IsPunct(r) {
+		lead = strings.TrimLeft(lead, " ")
+	}
 	raw = lead + raw + trail
 	canon, unknown := i18n.Canonicalize(key, raw)
 	if len(unknown) > 0 {
@@ -674,12 +680,16 @@ func (a *App) textDraftFromMessage(lang, key string, m *models.Message) (canon s
 		}
 	}
 	if len(errs) == 0 {
-		if err := i18n.Compile(key, canon); err != nil {
+		if err := i18n.Compile(bl, key, canon); err != nil {
 			switch {
 			case errors.Is(err, i18n.ErrBadChars):
 				errs = append(errs, i18n.T(lang, "tx.err_chars"))
 			case errors.Is(err, i18n.ErrUnknownVar):
 				errs = append(errs, i18n.T(lang, "tx.err_bad_var"))
+			case errors.Is(err, i18n.ErrNewline):
+				errs = append(errs, i18n.T(lang, "tx.err_newline"))
+			case errors.Is(err, i18n.ErrTooLong):
+				errs = append(errs, i18n.T(lang, "tx.err_too_long"))
 			default:
 				errs = append(errs, i18n.T(lang, "tx.err_empty"))
 			}
@@ -737,7 +747,7 @@ func (a *App) saveTextDraft(ctx context.Context, chatID int64) {
 		a.showTextsHome(ctx, chatID)
 		return
 	}
-	if err := i18n.Compile(key, draft); err != nil {
+	if err := i18n.Compile(a.botLang(), key, draft); err != nil {
 		a.showTextCard(ctx, chatID, key, "")
 		return
 	}

@@ -50,6 +50,11 @@ func (a *App) saveConfigOnly(ctx context.Context) error {
 	// так что «оба сохранения из одного обработчика» здесь неверно.
 	a.cfgSaveMu.Lock()
 	defer a.cfgSaveMu.Unlock()
+	return a.saveConfigHeld(ctx)
+}
+
+// saveConfigHeld — то же, но вызывающий уже держит cfgSaveMu.
+func (a *App) saveConfigHeld(ctx context.Context) error {
 	a.mu.Lock()
 	st := a.store
 	raw, err := a.botCfg.SnapshotJSON()
@@ -310,7 +315,10 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", methodName(lang, model.PayMethodStars), a.saleStars(s)), "method:stars")})
 	}
-	if cb.Enabled && base != "" && gridCur {
+	// CryptoBot принимает не любую фиатную валюту: с чужой счёт не выставится,
+	// и кнопка вела бы в отказ.
+	_, cbCurOK := cbFiat(a.pricing().Currency)
+	if cb.Enabled && base != "" && gridCur && cbCurOK {
 		label := i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
@@ -472,15 +480,15 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	if s == nil {
 		return
 	}
-	a.issueCardSale(ctx, chatID, s)
+	_ = a.issueCardSale(ctx, chatID, s)
 }
 
-func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
+func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) error {
 	lang := a.lang(chatID)
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, chatID, s)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
-		return
+		return err
 	}
 	idStr := strconv.FormatInt(reqID, 10)
 	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card)),
@@ -488,6 +496,7 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
 			btn(i18n.T(lang, "p2p.paid_btn"), "p2p:paid:"+idStr),
 			btn(i18n.T(lang, "btn.cancel"), "p2p:cancel:"+idStr),
 		}})
+	return nil
 }
 
 // nextP2PCardIdx — индекс следующей карты. Счётчик живёт в памяти процесса и

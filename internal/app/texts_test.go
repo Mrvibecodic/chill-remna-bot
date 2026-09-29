@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -596,6 +598,127 @@ func TestPayMethodNamesOnPurchaseButtons(t *testing.T) {
 	for _, m := range []string{model.PayMethodP2P, model.PayMethodStars, model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodPlatega, model.PayMethodHeleket} {
 		if !strings.Contains(labels, "Своё "+m) {
 			t.Errorf("на кнопке %s нет нового названия: %s", m, labels)
+		}
+	}
+}
+
+type blockingSaveStore struct {
+	*fakeStore
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingSaveStore) SaveConfig(ctx context.Context, c *model.BotConfig) error {
+	s.mu.Lock()
+	s.calls++
+	first := s.calls == 1
+	s.mu.Unlock()
+	if first {
+		close(s.started)
+		<-s.release
+		return errors.New("база недоступна")
+	}
+	return s.fakeStore.SaveConfig(ctx, c)
+}
+
+// Откат неудачной записи не стирает правку, сохранённую в это же время.
+func TestTextSaveRollbackKeepsConcurrentEdit(t *testing.T) {
+	a, _, fs := newTextsApp(t)
+	st := &blockingSaveStore{fakeStore: fs, started: make(chan struct{}), release: make(chan struct{})}
+	a.store = st
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _ = a.setTextOverride(ctx, "ru", "buy.traffic", "A {traffic}") }()
+	<-st.started
+	go func() { defer wg.Done(); _ = a.setTextOverride(ctx, "ru", "btn.buy", "Купить B") }()
+	time.Sleep(50 * time.Millisecond)
+	close(st.release)
+	wg.Wait()
+	if got := i18n.T("ru", "btn.buy"); got != "Купить B" {
+		t.Fatalf("успешная правка стёрта откатом соседней: %q", got)
+	}
+	if fs.cfg == nil || fs.cfg.Texts.Overrides["ru"]["btn.buy"].Text != "Купить B" {
+		t.Fatal("успешная правка не в базе")
+	}
+	if got := i18n.T("ru", "buy.traffic", "5 ГБ"); strings.HasPrefix(got, "A ") {
+		t.Fatal("неудачная правка применена")
+	}
+}
+
+// «Отмена» в поиске возвращает в тексты, а не в главное меню админки.
+func TestTextSearchCancelReturnsToTexts(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:q"))
+	a.handleCallback(ctx, cb(100, "inp:cancel"))
+	if !strings.Contains(fm.last(), "Тексты бота") {
+		t.Fatalf("после отмены не экран текстов: %q", fm.last())
+	}
+}
+
+// Правила места действуют и при загрузке: перенос в кнопке и длинное
+// название счёта из конфига не применяются и видны как ⛔.
+func TestTextKindRulesOnLoad(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	a.botCfg.Texts.Overrides = map[string]map[string]model.TextOverride{"ru": {
+		"btn.buy":             {Text: "Купить\nсейчас"},
+		"stars.invoice_title": {Text: strings.Repeat("я", 40) + " {months}"},
+	}}
+	a.applyTexts(a.botCfg)
+	if got := i18n.T("ru", "btn.buy"); strings.Contains(got, "\n") {
+		t.Fatal("перенос в кнопке применён")
+	}
+	if _, broken := a.textsAttention("ru"); len(broken) != 2 {
+		t.Fatalf("недопустимые тексты не отмечены: %v", broken)
+	}
+}
+
+// Знак препинания в начале не отрывается пробелом: «, » между названиями.
+func TestTextEdgeWhitespaceWithPunctuation(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "tx:e:legal.and"))
+	a.handleMessage(ctx, adminMsg(","))
+	if got := a.getUI(100).txtDraft; got != ", " {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Запись [текст]({ссылка}) внутри кода остаётся текстом.
+func TestVarLinkInsideCodeStaysText(t *testing.T) {
+	in := `<code>[x]({ссылка})</code> [y]({ссылка})`
+	want := `<code>[x]({ссылка})</code> <a href="{ссылка}">y</a>`
+	if got := varLinksToHTML(in); got != want {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Без реквизитов мини-апп не зовёт «завершить оплату в чате».
+func TestMiniP2PNoCards(t *testing.T) {
+	a, _, fs := newTextsApp(t)
+	ctx := context.Background()
+	a.botCfg.P2P.Enabled = true
+	a.botCfg.P2P.Cards = nil
+	_ = fs.UpsertUser(ctx, 555)
+	_ = fs.SetP2PApproved(ctx, 555, true)
+	dto := a.MiniP2P(ctx, 555, baseSale(1))
+	if dto.Redirect || dto.Error == "" {
+		t.Fatalf("got %+v", dto)
+	}
+}
+
+// CryptoBot с валютой, которую он не принимает, не предлагается.
+func TestCryptoBotHiddenForUnsupportedCurrency(t *testing.T) {
+	a, _, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.botCfg.CryptoBot.Enabled = true
+	a.botCfg.Pricing.Currency = "CNY"
+	for _, m := range a.MiniMenu(ctx, 555, false).PayMethods {
+		if m == model.PayMethodCryptoBot {
+			t.Fatal("CryptoBot предложен для CNY")
 		}
 	}
 }

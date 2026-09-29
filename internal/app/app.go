@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -1527,7 +1528,9 @@ func (a *App) noteBannerOK(photo models.InputFile) {
 }
 
 func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption string, rows [][]models.InlineKeyboardButton) {
-	if !assets.Has(section) || len([]rune(caption)) > 1000 {
+	// Предел подписи Telegram (1024) считается в единицах UTF-16 видимого
+	// текста: эмодзи — по две. Длинная подпись уходит обычным сообщением.
+	if !assets.Has(section) || len([]rune(caption)) > 1000 || len(utf16.Encode([]rune(stripHTMLTags(caption)))) > 1000 {
 		a.sendKB(ctx, chatID, caption, rows)
 		return
 	}
@@ -1670,6 +1673,10 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 	case cbTribute:
 		if isAdmin {
 			a.onTributeAdmin(ctx, chatID, val)
+		}
+	case cbTexts:
+		if isAdmin {
+			a.onTexts(ctx, chatID, val)
 		}
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)

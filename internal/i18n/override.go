@@ -3,8 +3,11 @@ package i18n
 import (
 	"errors"
 	"fmt"
+	"html"
+	"regexp"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // Свои тексты админа поверх стандартных. Набор меняется целиком и читается
@@ -20,6 +23,18 @@ var (
 	// ErrBadChars — < > & в кнопке или обычном тексте: такие значения
 	// подставляются и в сообщения с разметкой, где сломали бы её.
 	ErrBadChars = errors.New("символы < > & в тексте без разметки")
+	// ErrNewline — перенос строки в тексте, который обязан быть одной строкой.
+	ErrNewline = errors.New("перенос строки в однострочном тексте")
+	// ErrTooLong — текст длиннее предела своего места.
+	ErrTooLong = errors.New("текст длиннее предела")
+)
+
+// ButtonMax — предел длины однострочного текста (кнопки) вместе со
+// значениями переменных.
+const ButtonMax = 64
+
+var (
+	markupTagRe = regexp.MustCompile(`<[^<>]+>`)
 )
 
 type segment struct {
@@ -32,13 +47,15 @@ type compiled []segment
 var active atomic.Pointer[map[string]map[string]compiled]
 
 // Compile проверяет канонический текст: ключ есть в каталоге, переменные —
-// его собственные.
-func Compile(key, canonical string) error {
-	_, err := compile(key, canonical)
+// его собственные, соблюдены правила места (одна строка, предел длины). Те же
+// проверки идут при загрузке конфига: текст, ставший недопустимым после
+// обновления бота, не применяется.
+func Compile(lang, key, canonical string) error {
+	_, err := compile(lang, key, canonical)
 	return err
 }
 
-func compile(key, canonical string) (compiled, error) {
+func compile(lang, key, canonical string) (compiled, error) {
 	e, ok := editableIdx[key]
 	if !ok {
 		return nil, ErrNotEditable
@@ -66,6 +83,21 @@ func compile(key, canonical string) (compiled, error) {
 	if last < len(canonical) {
 		out = append(out, segment{lit: canonical[last:], pos: -1})
 	}
+	worst := RenderWorst(lang, key, canonical)
+	switch e.Kind {
+	case KindButton:
+		if strings.ContainsAny(canonical, "\r\n") {
+			return nil, ErrNewline
+		}
+		if utf8.RuneCountInString(worst) > ButtonMax {
+			return nil, ErrTooLong
+		}
+	case KindHTML:
+		worst = html.UnescapeString(markupTagRe.ReplaceAllString(worst, ""))
+	}
+	if e.MaxLen > 0 && utf8.RuneCountInString(worst) > e.MaxLen {
+		return nil, ErrTooLong
+	}
 	return out, nil
 }
 
@@ -77,7 +109,7 @@ func SetOverrides(texts map[string]map[string]string) map[string]map[string]erro
 	var rejected map[string]map[string]error
 	for lang, m := range texts {
 		for key, text := range m {
-			c, err := compile(key, text)
+			c, err := compile(lang, key, text)
 			if err != nil {
 				if rejected == nil {
 					rejected = map[string]map[string]error{}

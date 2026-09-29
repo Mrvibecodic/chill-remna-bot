@@ -684,7 +684,7 @@ SCREENS.checkout=function(a){
   h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list">';
   methods(p).forEach(function(m){
     var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
-    h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
+    h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
   });
   h+='</div>';
   if(p.tribute&&p.tribute_terms&&p.tribute_terms.length&&methods(p).indexOf('tribute')>=0)h+='<div class="hint">'+esc(T('tribute_hint',p.tribute_terms.join(', ')))+'</div>';
@@ -802,7 +802,7 @@ SCREENS.wallet=async function(a){
 function tuMethods(a){
   var o=a.o||{};if(!(a.k>0)||!o.methods)return '';
   var h='<div class="sect" style="margin-top:14px">'+esc(T('topup_method'))+'</div><div class="list" style="margin-top:0">';
-  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
+  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
   return h+'</div>';
 }
 function tuPick(k){haptic();CUR.arg.k=k;CUR.arg.custom=false;rerender();}

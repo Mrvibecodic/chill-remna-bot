@@ -139,7 +139,15 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDT
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_request"))}
 	}
-	a.issueCardSale(ctx, tgID, s)
+	if err := a.issueCardSale(ctx, tgID, s); err != nil {
+		// Реквизиты не выданы — мини-апп не должен звать в чат «завершить
+		// оплату».
+		var ut userText
+		if errors.As(err, &ut) {
+			return web.MiniActionDTO{Error: stripHTMLTags(ut.msg)}
+		}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_unavailable"))}
+	}
 	return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_sent"))}
 }
 

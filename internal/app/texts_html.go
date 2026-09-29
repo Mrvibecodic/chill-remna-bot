@@ -196,8 +196,42 @@ func closeTag(e models.MessageEntity) string {
 var varLinkRe = regexp.MustCompile(`\[([^\[\]<>\n]+)\]\((\{[\p{L}\p{N}_ ]{1,40}\})\)`)
 
 func varLinksToHTML(s string) string {
-	return varLinkRe.ReplaceAllString(s, `<a href="$2">$1</a>`)
+	// Внутри кода и внутри ссылки запись остаётся текстом: вложенная ссылка
+	// сломала бы разметку.
+	var b strings.Builder
+	depth := 0
+	last := 0
+	for _, m := range tagOrLinkRe.FindAllStringIndex(s, -1) {
+		tok := s[m[0]:m[1]]
+		if tok[0] == '<' {
+			name := strings.ToLower(strings.TrimLeft(tok[1:len(tok)-1], "/"))
+			if k := strings.IndexAny(name, " \t\n"); k >= 0 {
+				name = name[:k]
+			}
+			if name == "code" || name == "pre" || name == "a" {
+				if strings.HasPrefix(tok, "</") {
+					if depth > 0 {
+						depth--
+					}
+				} else {
+					depth++
+				}
+			}
+			continue
+		}
+		if depth > 0 {
+			continue
+		}
+		b.WriteString(s[last:m[0]])
+		b.WriteString(varLinkRe.ReplaceAllString(tok, `<a href="$2">$1</a>`))
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
+
+// tagOrLinkRe — тег или запись [текст]({переменная}).
+var tagOrLinkRe = regexp.MustCompile(`<[^<>]+>|` + varLinkRe.String())
 
 // hrefVarRe — ссылка на переменную в шаблоне: обратное превращение для
 // текста, который админ копирует. Сообщение со ссылкой «{ссылка}» Telegram
