@@ -23,6 +23,7 @@ var dynamicPrefixes = []string{
 	"webui.design_",
 	"webui.theme_",
 	"webui.ask_",
+	"tx.sec.",
 }
 
 // Осиротевшие после рефакторингов ключи накапливаются незаметно: компилятор их

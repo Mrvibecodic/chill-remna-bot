@@ -98,7 +98,7 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
 		return
 	}
-	prompt := i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur))
+	prompt := withPayNote(lang, model.PayMethodYooKassa, i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur)))
 	if save {
 		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint")
 	}

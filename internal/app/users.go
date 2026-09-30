@@ -1049,7 +1049,7 @@ func (a *App) addSubLine(ctx context.Context, chatID int64) string {
 	lang := a.lang(chatID)
 	// Название опции — тарифа пользователя (или общее): у каждого тарифа опция
 	// может называться по-своему.
-	name := a.userAddSubName(ctx, chatID)
+	name := html_(a.userAddSubName(ctx, chatID))
 	switch {
 	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
 		return "\n" + i18n.T(lang, "sub.addsub_off", name)

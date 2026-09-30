@@ -50,6 +50,11 @@ func (a *App) saveConfigOnly(ctx context.Context) error {
 	// так что «оба сохранения из одного обработчика» здесь неверно.
 	a.cfgSaveMu.Lock()
 	defer a.cfgSaveMu.Unlock()
+	return a.saveConfigHeld(ctx)
+}
+
+// saveConfigHeld — то же, но вызывающий уже держит cfgSaveMu.
+func (a *App) saveConfigHeld(ctx context.Context) error {
 	a.mu.Lock()
 	st := a.store
 	raw, err := a.botCfg.SnapshotJSON()
@@ -301,32 +306,35 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
 	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" && gridCur {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn"), "method:p2p")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, model.PayMethodP2P)), "method:p2p")})
 	}
 	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" && a.ykSaleCurrencyOK(s) {
-		label := i18n.T(lang, "method.yk_btn", a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
+		label := i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
 	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", a.saleStars(s)), "method:stars")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", methodName(lang, model.PayMethodStars), a.saleStars(s)), "method:stars")})
 	}
-	if cb.Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.cb_btn", base+curSuffix(curRUB))
+	// CryptoBot принимает не любую фиатную валюту: с чужой счёт не выставится,
+	// и кнопка вела бы в отказ.
+	_, cbCurOK := cbFiat(a.pricing().Currency)
+	if cb.Enabled && base != "" && gridCur && cbCurOK {
+		label := i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
 	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
-		label := i18n.T(lang, "method.pl_btn", a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
+		label := i18n.T(lang, "method.pl_btn", methodName(lang, model.PayMethodPlatega), a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
 	if a.hlConfig().Enabled && base != "" && gridCur {
-		label := i18n.T(lang, "method.hl_btn", base+curSuffix(curRUB))
+		label := i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
 	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
 	// привязанной подпиской (у «Базового» — со ссылкой оплаты). Сравнивается
 	// код: «Базовый» с витрины приходит строкой тарифа, а не пустым Plan.
 	if url, _ := a.tributeOffer(lang, s.Plan, s.planCode()); url != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn"), "method:trb")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn", methodName(lang, model.PayMethodTribute)), "method:trb")})
 	}
 
 	bal := a.userBalance(ctx, chatID)
@@ -472,22 +480,23 @@ func (a *App) issueCard(ctx context.Context, chatID int64) {
 	if s == nil {
 		return
 	}
-	a.issueCardSale(ctx, chatID, s)
+	_ = a.issueCardSale(ctx, chatID, s)
 }
 
-func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) {
+func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) error {
 	lang := a.lang(chatID)
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, chatID, s)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
-		return
+		return err
 	}
 	idStr := strconv.FormatInt(reqID, 10)
-	a.sendKB(ctx, chatID, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card),
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card)),
 		[][]models.InlineKeyboardButton{{
 			btn(i18n.T(lang, "p2p.paid_btn"), "p2p:paid:"+idStr),
 			btn(i18n.T(lang, "btn.cancel"), "p2p:cancel:"+idStr),
 		}})
+	return nil
 }
 
 // nextP2PCardIdx — индекс следующей карты. Счётчик живёт в памяти процесса и
@@ -533,7 +542,7 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 	p2p := a.botCfg.P2P
 	if len(p2p.Cards) == 0 {
 		a.mu.Unlock()
-		return "", "", 0, errors.New(i18n.T(a.lang(chatID), "p2p.no_cards"))
+		return "", "", 0, errUserText(i18n.T(a.lang(chatID), "p2p.no_cards"))
 	}
 	if price == "" {
 		// Заявка с пустой суммой — это «переведите сколько-нибудь»: человек
@@ -1273,12 +1282,14 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 			Amount: req.Price + curSuffix(a.curFor(model.PayMethodP2P)), Status: model.PaymentRejected, Comment: text,
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
-		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", text))
+		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
 		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
 	}
 
 	switch ui.adminInput {
+	case "tx_search":
+		a.applyTextSearch(ctx, chatID, text)
 	case "plan_name", "plan_desc", "plan_icon", "plan_addsub_name", "plan_addsub_desc":
 		a.applyPlanText(ctx, chatID, ui.adminInput, text)
 	case "plan_access":

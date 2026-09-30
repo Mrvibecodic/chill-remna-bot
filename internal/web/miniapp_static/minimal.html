@@ -673,14 +673,18 @@ function toCheckout(code,months){
   if(STATE.menu.legal_accept&&legalDocs().length){go('legalgate',{code:code,months:months});return;}
   go('checkout',{code:code,months:months});
 }
+/* Названия и описания способов — с сервера (правятся в боте); словарь L —
+   запасной для старого сервера. */
+function mName(m){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]||T('m_'+m);}
+function mNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]||'';}
 var M_IC={balance:'wallet',stars:'star',yookassa:'card',cryptobot:'coins',platega:'card',heleket:'coins',tribute:'card',p2p:'send'};
 SCREENS.checkout=function(a){
   var p=planBy(a.code),d=durBy(p,a.months);if(!p||!d){goHome();return;}
   var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(planTitle(p))+' · '+esc(monthsW(a.months))+'</span><div class="big">'+esc(price(d))+'</div></div>';
   h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list">';
   methods(p).forEach(function(m){
-    var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):'';
-    h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(T('m_'+m))+'</div>'+(sub?'<div class="s">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
+    var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
+    h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
   });
   h+='</div>';
   if(p.tribute&&p.tribute_terms&&p.tribute_terms.length&&methods(p).indexOf('tribute')>=0)h+='<div class="hint">'+esc(T('tribute_hint',p.tribute_terms.join(', ')))+'</div>';
@@ -798,7 +802,7 @@ SCREENS.wallet=async function(a){
 function tuMethods(a){
   var o=a.o||{};if(!(a.k>0)||!o.methods)return '';
   var h='<div class="sect" style="margin-top:14px">'+esc(T('topup_method'))+'</div><div class="list" style="margin-top:0">';
-  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(T('m_'+m))+'</div><div class="s">'+esc(rub(a.k))+'</div></span>'+CHEV+'</button>';});
+  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
   return h+'</div>';
 }
 function tuPick(k){haptic();CUR.arg.k=k;CUR.arg.custom=false;rerender();}

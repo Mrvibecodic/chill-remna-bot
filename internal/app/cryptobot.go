@@ -124,7 +124,7 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodCryptoBot, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "cb.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+strconv.FormatInt(invoiceID, 10)+":"+strconv.Itoa(months))},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},

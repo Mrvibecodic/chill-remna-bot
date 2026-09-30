@@ -255,7 +255,7 @@ func (a *App) startHeleket(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Heleket", err))
 		return
 	}
-	a.sendKB(ctx, chatID, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency()))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodHeleket, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "hl.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "hl.btn_check"), "hlc:"+uuid)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},

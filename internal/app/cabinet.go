@@ -22,7 +22,8 @@ import (
 // reuses the whole Mini App API; only sign-in differs. Telegram sign-in maps to
 // the real Telegram id; email+password accounts get a synthetic NEGATIVE id so
 // they slot into the bot's telegram-id-keyed system without colliding with real
-// (positive) Telegram ids. The trial is never available via the cabinet.
+// (positive) Telegram ids. The trial in the cabinet is offered only to Telegram
+// sign-ins; email accounts never get it.
 
 func (a *App) cabinetCfg() model.CabinetConfig {
 	a.mu.Lock()

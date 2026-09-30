@@ -35,7 +35,7 @@ func (a *App) MiniMe(ctx context.Context, tgID int64) web.MiniMeDTO {
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
 			dto.BalanceK = u.Balance
-			dto.Name = displayName(u.FirstName, u.Username)
+			dto.Name = displayName(a.lang(tgID), u.FirstName, u.Username)
 		}
 		// Знак идентификатора больше не признак «аккаунт по почте»: после
 		// привязки Telegram у аккаунта и положительный идентификатор, и почта.
@@ -83,7 +83,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.YooKassa.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodYooKassa)
 		}
-		if c.CryptoBot.Enabled {
+		if _, ok := cbFiat(c.Pricing.Currency); c.CryptoBot.Enabled && ok {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodCryptoBot)
 		}
 		// Platega выставляет счёт только в рублях (см. plGridCurrencyOK):
@@ -103,6 +103,9 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		}
 	}
 	a.mu.Unlock()
+	// Названия и описания способов — те же, что в чате (правятся в «Тексты
+	// бота»); страница без них показывает свои встроенные.
+	dto.PayLabels, dto.PayNotes = payMethodWebTexts(a.lang(tgID))
 	return dto
 }
 
@@ -164,7 +167,7 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 	// чтобы его дни не сгорали (админ может разрешить покупку тумблером).
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
-		dto.Notice = i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))
+		dto.Notice = stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))
 		return dto
 	}
 	// Первая точка гейта доступности — сама витрина: тарифы фильтруются по
@@ -280,7 +283,7 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 	a.syncPanelAccount(ctx, tgID)
 	link, expireAt, ok, err := a.trialOnce(ctx, tgID)
 	if !ok {
-		return web.MiniActionDTO{Error: "триал недоступен"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.trial_unavailable"))}
 	}
 	if err != nil {
 		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
@@ -350,19 +353,19 @@ func (a *App) MiniLegalRequired(ctx context.Context, tgID int64) bool {
 func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_, p2pInApp bool) web.MiniActionDTO {
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
-		return web.MiniActionDTO{Error: i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang))}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))}
 	}
 	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
 	// пользователь покупал бы тариф, недоступный ему по режиму, прямым
 	// запросом мимо витрины.
 	s := a.miniSale(ctx, tgID, plan, months)
 	if s == nil {
-		return web.MiniActionDTO{Error: "тариф недоступен"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.plan_unavailable"))}
 	}
 	// Гейт документов — до выбора способа: оплата с баланса и P2P идут мимо
 	// miniPayURLCore, и проверка только там оставляла их без согласия.
 	if a.legalRequired(ctx, tgID) {
-		return web.MiniActionDTO{Error: "сначала примите документы сервиса"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.legal_first"))}
 	}
 	// Сверка показанной цены с сегодняшней — до всех способов. Список тарифов
 	// фронт кэширует до перезагрузки страницы, поэтому здесь окно расхождения
@@ -373,7 +376,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		cur := curSuffix(curSymbol(a.pricing().Currency))
 		a.payLog(ctx, "", "", tgID, "price_changed", "было %s стало %s plan=%s months=%d",
 			shownPrice, now, s.planCode(), s.Months)
-		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur)}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "buy.price_changed", shownPrice+cur, now+cur))}
 	}
 	if method == model.PayMethodP2P {
 		// Реквизиты на странице — кабинету всегда, мини-аппу, если фронт
@@ -396,7 +399,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
 	// иначе «5 $» молча списались бы как «5 ₽».
 	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
-		return web.MiniActionDTO{Error: "тариф недоступен"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.plan_unavailable"))}
 	}
 	if a.store == nil {
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
@@ -413,7 +416,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	defer clk.Unlock()
 	if a.boughtJustNow(buyKey) {
 		a.payLog(ctx, "balance", "", tgID, "duplicate", "повторное нажатие: покупка только что выполнена")
-		return web.MiniActionDTO{Error: i18n.T(a.lang(tgID), "buy.just_bought")}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "buy.just_bought"))}
 	}
 
 	// Ключ сделки против двойного нажатия. Намерения покупки здесь нет (счёт
@@ -427,7 +430,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	if extID != "" {
 		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
 			a.payLog(ctx, "balance", extID, tgID, "duplicate", "повторный запрос: покупка уже выполнена")
-			return web.MiniActionDTO{Error: "покупка уже выполнена"}
+			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.already_bought"))}
 		}
 	}
 	// Снимок — до списания (как в чате): после DeductBalance любой отказ
@@ -438,13 +441,13 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
 	}
 	if !deducted {
-		return web.MiniActionDTO{Error: "недостаточно средств на балансе"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.no_funds"))}
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.refundBalance(tgID, kopecks, nil)
-			return web.MiniActionDTO{Error: "покупка уже выполнена"}
+			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.already_bought"))}
 		}
 		a.refundBalance(tgID, kopecks, err)
 		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
@@ -505,7 +508,7 @@ func (a *App) MiniAcceptLegal(ctx context.Context, tgID int64) web.MiniActionDTO
 	if a.store != nil {
 		if err := a.store.SetTermsAccepted(ctx, tgID, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			a.log.Warn("согласие с документами не записано", "err", err, "user", tgID)
-			return web.MiniActionDTO{Error: "не удалось сохранить согласие"}
+			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.consent_failed"))}
 		}
 	}
 	return web.MiniActionDTO{OK: true}

@@ -187,6 +187,27 @@ type BotConfig struct {
 	Mail MailConfig `json:"mail"`
 
 	Wallet WalletConfig `json:"wallet"`
+
+	// Texts — свои тексты админа (раздел «Тексты бота»).
+	Texts TextsConfig `json:"texts"`
+}
+
+// TextsConfig — свои тексты админа поверх стандартных.
+type TextsConfig struct {
+	// Overrides: язык → ключ → свой текст.
+	Overrides map[string]map[string]TextOverride `json:"overrides,omitempty"`
+	// NotifiedStale — отпечаток набора текстов, о которых админ уже
+	// предупреждён «стандартный вариант обновился»: чтобы не повторять.
+	NotifiedStale string `json:"notified_stale,omitempty"`
+}
+
+// TextOverride — свой текст одного ключа.
+type TextOverride struct {
+	// Text — текст с переменными в каноническом виде ({plan}).
+	Text string `json:"text"`
+	// Base — отпечаток стандартного текста на момент правки.
+	Base string `json:"base"`
+	At   string `json:"at,omitempty"`
 }
 
 // Clone возвращает независимую копию конфига.

@@ -12,11 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -106,6 +108,10 @@ type App struct {
 	// восстановило её (след отката). Уведомить админа надо, но в момент
 	// загрузки конфига мессенджера ещё нет — флаг ждёт запуска бота.
 	healNotice bool
+	// txtRejected — свои тексты, которые i18n не принял (язык → ключ →
+	// причина). Под отдельным замком: заполняется и под a.mu, и без него.
+	txtMu       sync.Mutex
+	txtRejected map[string]map[string]error
 	// basePlanRef — тариф «Базовый», прочитанный при последней синхронизации.
 	// Нужен там, где тариф требуется под замком и лезть в базу нельзя (снимок
 	// условий сделки). nil до первой синхронизации.
@@ -367,6 +373,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
 		a.botCfg = cfg
+		a.applyTexts(cfg)
 		a.panel = a.newPanel(cfg.Panel)
 		if cfg.Panel.Mode == model.ModeLocal && a.ctl != nil && a.ctl.Available() {
 			if err := a.ctl.ConnectPanelNetwork(ctx); err != nil {
@@ -565,6 +572,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.b = b
 	a.msg = botMessenger{b: b, log: a.log}
 	a.sendHealNotice(ctx)
+	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
@@ -750,16 +758,32 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		return
 	}
 
+	// Новый текст бота может начинаться с «/» (например, подсказка про
+	// команду). Пока редактор ждёт текст, это не команда — кроме /start и
+	// /setup, которыми из любого состояния выходят в меню.
+	if isAdmin && strings.HasPrefix(text, "/") && a.getUI(chatID).txtKey != "" &&
+		!strings.HasPrefix(text, "/start") && !strings.HasPrefix(text, "/setup") {
+		a.msg.Delete(ctx, chatID, m.ID)
+		a.onTextInput(ctx, chatID, m)
+		return
+	}
+
 	if strings.HasPrefix(text, "/") {
 		a.msg.Delete(ctx, chatID, m.ID)
 		// Команда уводит с экрана ввода — ожидание секрета доступа к панели
 		// снимаем здесь же: экран ввода команда затрёт, а состояние осталось бы
 		// взведённым, и следующий обычный текст молча стал бы ключом панели.
 		a.clearPanelInput(chatID)
+		if isAdmin {
+			a.clearTextInput(ctx, chatID)
+		}
 	}
 
 	if a.installed() && isHomeText(text) {
 		a.msg.Delete(ctx, chatID, m.ID)
+		if isAdmin {
+			a.clearTextInput(ctx, chatID)
+		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
 		return
 	}
@@ -893,6 +917,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	if ui.torAwait {
 		a.setTorrentUnblockText(ctx, chatID, m)
+		return
+	}
+	if ui.txtKey != "" {
+		a.onTextInput(ctx, chatID, m)
 		return
 	}
 	if ui.welcomeAwait == "img" {
@@ -1500,7 +1528,9 @@ func (a *App) noteBannerOK(photo models.InputFile) {
 }
 
 func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption string, rows [][]models.InlineKeyboardButton) {
-	if !assets.Has(section) || len([]rune(caption)) > 1000 {
+	// Предел подписи Telegram (1024) считается в единицах UTF-16 видимого
+	// текста: эмодзи — по две. Длинная подпись уходит обычным сообщением.
+	if !assets.Has(section) || len([]rune(caption)) > 1000 || len(utf16.Encode([]rune(stripHTMLTags(caption)))) > 1000 {
 		a.sendKB(ctx, chatID, caption, rows)
 		return
 	}
@@ -1644,13 +1674,17 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		if isAdmin {
 			a.onTributeAdmin(ctx, chatID, val)
 		}
+	case cbTexts:
+		if isAdmin {
+			a.onTexts(ctx, chatID, val)
+		}
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}
 }
 
 func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstName, username string) {
-	name := displayName(firstName, username)
+	name := displayName(a.lang(chatID), firstName, username)
 	a.clearPanelInput(chatID)
 	if isAdmin {
 		a.showMenu(ctx, chatID, true, name)
@@ -2124,11 +2158,63 @@ func applyPremiumEmoji(text string, m map[string]string) string {
 	if len(m) == 0 {
 		return text
 	}
+	keys := make([]string, 0, len(m))
 	for emoji, id := range m {
-		if id == "" {
+		if emoji != "" && id != "" {
+			keys = append(keys, emoji)
+		}
+	}
+	if len(keys) == 0 {
+		return text
+	}
+	// Длинные первыми: «❤️» не должен разбиться заменой «❤».
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	// Замена идёт только в тексте: не внутри тегов (адрес ссылки) и не
+	// внутри <code>, <pre> и уже стоящего <tg-emoji> — там вложенный тег
+	// сломал бы разметку, и сообщение ушло бы без оформления.
+	var b strings.Builder
+	skip := 0
+	for i := 0; i < len(text); {
+		if text[i] == '<' {
+			j := strings.IndexByte(text[i:], '>')
+			if j < 0 {
+				b.WriteString(text[i:])
+				break
+			}
+			tag := text[i : i+j+1]
+			name := strings.ToLower(strings.TrimLeft(tag[1:len(tag)-1], "/"))
+			if k := strings.IndexAny(name, " \t\n"); k >= 0 {
+				name = name[:k]
+			}
+			if name == "code" || name == "pre" || name == "tg-emoji" {
+				if strings.HasPrefix(tag, "</") {
+					if skip > 0 {
+						skip--
+					}
+				} else {
+					skip++
+				}
+			}
+			b.WriteString(tag)
+			i += j + 1
 			continue
 		}
-		text = strings.ReplaceAll(text, emoji, "<tg-emoji emoji-id=\""+id+"\">"+emoji+"</tg-emoji>")
+		if skip == 0 {
+			hit := ""
+			for _, k := range keys {
+				if strings.HasPrefix(text[i:], k) {
+					hit = k
+					break
+				}
+			}
+			if hit != "" {
+				b.WriteString("<tg-emoji emoji-id=\"" + m[hit] + "\">" + hit + "</tg-emoji>")
+				i += len(hit)
+				continue
+			}
+		}
+		b.WriteByte(text[i])
+		i++
 	}
-	return text
+	return b.String()
 }

@@ -134,15 +134,15 @@ func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDT
 	panel := a.panel
 	a.mu.Unlock()
 	if panel == nil {
-		return web.MiniActionDTO{Error: "панель недоступна"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.panel_down"))}
 	}
 	res, found, err := panel.ResetDevicesByTelegramID(ctx, tgID)
 	if err != nil {
 		a.log.Warn("miniapp reset devices failed", "tg", tgID, "err", err)
-		return web.MiniActionDTO{Error: "не удалось сбросить устройства"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.dev_reset_fail"))}
 	}
 	if !found {
-		return web.MiniActionDTO{Error: "подписка не найдена"}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.no_sub"))}
 	}
 	if res.HwidErr != nil {
 		a.log.Warn("miniapp reset devices: HWID delete-all failed; keys rotated, retrying in background", "tg", tgID, "err", res.HwidErr)

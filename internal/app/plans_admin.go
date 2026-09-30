@@ -287,12 +287,9 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	body := i18n.T(lang, "plans.card",
 		planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc),
 		html.EscapeString(a.planLimitsLine(lang, p)), html.EscapeString(planDurationsLine(lang, p)))
-	// Продаёт бот пока по старой сетке цен: витрина, счета и финализация читают
-	// конфиг. Тариф, заведённый рядом, ни на что не влияет — говорим об этом
-	// прямо, иначе выключённый «Базовый» выглядел бы как остановка продаж.
-	if p.Code == model.PlanCodeBase {
-		body += i18n.T(lang, "plans.note_base")
-	} else {
+	// Выключенный тариф или тариф без цены ни одного срока витрина не
+	// показывает — говорим об этом прямо, иначе он выглядел бы продающимся.
+	if !p.Enabled || !planSellsAnything(p) {
 		body += i18n.T(lang, "plans.note_idle")
 	}
 

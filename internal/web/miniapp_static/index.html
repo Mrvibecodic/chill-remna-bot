@@ -644,6 +644,11 @@ function monthsWord(n){return n+' '+plural(n,'месяц','месяца','мес
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
 function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
+// Названия и описания способов приходят с сервера (правятся в боте, «Тексты
+// бота»); встроенные ниже — запасные для старого сервера.
+var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',hl:'🪙'};
+function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]?(METHOD_EMOJI[m]?METHOD_EMOJI[m]+' ':'')+esc(L[m]):fb;}
+function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(code,months){
   haptic('tap');
@@ -687,7 +692,7 @@ function buyPlan(code,months){
     // Цена уходит на сервер ровно та, что нарисована выше в bigprice: список
     // тарифов кэшируется до перезагрузки, и сервер обязан отличить показанную
     // цену от сегодняшней, а не списать молча другую сумму.
-    h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this,\''+jsq(String(d.price||''))+'\')">'+(METHOD_LABELS[m]||m)+'</button>';
+    h+='<button class="btn sec" onclick="pay(\''+jsq(code)+'\','+months+',\''+m+'\',this,\''+jsq(String(d.price||''))+'\')">'+payLabel(m,METHOD_LABELS[m]||m)+'</button>'+payNote(m);
     if(m==='tribute'&&p.tribute_terms&&p.tribute_terms.length){
       h+='<div class="hint">Срок выбирается на странице Tribute. Подходят: '+esc(p.tribute_terms.join(', '))+' — другой срок доступа не выдаст.</div>';
     }
@@ -876,7 +881,7 @@ function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
     '<div class="title">'+esc(label)+'</div><div class="until">Способ пополнения</div></div>';
-  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+(METHOD_LABELS2[m]||m)+'</button>';});
+  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+payLabel(m,METHOD_LABELS2[m]||m)+'</button>'+payNote(m);});
   h+='<button class="btn ghost" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
   view(h,topupOpen);
 }

@@ -357,7 +357,11 @@ func (a *App) autoPayYield(ctx context.Context, tgID int64, method string, appli
 		return
 	}
 	a.payLog(ctx, ap.Method, "", tgID, "autopay_off", "выключено: подписку продлевает %s", methodLabel(method))
-	a.notify(ctx, tgID, i18n.T(a.lang(tgID), "ap.off_self_renew", methodLabel(method)))
+	name := ownMethodName(a.lang(tgID), method)
+	if name == "" {
+		name = methodLabel(method)
+	}
+	a.notify(ctx, tgID, i18n.T(a.lang(tgID), "ap.off_self_renew", name))
 }
 
 // paidRub — сумма платежа в валюте сетки: «990 ₽» → «990». Пусто — сумма не в

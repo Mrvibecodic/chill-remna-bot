@@ -51,14 +51,14 @@ func (a *App) botLang() string {
 	return i18n.Fallback
 }
 
-func displayName(first, username string) string {
+func displayName(lang, first, username string) string {
 	if first != "" {
 		return escapeName(first)
 	}
 	if username != "" {
 		return "@" + escapeName(username)
 	}
-	return "друг"
+	return i18n.T(lang, "menu.friend")
 }
 
 func userLabel(u *model.User) string {
@@ -291,6 +291,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
+		{btn(i18n.T(lang, "btn.texts"), "tx:home")},
 		{btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
 		{btn(i18n.T(lang, "btn.webui"), "menu:webui")},
 		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
@@ -373,6 +374,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
 		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
 		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute")},
+		{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
 		{btn(i18n.T(lang, "btn.wallet"), "menu:wallet")},
 		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
 		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
@@ -597,11 +599,11 @@ func (a *App) registerUser(ctx context.Context, chatID int64, firstName, usernam
 		a.askLegal(ctx, chatID)
 		return
 	}
-	a.showMenu(ctx, chatID, false, displayName(firstName, username))
+	a.showMenu(ctx, chatID, false, displayName(a.lang(chatID), firstName, username))
 }
 
 func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool, firstName, username string) {
-	name := displayName(firstName, username)
+	name := displayName(a.lang(chatID), firstName, username)
 	// Уход в меню отменяет ожидание секрета доступа к панели: см. clearPanelInput.
 	a.clearPanelInput(chatID)
 	switch val {
