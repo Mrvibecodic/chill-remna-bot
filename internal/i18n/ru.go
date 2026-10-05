@@ -106,6 +106,7 @@ var ru = map[string]string{
 	"buy.plan_btn":            "%d мес — %s",
 	"buy.choose_method":       "💳 <b>Как удобнее оплатить?</b>\n\n💼 Баланс: %s ₽\n\nВыберите способ ниже — после нажатия бот покажет инструкцию.",
 	"buy.countries":           "🌍 <b>Доступно стран: %d</b>\n%s",
+	"buy.servers":             "🖥 <b>Серверов: %d</b>",
 	"buy.traffic":             "📊 Трафик: %s",
 	"buy.devices":             "📱 Устройства: %s",
 	"buy.per_months":          "%d мес — %s",

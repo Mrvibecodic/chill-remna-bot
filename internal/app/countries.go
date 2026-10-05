@@ -79,7 +79,16 @@ type country struct {
 	Name string
 }
 
-// saleCountriesLine — строка стран для экрана способов оплаты.
+// planGeo — что достанется подписке тарифа: страны, конфиги и хосты.
+type planGeo struct {
+	countries []country
+	inbounds  int
+	// hosts — включённые и не скрытые хосты панели, которые получит подписка
+	// (и с флагом страны в названии, и без).
+	hosts int
+}
+
+// saleCountriesLine — строки стран и серверов для экрана способов оплаты.
 func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) string {
 	if s == nil {
 		return ""
@@ -87,8 +96,7 @@ func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) strin
 	if s.Plan == nil {
 		return a.countriesLine(ctx, lang, s.Months)
 	}
-	cs, _ := a.squadCountries(ctx, s.Plan.IntSquadsFor(s.D))
-	return countriesText(lang, cs)
+	return geoText(lang, a.squadGeo(ctx, s.Plan.IntSquadsFor(s.D)))
 }
 
 // planCountries returns the distinct countries available to a plan, taken from
@@ -100,8 +108,14 @@ func (a *App) planCountries(ctx context.Context, months int) (countries []countr
 
 // squadCountries — страны и число конфигов для явно заданного набора сквадов.
 func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries []country, inbounds int) {
+	g := a.squadGeo(ctx, squadIDs)
+	return g.countries, g.inbounds
+}
+
+// squadGeo — страны, конфиги и хосты для явно заданного набора сквадов.
+func (a *App) squadGeo(ctx context.Context, squadIDs []string) (g planGeo) {
 	if len(squadIDs) == 0 {
-		return nil, 0
+		return g
 	}
 	squads, hosts := a.infra(ctx)
 	squadSet := map[string]bool{}
@@ -118,7 +132,7 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		if !squadSet[s.UUID] {
 			continue
 		}
-		inbounds += s.InboundsCount
+		g.inbounds += s.InboundsCount
 		set := make(map[string]bool, len(s.InboundUUIDs))
 		for _, ib := range s.InboundUUIDs {
 			set[ib] = true
@@ -126,7 +140,7 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		inboundsBySquad[s.UUID] = set
 	}
 	if len(inboundsBySquad) == 0 {
-		return nil, inbounds
+		return g
 	}
 	served := func(h remnawave.Host) bool {
 		one := map[string]bool{}
@@ -150,14 +164,15 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		if !served(h) {
 			continue
 		}
+		g.hosts++
 		flag, name := splitFlag(h.Remark)
 		if flag == "" || seen[flag] {
 			continue
 		}
 		seen[flag] = true
-		countries = append(countries, country{Flag: flag, Code: flagToISO(flag), Name: name})
+		g.countries = append(g.countries, country{Flag: flag, Code: flagToISO(flag), Name: name})
 	}
-	return countries, inbounds
+	return g
 }
 
 // flagToISO converts a flag emoji (two regional-indicator runes) to its
@@ -200,8 +215,22 @@ func cleanCountryName(s string) string {
 // countriesLine renders the localized "countries available" block for the chat
 // buy screen, or "" when the plan has no detectable countries.
 func (a *App) countriesLine(ctx context.Context, lang string, months int) string {
-	cs, _ := a.planCountries(ctx, months)
-	return countriesText(lang, cs)
+	return geoText(lang, a.squadGeo(ctx, a.planSquadUUIDs(months)))
+}
+
+// geoText — строка стран и под ней число серверов (хостов панели). Строку
+// серверов админ может убрать в «Текстах бота». "" — показывать нечего.
+func geoText(lang string, g planGeo) string {
+	var lines []string
+	if line := countriesText(lang, g.countries); line != "" {
+		lines = append(lines, line)
+	}
+	if g.hosts > 0 {
+		if line := i18n.T(lang, "buy.servers", g.hosts); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // countriesText — общий рендер списка стран ("" — стран нет).

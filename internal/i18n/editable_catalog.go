@@ -80,6 +80,11 @@ var editableList = []Editable{
 			{Name: "country_count", Ru: "число_стран", Desc: [2]string{"сколько стран доступно в тарифе (число)", "number of countries available on the plan"}, Example: [2]string{"4", "4"}},
 			{Name: "countries", Ru: "страны", Desc: [2]string{"список стран через запятую: флаг и название (если название не определено — только флаг)", "comma-separated list of countries: flag and name (flag only if the name is unknown)"}, Example: [2]string{"🇩🇪 Германия, 🇳🇱 Нидерланды, 🇫🇮 Финляндия, 🇺🇸 США", "🇩🇪 Germany, 🇳🇱 Netherlands, 🇫🇮 Finland, 🇺🇸 USA"}},
 		}},
+	{Key: "buy.servers", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа и экран выбора оплаты — число серверов (хостов панели) под списком стран", "Plan card and payment method screen — number of servers (panel hosts) under the country list"},
+		Vars: []EditVar{
+			{Name: "server_count", Ru: "число_серверов", Desc: [2]string{"сколько включённых и не скрытых хостов панели получит подписка тарифа (число)", "how many enabled, non-hidden panel hosts the plan's subscription gets"}, Example: [2]string{"7", "7"}},
+		}},
 	{Key: "buy.currency_mismatch", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Сообщение: валюта тарифа не совпадает с валютой оплаты", "Message: plan currency differs from the payment currency"},
 		Vars: []EditVar{

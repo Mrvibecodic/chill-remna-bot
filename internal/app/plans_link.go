@@ -230,11 +230,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		b.WriteString("\n\n")
 		b.WriteString(i18n.T(lang, "buy.switch_note"))
 	}
-	if cs, _ := a.squadCountries(ctx, p.IntSquadsFor(nil)); len(cs) > 0 {
-		if line := countriesText(lang, cs); line != "" {
-			b.WriteString("\n\n")
-			b.WriteString(line)
-		}
+	if line := geoText(lang, a.squadGeo(ctx, p.IntSquadsFor(nil))); line != "" {
+		b.WriteString("\n\n")
+		b.WriteString(line)
 	}
 	if terms := planTermsText(lang, p); terms != "" {
 		b.WriteString("\n\n")

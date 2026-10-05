@@ -106,6 +106,7 @@ var en = map[string]string{
 	"buy.plan_btn":            "%d mo — %s",
 	"buy.choose_method":       "💳 <b>How would you like to pay?</b>\n\n💼 Balance: %s ₽\n\nPick a method below — the bot will show instructions.",
 	"buy.countries":           "🌍 <b>Countries available: %d</b>\n%s",
+	"buy.servers":             "🖥 <b>Servers: %d</b>",
 	"buy.traffic":             "📊 Traffic: %s",
 	"buy.devices":             "📱 Devices: %s",
 	"buy.per_months":          "%d mo — %s",

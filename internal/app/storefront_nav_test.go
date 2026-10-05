@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func storefrontApp(t *testing.T) (*App, *fakeMsg, *model.Plan) {
@@ -142,5 +144,36 @@ func TestMethodsBackLinkPlan(t *testing.T) {
 		if strings.HasPrefix(d, "plb:"+p.Code+":") {
 			t.Fatalf("выключенный тариф показан карточкой: %v", fm.allCallbackData()[nc:])
 		}
+	}
+}
+
+// Число серверов — на карточке тарифа и на экране оплаты; убирается в
+// «Текстах бота».
+func TestPlanCardServers(t *testing.T) {
+	a, fm, p := storefrontApp(t)
+	ctx := context.Background()
+	const uid = int64(1000000004)
+	a.infraCache = &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads:    []remnawave.SquadFull{{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}}},
+		hosts: []remnawave.Host{
+			{Remark: "🇩🇪 Германия #1", InboundUUID: "ib1"},
+			{Remark: "🇩🇪 Германия #2", InboundUUID: "ib1"},
+			{Remark: "🇳🇱 Нидерланды", InboundUUID: "ib1", Hidden: true},
+		},
+	}
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if !strings.Contains(fm.last(), "Доступно стран: 1") || !strings.Contains(fm.last(), "Серверов: 2") {
+		t.Fatalf("карточка без стран или серверов: %q", fm.last())
+	}
+	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":1"))
+	if !strings.Contains(fm.last(), "Серверов: 2") {
+		t.Fatalf("экран оплаты без серверов: %q", fm.last())
+	}
+
+	planTap(t, a, "tx:hdy:buy.servers")
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	if strings.Contains(fm.last(), "Серверов") || !strings.Contains(fm.last(), "Доступно стран: 1") {
+		t.Fatalf("строка серверов не убралась: %q", fm.last())
 	}
 }
