@@ -34,6 +34,18 @@ var payMethodKeys = map[string]payMethodTexts{
 	model.PayMethodTribute:   {"method.trb_name", "method.trb_note", "method.trb_btn"},
 }
 
+// methodBtnKey — шаблон кнопки чата для ключа названия способа ("" — ключ не
+// название способа). В шаблоне живёт значок способа (🎁, 💳…): из карточки
+// названия к нему ведёт отдельная кнопка, иначе значок не найти.
+func methodBtnKey(nameKey string) string {
+	for _, k := range payMethodKeys {
+		if k.name == nameKey {
+			return k.btn
+		}
+	}
+	return ""
+}
+
 // methodName — название способа для кнопки чата.
 func methodName(lang, method string) string {
 	if k, ok := payMethodKeys[method]; ok {

@@ -486,6 +486,9 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	if e.Hideable && !hidden {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_clear"), "tx:hd:"+key)})
 	}
+	if bk := methodBtnKey(key); bk != "" {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_method_btn"), "tx:k:"+bk)})
+	}
 	if stored {
 		if own && textStale(bl, key, o) {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_keep"), "tx:kp:"+key)})

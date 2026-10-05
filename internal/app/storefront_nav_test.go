@@ -222,3 +222,30 @@ func TestPlanCardServersPerTerm(t *testing.T) {
 		t.Fatalf("экран оплаты 12 мес: %q", fm.last())
 	}
 }
+
+// Значок способа оплаты (у Tribute — 🎁) живёт в шаблоне кнопки, а не в
+// названии: из карточки названия к шаблону ведёт кнопка, и правка убирает
+// значок с экрана оплаты.
+func TestPayMethodIconRemovable(t *testing.T) {
+	t.Cleanup(i18n.ResetOverrides)
+	ctx := context.Background()
+	a, fm, _, _ := trbChatApp(t)
+	const uid = int64(1000000006)
+
+	planTap(t, a, "tx:pm")
+	planTap(t, a, "tx:k:method.trb_name")
+	if !hasCB(fm.allCallbackData(), "tx:k:method.trb_btn") {
+		t.Fatal("из карточки названия Tribute нет перехода к кнопке со значком")
+	}
+	planTap(t, a, "tx:k:method.trb_btn")
+	planTap(t, a, "tx:e:method.trb_btn")
+	a.handleMessage(ctx, adminMsg("{способ_оплаты}"))
+	planTap(t, a, "tx:ok")
+
+	n := len(fm.buttonLabels())
+	a.handleCallback(ctx, cb(uid, "plb:"+model.PlanCodeBase+":1"))
+	labels := strings.Join(fm.buttonLabels()[n:], "|")
+	if !strings.Contains(labels, "Оплатить через Tribute") || strings.Contains(labels, "🎁") {
+		t.Fatalf("значок Tribute не убрался: %q", labels)
+	}
+}
