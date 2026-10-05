@@ -230,7 +230,7 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		b.WriteString("\n\n")
 		b.WriteString(i18n.T(lang, "buy.switch_note"))
 	}
-	if line := geoText(lang, a.squadGeo(ctx, p.IntSquadsFor(nil))); line != "" {
+	if line := a.planGeoText(ctx, lang, p); line != "" {
 		b.WriteString("\n\n")
 		b.WriteString(line)
 	}

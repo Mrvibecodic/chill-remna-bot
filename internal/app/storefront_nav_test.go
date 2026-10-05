@@ -176,4 +176,49 @@ func TestPlanCardServers(t *testing.T) {
 	if strings.Contains(fm.last(), "Серверов") || !strings.Contains(fm.last(), "Доступно стран: 1") {
 		t.Fatalf("строка серверов не убралась: %q", fm.last())
 	}
+	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":1"))
+	if strings.Contains(fm.last(), "Серверов") || !strings.Contains(fm.last(), "Доступно стран: 1") {
+		t.Fatalf("строка серверов не убралась с экрана оплаты: %q", fm.last())
+	}
+}
+
+// Сквады заданы для отдельного срока: карточка не выдаёт серверы одного срока
+// за все, а экран оплаты показывает точное число выбранного.
+func TestPlanCardServersPerTerm(t *testing.T) {
+	t.Cleanup(i18n.ResetOverrides)
+	a, fm, fs := planAdminApp(t)
+	a.botCfg.CryptoBot.Enabled = true
+	a.botCfg.CryptoBot.Token = "t"
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	year := []string{"sq-vip", "sq-b"}
+	p.Durations[1].IntSquads = &year
+	if err := fs.SavePlan(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const uid = int64(1000000005)
+	a.infraCache = &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads: []remnawave.SquadFull{
+			{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}},
+			{UUID: "sq-b", InboundsCount: 1, InboundUUIDs: []string{"ib2"}},
+		},
+		hosts: []remnawave.Host{
+			{Remark: "🇩🇪 Германия #1", InboundUUID: "ib1"},
+			{Remark: "🇩🇪 Германия #2", InboundUUID: "ib1"},
+			{Remark: "🇳🇱 Нидерланды", InboundUUID: "ib2"},
+		},
+	}
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	card := fm.last()
+	if !strings.Contains(card, "Серверов: 1 мес — 2 · 12 мес — 3") {
+		t.Fatalf("на карточке нет серверов по срокам: %q", card)
+	}
+	if strings.Contains(card, "Доступно стран") {
+		t.Fatalf("страны различаются по срокам — на карточке их быть не должно: %q", card)
+	}
+	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":12"))
+	if !strings.Contains(fm.last(), "Серверов: 3") || !strings.Contains(fm.last(), "Доступно стран: 2") {
+		t.Fatalf("экран оплаты 12 мес: %q", fm.last())
+	}
 }

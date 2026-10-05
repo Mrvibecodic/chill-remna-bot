@@ -83,7 +83,7 @@ var editableList = []Editable{
 	{Key: "buy.servers", Section: "buy", Kind: KindHTML, Hideable: true,
 		Where: [2]string{"Карточка тарифа и экран выбора оплаты — число серверов (хостов панели) под списком стран", "Plan card and payment method screen — number of servers (panel hosts) under the country list"},
 		Vars: []EditVar{
-			{Name: "server_count", Ru: "число_серверов", Desc: [2]string{"сколько включённых и не скрытых хостов панели получит подписка тарифа (число)", "how many enabled, non-hidden panel hosts the plan's subscription gets"}, Example: [2]string{"7", "7"}},
+			{Name: "server_count", Ru: "число_серверов", Desc: [2]string{"сколько включённых и не скрытых хостов панели получит подписка тарифа; если на разных сроках по-разному — список по срокам", "how many enabled, non-hidden panel hosts the plan's subscription gets; a per-term list if it differs by term"}, Example: [2]string{"7", "7"}},
 		}},
 	{Key: "buy.currency_mismatch", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Сообщение: валюта тарифа не совпадает с валютой оплаты", "Message: plan currency differs from the payment currency"},
