@@ -147,6 +147,20 @@ func (a *App) setTextOverride(ctx context.Context, lang, key, canonical string) 
 	})
 }
 
+// hideTextOverride убирает текст совсем (только у текстов с Hideable). Отпечаток
+// стандартного не пишется: от его правок пустой текст не устаревает.
+func (a *App) hideTextOverride(ctx context.Context, lang, key string) error {
+	return a.updateTexts(ctx, func(tc *model.TextsConfig) {
+		if tc.Overrides == nil {
+			tc.Overrides = map[string]map[string]model.TextOverride{}
+		}
+		if tc.Overrides[lang] == nil {
+			tc.Overrides[lang] = map[string]model.TextOverride{}
+		}
+		tc.Overrides[lang][key] = model.TextOverride{At: time.Now().UTC().Format(time.RFC3339)}
+	})
+}
+
 // keepTextOverride — «оставить мой»: свой текст сверен с новым стандартным.
 func (a *App) keepTextOverride(ctx context.Context, lang, key string) error {
 	return a.updateTexts(ctx, func(tc *model.TextsConfig) {

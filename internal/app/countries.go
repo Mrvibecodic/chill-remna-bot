@@ -3,11 +3,12 @@ package app
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"remnabot/internal/i18n"
-
+	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 )
 
@@ -67,6 +68,11 @@ func (a *App) planSquadUUIDs(months int) []string {
 	if sq := a.botCfg.Pricing.SquadsInt[months]; len(sq) > 0 {
 		return append([]string(nil), sq...)
 	}
+	// Тот же порядок, что при выдаче подписки: без общего набора — одиночный
+	// сквад P2P старых установок.
+	if len(a.botCfg.Plan.ActiveInternalSquads) == 0 && a.botCfg.P2P.SquadUUID != "" {
+		return []string{a.botCfg.P2P.SquadUUID}
+	}
 	return append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
 }
 
@@ -79,7 +85,16 @@ type country struct {
 	Name string
 }
 
-// saleCountriesLine — строка стран для экрана способов оплаты.
+// planGeo — что достанется подписке тарифа: страны, конфиги и хосты.
+type planGeo struct {
+	countries []country
+	inbounds  int
+	// hosts — включённые и не скрытые хосты панели, которые получит подписка
+	// (и с флагом страны в названии, и без).
+	hosts int
+}
+
+// saleCountriesLine — строки стран и серверов для экрана способов оплаты.
 func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) string {
 	if s == nil {
 		return ""
@@ -87,8 +102,8 @@ func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) strin
 	if s.Plan == nil {
 		return a.countriesLine(ctx, lang, s.Months)
 	}
-	cs, _ := a.squadCountries(ctx, s.Plan.IntSquadsFor(s.D))
-	return countriesText(lang, cs)
+	g := a.squadGeo(ctx, s.Plan.IntSquadsFor(s.D))
+	return geoText(lang, g.countries, g.hosts)
 }
 
 // planCountries returns the distinct countries available to a plan, taken from
@@ -100,8 +115,14 @@ func (a *App) planCountries(ctx context.Context, months int) (countries []countr
 
 // squadCountries — страны и число конфигов для явно заданного набора сквадов.
 func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries []country, inbounds int) {
+	g := a.squadGeo(ctx, squadIDs)
+	return g.countries, g.inbounds
+}
+
+// squadGeo — страны, конфиги и хосты для явно заданного набора сквадов.
+func (a *App) squadGeo(ctx context.Context, squadIDs []string) (g planGeo) {
 	if len(squadIDs) == 0 {
-		return nil, 0
+		return g
 	}
 	squads, hosts := a.infra(ctx)
 	squadSet := map[string]bool{}
@@ -118,7 +139,7 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		if !squadSet[s.UUID] {
 			continue
 		}
-		inbounds += s.InboundsCount
+		g.inbounds += s.InboundsCount
 		set := make(map[string]bool, len(s.InboundUUIDs))
 		for _, ib := range s.InboundUUIDs {
 			set[ib] = true
@@ -126,7 +147,7 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		inboundsBySquad[s.UUID] = set
 	}
 	if len(inboundsBySquad) == 0 {
-		return nil, inbounds
+		return g
 	}
 	served := func(h remnawave.Host) bool {
 		one := map[string]bool{}
@@ -150,14 +171,15 @@ func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries 
 		if !served(h) {
 			continue
 		}
+		g.hosts++
 		flag, name := splitFlag(h.Remark)
 		if flag == "" || seen[flag] {
 			continue
 		}
 		seen[flag] = true
-		countries = append(countries, country{Flag: flag, Code: flagToISO(flag), Name: name})
+		g.countries = append(g.countries, country{Flag: flag, Code: flagToISO(flag), Name: name})
 	}
-	return countries, inbounds
+	return g
 }
 
 // flagToISO converts a flag emoji (two regional-indicator runes) to its
@@ -200,8 +222,98 @@ func cleanCountryName(s string) string {
 // countriesLine renders the localized "countries available" block for the chat
 // buy screen, or "" when the plan has no detectable countries.
 func (a *App) countriesLine(ctx context.Context, lang string, months int) string {
-	cs, _ := a.planCountries(ctx, months)
-	return countriesText(lang, cs)
+	g := a.squadGeo(ctx, a.planSquadUUIDs(months))
+	return geoText(lang, g.countries, g.hosts)
+}
+
+// geoText — строка стран и под ней число серверов (хостов панели) для одного
+// срока. Строку серверов админ может убрать в «Текстах бота». "" — показывать
+// нечего.
+func geoText(lang string, cs []country, hosts int) string {
+	servers := ""
+	if hosts > 0 {
+		servers = strconv.Itoa(hosts)
+	}
+	return geoLines(lang, cs, servers)
+}
+
+// geoLines — то же с готовым значением строки серверов ("" — строки нет).
+func geoLines(lang string, cs []country, servers string) string {
+	var lines []string
+	if line := countriesText(lang, cs); line != "" {
+		lines = append(lines, line)
+	}
+	if servers != "" {
+		if line := i18n.T(lang, "buy.servers", servers); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// planGeoText — страны и серверы для карточки тарифа. Сквады бывают заданы
+// для отдельного срока, поэтому считается каждый продаваемый срок: одинаковые
+// значения — одной строкой, разное число серверов — списком по срокам. Если
+// различаются страны, на карточке их нет: точный список покажет экран оплаты
+// выбранного срока.
+func (a *App) planGeoText(ctx context.Context, lang string, p *model.Plan) string {
+	type term struct {
+		months int
+		g      planGeo
+	}
+	var terms []term
+	for i := range p.Durations {
+		d := &p.Durations[i]
+		if d.Months <= 0 || d.Base == "" {
+			continue
+		}
+		terms = append(terms, term{d.Months, a.squadGeo(ctx, p.IntSquadsFor(d))})
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	first := terms[0].g
+	sameCountries, sameHosts, anyHosts := true, true, false
+	for _, t := range terms {
+		if !sameFlags(t.g.countries, first.countries) {
+			sameCountries = false
+		}
+		if t.g.hosts != first.hosts {
+			sameHosts = false
+		}
+		if t.g.hosts > 0 {
+			anyHosts = true
+		}
+	}
+	var cs []country
+	if sameCountries {
+		cs = first.countries
+	}
+	servers := ""
+	switch {
+	case !anyHosts:
+	case sameHosts:
+		servers = strconv.Itoa(first.hosts)
+	default:
+		parts := make([]string, 0, len(terms))
+		for _, t := range terms {
+			parts = append(parts, i18n.T(lang, "buy.per_months", t.months, strconv.Itoa(t.g.hosts)))
+		}
+		servers = strings.Join(parts, " · ")
+	}
+	return geoLines(lang, cs, servers)
+}
+
+func sameFlags(a, b []country) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Flag != b[i].Flag {
+			return false
+		}
+	}
+	return true
 }
 
 // countriesText — общий рендер списка стран ("" — стран нет).

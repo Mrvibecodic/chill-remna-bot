@@ -162,7 +162,7 @@ body.web .top .in{max-width:980px}
 button.chip{cursor:pointer}
 .chip.on{border-color:var(--acc-ink);color:var(--acc-ink);background:var(--acc-soft)}
 .flag{width:20px;height:14px;border-radius:3px;object-fit:cover}
-.cols{display:grid;grid-template-columns:1fr;gap:0}
+.cols{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
 .field{width:100%;height:50px;border-radius:14px;border:1px solid var(--line);background:var(--card);padding:0 14px;font-size:15.5px;outline:none}
 .field:focus{border-color:var(--acc-ink)}
 input[type=file].field{padding:12px;height:auto}
@@ -200,8 +200,8 @@ input[type=file].field{padding:12px;height:auto}
 @keyframes rot{to{transform:rotate(360deg)}}
 
 @media(min-width:760px){
-  body.web .cols{grid-template-columns:1fr 1fr;gap:0 16px;align-items:start}
-  body.web .plans-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  body.web .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 16px;align-items:start}
+  body.web .plans-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px}
   body.web .narrow{max-width:520px;margin:0 auto}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

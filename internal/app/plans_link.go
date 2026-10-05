@@ -140,6 +140,12 @@ type offerView struct {
 	switchPlan bool
 }
 
+// offerMemo — карточка тарифа и то, как она была показана.
+type offerMemo struct {
+	code string
+	view offerView
+}
+
 // showPlanOffer — экран одного тарифа: описание и кнопки сроков с ценами.
 func (a *App) showPlanOffer(ctx context.Context, chatID int64, p *model.Plan) {
 	a.showPlanOfferView(ctx, chatID, p, offerView{})
@@ -158,7 +164,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		a.askLegal(ctx, chatID)
 		return
 	}
-	a.getUI(chatID).pendingPlanOffer = ""
+	ui := a.getUI(chatID)
+	ui.pendingPlanOffer = ""
+	ui.lastOffer = &offerMemo{code: p.Code, view: view}
 
 	var rows [][]models.InlineKeyboardButton
 	cur := planCurrencyOr(p, a.pricing().Currency)
@@ -222,11 +230,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		b.WriteString("\n\n")
 		b.WriteString(i18n.T(lang, "buy.switch_note"))
 	}
-	if cs, _ := a.squadCountries(ctx, p.IntSquadsFor(nil)); len(cs) > 0 {
-		if line := countriesText(lang, cs); line != "" {
-			b.WriteString("\n\n")
-			b.WriteString(line)
-		}
+	if line := a.planGeoText(ctx, lang, p); line != "" {
+		b.WriteString("\n\n")
+		b.WriteString(line)
 	}
 	if terms := planTermsText(lang, p); terms != "" {
 		b.WriteString("\n\n")
@@ -380,6 +386,34 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		return
 	}
 	a.showPlanOfferView(ctx, chatID, p, offerView{backToList: true})
+}
+
+// onPlanBack — «Назад» с экрана способов оплаты: карточка тарифа, срок которого
+// выбран. Тариф берётся из намерения покупки с теми же проверками, что у
+// оплаты: устаревшая кнопка ведёт на витрину, а не в закрытый тариф.
+func (a *App) onPlanBack(ctx context.Context, chatID int64) {
+	s := a.saleOrAskPrice(ctx, chatID, false)
+	if s == nil {
+		return
+	}
+	p := s.Plan
+	if p == nil {
+		p = a.basePlanRow(ctx)
+	}
+	if p == nil {
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+	}
+	if p == nil {
+		a.showPlans(ctx, chatID)
+		return
+	}
+	var view offerView
+	if m := a.getUI(chatID).lastOffer; m != nil && m.code == p.Code {
+		view = m.view
+	}
+	a.showPlanOfferView(ctx, chatID, p, view)
 }
 
 // onPlanBuy — нажатие срока на экране тарифа: plb:<код>:<месяцы>.

@@ -151,7 +151,11 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		p := &plans[i]
 		label := planTitle(lang, p)
 		if from := planMinPrice(p); from != "" {
-			label += " · " + i18n.T(lang, "buy.from_price", from+curSuffix(planCurrencyOr(p, a.pricing().Currency)))
+			// Приписку админ может убрать в «Текстах бота» — тогда без
+			// разделителя.
+			if s := i18n.T(lang, "buy.from_price", from+curSuffix(planCurrencyOr(p, a.pricing().Currency))); s != "" {
+				label += " · " + s
+			}
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "plo:"+p.Code)})
 	}
@@ -348,7 +352,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		// — при настроенных способах.
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.currency_mismatch",
 			curSymbol(a.saleCurrency(s)), curSymbol(a.pricing().Currency)),
-			[][]models.InlineKeyboardButton{homeRow(lang)})
+			[][]models.InlineKeyboardButton{navBack(lang, cbPlanBack)})
 		return
 	}
 	if len(rows) == 0 {
@@ -356,14 +360,15 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		if a.topUpEnabled() {
 			empty = append(empty, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 		}
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), append(empty, homeRow(lang)))
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), append(empty, navBack(lang, cbPlanBack)))
 		return
 	}
 
 	if a.topUpEnabled() {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	}
-	rows = append(rows, homeRow(lang))
+	// «Назад» — к карточке тарифа, выбрать другой срок.
+	rows = append(rows, navBack(lang, cbPlanBack))
 	caption := i18n.T(lang, "buy.choose_method", kopecksToRub(bal))
 	// Смена тарифа: показываем зачёт остатка теми же цифрами, которые применит
 	// финализация, — человек должен видеть сдвиг срока ДО оплаты.

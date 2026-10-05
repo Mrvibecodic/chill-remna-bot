@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 )
@@ -44,7 +45,15 @@ func TestPlanCountries_DedupAndFilter(t *testing.T) {
 			{Remark: "🇺🇸 USA", InboundUUID: "ib1", Hidden: true},
 			{Remark: "🇫🇷 France", InboundUUID: "ib1", ExcludedSquads: []string{"sq1"}},
 			{Remark: "🇯🇵 Japan", InboundUUID: "ib9"},
+			{Remark: "Резерв", InboundUUID: "ib2"},
+			{Remark: "🇩🇪 Германия #3", InboundUUID: "ib1", Disabled: true},
 		},
+	}
+	// Серверы — все хосты, что достанутся подписке, и без флага тоже:
+	// DE#1, DE#2, NL, «Резерв». Скрытый, выключенный, исключённый и чужой —
+	// не считаются.
+	if g := a.squadGeo(context.Background(), []string{"sq1"}); g.hosts != 4 {
+		t.Fatalf("hosts=%d want 4", g.hosts)
 	}
 	cs, inb := a.planCountries(context.Background(), 1)
 	if len(cs) != 2 || cs[0].Code != "de" || cs[0].Name != "Германия" || cs[1].Code != "nl" {
@@ -114,5 +123,58 @@ func TestPlanCountries_InboundAndAccessSameSquad(t *testing.T) {
 	cs, _ := a.planCountries(context.Background(), 1)
 	if len(cs) != 1 || cs[0].Code != "nl" {
 		t.Fatalf("countries=%+v want только NL", cs)
+	}
+}
+
+func TestGeoText(t *testing.T) {
+	t.Cleanup(i18n.ResetOverrides)
+	de := []country{{Flag: "🇩🇪", Code: "de", Name: "Германия"}}
+	if got := geoText("ru", de, 3); got != "🌍 <b>Доступно стран: 1</b>\n🇩🇪 Германия\n🖥 <b>Серверов: 3</b>" {
+		t.Fatalf("got %q", got)
+	}
+	// Хосты без флагов: стран не видно, серверы — видно.
+	if got := geoText("ru", nil, 2); got != "🖥 <b>Серверов: 2</b>" {
+		t.Fatalf("без стран: %q", got)
+	}
+	if got := geoText("ru", nil, 0); got != "" {
+		t.Fatalf("пусто: %q", got)
+	}
+	// Убранная в «Текстах бота» строка не оставляет пустой строки.
+	if rej := i18n.SetOverrides(map[string]map[string]string{"ru": {"buy.servers": ""}}); rej != nil {
+		t.Fatal(rej)
+	}
+	if got := geoText("ru", de, 3); got != "🌍 <b>Доступно стран: 1</b>\n🇩🇪 Германия" {
+		t.Fatalf("убрана: %q", got)
+	}
+}
+
+// Хост, доступный через два сквада тарифа, — один сервер.
+func TestSquadGeo_HostThroughTwoSquads(t *testing.T) {
+	a := &App{ui: map[int64]*uiState{}}
+	a.infraCache = &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads: []remnawave.SquadFull{
+			{UUID: "sq1", InboundsCount: 1, InboundUUIDs: []string{"ib1"}},
+			{UUID: "sq2", InboundsCount: 1, InboundUUIDs: []string{"ib1"}},
+		},
+		hosts: []remnawave.Host{{Remark: "🇩🇪 Германия", InboundUUID: "ib1"}},
+	}
+	if g := a.squadGeo(context.Background(), []string{"sq1", "sq2"}); g.hosts != 1 || len(g.countries) != 1 {
+		t.Fatalf("hosts=%d countries=%d want 1,1", g.hosts, len(g.countries))
+	}
+}
+
+// Старая установка с одним сквадом P2P: страны и серверы «Базового» берутся
+// из него, как и при выдаче подписки.
+func TestPlanSquadUUIDs_P2PFallback(t *testing.T) {
+	a := &App{ui: map[int64]*uiState{}}
+	a.botCfg = &model.BotConfig{P2P: model.P2PConfig{SquadUUID: "sq-p2p"}}
+	a.botCfg.NormalizePricing()
+	if got := a.planSquadUUIDs(1); len(got) != 1 || got[0] != "sq-p2p" {
+		t.Fatalf("squads=%v want [sq-p2p]", got)
+	}
+	a.botCfg.Plan.ActiveInternalSquads = []string{"sq-main"}
+	if got := a.planSquadUUIDs(1); len(got) != 1 || got[0] != "sq-main" {
+		t.Fatalf("squads=%v want [sq-main]", got)
 	}
 }

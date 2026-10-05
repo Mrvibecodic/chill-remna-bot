@@ -61,6 +61,9 @@ func compile(lang, key, canonical string) (compiled, error) {
 		return nil, ErrNotEditable
 	}
 	if strings.TrimSpace(canonical) == "" {
+		if e.Hideable {
+			return compiled{}, nil
+		}
 		return nil, ErrEmpty
 	}
 	if e.Kind != KindHTML && strings.ContainsAny(canonical, "<>&") {
