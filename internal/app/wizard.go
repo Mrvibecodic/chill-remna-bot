@@ -117,6 +117,7 @@ const (
 	cbPlanSquad = "plq"
 	cbPlanBuy   = "plb"
 	cbPlanView  = "plo"
+	cbPlanBack  = "plbk"
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
@@ -167,6 +168,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onPlanBuy(ctx, chatID, val)
 	case cbPlanView:
 		a.onPlanView(ctx, chatID, val)
+	case cbPlanBack:
+		a.onPlanBack(ctx, chatID)
 	case cbMethod:
 		a.onMethod(ctx, chatID, val)
 	case cbTop:

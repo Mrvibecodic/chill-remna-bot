@@ -70,6 +70,9 @@ type fakeMsg struct {
 	btnText []string
 	// urls — адреса URL-кнопок (ссылки оплаты).
 	urls []string
+	// emptyBtns — кнопки без подписи: Telegram отвергает такое сообщение
+	// целиком.
+	emptyBtns int
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -91,6 +94,8 @@ func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
 			}
 			if b.Text != "" {
 				f.btnText = append(f.btnText, b.Text)
+			} else {
+				f.emptyBtns++
 			}
 			if b.URL != "" {
 				f.urls = append(f.urls, b.URL)

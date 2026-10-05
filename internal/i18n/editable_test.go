@@ -270,3 +270,19 @@ func TestOptionalEmptyByDefault(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestHideableEmpty(t *testing.T) {
+	t.Cleanup(ResetOverrides)
+	if err := Compile("ru", "buy.from_price", ""); err != nil {
+		t.Fatalf("убираемый текст: %v", err)
+	}
+	if err := Compile("ru", "buy.choose_tariff", ""); err != ErrEmpty {
+		t.Fatalf("обязательный текст пустым: %v", err)
+	}
+	if rej := SetOverrides(map[string]map[string]string{"ru": {"buy.from_price": ""}}); rej != nil {
+		t.Fatalf("не применён: %v", rej)
+	}
+	if got := T("ru", "buy.from_price", "290 ₽"); got != "" {
+		t.Fatalf("убранный текст: %q", got)
+	}
+}

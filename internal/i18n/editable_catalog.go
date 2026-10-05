@@ -98,7 +98,7 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "devices", Ru: "устройства", Desc: [2]string{"лимит устройств, например «до 5»; если на разных сроках лимит разный — список по срокам", "device limit, e.g. “up to 5”; a per-term list if it differs by term"}, Example: [2]string{"до 5", "up to 5"}},
 		}},
-	{Key: "buy.from_price", Section: "buy", Kind: KindButton,
+	{Key: "buy.from_price", Section: "buy", Kind: KindButton, Hideable: true,
 		Where: [2]string{"Кнопка тарифа в витрине — приписка «от N ₽»", "Plan button in the storefront — «from N ₽» suffix"},
 		Vars: []EditVar{
 			{Name: "price", Ru: "цена", Desc: [2]string{"минимальная цена тарифа среди его сроков, с валютой", "the plan's lowest price across its terms, with currency"}, Example: [2]string{"290 ₽", "290 ₽"}},

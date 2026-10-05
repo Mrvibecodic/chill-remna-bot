@@ -108,6 +108,24 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 			note = i18n.T(lang, "tx.save_failed")
 		}
 		a.showTextCard(ctx, chatID, arg, note)
+	case "hd":
+		if e, ok := i18n.EditableByKey(arg); !ok || !e.Hideable {
+			a.showTextsHome(ctx, chatID)
+			return
+		}
+		a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.clear_ask"), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "tx.btn_yes_clear"), "tx:hdy:"+arg), btn(i18n.T(lang, "btn.cancel"), "tx:k:"+arg)},
+		})
+	case "hdy":
+		if e, ok := i18n.EditableByKey(arg); !ok || !e.Hideable {
+			a.showTextsHome(ctx, chatID)
+			return
+		}
+		note := i18n.T(lang, "tx.cleared")
+		if err := a.hideTextOverride(ctx, a.botLang(), arg); err != nil {
+			note = i18n.T(lang, "tx.save_failed")
+		}
+		a.showTextCard(ctx, chatID, arg, note)
 	case "kp":
 		note := i18n.T(lang, "tx.kept")
 		if err := a.keepTextOverride(ctx, a.botLang(), arg); err != nil {
@@ -406,6 +424,8 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	bl := a.botLang()
 	canon, own := i18n.Effective(bl, key)
 	o, stored := a.textOverride(bl, key)
+	// hidden — текст убран (пустой свой у текста, который можно убрать).
+	hidden := own && e.Hideable && strings.TrimSpace(canon) == ""
 
 	var b strings.Builder
 	if note != "" {
@@ -416,6 +436,8 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	switch {
 	case stored && !own:
 		b.WriteString("\n\n" + i18n.T(lang, "tx.st_broken"))
+	case hidden:
+		b.WriteString("\n" + i18n.T(lang, "tx.st_empty"))
 	case own:
 		at := o.At
 		if t, err := time.Parse(time.RFC3339, o.At); err == nil {
@@ -436,9 +458,12 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	head := b.String()
 
 	preview := i18n.T(lang, "tx.preview_head")
-	if e.Kind == i18n.KindButton {
+	switch {
+	case hidden:
+		preview += "\n——————\n" + i18n.T(lang, "tx.preview_empty") + "\n——————"
+	case e.Kind == i18n.KindButton:
 		preview += "\n" + i18n.T(lang, "tx.preview_button")
-	} else {
+	default:
 		body := txtPreviewHTML(bl, key, canon)
 		if strings.TrimSpace(canon) == "" {
 			body = i18n.T(lang, "tx.preview_empty")
@@ -447,7 +472,8 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	}
 
 	var rows [][]models.InlineKeyboardButton
-	if e.Kind == i18n.KindButton {
+	// Пустую кнопку Telegram не примет — у убранного текста её нет.
+	if e.Kind == i18n.KindButton && !hidden {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.RenderExample(bl, key, canon), "tx:noop")})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_edit"), "tx:e:"+key), btn(i18n.T(lang, "tx.btn_test"), "tx:t:"+key)})
@@ -456,6 +482,9 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_clear"), "tx:r:"+key)})
 	case stored:
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_default"), "tx:d:"+key), btn(i18n.T(lang, "tx.btn_reset"), "tx:r:"+key)})
+	}
+	if e.Hideable && !hidden {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_clear"), "tx:hd:"+key)})
 	}
 	if stored {
 		if own && textStale(bl, key, o) {
