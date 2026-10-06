@@ -201,7 +201,7 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	if a.store != nil {
 		// «Чаще всего выбирают» — только если такой срок есть у ЭТОГО тарифа:
 		// подпись по чужому сроку читалась бы как сбой.
-		if months, total, err := a.store.MostPopularPlan(ctx); err == nil && months > 0 && total >= popularThreshold {
+		if months, total := a.mostPopularPlan(ctx); months > 0 && total >= popularThreshold {
 			if d := p.Duration(months); d != nil && d.Base != "" {
 				b.WriteString(i18n.T(lang, "buy.popular", months))
 				b.WriteString("\n\n")
@@ -493,4 +493,22 @@ func (a *App) planLinkGlobalBlocked(ctx context.Context, chatID int64) bool {
 	a.payLogThrottled(ctx, "plan-link-global", "", "", chatID, "error",
 		"перебор кодов тарифов по всему боту: открытие ссылок временно закрыто")
 	return true
+}
+
+const popularTTL = 10 * time.Minute
+
+// mostPopularPlan — самый покупаемый срок с кэшем на popularTTL. Ошибка не
+// кэшируется.
+func (a *App) mostPopularPlan(ctx context.Context) (months, total int) {
+	a.popularMu.Lock()
+	defer a.popularMu.Unlock()
+	if !a.popularAt.IsZero() && time.Since(a.popularAt) < popularTTL {
+		return a.popularMonths, a.popularTotal
+	}
+	m, t, err := a.store.MostPopularPlan(ctx)
+	if err != nil {
+		return 0, 0
+	}
+	a.popularMonths, a.popularTotal, a.popularAt = m, t, time.Now()
+	return m, t
 }
