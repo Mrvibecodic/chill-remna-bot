@@ -53,13 +53,14 @@ docker compose up -d
 
 **4. Напишите боту `/start`** — откроется мастер настройки: язык, база данных, подключение к панели.
 
-Что нужно на сервере и права API-токена панели — [«Что нужно перед стартом»](https://remna.shop/start/requirements/), подробности установки — [«Установка»](https://remna.shop/start/install/).
+Что нужно на сервере и права API-токена панели — [«Что нужно перед стартом»](https://remna.shop/start/requirements/), сколько ресурсов — [«Требования к серверу»](https://remna.shop/start/server/), подробности установки — [«Установка»](https://remna.shop/start/install/).
 
 ## Где что искать
 
 | Раздел документации | О чём |
 |---|---|
 | [Установка](https://remna.shop/start/install/) | сервер, Docker Compose, первый запуск |
+| [Требования к серверу](https://remna.shop/start/server/) | процессор, память, диск и результаты нагрузочных тестов |
 | [Мастер настройки](https://remna.shop/start/wizard/) | язык, БД, панель, режим установки |
 | [Админка](https://remna.shop/admin/overview/) | продажи, маркетинг, интерфейс, пользователи, система |
 | [Вебхуки и reverse-proxy](https://remna.shop/payments/webhooks/) | как подключить платёжки и правильно проксировать бота |

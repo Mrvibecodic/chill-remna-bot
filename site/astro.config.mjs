@@ -53,6 +53,7 @@ export default defineConfig({
           items: [
             { label: 'Что умеет бот', slug: 'start/features' },
             { label: 'Что нужно перед стартом', slug: 'start/requirements' },
+            { label: 'Требования к серверу', slug: 'start/server' },
             { label: 'Установка за 4 шага', slug: 'start/install' },
             { label: 'Мастер настройки', slug: 'start/wizard' },
           ],

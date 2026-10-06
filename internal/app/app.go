@@ -233,6 +233,13 @@ type App struct {
 	// check) can't extend the panel subscription more than once.
 	finalizeLk [finalizeLockShards]sync.Mutex
 
+	// popular* — кэш «чаще всего выбирают»: подсчёт идёт по всей таблице
+	// платежей и на больших базах стоит сотни миллисекунд на каждый показ.
+	popularMu     sync.Mutex
+	popularAt     time.Time
+	popularMonths int
+	popularTotal  int
+
 	infraMu    sync.Mutex
 	infraCache *infraCacheEntry
 
