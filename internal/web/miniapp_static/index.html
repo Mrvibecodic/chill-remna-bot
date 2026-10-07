@@ -41,6 +41,7 @@ body{
   font-size:15px;line-height:1.45;
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
+  overflow-wrap:break-word;
 }
 /* global icon sizing — inline SVGs have no intrinsic size, must be capped */
 svg{width:18px;height:18px;flex:none;vertical-align:middle}
@@ -112,7 +113,7 @@ svg{width:18px;height:18px;flex:none;vertical-align:middle}
 
 /* buttons */
 .btn{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-  border:0;border-radius:14px;font-weight:650;font-size:15.5px;padding:15px;margin-top:10px;cursor:pointer;
+  border:0;border-radius:14px;font-weight:650;font-size:15.5px;padding:15px;margin-top:10px;cursor:pointer;text-align:center;overflow-wrap:anywhere;
   color:var(--accent-text);overflow:hidden;
   background:linear-gradient(120deg,var(--accent),var(--accent-2));
   box-shadow:0 8px 24px color-mix(in srgb,var(--accent) 40%,transparent);
@@ -132,10 +133,10 @@ svg{width:18px;height:18px;flex:none;vertical-align:middle}
   background:var(--surface);border:1px solid var(--stroke);border-radius:16px;padding:16px 18px;margin-bottom:10px;
   cursor:pointer;backdrop-filter:blur(12px);transition:transform .12s ease,border-color .2s ease,background .2s ease}
 .plan:active{transform:scale(.98)}
-.plan .pl{display:flex;flex-direction:column;gap:2px}
+.plan .pl{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
 .plan .pm{font-size:16px;font-weight:700}
 .plan .ps{font-size:12px;color:var(--muted)}
-.plan .price{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.plan .price{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.3px;flex:none;white-space:nowrap;margin-left:12px}
 .plan.best{border-color:transparent;background:
   linear-gradient(var(--bg-2),var(--bg-2)) padding-box,
   linear-gradient(120deg,var(--accent),var(--accent-2)) border-box;
@@ -155,19 +156,24 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .hint{color:var(--muted);font-size:13.5px}
 .legal{font-size:14px;line-height:1.6;word-wrap:break-word;overflow-wrap:anywhere}
 .legal a{color:var(--acc)}
+.legal pre{white-space:pre-wrap}
+.legal img{max-width:100%;height:auto}
+.legal table{display:block;max-width:100%;overflow-x:auto}
 .hint.center{text-align:center;margin-top:10px}
 .err{color:var(--bad);font-size:14.5px;font-weight:500}
 /* plan feature list */
 .feat{margin-bottom:14px}
-.frow{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:var(--surface);border:1px solid var(--stroke);border-bottom:0;backdrop-filter:blur(12px)}
+.frow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--surface);border:1px solid var(--stroke);border-bottom:0;backdrop-filter:blur(12px)}
 .frow:first-child{border-radius:14px 14px 0 0}
 .frow:last-child{border-bottom:1px solid var(--stroke);border-radius:0 0 14px 14px}
 .frow:only-child{border-radius:14px}
 .frow .l{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
-.frow b{font-size:14.5px;font-variant-numeric:tabular-nums}
-.frow b.dmeta{font-size:12px;color:var(--muted);font-weight:600;text-align:right;max-width:58%;line-height:1.35}
+.frow b{font-size:14.5px;font-variant-numeric:tabular-nums;text-align:right}
+.frow.dev{display:block}
+.frow.dev .dn{font-size:14px;font-weight:600;line-height:1.35}
+.frow.dev .dm{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.35}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
-.chip2{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(10px)}
+.chip2{max-width:100%;overflow-wrap:anywhere;display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(10px)}
 .flag{width:21px;height:15px;border-radius:3px;object-fit:cover;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
 
 /* skeletons */
@@ -202,10 +208,10 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .segbtn.on{background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff}
 .appc{background:var(--surface);border:1px solid var(--stroke);border-radius:16px;padding:14px;margin-bottom:10px;backdrop-filter:blur(12px)}
 .appc.feat{border-color:transparent;background:linear-gradient(var(--bg-2),var(--bg-2)) padding-box,linear-gradient(120deg,var(--accent),var(--accent-2)) border-box}
-.apphead{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
-.appname{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.apphead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}
+.appname{overflow-wrap:anywhere;font-size:16px;font-weight:700;display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
 .appdesc{font-size:12.5px;color:var(--muted);margin:6px 0 2px}
-.fbadge{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:999px;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
+.fbadge{white-space:nowrap;font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:999px;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
 .pass{position:relative;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#26305a,#3c2668 48%,#143a52);box-shadow:0 12px 30px rgba(91,140,255,.22);margin-bottom:14px}
 .pass .sheen{position:absolute;inset:0;background:linear-gradient(115deg,transparent 33%,rgba(255,255,255,.12) 49%,transparent 64%);pointer-events:none}
 .pass .ph{position:relative;padding:15px 16px 13px}
@@ -217,9 +223,11 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .pass .route .pic svg{color:#9fb4e8}
 .pass .route .ln{flex:1;height:2px;margin:0 10px;background:repeating-linear-gradient(90deg,rgba(255,255,255,.38) 0 5px,transparent 5px 10px)}
 .pass .perf{position:relative;border-top:1.5px dashed rgba(255,255,255,.28);margin:0 16px}
-.pass .stub{display:flex;justify-content:space-between;padding:13px 18px 15px}
+.pass .stub{display:flex;justify-content:space-between;gap:10px 14px;padding:13px 18px 15px}
+.pass .stub .c{min-width:0}
+@media(max-width:439px){.pass .stub.n4{display:grid;grid-template-columns:1fr 1fr}.pass .stub.n4 .c{text-align:left}.pass .stub.n4 .c:nth-child(even){text-align:right}}
 .pass .stub .c .k{font-size:9px;letter-spacing:1px;color:#9aa3ba;margin-bottom:3px}
-.pass .stub .c .v{font-size:14px;font-weight:800;color:#fff}
+.pass .stub .c .v{font-size:14px;font-weight:800;color:#fff;white-space:nowrap}
 .pass .stub .c:nth-child(2){text-align:center}
 .pass .stub .c:last-child{text-align:right}
 body.web .wrap{max-width:960px}
@@ -231,12 +239,13 @@ body.web .wrap{max-width:960px}
 .ulogout{width:auto;margin:0;padding:9px 13px;font-size:13px;flex:none}
 .cols{display:flex;flex-direction:column;gap:10px}
 @media(min-width:700px){
-  body.web .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+  body.web .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:16px}
   body.web .cols>.plan,body.web .cols>.appc{margin-bottom:0}
 }
 .coins{display:flex;justify-content:center;margin-top:14px}
 .coins svg{width:128px;height:48px}
-.payhead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.payhead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:0 12px}
+.payhead .title{min-width:0}
 .payhead .title{margin:6px 0 0}
 .bigprice{font-size:26px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums;white-space:nowrap;background:linear-gradient(120deg,#fff,#cdd6ff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 /* ---- web cabinet desktop layout: independent design, grouped, never stretched ---- */
@@ -252,7 +261,7 @@ body.web .authwrap{max-width:480px;margin:0 auto}
 .authwrap .field{padding:14px 15px;font-size:15px}
 .authwrap .btn{height:50px}
 @media(min-width:700px){
-  body.web .acctgrp{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:stretch;margin-bottom:16px}
+  body.web .acctgrp{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:stretch;margin-bottom:16px}
   body.web .acctgrp>.ublock,body.web .acctgrp>.pass{margin-bottom:0}
   body.web .acctgrp>.ublock{align-self:start}
   body.web .btnrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
@@ -413,7 +422,7 @@ function devicesBlock(s){
   if(!list.length)return '';
   var h='<div class="sec-title">'+IC.device+'Подключённые устройства</div><div class="feat">';
   list.forEach(function(d){
-    h+='<div class="frow"><span class="l">'+esc(d.name||'')+'</span>'+(d.meta?'<b class="dmeta">'+esc(d.meta)+'</b>':'')+'</div>';
+    h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'</div>';
   });
   return h+'</div>';
 }
@@ -459,7 +468,7 @@ function render(me,menu,sub,plans){
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
       '<div class="pl"><span class="brand">ДОСТУП · BOARDING</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
-      '<div class="perf"></div><div class="stub">'+
+      '<div class="perf"></div><div class="stub'+(dleft!==null&&dtext!==null&&atext!==null?' n4':'')+'">'+
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
         (dleft!==null?'<div class="c"><div class="k">ОСТАЛОСЬ</div><div class="v">'+dleft+' '+daysWord(dleft)+'</div></div>':'')+
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
@@ -1013,7 +1022,7 @@ async function openAccount(){
   var h='<div class="stagger">';
   h+='<div class="sec-title">'+IC.users+'Аккаунт</div><div class="card">';
   if(a.email){
-    h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b>'+esc(a.email)+'</b></div>';
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b style="min-width:0;text-align:right">'+esc(a.email)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Адрес</span><b style="color:'+(a.email_verified?'var(--good)':'var(--bad)')+'">'+(a.email_verified?'подтверждён':'не подтверждён')+'</b></div>';
   }
   h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Telegram</span><b>'+(a.tg_linked?'привязан':'не привязан')+'</b></div>';

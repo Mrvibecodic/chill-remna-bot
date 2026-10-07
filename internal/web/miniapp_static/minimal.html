@@ -44,7 +44,7 @@
 html,body{min-height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   background:var(--bg);color:var(--text);font-size:15px;line-height:1.45;overflow-x:hidden;
-  transition:background-color .2s,color .2s}
+  transition:background-color .2s,color .2s;overflow-wrap:break-word}
 button,input{font:inherit;color:inherit}
 svg{width:20px;height:20px;flex:none;vertical-align:middle}
 a{color:var(--acc-ink)}
@@ -103,25 +103,25 @@ body.web .top .in{max-width:980px}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:12px 16px;font-size:14.5px}
 .kv+.kv{border-top:1px solid var(--line)}
 .kv .k{color:var(--muted)}
-.kv .v{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.kv .v{flex-shrink:0;max-width:65%;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
 
 /* кнопки */
-.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;border-radius:14px;border:0;
-  background:var(--accent);color:var(--on-accent);font-weight:650;font-size:15.5px;cursor:pointer;transition:transform .1s,opacity .15s;padding:0 16px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;text-align:center;overflow-wrap:anywhere;line-height:1.25;border-radius:14px;border:0;
+  background:var(--accent);color:var(--on-accent);font-weight:650;font-size:15.5px;cursor:pointer;transition:transform .1s,opacity .15s;padding:8px 16px}
 .btn:active{transform:scale(.985)}
 .btn svg{width:18px;height:18px}
 .btn.sec{background:var(--soft);color:var(--text)}
 .btn.line{background:transparent;border:1px solid var(--line);color:var(--text)}
-.btn.ghost{background:transparent;color:var(--muted);height:42px}
+.btn.ghost{background:transparent;color:var(--muted);min-height:42px}
 .btn.danger{background:transparent;border:1px solid var(--line);color:var(--bad)}
 .btn[disabled]{opacity:.55;pointer-events:none}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .back{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-weight:600;font-size:14.5px;background:none;border:0;cursor:pointer;padding:14px 0 2px}
 .back svg{width:18px;height:18px}
 
 /* подписка */
 .sub .st{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:650;padding:5px 10px;border-radius:999px;background:var(--soft);color:var(--muted)}
+.badge{white-space:nowrap;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:650;padding:5px 10px;border-radius:999px;background:var(--soft);color:var(--muted)}
 .badge .d{width:7px;height:7px;border-radius:50%;background:currentColor}
 .badge.ok{color:var(--ok);background:var(--ok-soft)}
 .badge.bad{color:var(--bad);background:var(--bad-soft)}
@@ -145,6 +145,7 @@ body.web .top .in{max-width:980px}
 .plan{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-top:10px;cursor:pointer;box-shadow:var(--shadow)}
 .plan:active{transform:scale(.99)}
 .plan .pt{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.plan .pt>:first-child{min-width:0}
 .plan .pn{font-weight:700;font-size:16.5px}
 .plan .pp{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
 .plan .pd{color:var(--muted);font-size:13.5px;margin-top:4px}
@@ -158,7 +159,7 @@ body.web .top .in{max-width:980px}
 .opt .s{font-size:12.5px;color:var(--muted)}
 .opt .p{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--soft);font-size:13.5px;font-weight:600;border:1.5px solid transparent;cursor:default}
+.chip{max-width:100%;overflow-wrap:anywhere;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--soft);font-size:13.5px;font-weight:600;border:1.5px solid transparent;cursor:default}
 button.chip{cursor:pointer}
 .chip.on{border-color:var(--acc-ink);color:var(--acc-ink);background:var(--acc-soft)}
 .flag{width:20px;height:14px;border-radius:3px;object-fit:cover}
@@ -177,6 +178,9 @@ input[type=file].field{padding:12px;height:auto}
 .qr div{background:#fff;padding:10px;border-radius:14px;line-height:0}
 .legal{font-size:14.5px;line-height:1.6;overflow-wrap:anywhere}
 .legal p+p{margin-top:8px}
+.legal pre{white-space:pre-wrap}
+.legal img{max-width:100%;height:auto}
+.legal table{display:block;max-width:100%;overflow-x:auto}
 .big{font-size:40px;font-weight:750;letter-spacing:-1.2px;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
 .empty{padding:26px 16px;text-align:center;color:var(--muted)}
 .ava{width:40px;height:40px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
@@ -922,7 +926,7 @@ SCREENS.connect=async function(a){
   if(!apps.length)h+='<div class="card empty">'+esc(T('conn_empty'))+'</div>';
   h+='<div class="plans-grid">';
   apps.forEach(function(x){
-    h+='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span class="h2" style="font-size:17px">'+esc(x.name)+'</span>'+(x.featured?'<span class="badge acc">'+esc(T('recommended'))+'</span>':'')+'</div>';
+    h+='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span class="h2" style="font-size:17px;min-width:0">'+esc(x.name)+'</span>'+(x.featured?'<span class="badge acc">'+esc(T('recommended'))+'</span>':'')+'</div>';
     if(x.add_desc)h+='<div class="hint">'+esc(x.add_desc)+'</div>';
     h+='<div class="stack" style="margin-top:12px">';
     if(x.deeplink)h+='<button class="btn" onclick="openDeep(\''+jsq(x.deeplink)+'\')">'+IC.plus+esc(T('add_sub'))+'</button>';
@@ -1002,7 +1006,7 @@ async function resend(el){busy(el,true);try{await post('/api/cabinet/email/verif
 SCREENS.account=async function(){
   var a=STATE.acct||{};try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
   if(!CUR||CUR.name!=='account')return;
-  var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava">'+esc(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
+  var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava">'+esc(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2" style="min-width:0">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
   if(a.email){h+='<div class="kv"><span class="k">'+esc(T('email'))+'</span><span class="v">'+esc(a.email)+'</span></div><div class="kv"><span class="k">'+esc(T('addr'))+'</span><span class="v" style="color:'+(a.email_verified?'var(--ok)':'var(--bad)')+'">'+esc(a.email_verified?T('verified'):T('not_verified'))+'</span></div>';}
   h+='<div class="kv"><span class="k">Telegram</span><span class="v">'+esc(a.tg_linked?T('tg_linked'):T('tg_not'))+'</span></div></div>';
   if(a.email&&!a.email_verified&&a.mail_on)h+='<button class="btn sec" style="margin-top:12px" onclick="resend(this)">'+esc(T('resend'))+'</button>';
