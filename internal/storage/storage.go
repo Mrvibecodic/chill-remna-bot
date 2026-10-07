@@ -154,6 +154,9 @@ type Storage interface {
 	Ping(ctx context.Context) error
 	LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
+	// SetP2PAmount меняет сумму незакрытой заявки на пополнение. false — заявка
+	// уже решена или это не пополнение.
+	SetP2PAmount(ctx context.Context, id int64, price string, kopecks int64) (bool, error)
 
 	AddPayment(ctx context.Context, p *model.Payment) error
 	AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error
@@ -734,9 +737,23 @@ func (b *base) LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*m
 func (b *base) UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error {
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE p2p_requests SET status = "+b.ph(1)+", screenshot = "+b.ph(2)+", comment = "+b.ph(3)+", decided_at = "+b.ph(4)+
-			", price = "+b.ph(5)+", kopecks = "+b.ph(6)+" WHERE id = "+b.ph(7),
-		r.Status, r.Screenshot, r.Comment, r.DecidedAt, r.Price, r.Kopecks, r.ID)
+			" WHERE id = "+b.ph(5),
+		r.Status, r.Screenshot, r.Comment, r.DecidedAt, r.ID)
 	return err
+}
+
+// SetP2PAmount — отдельной записью с условием: чек клиента, пришедший в ту же
+// секунду, не должен вернуть старую сумму, а решённая заявка — поменяться.
+func (b *base) SetP2PAmount(ctx context.Context, id int64, price string, kopecks int64) (bool, error) {
+	res, err := b.db.ExecContext(ctx,
+		"UPDATE p2p_requests SET price = "+b.ph(1)+", kopecks = "+b.ph(2)+
+			" WHERE id = "+b.ph(3)+" AND purpose = "+b.ph(4)+" AND status IN ("+b.ph(5)+", "+b.ph(6)+")",
+		price, kopecks, id, model.P2PPurposeTopUp, model.P2PAwaiting, model.P2PSubmitted)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {

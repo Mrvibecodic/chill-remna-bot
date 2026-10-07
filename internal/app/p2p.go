@@ -507,7 +507,7 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) error {
 		var busy *p2pBusyErr
 		if errors.As(err, &busy) {
 			a.showOpenP2P(ctx, chatID, busy.req)
-			return nil
+			return err
 		}
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
 		return err
@@ -638,9 +638,21 @@ func (a *App) showOpenP2P(ctx context.Context, chatID int64, req *model.P2PReque
 // p2pUserCardText — реквизиты по заявке в том виде, в каком их видит клиент.
 func (a *App) p2pUserCardText(lang string, req *model.P2PRequest) string {
 	if req.IsTopUp() {
-		return i18n.T(lang, "p2p.topup_card", req.Price+curSuffix(curRUB), req.Card)
+		return i18n.T(lang, "p2p.topup_card", req.Price+curSuffix(curRUB), a.p2pReqCard(req))
 	}
-	return i18n.T(lang, "p2p.card", req.Months, req.Price+curSuffix(curRUB), req.Card)
+	return i18n.T(lang, "p2p.card", req.Months, req.Price+curSuffix(curRUB), a.p2pReqCard(req))
+}
+
+// p2pReqCard — реквизиты заявки. У заявок, созданных до того, как реквизиты
+// стали сохраняться, их нет — показываем первую карту из настроек.
+func (a *App) p2pReqCard(req *model.P2PRequest) string {
+	if req.Card != "" {
+		return req.Card
+	}
+	if cards := a.p2pConfig().Cards; len(cards) > 0 {
+		return cards[0]
+	}
+	return ""
 }
 
 func p2pUserRows(lang string, id int64) [][]models.InlineKeyboardButton {
@@ -679,8 +691,9 @@ func (a *App) startP2PTopUp(ctx context.Context, chatID, kopecks int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "перевод", err))
 		return
 	}
-	if req.Status == model.P2PSubmitted {
-		a.sendHome(ctx, chatID, i18n.T(lang, "p2p.open_review"))
+	// Открытая заявка на другую сумму — не выдаём её молча за новую.
+	if req.Status == model.P2PSubmitted || req.Kopecks != kopecks {
+		a.showOpenP2P(ctx, chatID, req)
 		return
 	}
 	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, a.p2pUserCardText(lang, req)), p2pUserRows(lang, req.ID))
@@ -746,7 +759,14 @@ func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	switch action {
 	case "paid":
-		if id == 0 {
+		if id == 0 || a.store == nil {
+			return
+		}
+		// Кнопка из старого сообщения не должна возвращать решённую или чужую
+		// заявку на проверку.
+		if r, e := a.store.GetP2PRequest(ctx, id); e != nil || r == nil || r.TelegramID != chatID ||
+			(r.Status != model.P2PAwaiting && r.Status != model.P2PSubmitted) {
+			a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "p2p.request_closed"))
 			return
 		}
 		a.getUI(chatID).awaitShotReq = id
@@ -865,6 +885,11 @@ func (a *App) submitP2PReceipt(ctx context.Context, m *models.Message, fileID st
 	reqID := ui.awaitShotReq
 	req, err := a.store.GetP2PRequest(ctx, reqID)
 	if err != nil || req == nil {
+		return
+	}
+	if req.TelegramID != chatID || (req.Status != model.P2PAwaiting && req.Status != model.P2PSubmitted) {
+		ui.awaitShotReq = 0
+		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "p2p.request_closed"))
 		return
 	}
 	req.Screenshot = fileID
@@ -1116,7 +1141,9 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
-	if req.IsTopUp() && req.Kopecks <= 0 {
+	// Пополнение без суммы и покупка без срока — битые заявки: одобрять их
+	// нечем (покупка на 0 месяцев ушла бы в панель как продление «ни на что»).
+	if (req.IsTopUp() && req.Kopecks <= 0) || (!req.IsTopUp() && req.Months <= 0) {
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
@@ -1177,6 +1204,9 @@ func (a *App) adminAskP2PAmount(ctx context.Context, chatID int64, arg string, s
 		return
 	}
 	ui := a.getUI(chatID)
+	// Прочие ожидания ввода снимаем: иначе сумма ушла бы, например, причиной
+	// отказа по заявке, если до этого админ нажал «Отклонить».
+	resetPendingInputs(ui)
 	ui.adminInput = "p2p_amt"
 	ui.p2pAmtReq = id
 	ui.p2pAmtMsg = srcMsgID
@@ -1188,7 +1218,7 @@ func (a *App) adminAskP2PAmount(ctx context.Context, chatID int64, arg string, s
 func (a *App) applyP2PAmount(ctx context.Context, chatID int64, text string) {
 	lang := a.lang(chatID)
 	ui := a.getUI(chatID)
-	k, ok := rubToKopecks(text)
+	k, ok := parseRubInput(text)
 	if !ok || k <= 0 {
 		a.askInput(ctx, chatID, i18n.T(lang, "admin.p2p_amount_bad"), "")
 		return
@@ -1204,12 +1234,17 @@ func (a *App) applyP2PAmount(ctx context.Context, chatID int64, text string) {
 		return
 	}
 	old := req.Price
-	req.Kopecks = k
-	req.Price = kopecksToRub(k)
-	if err := a.store.UpdateP2PRequest(ctx, req); err != nil {
+	changed, err := a.store.SetP2PAmount(ctx, req.ID, kopecksToRub(k), k)
+	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "сумма заявки", err))
 		return
 	}
+	if !changed {
+		a.sendHome(ctx, chatID, i18n.T(lang, "admin.not_found"))
+		return
+	}
+	req.Kopecks = k
+	req.Price = kopecksToRub(k)
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "amount_changed", "сумма пополнения изменена админом: %s → %s ₽", old, req.Price)
 	if msgID != 0 {
 		a.msg.Delete(ctx, chatID, msgID)
@@ -1493,7 +1528,9 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		id := ui.rejectReq
 		ui.rejectReq = 0
 		req, err := a.store.GetP2PRequest(ctx, id)
-		if err != nil || req == nil {
+		// Отклонить можно только нерешённую заявку: вторая карточка той же
+		// заявки (из списка «на рассмотрении») не должна отменять одобрение.
+		if err != nil || req == nil || (req.Status != model.P2PAwaiting && req.Status != model.P2PSubmitted) {
 			a.sendHome(ctx, chatID, i18n.T(lang, "admin.not_found"))
 			return
 		}

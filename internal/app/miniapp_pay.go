@@ -140,6 +140,11 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDT
 		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_request"))}
 	}
 	if err := a.issueCardSale(ctx, tgID, s); err != nil {
+		// В чат ушла уже открытая заявка — так и говорим.
+		var busy *p2pBusyErr
+		if errors.As(err, &busy) {
+			return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_open_chat"))}
+		}
 		// Реквизиты не выданы — мини-апп не должен звать в чат «завершить
 		// оплату».
 		var ut userText
@@ -167,7 +172,7 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActio
 	if err != nil {
 		var busy *p2pBusyErr
 		if errors.As(err, &busy) {
-			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_open_other"))}
+			return a.miniOpenP2P(a.lang(tgID), busy.req)
 		}
 		// Готовый текст для человека («реквизиты не настроены») показываем
 		// как есть, остальное — общей фразой.
@@ -200,7 +205,7 @@ func (a *App) miniP2PTopUp(ctx context.Context, tgID, kopecks int64) web.MiniAct
 	if err != nil {
 		var busy *p2pBusyErr
 		if errors.As(err, &busy) {
-			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.p2p_open_other"))}
+			return a.miniOpenP2P(lang, busy.req)
 		}
 		var ut userText
 		if errors.As(err, &ut) {
@@ -208,10 +213,41 @@ func (a *App) miniP2PTopUp(ctx context.Context, tgID, kopecks int64) web.MiniAct
 		}
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.p2p_unavailable"))}
 	}
+	if req.Status == model.P2PSubmitted || req.Kopecks != kopecks {
+		return a.miniOpenP2P(lang, req)
+	}
+	return web.MiniActionDTO{OK: true, P2PCard: req.Card, P2PAmount: req.Price + curSuffix(curRUB), P2PReqID: req.ID, P2PTopUp: true}
+}
+
+// miniOpenP2P отдаёт странице уже открытую заявку на перевод — с её суммой и
+// реквизитами, чтобы дослать чек или отменить её на месте. Аккаунту кабинета
+// по почте чата нет, и другого способа закрыть заявку у него не было бы.
+func (a *App) miniOpenP2P(lang string, req *model.P2PRequest) web.MiniActionDTO {
 	if req.Status == model.P2PSubmitted {
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "p2p.open_review"))}
 	}
-	return web.MiniActionDTO{OK: true, P2PCard: req.Card, P2PAmount: req.Price + curSuffix(curRUB), P2PReqID: req.ID}
+	return web.MiniActionDTO{
+		OK: true, P2PCard: a.p2pReqCard(req), P2PAmount: req.Price + curSuffix(curRUB), P2PReqID: req.ID,
+		P2PTopUp: req.IsTopUp(), Message: stripHTMLTags(i18n.T(lang, "mini.p2p_open_other")),
+	}
+}
+
+// MiniP2PCancel отменяет свою незакрытую заявку на перевод из мини-аппа или
+// кабинета — как кнопка «Отмена» под реквизитами в чате.
+func (a *App) MiniP2PCancel(ctx context.Context, tgID, reqID int64) web.MiniActionDTO {
+	if a.store == nil {
+		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	}
+	r, err := a.store.GetP2PRequest(ctx, reqID)
+	if err != nil || r == nil || r.TelegramID != tgID || (r.Status != model.P2PAwaiting && r.Status != model.P2PSubmitted) {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "p2p.request_closed"))}
+	}
+	r.Status = model.P2PRejected
+	if err := a.store.UpdateP2PRequest(ctx, r); err != nil {
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
+	}
+	a.payLog(ctx, model.PayMethodP2P, p2pExt(r.ID), tgID, "cancelled", "отменено пользователем (%s)", "мини-апп или кабинет")
+	return web.MiniActionDTO{OK: true}
 }
 
 // miniDesc is a neutral invoice description for Mini App payments. Название

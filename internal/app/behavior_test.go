@@ -1822,9 +1822,23 @@ func (s *fakeStore) UpdateP2PRequest(_ context.Context, r *model.P2PRequest) err
 	if s.reqs == nil {
 		s.reqs = map[int64]*model.P2PRequest{}
 	}
+	// Как настоящий UPDATE: сумма и назначение этой записью не меняются.
 	cp := *r
+	if old := s.reqs[r.ID]; old != nil {
+		cp.Price, cp.Kopecks, cp.Purpose, cp.Months, cp.Card = old.Price, old.Kopecks, old.Purpose, old.Months, old.Card
+	}
 	s.reqs[r.ID] = &cp
 	return nil
+}
+func (s *fakeStore) SetP2PAmount(_ context.Context, id int64, price string, kopecks int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.reqs[id]
+	if r == nil || !r.IsTopUp() || (r.Status != model.P2PAwaiting && r.Status != model.P2PSubmitted) {
+		return false, nil
+	}
+	r.Price, r.Kopecks = price, kopecks
+	return true, nil
 }
 func (s *fakeStore) LoadMediaFileID(_ context.Context, section string) (string, bool, error) {
 	if s.media == nil {

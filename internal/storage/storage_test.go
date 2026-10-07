@@ -1193,13 +1193,25 @@ func TestP2PTopUpRequestFields(t *testing.T) {
 		if err != nil || got == nil || !got.IsTopUp() || got.Kopecks != 50000 {
 			t.Fatalf("заявка: %+v %v", got, err)
 		}
-		got.Kopecks, got.Price = 44990, "449.90"
+		if ok, err := st.SetP2PAmount(ctx, r.ID, "449.90", 44990); err != nil || !ok {
+			t.Fatalf("сумма не изменена: %v %v", ok, err)
+		}
+		// Запись заявки со старой копией (чек в ту же секунду) сумму не
+		// откатывает.
 		got.Status = model.P2PApproved
 		if err := st.UpdateP2PRequest(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		if g, _ := st.GetP2PRequest(ctx, r.ID); g == nil || g.Kopecks != 44990 || g.Price != "449.90" {
 			t.Fatalf("исправленная сумма не сохранилась: %+v", g)
+		}
+		if ok, _ := st.SetP2PAmount(ctx, r.ID, "1", 100); ok {
+			t.Fatal("сумма решённой заявки изменилась")
+		}
+		buy := &model.P2PRequest{TelegramID: u, Months: 1, Price: "150", Status: model.P2PSubmitted}
+		_ = st.CreateP2PRequest(ctx, buy)
+		if ok, _ := st.SetP2PAmount(ctx, buy.ID, "1", 100); ok {
+			t.Fatal("сумма заявки на покупку изменилась")
 		}
 		if ok, err := st.HasApprovedPurchase(ctx, u); err != nil || ok {
 			t.Fatalf("пополнение засчитано покупкой: %v %v", ok, err)

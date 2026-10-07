@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -185,6 +186,10 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 	}
 	amount := fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency)
 	if p, _ := a.store.PendingByExtID(ctx, txID); p != nil && p.Purpose == "topup" {
+		// Зачисляется сумма счёта; расхождение с суммой Platega — в журнал.
+		if strings.EqualFold(tx.Currency, "RUB") && int64(math.Round(tx.Amount*100)) != p.Kopecks {
+			a.payLog(ctx, model.PayMethodPlatega, txID, p.TelegramID, "amount_mismatch", "счёт на %d коп., Platega сообщила %.2f RUB", p.Kopecks, tx.Amount)
+		}
 		// Счёт гасится ТОЛЬКО после успешного зачисления. Иначе неудача
 		// зачисления снимала страховку: сверка больше не увидела бы этот счёт,
 		// и деньги, принятые эквайером, не попали бы на баланс никогда.

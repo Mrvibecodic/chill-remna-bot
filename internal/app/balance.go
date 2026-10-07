@@ -40,6 +40,23 @@ func rubToKopecks(s string) (int64, bool) {
 	return w*100 + f, true
 }
 
+// parseRubInput — сумма, набранная человеком: только цифры и до двух знаков
+// после запятой. «1.000.000», «10.000» и «1.55x» не угадываются, а
+// отклоняются — для денег лучше переспросить.
+func parseRubInput(s string) (int64, bool) {
+	s = strings.TrimSpace(strings.ReplaceAll(s, ",", "."))
+	whole, frac, hasDot := strings.Cut(s, ".")
+	if whole == "" || len(whole) > 9 || (hasDot && (frac == "" || len(frac) > 2)) {
+		return 0, false
+	}
+	for _, c := range whole + frac {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	return rubToKopecks(s)
+}
+
 func kopecksToRub(k int64) string {
 	if k%100 == 0 {
 		return strconv.FormatInt(k/100, 10)
@@ -299,7 +316,7 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 		a.showBalance(ctx, chatID)
 		return
 	}
-	k, ok := rubToKopecks(text)
+	k, ok := parseRubInput(text)
 	if !ok || k <= 0 {
 		a.sendKB(ctx, chatID, i18n.T(a.lang(chatID), "topup.bad_amount"),
 			[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:topup")})
@@ -395,6 +412,16 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	lang := a.lang(chatID)
 	if !a.topUpEnabled() {
 		a.showBalance(ctx, chatID)
+		return
+	}
+	// Кнопка способа могла пролежать в переписке: за это время способ могли
+	// выключить, а согласие с документами — сбросить.
+	if !a.topUpMethodOn(method) {
+		a.sendHome(ctx, chatID, i18n.T(lang, "topup.unavailable"))
+		return
+	}
+	if a.legalRequired(ctx, chatID) {
+		a.askLegal(ctx, chatID)
 		return
 	}
 	k := a.getUI(chatID).topUpKopecks
@@ -536,6 +563,15 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 
 func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, method, amount, extID string) error {
 	if a.store == nil {
+		return nil
+	}
+	// Пользователя удалили, а оплата пришла позже: не заводим его заново с
+	// деньгами, а зовём админа — так же, как это делает сверка счетов.
+	if u, err := a.store.GetUser(ctx, chatID); err == nil && u == nil {
+		a.payLog(ctx, method, extID, chatID, "orphan_paid", "пополнение на удалённого пользователя: %s", amount)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.orphan_payment",
+			escapeName(method), escapeName(extID), escapeName(amount), chatID))
 		return nil
 	}
 	// Запись платежа и зачисление — одной транзакцией. Порознь сбой между

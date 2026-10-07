@@ -135,6 +135,16 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	if isAdmin && key != cbTexts && key != cbClose && a.getUI(chatID).txtKey != "" {
 		a.clearTextInput(ctx, chatID)
 	}
+	// Правка суммы заявки — тоже: брошенный ввод не должен через час
+	// превратить случайное число в сумму пополнения.
+	if isAdmin && key != "inp" {
+		if ui := a.getUI(chatID); ui.p2pAmtReq != 0 {
+			if ui.adminInput == "p2p_amt" {
+				ui.adminInput = ""
+			}
+			ui.p2pAmtReq, ui.p2pAmtMsg = 0, 0
+		}
+	}
 
 	switch key {
 	case "botlang":
