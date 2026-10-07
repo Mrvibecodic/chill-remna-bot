@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -68,7 +69,19 @@ func plPayload(chatID int64, months int) string {
 	return fmt.Sprintf("telegram_id=%d&months=%d", chatID, months)
 }
 
+// plTopUpPayload — payload счёта на пополнение: topup — сумма в копейках.
+func plTopUpPayload(chatID, kopecks int64) string {
+	return fmt.Sprintf("telegram_id=%d&topup=%d", chatID, kopecks)
+}
+
 func parsePlPayload(payload string) (telegramID int64, months int) {
+	telegramID, months, _ = parsePlPayloadAll(payload)
+	return
+}
+
+// parsePlPayloadAll разбирает payload целиком; topUpK > 0 — счёт на
+// пополнение баланса.
+func parsePlPayloadAll(payload string) (telegramID int64, months int, topUpK int64) {
 	payload = strings.ReplaceAll(payload, "&amp;", "&")
 	if !strings.Contains(payload, "=") && strings.Contains(payload, "%3D") {
 		if dec, err := url.QueryUnescape(payload); err == nil {
@@ -85,6 +98,8 @@ func parsePlPayload(payload string) (telegramID int64, months int) {
 			telegramID, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		case "months":
 			months, _ = strconv.Atoi(strings.TrimSpace(v))
+		case "topup":
+			topUpK, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 		}
 	}
 	return
@@ -171,6 +186,10 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 	}
 	amount := fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency)
 	if p, _ := a.store.PendingByExtID(ctx, txID); p != nil && p.Purpose == "topup" {
+		// Зачисляется сумма счёта; расхождение с суммой Platega — в журнал.
+		if strings.EqualFold(tx.Currency, "RUB") && int64(math.Round(tx.Amount*100)) != p.Kopecks {
+			a.payLog(ctx, model.PayMethodPlatega, txID, p.TelegramID, "amount_mismatch", "счёт на %d коп., Platega сообщила %.2f RUB", p.Kopecks, tx.Amount)
+		}
 		// Счёт гасится ТОЛЬКО после успешного зачисления. Иначе неудача
 		// зачисления снимала страховку: сверка больше не увидела бы этот счёт,
 		// и деньги, принятые эквайером, не попали бы на баланс никогда.
@@ -181,7 +200,7 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 		_ = a.store.ResolvePending(ctx, p.ID)
 		return
 	}
-	chatID, months := parsePlPayload(tx.Payload)
+	chatID, months, topUpK := parsePlPayloadAll(tx.Payload)
 	if chatID == 0 || months == 0 {
 		if p, _ := a.store.PendingByExtID(ctx, txID); p != nil {
 			if chatID == 0 {
@@ -194,6 +213,14 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 	}
 	if chatID == 0 {
 		a.payLog(ctx, model.PayMethodPlatega, txID, 0, "error", "оплата подтверждена, но получатель неизвестен: нет payload и pending-счёта")
+		return
+	}
+	// Пополнение без строки счёта опознаётся по topup в payload. Без этой
+	// ветки деньги за пополнение ушли бы в «срок не определён».
+	if months == 0 && topUpK > 0 {
+		if err := a.finalizeTopUp(ctx, chatID, topUpK, model.PayMethodPlatega, amount, txID); err != nil {
+			a.log.Error("platega topup finalize", "err", err, "ext_id", txID)
+		}
 		return
 	}
 	if months == 0 {
@@ -320,6 +347,29 @@ func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months 
 	}
 	if a.store != nil {
 		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Months: months, Snapshot: snap})
+	}
+	return tx.Redirect, tx.ID, nil
+}
+
+// plCreateTopUp выставляет счёт Platega на пополнение баланса. Счёт всегда в
+// рублях: баланс ведётся в копейках ₽.
+func (a *App) plCreateTopUp(ctx context.Context, chatID, kopecks int64, desc, returnURL string) (redirect, txID string, err error) {
+	client := a.plClient()
+	if client == nil {
+		return "", "", fmt.Errorf("platega не настроена")
+	}
+	if kopecks <= 0 {
+		return "", "", fmt.Errorf("platega: сумма пополнения %d коп", kopecks)
+	}
+	amount := float64(kopecks) / 100
+	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plTopUpPayload(chatID, kopecks))
+	if err != nil {
+		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "topup kopecks=%d: %v", kopecks, err)
+		return "", "", err
+	}
+	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "topup kopecks=%d amount=%.2f RUB method=%d", kopecks, amount, a.plMethod())
+	if a.store != nil {
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: tx.ID, TelegramID: chatID, Purpose: purposeTopUp, Kopecks: kopecks})
 	}
 	return tx.Redirect, tx.ID, nil
 }

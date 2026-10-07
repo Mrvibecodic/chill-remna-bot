@@ -99,6 +99,7 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /api/cabinet/password/reset", s.handleCabinetReset)
 	mux.HandleFunc("POST /api/cabinet/tg/bind", s.handleCabinetBind)
 	mux.HandleFunc("POST /api/cabinet/p2p/screenshot", s.handleCabinetP2PScreenshot)
+	mux.HandleFunc("POST /api/miniapp/p2p/cancel", s.handleMiniP2PCancel)
 	mux.HandleFunc("GET /", s.handleCabinetStatic)
 	return mux
 }

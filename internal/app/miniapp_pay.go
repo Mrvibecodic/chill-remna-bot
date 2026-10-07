@@ -140,6 +140,11 @@ func (a *App) MiniP2P(ctx context.Context, tgID int64, s *sale) web.MiniActionDT
 		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_request"))}
 	}
 	if err := a.issueCardSale(ctx, tgID, s); err != nil {
+		// В чат ушла уже открытая заявка — так и говорим.
+		var busy *p2pBusyErr
+		if errors.As(err, &busy) {
+			return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_open_chat"))}
+		}
 		// Реквизиты не выданы — мини-апп не должен звать в чат «завершить
 		// оплату».
 		var ut userText
@@ -159,22 +164,16 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActio
 	}
 	_ = a.store.UpsertUser(ctx, tgID)
 	u, _ := a.store.GetUser(ctx, tgID)
-	// «Перевод всем без одобрения» распространяется на Telegram-аккаунты.
-	// E-mail-аккаунт кабинета (отрицательный синтетический id) заводится без
-	// подтверждения почты, поэтому реквизиты по нему выдаём только после
-	// ручного одобрения — иначе карты вытягиваются регистрацией на любой ящик.
-	allowed := a.p2pAllowed(u)
-	if tgID < 0 {
-		// Выключенный способ остаётся выключенным и здесь: проверка одобрения
-		// заменяет только ветку «открыт всем», а не сам тумблер.
-		allowed = a.p2pConfig().Enabled && u != nil && u.P2PApproved
-	}
-	if !allowed {
+	if !a.p2pAllowedFor(tgID, u) {
 		a.notifyAdminUserRequest(ctx, tgID)
 		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_pending"))}
 	}
 	card, price, reqID, err := a.prepareP2PCardSale(ctx, tgID, s)
 	if err != nil {
+		var busy *p2pBusyErr
+		if errors.As(err, &busy) {
+			return a.miniOpenP2P(a.lang(tgID), busy.req)
+		}
 		// Готовый текст для человека («реквизиты не настроены») показываем
 		// как есть, остальное — общей фразой.
 		var ut userText
@@ -184,6 +183,71 @@ func (a *App) MiniP2PWeb(ctx context.Context, tgID int64, s *sale) web.MiniActio
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.p2p_unavailable"))}
 	}
 	return web.MiniActionDTO{OK: true, P2PCard: card, P2PAmount: price + curSuffix(curRUB), P2PReqID: reqID}
+}
+
+// miniP2PTopUp — пополнение переводом из мини-аппа и кабинета: реквизиты и
+// загрузка чека прямо на странице, одобрение — как у оплаты переводом.
+func (a *App) miniP2PTopUp(ctx context.Context, tgID, kopecks int64) web.MiniActionDTO {
+	lang := a.lang(tgID)
+	if a.store == nil {
+		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	}
+	_ = a.store.UpsertUser(ctx, tgID)
+	u, err := a.store.GetUser(ctx, tgID)
+	if err != nil {
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
+	}
+	if !a.p2pAllowedFor(tgID, u) {
+		a.notifyAdminUserRequest(ctx, tgID)
+		return web.MiniActionDTO{Redirect: true, Message: stripHTMLTags(i18n.T(lang, "mini.p2p_pending"))}
+	}
+	req, err := a.prepareP2PTopUp(ctx, tgID, kopecks)
+	if err != nil {
+		var busy *p2pBusyErr
+		if errors.As(err, &busy) {
+			return a.miniOpenP2P(lang, busy.req)
+		}
+		var ut userText
+		if errors.As(err, &ut) {
+			return web.MiniActionDTO{Error: stripHTMLTags(ut.msg)}
+		}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.p2p_unavailable"))}
+	}
+	if req.Status == model.P2PSubmitted || req.Kopecks != kopecks {
+		return a.miniOpenP2P(lang, req)
+	}
+	return web.MiniActionDTO{OK: true, P2PCard: req.Card, P2PAmount: req.Price + curSuffix(curRUB), P2PReqID: req.ID, P2PTopUp: true}
+}
+
+// miniOpenP2P отдаёт странице уже открытую заявку на перевод — с её суммой и
+// реквизитами, чтобы дослать чек или отменить её на месте. Аккаунту кабинета
+// по почте чата нет, и другого способа закрыть заявку у него не было бы.
+func (a *App) miniOpenP2P(lang string, req *model.P2PRequest) web.MiniActionDTO {
+	if req.Status == model.P2PSubmitted {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "p2p.open_review"))}
+	}
+	return web.MiniActionDTO{
+		OK: true, P2PCard: a.p2pReqCard(req), P2PAmount: req.Price + curSuffix(curRUB), P2PReqID: req.ID,
+		P2PTopUp: req.IsTopUp(), Message: stripHTMLTags(i18n.T(lang, "mini.p2p_open_other")),
+	}
+}
+
+// MiniP2PCancel отменяет свою незакрытую заявку на перевод из мини-аппа или
+// кабинета — как кнопка «Отмена» под реквизитами в чате.
+func (a *App) MiniP2PCancel(ctx context.Context, tgID, reqID int64) web.MiniActionDTO {
+	if a.store == nil {
+		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	}
+	r, err := a.store.GetP2PRequest(ctx, reqID)
+	if err != nil || r == nil || r.TelegramID != tgID || (r.Status != model.P2PAwaiting && r.Status != model.P2PSubmitted) {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "p2p.request_closed"))}
+	}
+	r.Status = model.P2PRejected
+	if err := a.store.UpdateP2PRequest(ctx, r); err != nil {
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
+	}
+	a.payLog(ctx, model.PayMethodP2P, p2pExt(r.ID), tgID, "cancelled", "отменено пользователем (%s)", "мини-апп или кабинет")
+	return web.MiniActionDTO{OK: true}
 }
 
 // miniDesc is a neutral invoice description for Mini App payments. Название
@@ -251,19 +315,7 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 	}
 	// Своя сумма — с тем же потолком, что в чате.
 	dto.MaxKopecks = maxK
-	a.mu.Lock()
-	if a.botCfg != nil {
-		if a.botCfg.YooKassa.Enabled {
-			dto.Methods = append(dto.Methods, "yk")
-		}
-		if a.botCfg.CryptoBot.Enabled {
-			dto.Methods = append(dto.Methods, "cb")
-		}
-		if a.botCfg.Heleket.Enabled {
-			dto.Methods = append(dto.Methods, "hl")
-		}
-	}
-	a.mu.Unlock()
+	dto.Methods = a.topUpMethods()
 	return dto
 }
 
@@ -279,9 +331,12 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.bad_amount"))}
 	}
-	if method != "yk" && method != "cb" && method != "hl" {
+	if !a.topUpMethodOn(method) {
 		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.topup_method"))}
+	}
+	if method == model.PayMethodP2P {
+		return a.miniP2PTopUp(ctx, tgID, kopecks)
 	}
 	payURL, _, err := a.topUpCreate(ctx, tgID, kopecks, method, web_)
 	if err != nil {

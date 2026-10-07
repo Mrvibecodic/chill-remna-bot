@@ -8,6 +8,10 @@ type uiState struct {
 	awaitPromo   bool
 	awaitShotReq int64
 	rejectReq    int64
+	// p2pAmtReq — заявка на пополнение, чью сумму админ сейчас вводит;
+	// p2pAmtMsg — её карточка, которую заменит карточка с новой суммой.
+	p2pAmtReq int64
+	p2pAmtMsg int
 
 	adminInput  string
 	priceMonths int

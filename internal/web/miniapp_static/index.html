@@ -646,7 +646,7 @@ function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')
 function daysWord(n){return plural(n,'день','дня','дней');}
 // Названия и описания способов приходят с сервера (правятся в боте, «Тексты
 // бота»); встроенные ниже — запасные для старого сервера.
-var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',hl:'🪙'};
+var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',pl:'💳',hl:'🪙'};
 function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]?(METHOD_EMOJI[m]?METHOD_EMOJI[m]+' ':'')+esc(L[m]):fb;}
 function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
@@ -707,16 +707,17 @@ function buyPlan(code,months){
   h+='<button class="btn ghost" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
-function renderP2PCard(card,amount,reqID){
+function renderP2PCard(card,amount,reqID,topup){
   haptic('tap');setBack(boot);
-  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+' Оплата переводом</span>'+IC.wallet+'</div>'+
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+(topup?' Пополнение переводом':' Оплата переводом')+'</span>'+IC.wallet+'</div>'+
     '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
     '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
-    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+reqID+',this)">'+IC.check+'Отправить подтверждение</button></div>';
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(reqID||0)+',this)">'+IC.check+'Отправить подтверждение</button></div>';
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel('+Number(reqID||0)+',this)">Отменить заявку</button>';
+  h+='<button class="btn ghost" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function p2pUpload(reqID,el){
@@ -725,10 +726,22 @@ async function p2pUpload(reqID,el){
   haptic('tap');busy(el,true);
   try{
     var fd=new FormData();fd.append('req_id',String(reqID));fd.append('photo',f);
-    var r=await fetch('/api/cabinet/p2p/screenshot',{method:'POST',headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{},body:fd});
+    var send=function(){return fetch('/api/cabinet/p2p/screenshot',{method:'POST',headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{},body:fd});};
+    var r=await send();
+    // Пропуск мини-аппа живёт полчаса, а перевод в банке бывает дольше.
+    if(r.status===401&&!WEB&&tg&&tg.initData){await authenticate();r=await send();}
+    if(r.status===401&&WEB){clearToken();renderLogin();return;}
     if(r.ok){haptic('ok');toast('Подтверждение отправлено на проверку','ok');boot();return;}
     var j={};try{j=await r.json();}catch(e){}haptic('err');toast(j.error||'Ошибка загрузки','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
+  busy(el,false);
+}
+async function p2pCancel(reqID,el){
+  haptic('tap');busy(el,true);
+  try{var r=await post('/api/miniapp/p2p/cancel',{req_id:reqID});
+    if(r.ok){toast('Заявка отменена','ok');boot();return;}
+    toast(r.error||'Не удалось отменить','err');
+  }catch(e){toast('Ошибка: '+e.message,'err');}
   busy(el,false);
 }
 // Браузер пускает новую вкладку только прямо в обработчике нажатия, а не
@@ -743,7 +756,7 @@ async function pay(plan,months,method,el,shownPrice){
   try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
-    if(r.ok&&r.p2p_card){renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id);return;}
+    if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
@@ -876,7 +889,7 @@ async function topupOpen(){
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
-var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',hl:'🪙 Криптовалюта (Heleket)'};
+var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)'};
 function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
@@ -887,8 +900,10 @@ function topupPick(kopecks,label){
 }
 async function topupPay(kopecks,method,el){
   haptic('tap');busy(el,true);
-  var tab=payTab();
+  var tab=method==='p2p'?null:payTab();
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
+    if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
+    if(r.redirect){toast(r.message||'Запрос отправлен администратору','ok');return;}
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
     if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');

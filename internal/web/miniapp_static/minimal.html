@@ -285,13 +285,13 @@ var L={ru:{
  tribute_hint:'Срок выбирается на странице Tribute. Подходят: %s — другой срок доступа не выдаст.',
  ap_hint:'После оплаты картой можно будет включить автопродление (%s). Только с вашего согласия.',
  m_balance:'С баланса',m_stars:'Telegram Stars',m_yookassa:'Банковская карта',m_cryptobot:'Криптовалюта',m_platega:'Platega',m_heleket:'Криптовалюта (Heleket)',m_tribute:'Tribute',m_p2p:'Перевод на карту',
- m_balance_s:'На балансе %s',m_yk:'Банковская карта',m_cb:'Криптовалюта',m_hl:'Криптовалюта (Heleket)',
+ m_balance_s:'На балансе %s',m_yk:'Банковская карта',m_pl:'Platega',m_cb:'Криптовалюта',m_hl:'Криптовалюта (Heleket)',
  pay_fail:'Не удалось создать оплату',paid_ok:'Оплата получена',
  wait_title:'Ожидаем оплату',wait_text:'Завершите оплату на открывшейся странице. Как только платёж пройдёт, подписка обновится сама.',
  wait_check:'Проверить оплату',wait_again:'Открыть оплату снова',wait_none:'Оплата пока не поступила. Если вы уже заплатили, подождите минуту.',
  p2p_title:'Перевод на карту',p2p_text:'Переведите точную сумму на карту и загрузите подтверждение — скриншот или PDF-чек. Администратор проверит платёж вручную.',
  p2p_card:'Карта для перевода',copy_card:'Скопировать номер',p2p_proof:'Подтверждение оплаты',p2p_send:'Отправить чек',p2p_pick:'Выберите скриншот или PDF-чек',
- p2p_sent:'Чек отправлен на проверку',p2p_sent_text:'Подписка обновится сразу после проверки администратором.',upload_fail:'Ошибка загрузки',
+ p2p_sent:'Чек отправлен на проверку',p2p_sent_text:'Подписка обновится сразу после проверки администратором.',p2p_sent_topup:'Баланс пополнится сразу после проверки администратором.',p2p_cancel:'Отменить заявку',p2p_cancelled:'Заявка отменена',upload_fail:'Ошибка загрузки',
  wallet:'Кошелёк',balance:'Баланс',topup_amount:'Сумма пополнения',topup_custom:'Своя сумма',topup_max:'до %s',topup_method:'Способ пополнения',
  topup_bad:'Введите сумму',topup_big:'Максимум — %s',
  forecast:'На сколько хватит',forecast_plan:'По ценам тарифа %s',forecast_max:'Хватит максимум на %s',
@@ -341,13 +341,13 @@ var L={ru:{
  tribute_hint:'The period is chosen on the Tribute page. Accepted: %s — other periods won’t grant access.',
  ap_hint:'After paying by card you can turn on auto-renewal (%s). Only with your consent.',
  m_balance:'From balance',m_stars:'Telegram Stars',m_yookassa:'Bank card',m_cryptobot:'Crypto',m_platega:'Platega',m_heleket:'Crypto (Heleket)',m_tribute:'Tribute',m_p2p:'Card transfer',
- m_balance_s:'Balance %s',m_yk:'Bank card',m_cb:'Crypto',m_hl:'Crypto (Heleket)',
+ m_balance_s:'Balance %s',m_yk:'Bank card',m_pl:'Platega',m_cb:'Crypto',m_hl:'Crypto (Heleket)',
  pay_fail:'Could not create the payment',paid_ok:'Payment received',
  wait_title:'Waiting for payment',wait_text:'Complete the payment in the opened window. As soon as it goes through, your subscription updates by itself.',
  wait_check:'Check payment',wait_again:'Open payment again',wait_none:'No payment yet. If you have already paid, wait a minute.',
  p2p_title:'Card transfer',p2p_text:'Transfer the exact amount to the card and upload a proof — a screenshot or a PDF receipt. An admin checks it manually.',
  p2p_card:'Card number',copy_card:'Copy number',p2p_proof:'Payment proof',p2p_send:'Send receipt',p2p_pick:'Pick a screenshot or a PDF receipt',
- p2p_sent:'Receipt sent for review',p2p_sent_text:'Your subscription updates right after an admin confirms it.',upload_fail:'Upload failed',
+ p2p_sent:'Receipt sent for review',p2p_sent_text:'Your subscription updates right after an admin confirms it.',p2p_sent_topup:'Your balance is credited right after an admin confirms it.',p2p_cancel:'Cancel the request',p2p_cancelled:'Request cancelled',upload_fail:'Upload failed',
  wallet:'Wallet',balance:'Balance',topup_amount:'Top-up amount',topup_custom:'Custom amount',topup_max:'up to %s',topup_method:'Top-up method',
  topup_bad:'Enter an amount',topup_big:'Maximum is %s',
  forecast:'How long it lasts',forecast_plan:'At %s prices',forecast_max:'Lasts up to %s',
@@ -714,7 +714,7 @@ async function pay(code,months,method,el,shown){
     var r=await post('/api/miniapp/checkout',{plan:code,months:months,method:method,price:shown||'',p2p_inapp:true});
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
     if(r.ok&&r.sub_url){toast(T('paid_ok'),'ok');await refresh();goHome();return;}
-    if(r.ok&&r.p2p_card){go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id},{replace:true});return;}
+    if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup},{replace:true});return;}
     if(r.ok&&r.pay_url){
       guardOn();
       if(r.invoice&&tg&&tg.openInvoice){tg.openInvoice(r.pay_url,function(st){guardOff();if(st==='paid'){toast(T('paid_ok'),'ok');refresh().then(goHome,goHome);}});return;}
@@ -752,10 +752,19 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden&&CUR
 SCREENS.p2p=function(a){
   var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('p2p_title'))+'</span><div class="big">'+esc(a.amount||'')+'</div><div class="hint">'+esc(T('p2p_text'))+'</div></div>';
   h+='<div class="sect">'+esc(T('p2p_card'))+'</div><div class="card flat" style="margin-top:0"><div class="mono">'+esc(a.card)+'</div><button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(a.card)+'\')">'+IC.copy+esc(T('copy_card'))+'</button></div>';
-  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(a.req||0)+',this)">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
+  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(a.req||0)+',this,'+(a.topup?1:0)+')">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
+  h+='<button class="btn ghost" style="margin-top:12px" onclick="p2pCancel('+Number(a.req||0)+',this)">'+esc(T('p2p_cancel'))+'</button>';
   view(h);
 };
-async function p2pUpload(req,el){
+async function p2pCancel(req,el){
+  busy(el,true);
+  try{var r=await post('/api/miniapp/p2p/cancel',{req_id:req});
+    if(r.ok){toast(T('p2p_cancelled'),'ok');STACK=[];setBack(false);goHome();return;}
+    toast(r.error||T('error'),'err');
+  }catch(e){toast(e.message||T('error'),'err');}
+  busy(el,false);
+}
+async function p2pUpload(req,el,topup){
   var f=document.getElementById('p2pf');f=f&&f.files&&f.files[0];
   if(!f){toast(T('p2p_pick'),'err');return;}
   busy(el,true);
@@ -766,7 +775,7 @@ async function p2pUpload(req,el){
     // Пропуск мини-аппа живёт полчаса, а перевод в банке бывает дольше.
     if(r.status===401&&!WEB&&tg&&tg.initData){await authenticate();r=await send();}
     if(r.status===401&&WEB){logout();return;}
-    if(r.ok){view('<div class="card center" style="margin-top:18px">'+IC.check.replace('<svg','<svg style="width:40px;height:40px;color:var(--ok)"')+'<div class="h2" style="margin-top:10px">'+esc(T('p2p_sent'))+'</div><div class="hint">'+esc(T('p2p_sent_text'))+'</div><button class="btn" style="margin-top:16px" onclick="goHome()">'+esc(T('home'))+'</button></div>');STACK=[];setBack(false);haptic('ok');return;}
+    if(r.ok){view('<div class="card center" style="margin-top:18px">'+IC.check.replace('<svg','<svg style="width:40px;height:40px;color:var(--ok)"')+'<div class="h2" style="margin-top:10px">'+esc(T('p2p_sent'))+'</div><div class="hint">'+esc(T(topup?'p2p_sent_topup':'p2p_sent_text'))+'</div><button class="btn" style="margin-top:16px" onclick="goHome()">'+esc(T('home'))+'</button></div>');STACK=[];setBack(false);haptic('ok');return;}
     var j={};try{j=await r.json();}catch(e){}toast(j.error||T('upload_fail'),'err');
   }catch(e){toast(e.message||T('error'),'err');}
   busy(el,false);
@@ -802,7 +811,7 @@ SCREENS.wallet=async function(a){
 function tuMethods(a){
   var o=a.o||{};if(!(a.k>0)||!o.methods)return '';
   var h='<div class="sect" style="margin-top:14px">'+esc(T('topup_method'))+'</div><div class="list" style="margin-top:0">';
-  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
+  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'||m==='pl'||m==='p2p'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
   return h+'</div>';
 }
 function tuPick(k){haptic();CUR.arg.k=k;CUR.arg.custom=false;rerender();}
@@ -825,8 +834,10 @@ async function tuPay(m,el){
   var a=CUR.arg;if(!(a.k>0)){toast(T('topup_bad'),'err');return;}
   if(needLegal())return;
   busy(el,true);
-  var tab=payTab();
+  var tab=m==='p2p'?null:payTab();
   try{var r=await post('/api/miniapp/topup',{kopecks:a.k,method:m});
+    if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup});return;}
+    if(r.redirect){toast(r.message||T('pay_fail'));return;}
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
     if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url});return;}
     toast(r.error||T('pay_fail'),'err');

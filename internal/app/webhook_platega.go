@@ -64,7 +64,13 @@ func (a *App) HandlePlategaWebhook(ctx context.Context, merchantID, secret strin
 	if strings.EqualFold(tx.Status, "CHARGEBACKED") {
 		a.payLog(ctx, model.PayMethodPlatega, id, hintTG, "chargeback", "Platega вернула деньги по транзакции — доступ НЕ отозван, разберите вручную")
 		alang := a.lang(a.cfg.AdminID)
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "pl.admin_chargeback", id, fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency), a.userLabelByID(ctx, hintTG)))
+		key := "pl.admin_chargeback"
+		if a.store != nil {
+			if p, _ := a.store.PendingByExtID(ctx, id); p != nil && p.Purpose == purposeTopUp {
+				key = "pl.admin_cb_topup"
+			}
+		}
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, key, id, fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency), a.userLabelByID(ctx, hintTG)))
 		return true, nil
 	}
 	if a.store != nil {

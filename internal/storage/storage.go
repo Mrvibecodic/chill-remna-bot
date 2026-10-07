@@ -154,6 +154,9 @@ type Storage interface {
 	Ping(ctx context.Context) error
 	LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*model.P2PRequest, error)
 	UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error
+	// SetP2PAmount меняет сумму незакрытой заявки на пополнение. false — заявка
+	// уже решена или это не пополнение.
+	SetP2PAmount(ctx context.Context, id int64, price string, kopecks int64) (bool, error)
 
 	AddPayment(ctx context.Context, p *model.Payment) error
 	AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error
@@ -352,7 +355,7 @@ func (b *base) SetUserInfo(ctx context.Context, telegramID int64, username, firs
 func (b *base) HasApprovedPurchase(ctx context.Context, telegramID int64) (bool, error) {
 	var n int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2),
+		"SELECT COUNT(1) FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+" AND months > 0",
 		telegramID, model.P2PApproved).Scan(&n)
 	return n > 0, err
 }
@@ -642,9 +645,9 @@ func (b *base) CreateP2PRequest(ctx context.Context, r *model.P2PRequest) error 
 		r.CreatedAt = nowStr()
 	}
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+")",
-		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt, r.Snapshot.Encode(), r.Card)
+		"INSERT INTO p2p_requests (id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card, purpose, kopecks) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+")",
+		r.ID, r.TelegramID, r.Months, r.Price, r.Status, r.Screenshot, r.Comment, r.CreatedAt, r.DecidedAt, r.Snapshot.Encode(), r.Card, r.Purpose, r.Kopecks)
 	return err
 }
 
@@ -653,7 +656,7 @@ func (b *base) GetP2PRequest(ctx context.Context, id int64) (*model.P2PRequest, 
 	var snapRaw string
 	err := b.db.QueryRowContext(ctx,
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE id = "+b.ph(1), id).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card, &r.Purpose, &r.Kopecks)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -687,7 +690,7 @@ func (b *base) ListP2PRequestsByStatus(ctx context.Context, status string, limit
 		var r model.P2PRequest
 		var snapRaw string
 		if err := rows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot,
-			&r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card); err != nil {
+			&r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card, &r.Purpose, &r.Kopecks); err != nil {
 			return nil, err
 		}
 		r.Snapshot = model.DecodePlanSnapshot(snapRaw)
@@ -703,7 +706,7 @@ func (b *base) OpenP2PRequest(ctx context.Context, telegramID int64) (*model.P2P
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE telegram_id = "+b.ph(1)+
 			" AND status IN ("+b.ph(2)+", "+b.ph(3)+") ORDER BY created_at DESC, id DESC LIMIT 1",
 		telegramID, model.P2PAwaiting, model.P2PSubmitted).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card, &r.Purpose, &r.Kopecks)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -720,7 +723,7 @@ func (b *base) LastAwaitingP2PRequest(ctx context.Context, telegramID int64) (*m
 	err := b.db.QueryRowContext(ctx,
 		"SELECT "+p2pCols+" FROM p2p_requests WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+
 			" ORDER BY created_at DESC, id DESC LIMIT 1", telegramID, model.P2PAwaiting).
-		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card)
+		Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card, &r.Purpose, &r.Kopecks)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -737,6 +740,20 @@ func (b *base) UpdateP2PRequest(ctx context.Context, r *model.P2PRequest) error 
 			" WHERE id = "+b.ph(5),
 		r.Status, r.Screenshot, r.Comment, r.DecidedAt, r.ID)
 	return err
+}
+
+// SetP2PAmount — отдельной записью с условием: чек клиента, пришедший в ту же
+// секунду, не должен вернуть старую сумму, а решённая заявка — поменяться.
+func (b *base) SetP2PAmount(ctx context.Context, id int64, price string, kopecks int64) (bool, error) {
+	res, err := b.db.ExecContext(ctx,
+		"UPDATE p2p_requests SET price = "+b.ph(1)+", kopecks = "+b.ph(2)+
+			" WHERE id = "+b.ph(3)+" AND purpose = "+b.ph(4)+" AND status IN ("+b.ph(5)+", "+b.ph(6)+")",
+		price, kopecks, id, model.P2PPurposeTopUp, model.P2PAwaiting, model.P2PSubmitted)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func (b *base) AddPayment(ctx context.Context, p *model.Payment) error {
@@ -1035,7 +1052,7 @@ func (b *base) DeleteMediaFileID(ctx context.Context, section string) error {
 // рантайме.
 const (
 	paymentCols = "id, telegram_id, method, months, amount, status, comment, ext_id, created_at, plan_snapshot"
-	p2pCols     = "id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card"
+	p2pCols     = "id, telegram_id, months, price, status, screenshot, comment, created_at, decided_at, plan_snapshot, card, purpose, kopecks"
 	autoPayCols = "telegram_id, method, method_id, title, months, amount, currency, enabled, created_at, " +
 		"last_pay_at, paid_period, next_try_at, fails, last_error, plan_snapshot"
 )
@@ -1402,7 +1419,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	for rrows.Next() {
 		var r model.P2PRequest
 		var snapRaw string
-		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card); err != nil {
+		if err := rrows.Scan(&r.ID, &r.TelegramID, &r.Months, &r.Price, &r.Status, &r.Screenshot, &r.Comment, &r.CreatedAt, &r.DecidedAt, &snapRaw, &r.Card, &r.Purpose, &r.Kopecks); err != nil {
 			_ = rrows.Close()
 			return nil, err
 		}

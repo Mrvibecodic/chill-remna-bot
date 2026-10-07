@@ -129,6 +129,8 @@ type MiniProvider interface {
 	// CabinetBindName сохраняет имя и @username из подписи виджета входа.
 	CabinetBindName(ctx context.Context, tgID int64, username, firstName string)
 	CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filename string, data []byte) error
+	// MiniP2PCancel отменяет свою незакрытую заявку на перевод.
+	MiniP2PCancel(ctx context.Context, tgID, reqID int64) MiniActionDTO
 	// MiniBlocked reports whether the user is blocked by an admin.
 	MiniBlocked(ctx context.Context, tgID int64) bool
 	// MiniAccessDenied reports whether the bot's publicity mode (invite-only /
@@ -233,6 +235,8 @@ type MiniActionDTO struct {
 	P2PCard   string `json:"p2p_card,omitempty"`
 	P2PAmount string `json:"p2p_amount,omitempty"`
 	P2PReqID  int64  `json:"p2p_req_id,omitempty"`
+	// P2PTopUp — заявка на пополнение баланса, а не на покупку.
+	P2PTopUp bool `json:"p2p_topup,omitempty"`
 }
 
 // MiniAutoPayDTO describes automatic renewal for the current user: whether the
@@ -810,6 +814,28 @@ func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web))
+}
+
+func (s *Server) handleMiniP2PCancel(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	body, err := readAllLimited(r, 1024)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		ReqID int64 `json:"req_id"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.ReqID == 0 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniP2PCancel(ctx, id, req.ReqID))
 }
 
 func (s *Server) handleMiniConnect(w http.ResponseWriter, r *http.Request) {

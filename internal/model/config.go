@@ -643,9 +643,19 @@ type P2PRequest struct {
 	// появления поля: для них повторный показ выдаёт карту по ротации, как
 	// раньше.
 	Card string
+	// Purpose — P2PPurposeTopUp у пополнения баланса, пусто у покупки.
+	// Kopecks — сумма пополнения; админ может исправить её до одобрения.
+	Purpose string
+	Kopecks int64
 
 	Snapshot *PlanSnapshot
 }
+
+// P2PPurposeTopUp — назначение заявки на перевод «пополнение баланса».
+const P2PPurposeTopUp = "topup"
+
+// IsTopUp — заявка на пополнение баланса, а не на покупку подписки.
+func (r *P2PRequest) IsTopUp() bool { return r != nil && r.Purpose == P2PPurposeTopUp }
 
 type WebhookConfig struct {
 	Enabled         bool   `json:"enabled"`

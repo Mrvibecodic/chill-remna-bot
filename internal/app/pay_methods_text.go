@@ -90,7 +90,7 @@ func withPayNote(lang, method, text string) string {
 func payMethodWebTexts(lang string) (labels, notes map[string]string) {
 	labels, notes = map[string]string{}, map[string]string{}
 	short := map[string]string{
-		model.PayMethodYooKassa: "yk", model.PayMethodCryptoBot: "cb", model.PayMethodHeleket: "hl",
+		model.PayMethodYooKassa: "yk", model.PayMethodCryptoBot: "cb", model.PayMethodPlatega: "pl", model.PayMethodHeleket: "hl",
 	}
 	for _, m := range payMethodOrder {
 		name := ownMethodName(lang, m)
