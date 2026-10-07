@@ -646,7 +646,7 @@ function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')
 function daysWord(n){return plural(n,'день','дня','дней');}
 // Названия и описания способов приходят с сервера (правятся в боте, «Тексты
 // бота»); встроенные ниже — запасные для старого сервера.
-var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',hl:'🪙'};
+var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',pl:'💳',hl:'🪙'};
 function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]?(METHOD_EMOJI[m]?METHOD_EMOJI[m]+' ':'')+esc(L[m]):fb;}
 function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
@@ -876,7 +876,7 @@ async function topupOpen(){
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
-var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',hl:'🪙 Криптовалюта (Heleket)'};
+var METHOD_LABELS2={yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)'};
 function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+

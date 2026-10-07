@@ -251,19 +251,7 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 	}
 	// Своя сумма — с тем же потолком, что в чате.
 	dto.MaxKopecks = maxK
-	a.mu.Lock()
-	if a.botCfg != nil {
-		if a.botCfg.YooKassa.Enabled {
-			dto.Methods = append(dto.Methods, "yk")
-		}
-		if a.botCfg.CryptoBot.Enabled {
-			dto.Methods = append(dto.Methods, "cb")
-		}
-		if a.botCfg.Heleket.Enabled {
-			dto.Methods = append(dto.Methods, "hl")
-		}
-	}
-	a.mu.Unlock()
+	dto.Methods = a.topUpMethods()
 	return dto
 }
 
@@ -279,7 +267,7 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.bad_amount"))}
 	}
-	if method != "yk" && method != "cb" && method != "hl" {
+	if !a.topUpMethodOn(method) {
 		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.topup_method"))}
 	}

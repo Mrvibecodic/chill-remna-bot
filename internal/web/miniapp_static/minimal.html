@@ -285,7 +285,7 @@ var L={ru:{
  tribute_hint:'Срок выбирается на странице Tribute. Подходят: %s — другой срок доступа не выдаст.',
  ap_hint:'После оплаты картой можно будет включить автопродление (%s). Только с вашего согласия.',
  m_balance:'С баланса',m_stars:'Telegram Stars',m_yookassa:'Банковская карта',m_cryptobot:'Криптовалюта',m_platega:'Platega',m_heleket:'Криптовалюта (Heleket)',m_tribute:'Tribute',m_p2p:'Перевод на карту',
- m_balance_s:'На балансе %s',m_yk:'Банковская карта',m_cb:'Криптовалюта',m_hl:'Криптовалюта (Heleket)',
+ m_balance_s:'На балансе %s',m_yk:'Банковская карта',m_pl:'Platega',m_cb:'Криптовалюта',m_hl:'Криптовалюта (Heleket)',
  pay_fail:'Не удалось создать оплату',paid_ok:'Оплата получена',
  wait_title:'Ожидаем оплату',wait_text:'Завершите оплату на открывшейся странице. Как только платёж пройдёт, подписка обновится сама.',
  wait_check:'Проверить оплату',wait_again:'Открыть оплату снова',wait_none:'Оплата пока не поступила. Если вы уже заплатили, подождите минуту.',
@@ -341,7 +341,7 @@ var L={ru:{
  tribute_hint:'The period is chosen on the Tribute page. Accepted: %s — other periods won’t grant access.',
  ap_hint:'After paying by card you can turn on auto-renewal (%s). Only with your consent.',
  m_balance:'From balance',m_stars:'Telegram Stars',m_yookassa:'Bank card',m_cryptobot:'Crypto',m_platega:'Platega',m_heleket:'Crypto (Heleket)',m_tribute:'Tribute',m_p2p:'Card transfer',
- m_balance_s:'Balance %s',m_yk:'Bank card',m_cb:'Crypto',m_hl:'Crypto (Heleket)',
+ m_balance_s:'Balance %s',m_yk:'Bank card',m_pl:'Platega',m_cb:'Crypto',m_hl:'Crypto (Heleket)',
  pay_fail:'Could not create the payment',paid_ok:'Payment received',
  wait_title:'Waiting for payment',wait_text:'Complete the payment in the opened window. As soon as it goes through, your subscription updates by itself.',
  wait_check:'Check payment',wait_again:'Open payment again',wait_none:'No payment yet. If you have already paid, wait a minute.',
@@ -802,7 +802,7 @@ SCREENS.wallet=async function(a){
 function tuMethods(a){
   var o=a.o||{};if(!(a.k>0)||!o.methods)return '';
   var h='<div class="sect" style="margin-top:14px">'+esc(T('topup_method'))+'</div><div class="list" style="margin-top:0">';
-  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
+  o.methods.forEach(function(m){h+='<button class="item" onclick="tuPay(\''+jsq(m)+'\',this)"><span class="ic">'+(m==='yk'||m==='pl'?IC.card:IC.coins)+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div><div class="s">'+esc(rub(a.k))+'</div>'+(mNote(m)?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(mNote(m))+'</div>':'')+'</span>'+CHEV+'</button>';});
   return h+'</div>';
 }
 function tuPick(k){haptic();CUR.arg.k=k;CUR.arg.custom=false;rerender();}

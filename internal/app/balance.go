@@ -314,6 +314,48 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 	a.showTopUpMethods(ctx, chatID)
 }
 
+// topUpMethodFull — короткий код способа пополнения → полное имя способа.
+var topUpMethodFull = map[string]string{
+	"yk": model.PayMethodYooKassa,
+	"cb": model.PayMethodCryptoBot,
+	"pl": model.PayMethodPlatega,
+	"hl": model.PayMethodHeleket,
+}
+
+// topUpMethods — включённые способы пополнения в порядке показа. Один список
+// на чат, мини-апп и кабинет.
+func (a *App) topUpMethods() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := a.botCfg
+	if c == nil {
+		return nil
+	}
+	var out []string
+	if c.YooKassa.Enabled {
+		out = append(out, "yk")
+	}
+	if c.CryptoBot.Enabled {
+		out = append(out, "cb")
+	}
+	if c.Platega.Enabled {
+		out = append(out, "pl")
+	}
+	if c.Heleket.Enabled {
+		out = append(out, "hl")
+	}
+	return out
+}
+
+func (a *App) topUpMethodOn(method string) bool {
+	for _, m := range a.topUpMethods() {
+		if m == method {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	k := a.getUI(chatID).topUpKopecks
@@ -321,20 +363,10 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 		a.showTopUp(ctx, chatID)
 		return
 	}
-	a.mu.Lock()
-	ykOn := a.botCfg != nil && a.botCfg.YooKassa.Enabled
-	cbOn := a.botCfg != nil && a.botCfg.CryptoBot.Enabled
-	hlOn := a.botCfg != nil && a.botCfg.Heleket.Enabled
-	a.mu.Unlock()
 	var rows [][]models.InlineKeyboardButton
-	if ykOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), kopecksToRub(k)+curSuffix(curRUB)), "top:m:yk")})
-	}
-	if cbOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), kopecksToRub(k)+curSuffix(curRUB)), "top:m:cb")})
-	}
-	if hlOn {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), kopecksToRub(k)+curSuffix(curRUB)), "top:m:hl")})
+	for _, m := range a.topUpMethods() {
+		full := topUpMethodFull[m]
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method."+m+"_btn", methodName(lang, full), kopecksToRub(k)+curSuffix(curRUB)), "top:m:"+m)})
 	}
 	if len(rows) == 0 {
 		// Админу — что включить, покупателю — куда писать. Раньше все видели
@@ -382,12 +414,16 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		checkCB = "cbc:" + checkExtID + ":0"
 		payBtn = i18n.T(lang, "cb.btn_pay")
 		checkBtn = i18n.T(lang, "cb.btn_check")
+	case "pl":
+		checkCB = "plc:" + checkExtID
+		payBtn = i18n.T(lang, "pl.btn_pay")
+		checkBtn = i18n.T(lang, "pl.btn_check")
 	case "hl":
 		checkCB = "hlc:" + checkExtID
 		payBtn = i18n.T(lang, "hl.btn_pay")
 		checkBtn = i18n.T(lang, "hl.btn_check")
 	}
-	full := map[string]string{"yk": model.PayMethodYooKassa, "cb": model.PayMethodCryptoBot, "hl": model.PayMethodHeleket}[method]
+	full := topUpMethodFull[method]
 	a.sendKB(ctx, chatID, withPayNote(lang, full, i18n.T(lang, "topup.pay_prompt", rub)), [][]models.InlineKeyboardButton{
 		{{Text: payBtn, URL: payURL}},
 		{btn(checkBtn, checkCB)},
@@ -396,7 +432,8 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 }
 
 // topUpCreate creates a balance top-up invoice (Purpose "topup") via YooKassa
-// ("yk") or CryptoBot ("cb") and returns the pay URL plus the check ExtID.
+// ("yk"), CryptoBot ("cb"), Platega ("pl") or Heleket ("hl") and returns the
+// pay URL plus the check ExtID.
 // For "cb" the returned ExtID is the bare invoice id (caller adds the "cb:"
 // prefix where needed). Shared by the chat flow and the Mini App so the pending
 // record format stays identical for the webhooks.
@@ -407,6 +444,11 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	// Последний рубеж: сюда приходят и чат, и мини-апп, и веб-кабинет.
 	if !a.topUpEnabled() {
 		return "", "", errUserText(i18n.T(lang, "topup.disabled"))
+	}
+	// Выключенный способ не принимает пополнений, даже если ключи остались:
+	// кнопка могла сохраниться в старом сообщении.
+	if !a.topUpMethodOn(method) {
+		return "", "", errUserText(i18n.T(lang, "topup.unavailable"))
 	}
 	rub := kopecksToRub(k)
 	if a.store != nil {
@@ -457,6 +499,15 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 			payURL = inv.BotInvoiceURL
 		}
 		return payURL, strconv.FormatInt(inv.InvoiceID, 10), nil
+	case "pl":
+		if a.plClient() == nil {
+			return "", "", errUserText(i18n.T(lang, "pl.not_configured"))
+		}
+		redirect, txID, e := a.plCreateTopUp(ctx, chatID, k, i18n.T(lang, "topup.invoice_desc"), gatewayReturnURL(a.plConfig().ReturnURL))
+		if e != nil {
+			return "", "", fmt.Errorf("шлюз Platega: счёт на пополнение: %w", e)
+		}
+		return redirect, txID, nil
 	case "hl":
 		if a.hlClient() == nil {
 			return "", "", errUserText(i18n.T(lang, "hl.not_configured"))

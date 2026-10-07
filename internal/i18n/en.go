@@ -135,7 +135,7 @@ var en = map[string]string{
 	"topup.too_much":          "❌ Per-top-up maximum is %s ₽ (the most expensive plan price). Enter a smaller amount.",
 	"topup.bad_amount":        "❌ Invalid amount. Enter a number in RUB, e.g. 250.",
 	"topup.choose_method":     "💼 Top up <b>%s ₽</b>\n\nChoose a payment method:",
-	"topup.no_methods":        "🙏 No top-up methods available. Enable YooKassa or CryptoBot.",
+	"topup.no_methods":        "🙏 No top-up methods available. Enable YooKassa, CryptoBot, Platega or Heleket.",
 	"topup.invoice_desc":      "Balance top-up",
 	"topup.pay_prompt":        "💼 Top up <b>%s ₽</b>. Pay via the button below; balance is credited automatically after payment.",
 	"topup.done":              "✅ Balance topped up by %s ₽. Current balance: <b>%s ₽</b>.",
