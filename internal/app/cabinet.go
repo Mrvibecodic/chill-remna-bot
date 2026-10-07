@@ -5,15 +5,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-telegram/bot/models"
 	"golang.org/x/crypto/bcrypt"
 
-	"remnabot/internal/i18n"
 	"remnabot/internal/mailer"
 	"remnabot/internal/model"
 )
@@ -279,12 +276,8 @@ func (a *App) CabinetP2PScreenshot(ctx context.Context, tgID, reqID int64, filen
 	}
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), tgID, "screenshot_submitted", "из мини-аппа или кабинета, ожидает проверки")
 	lang := a.lang(a.cfg.AdminID)
-	caption := i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID), req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
-	id := strconv.FormatInt(req.ID, 10)
-	rows := [][]models.InlineKeyboardButton{{
-		btn(i18n.T(lang, "admin.btn_pay_ok"), "adm:pok:"+id),
-		btn(i18n.T(lang, "admin.btn_pay_no"), "adm:pno:"+id),
-	}}
+	caption := a.p2pCardText(ctx, req, lang)
+	rows := p2pCardRows(lang, req)
 	// PDF картинкой не отправишь — уводим админу файлом.
 	if kind == receiptPDF {
 		a.sendAdminDocUpload(ctx, filename, data, caption, rows)

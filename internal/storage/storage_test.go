@@ -1176,3 +1176,46 @@ func TestListUserPending(t *testing.T) {
 		}
 	})
 }
+
+// Заявка на пополнение переводом: назначение и сумма переживают запись,
+// исправленная админом сумма сохраняется, в «уже платил» пополнение не идёт.
+func TestP2PTopUpRequestFields(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const u int64 = 1000000001
+		_ = st.UpsertUser(ctx, u)
+		r := &model.P2PRequest{TelegramID: u, Price: "500", Status: model.P2PSubmitted, Card: "CARD",
+			Purpose: model.P2PPurposeTopUp, Kopecks: 50000}
+		if err := st.CreateP2PRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.GetP2PRequest(ctx, r.ID)
+		if err != nil || got == nil || !got.IsTopUp() || got.Kopecks != 50000 {
+			t.Fatalf("заявка: %+v %v", got, err)
+		}
+		got.Kopecks, got.Price = 44990, "449.90"
+		got.Status = model.P2PApproved
+		if err := st.UpdateP2PRequest(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		if g, _ := st.GetP2PRequest(ctx, r.ID); g == nil || g.Kopecks != 44990 || g.Price != "449.90" {
+			t.Fatalf("исправленная сумма не сохранилась: %+v", g)
+		}
+		if ok, err := st.HasApprovedPurchase(ctx, u); err != nil || ok {
+			t.Fatalf("пополнение засчитано покупкой: %v %v", ok, err)
+		}
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, p := range snap.P2P {
+			if p.ID == r.ID && p.IsTopUp() && p.Kopecks == 44990 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("выгрузка потеряла назначение или сумму заявки")
+		}
+	})
+}

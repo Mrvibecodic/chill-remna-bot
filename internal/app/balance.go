@@ -316,10 +316,11 @@ func (a *App) setTopUpCustom(ctx context.Context, chatID int64, text string) {
 
 // topUpMethodFull — короткий код способа пополнения → полное имя способа.
 var topUpMethodFull = map[string]string{
-	"yk": model.PayMethodYooKassa,
-	"cb": model.PayMethodCryptoBot,
-	"pl": model.PayMethodPlatega,
-	"hl": model.PayMethodHeleket,
+	"p2p": model.PayMethodP2P,
+	"yk":  model.PayMethodYooKassa,
+	"cb":  model.PayMethodCryptoBot,
+	"pl":  model.PayMethodPlatega,
+	"hl":  model.PayMethodHeleket,
 }
 
 // topUpMethods — включённые способы пополнения в порядке показа. Один список
@@ -332,6 +333,9 @@ func (a *App) topUpMethods() []string {
 		return nil
 	}
 	var out []string
+	if c.P2P.Enabled {
+		out = append(out, model.PayMethodP2P)
+	}
 	if c.YooKassa.Enabled {
 		out = append(out, "yk")
 	}
@@ -366,6 +370,10 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 	var rows [][]models.InlineKeyboardButton
 	for _, m := range a.topUpMethods() {
 		full := topUpMethodFull[m]
+		if m == model.PayMethodP2P {
+			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, full)), "top:m:"+m)})
+			continue
+		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method."+m+"_btn", methodName(lang, full), kopecksToRub(k)+curSuffix(curRUB)), "top:m:"+m)})
 	}
 	if len(rows) == 0 {
@@ -398,6 +406,11 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		a.getUI(chatID).topUpKopecks = 0
 		a.sendKB(ctx, chatID, i18n.T(lang, "topup.too_much", kopecksToRub(maxK)),
 			[][]models.InlineKeyboardButton{navBack(lang, "menu:topup")})
+		return
+	}
+	// Перевод на карту — не счёт шлюза, а заявка с чеком и ручным одобрением.
+	if method == model.PayMethodP2P {
+		a.startP2PTopUp(ctx, chatID, k)
 		return
 	}
 	rub := kopecksToRub(k)
