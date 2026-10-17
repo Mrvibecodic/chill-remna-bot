@@ -370,3 +370,81 @@ func TestV3DevicesUseNumericID(t *testing.T) {
 		t.Fatalf("список устройств запрошен не по id: %v", p.hwidPaths)
 	}
 }
+
+// panel28 — панель 2.8.x: старый поиск по telegramId ещё есть, а /users/stream
+// уже есть, но фильтр telegramId игнорирует и отдаёт первую страницу всех.
+func panel28(streamHits *int) *httptest.Server {
+	users := []string{
+		`{"uuid":"00000000-0000-4000-8000-000000000001","id":2,"username":"first","telegramId":1000000001,"status":"ACTIVE","subscriptionUrl":"https://x/first"}`,
+		`{"uuid":"00000000-0000-4000-8000-000000000003","id":4,"username":"third","telegramId":1000000003,"status":"ACTIVE","subscriptionUrl":"https://x/third"}`,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/users/by-telegram-id/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch strings.TrimPrefix(r.URL.Path, "/api/users/by-telegram-id/") {
+		case "1000000001":
+			w.Write([]byte(`{"response":[` + users[0] + `]}`))
+		case "1000000003":
+			w.Write([]byte(`{"response":[` + users[1] + `]}`))
+		default:
+			w.Write([]byte(`{"response":[]}`))
+		}
+	})
+	mux.HandleFunc("/api/users/stream", func(w http.ResponseWriter, r *http.Request) {
+		if streamHits != nil {
+			*streamHits++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"response":{"users":[` + users[0] + `],"nextCursor":"2","hasMore":true}}`))
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestPanel28UnknownUserDoesNotSwitchToV3(t *testing.T) {
+	// После поиска человека, которого на панели нет, бот не должен принять 2.8.x
+	// за 3.x и перестать находить подписчиков (продление заводило второй аккаунт).
+	var streamHits int
+	srv := panel28(&streamHits)
+	defer srv.Close()
+	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	ctx := context.Background()
+
+	if u, err := c.findByTelegram(ctx, 1000000009); u != nil || err != nil {
+		t.Fatalf("незнакомый: u=%v err=%v", u, err)
+	}
+	if g := c.generation(); g != genLegacy {
+		t.Fatalf("ответ старого маршрута должен определить диалект, получили %v", g)
+	}
+	u, err := c.findByTelegram(ctx, 1000000003)
+	if err != nil || u == nil || u.Username != "third" {
+		t.Fatalf("подписчик не найден: u=%v err=%v", u, err)
+	}
+	if streamHits != 0 {
+		t.Fatalf("на 2.8.x пробник не нужен, запросов к /users/stream: %d", streamHits)
+	}
+}
+
+func TestProbeStreamWithUUIDsIsLegacy(t *testing.T) {
+	srv := panel28(nil)
+	defer srv.Close()
+	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	if g := c.probeGen(context.Background()); g != genLegacy {
+		t.Fatalf("страница /users/stream с uuid — это 2.8.x, получили %v", g)
+	}
+}
+
+func TestStreamIgnoringFilterFallsBackToLegacy(t *testing.T) {
+	// Диалект уже ошибочно запомнен как 3.x: stream вернул чужого — это не
+	// «пользователя нет», бот обязан спросить старый маршрут.
+	srv := panel28(nil)
+	defer srv.Close()
+	c := New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	c.noteGen(genV3)
+	u, err := c.findByTelegram(context.Background(), 1000000003)
+	if err != nil || u == nil || u.Username != "third" {
+		t.Fatalf("подписчик не найден: u=%v err=%v", u, err)
+	}
+	if g := c.generation(); g != genLegacy {
+		t.Fatalf("диалект должен вернуться к старому, получили %v", g)
+	}
+}
