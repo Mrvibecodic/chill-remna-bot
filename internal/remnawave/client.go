@@ -386,11 +386,13 @@ func (c *Client) noteUser(u *panelUser) {
 	}
 }
 
-// probeGen asks the panel which dialect it speaks: /api/users/stream exists only
-// from 3.0.0 on. Deliberately careful — a wrong answer here sends every lookup
-// to a route the panel doesn't have:
+// probeGen asks the panel which dialect it speaks via /api/users/stream.
+// Deliberately careful — a wrong answer here sends every lookup to a route the
+// panel doesn't have:
 //   - 200 counts only when the body really is a stream envelope (a proxy or a
-//     catch-all answering 200 to anything proves nothing);
+//     catch-all answering 200 to anything proves nothing). The route exists
+//     since 2.8.0 too, but there it ignores telegramId and its users still
+//     carry a uuid — such a page means the pre-3.0.0 dialect;
 //   - any other client-side refusal means a pre-3.0.0 panel. Not just 404: on
 //     2.x the request matches GET /api/users/:uuid, whose uuid validation
 //     answers 400;
@@ -422,11 +424,20 @@ func (c *Client) probeGen(ctx context.Context) panelGen {
 		}
 		var env struct {
 			Response *struct {
-				Users *[]json.RawMessage `json:"users"`
+				Users *[]struct {
+					Uuid string `json:"uuid"`
+				} `json:"users"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(body, &env) == nil && env.Response != nil && env.Response.Users != nil {
-			c.noteGen(genV3)
+			g := genV3
+			for _, u := range *env.Response.Users {
+				if u.Uuid != "" {
+					g = genLegacy
+					break
+				}
+			}
+			c.noteGen(g)
 		}
 	case undecidedStatus(resp.StatusCode):
 		// auth / rate limit / server trouble — proves nothing
@@ -1797,8 +1808,8 @@ func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUs
 }
 
 // findByTelegramStream is the 3.0.0+ lookup: GET /api/users/stream?telegramId=.
-// gone=true means the route itself is not there (wrong base URL, or a panel
-// older than 3.0.0).
+// gone=true means the route can't answer this (not there — wrong base URL, or
+// a panel older than 2.8.0 — or there without the telegramId filter, as on 2.8.x).
 func (c *Client) findByTelegramStream(ctx context.Context, telegramID int64) (u *panelUser, gone bool, err error) {
 	path := "/api/users/stream?size=1&telegramId=" + strconv.FormatInt(telegramID, 10)
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
@@ -1829,6 +1840,12 @@ func (c *Client) findByTelegramStream(ctx context.Context, telegramID int64) (u 
 		c.noteUser(&env.Response.Users[i])
 		return &env.Response.Users[i], false, nil
 	}
+	if len(env.Response.Users) > 0 {
+		// Someone else came back, so the filter was not applied (2.8.x has this
+		// route without it). Treat it like a missing route: "no such user" here
+		// would let a renewal create a second account.
+		return nil, true, nil
+	}
 	return nil, false, nil
 }
 
@@ -1855,9 +1872,17 @@ func (c *Client) findByTelegramLegacy(ctx context.Context, telegramID int64) (u 
 		return nil, false, err
 	}
 	var arr []panelUser
-	if json.Unmarshal(env.Response, &arr) == nil && len(arr) > 0 {
-		c.noteUser(&arr[0])
-		return &arr[0], false, nil
+	if json.Unmarshal(env.Response, &arr) == nil {
+		if len(arr) > 0 {
+			c.noteUser(&arr[0])
+			return &arr[0], false, nil
+		}
+		if env.Response != nil && string(env.Response) != "null" {
+			// The route answered with its own (empty) list, and it exists only
+			// before 3.0.0: the dialect is settled without asking /users/stream,
+			// which on 2.8.x answers too but ignores telegramId.
+			c.noteGen(genLegacy)
+		}
 	}
 	var one panelUser
 	if json.Unmarshal(env.Response, &one) == nil && !one.ref().Empty() {
