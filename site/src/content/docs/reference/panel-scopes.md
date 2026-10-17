@@ -1,39 +1,45 @@
 ---
 title: Права токена панели
-description: Какие скоупы API-токена Remnawave 3.x нужны боту — готовый список для вставки и разбивка по функциям.
+description: Какие скоупы API-токена Remnawave нужны боту — готовый список для вставки и разбивка по функциям.
 ---
 
-На панели Remnawave **3.x** у API-токена есть скоупы: токен может только то, что в них перечислено. Если права не хватает, панель отвечает `403 Forbidden`, и функция не работает.
+С версии **2.8.0** у API-токена панели Remnawave есть скоупы: токен может только то, что в них перечислено. Если права не хватает, панель отвечает `403 Forbidden`, и функция не работает.
 
-На панели **2.x** скоупов нет — токен может всё, эта страница не нужна. При обновлении панели до 3.x старые токены переносятся сами.
+На панели **2.7.x** скоупов нет — эта страница не нужна. Токены, созданные до обновления, получают полный доступ (`*`) сами.
 
 ## Готовый список
 
-Всё, что нужно боту со всеми функциями:
+Всё, что нужно боту со всеми функциями. Скопируйте блок целиком.
 
+```json
+[
+  "system:remnawave-health",
+  "system:stats",
+  "users:list",
+  "users:stream",
+  "users:by-id",
+  "users:by-username",
+  "users:create",
+  "users:update",
+  "users:delete",
+  "users:reset-traffic",
+  "users:revoke-subscription",
+  "internal-squads:list",
+  "external-squads:list",
+  "hosts:list",
+  "hwid-user-devices:list-by-user",
+  "hwid-user-devices:delete-all",
+  "node-plugins:list",
+  "node-plugins:update",
+  "node-plugins:executor",
+  "subscription-page-configs:list",
+  "subscriptions:subpage-config"
+]
 ```
-system:remnawave-health
-system:stats
-users:list
-users:stream
-users:by-id
-users:by-username
-users:create
-users:update
-users:delete
-users:reset-traffic
-users:revoke-subscription
-internal-squads:list
-external-squads:list
-hosts:list
-hwid-user-devices:list-by-user
-hwid-user-devices:delete-all
-node-plugins:list
-node-plugins:update
-node-plugins:executor
-subscription-page-configs:list
-subscriptions:subpage-config
-```
+
+Как вставить: в панели **Настройки Remnawave → Токены API → Создать токен API**, кнопка «Вставить» (значок буфера обмена). Панель принимает только такой JSON-массив — список строками без скобок и кавычек она не примет.
+
+**Панель 2.8.x:** добавьте ещё `"users:by-telegram-id"` и `"users:by-uuid"` — на 2.8 бот ищет и открывает аккаунты по старым адресам.
 
 ## Обязательный минимум
 
@@ -42,10 +48,10 @@ subscriptions:subpage-config
 | Скоуп | Зачем |
 |---|---|
 | `system:remnawave-health` | проверка связи с панелью — с неё начинаются мастер и экран «Подключение к панели» |
-| `system:stats` | число пользователей панели в мастере, `/status` и «Системе» |
-| `users:stream` | поиск аккаунта по Telegram ID |
+| `system:stats` | число пользователей панели — тоже часть проверки токена; ещё `/status` и «Система» |
+| `users:stream` | поиск аккаунта по Telegram ID (на 2.8 — `users:by-telegram-id`) |
 | `users:by-username` | поиск аккаунтов без Telegram ID (например, зарегистрированных в кабинете по почте) |
-| `users:by-id` | привязка существующего аккаунта панели к человеку в админке |
+| `users:by-id` | открыть аккаунт панели по его номеру — например, при привязке в админке (на 2.8 — `users:by-uuid`) |
 | `users:list` | обход всех аккаунтов: переезд с другого бота, сверки, доп-подписка |
 | `users:create` | новая подписка и триал |
 | `users:update` | продление, лимиты, сквады, блокировка и разблокировка |
@@ -70,24 +76,26 @@ subscriptions:subpage-config
 
 Панель принимает и широкие права: `*` (всё), `ресурс:*` (например, `users:*`), `ресурс:read` или `ресурс:write` (все чтения или все записи ресурса). Поэтому вместо списка выше подойдёт:
 
-```
-users:*
-system:read
-internal-squads:list
-external-squads:list
-hosts:list
-hwid-user-devices:*
-node-plugins:*
-subscription-page-configs:list
-subscriptions:subpage-config
+```json
+[
+  "users:*",
+  "system:read",
+  "internal-squads:list",
+  "external-squads:list",
+  "hosts:list",
+  "hwid-user-devices:*",
+  "node-plugins:*",
+  "subscription-page-configs:list",
+  "subscriptions:subpage-config"
+]
 ```
 
-Прав будет больше, чем нужно, но бот заработает.
+Прав будет больше, чем нужно, но бот заработает — на 2.8.x тоже.
 
 ## Если панель отвечает 403
 
-- **Токен не сохраняется, «панель не на связи».** Скорее всего, нет `system:remnawave-health`: проверка связи начинается с него, и без него токен выглядит нерабочим целиком.
+- **Токен не сохраняется: «панель отклонила доступ (HTTP 403)».** Нет `system:remnawave-health` или `system:stats` — проверка токена начинается с них.
 - **403 на кнопках торрент-блокера.** Нет `node-plugins:update` или `node-plugins:executor`.
-- **Бот «теряет» подписку и заводит второй аккаунт.** Проверьте `users:stream` и `users:by-username`.
+- **Покупка или продление падают с 403.** Проверьте `users:stream` и `users:by-username` (на 2.8 — `users:by-telegram-id`).
 
 Токен меняется в боте: **Система → 🔌 Подключение к панели → 🔑 API-token**. Бот проверяет его на панели до сохранения, так что нехватку прав видно сразу.
