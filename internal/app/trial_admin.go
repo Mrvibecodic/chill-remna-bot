@@ -142,11 +142,15 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 	case "squads":
 		a.showTrialSquads(ctx, chatID)
 	case "intsq":
+		live := a.liveSquads(ctx)
 		a.toggleTrialInternal(arg)
+		a.pruneTrialSquads(live)
 		_ = a.saveBotConfig(ctx)
 		a.showTrialSquads(ctx, chatID)
 	case "extsq":
+		live := a.liveSquads(ctx)
 		a.toggleTrialExternal(arg)
+		a.pruneTrialSquads(live)
 		_ = a.saveBotConfig(ctx)
 		a.showTrialSquads(ctx, chatID)
 	case "quick":
@@ -190,6 +194,7 @@ func (a *App) showTrialSquads(ctx context.Context, chatID int64) {
 	}
 	intSquads, _ := panel.ListSquads(ctx)
 	extSquads, _ := panel.ListExternalSquads(ctx)
+	live := panel.LiveSquads(ctx)
 	_, _, _, _, activeInt, activeExt := a.trialCfg()
 	isActive := func(uuid string) bool {
 		for _, u := range activeInt {
@@ -221,8 +226,23 @@ func (a *App) showTrialSquads(ctx context.Context, chatID int64) {
 			})
 		}
 	}
+	gone := goneSquadRows(lang, live, activeInt, activeExt,
+		func(u string) string { return "trial:intsq:" + u },
+		func(u string) string { return "trial:extsq:" + u })
+	rows = append(rows, gone...)
 	rows = append(rows, back)
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "trial.squads_title", len(intSquads), len(extSquads), len(activeInt)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "trial.squads_title", len(intSquads), len(extSquads), len(activeInt))+goneSquadsHint(lang, gone), rows)
+}
+
+// pruneTrialSquads убирает из настроек триала сквады, удалённые в панели.
+func (a *App) pruneTrialSquads(live remnawave.LiveSquads) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.botCfg == nil {
+		return
+	}
+	t := &a.botCfg.Trial
+	t.InternalSquads, t.ExternalSquadUUID = pruneGoneSquads(live, t.InternalSquads, t.ExternalSquadUUID)
 }
 
 func (a *App) startTrialQuick(ctx context.Context, chatID int64) {

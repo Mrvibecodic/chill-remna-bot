@@ -265,6 +265,7 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.err", err.Error()), [][]models.InlineKeyboardButton{back})
 		return
 	}
+	live := panel.LiveSquads(ctx)
 
 	isActiveInt := func(uuid string) bool {
 		for _, u := range activeInt {
@@ -282,15 +283,19 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, "addsub:int:"+sq.UUID)})
 	}
+	gone := goneSquadRows(lang, live, activeInt, "",
+		func(u string) string { return "addsub:int:" + u }, nil)
+	rows = append(rows, gone...)
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "addsub:refresh")})
 	rows = append(rows, back)
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt))+goneSquadsHint(lang, gone), rows)
 }
 
 func (a *App) toggleAddSubInternal(ctx context.Context, chatID int64, uuid string) {
 	if uuid == "" {
 		return
 	}
+	live := a.liveSquads(ctx)
 	a.mu.Lock()
 	if a.botCfg != nil {
 		cur := a.botCfg.AddSub.InternalSquads
@@ -306,6 +311,7 @@ func (a *App) toggleAddSubInternal(ctx context.Context, chatID int64, uuid strin
 		} else {
 			a.botCfg.AddSub.InternalSquads = append(cur, uuid)
 		}
+		a.botCfg.AddSub.InternalSquads, _ = pruneGoneSquads(live, a.botCfg.AddSub.InternalSquads, "")
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)

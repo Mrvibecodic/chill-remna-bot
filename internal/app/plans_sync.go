@@ -441,11 +441,14 @@ func (a *App) setPlanCurrency(ctx context.Context, code, cur string) error {
 // togglePlanSquad переключает сквад. months == 0 — набор уровня тарифа
 // (глобальные сквады старого экрана), months > 0 — переопределение
 // длительности. external выбирает внешний сквад (он один) вместо внутренних.
+// Заодно из правимого набора уходят сквады, удалённые в панели.
 func (a *App) togglePlanSquad(ctx context.Context, code string, months int, uuid string, external bool) error {
 	if uuid == "" {
 		return nil
 	}
+	live := a.liveSquads(ctx)
 	return a.editPlanPricing(ctx, code, func(p *model.Plan) error {
+		defer prunePlanSquads(live, p, months)
 		if months == 0 {
 			if external {
 				if p.ExtSquad == uuid {

@@ -331,6 +331,7 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 		return
 	}
 	extSquads, _ := panel.ListExternalSquads(ctx)
+	live := panel.LiveSquads(ctx)
 
 	// Текущий выбор: у длительности — её переопределение (пусто = наследует
 	// уровень тарифа), у тарифа — его собственный набор.
@@ -379,6 +380,10 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 			btn(mark+" 📡 "+sq.Name, "plq:e:"+moStr+":"+h+":"+sq.UUID),
 		})
 	}
+	gone := goneSquadRows(lang, live, selInt, selExt,
+		func(u string) string { return "plq:i:" + moStr + ":" + h + ":" + u },
+		func(u string) string { return "plq:e:" + moStr + ":" + h + ":" + u })
+	rows = append(rows, gone...)
 	if mo > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "pricing.sq_clear"), "pln:sqc:"+moStr+":"+p.Code),
@@ -394,7 +399,7 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 		}
 		title = i18n.T(lang, "plans.sq_month_title", planTitleHTML(lang, p), mo, state)
 	}
-	a.sendPayKB(ctx, chatID, title, rows)
+	a.sendPayKB(ctx, chatID, title+goneSquadsHint(lang, gone), rows)
 }
 
 // onPlanSquadToggle — нажатие тумблера сквада: plq:<i|e>:<mo>:<hash>:<uuid>.
