@@ -45,6 +45,7 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	}
 	intSquads, _ := panel.ListSquads(ctx)
 	extSquads, _ := panel.ListExternalSquads(ctx)
+	live := panel.LiveSquads(ctx)
 	isActive := func(uuid string) bool {
 		for _, u := range actInt {
 			if u == uuid {
@@ -72,6 +73,10 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 			rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 📡 "+sq.Name, "prc:sqe:"+moStr+":"+sq.UUID)})
 		}
 	}
+	gone := goneSquadRows(lang, live, actInt, actExt,
+		func(u string) string { return "prc:sqi:" + moStr + ":" + u },
+		func(u string) string { return "prc:sqe:" + moStr + ":" + u })
+	rows = append(rows, gone...)
 	if len(actInt) > 0 || actExt != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "pricing.sq_clear"), "prc:sqclear:"+moStr)})
 	}
@@ -81,7 +86,7 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	if actExt != "" {
 		_, extState = a.squadNames(ctx, nil, actExt)
 	}
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.sq_title", mo, gIntCSV, gExtName, len(actInt), extState)+goneSquadsHint(lang, gone), rows)
 }
 
 func (a *App) formatTrafficLimits() string {

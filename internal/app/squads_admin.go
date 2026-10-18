@@ -35,6 +35,7 @@ func (a *App) showSquads(ctx context.Context, chatID int64) {
 
 		extSquads = nil
 	}
+	live := panel.LiveSquads(ctx)
 
 	a.mu.Lock()
 	activeInt := append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
@@ -73,10 +74,14 @@ func (a *App) showSquads(ctx context.Context, chatID int64) {
 			})
 		}
 	}
+	gone := goneSquadRows(lang, live, activeInt, activeExt,
+		func(u string) string { return "sqd:int:" + u },
+		func(u string) string { return "sqd:ext:" + u })
+	rows = append(rows, gone...)
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "sqd:refresh")})
 	rows = append(rows, back)
 
-	a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.title", len(intSquads), len(extSquads), len(activeInt), display(activeExt, lang)), rows)
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.title", len(intSquads), len(extSquads), len(activeInt), display(activeExt, lang))+goneSquadsHint(lang, gone), rows)
 }
 
 func display(v, lang string) string {

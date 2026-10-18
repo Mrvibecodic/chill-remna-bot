@@ -760,6 +760,8 @@ var en = map[string]string{
 	"plans.del_subs_note":          "⚠️ %d user(s) with an active subscription are currently on this plan: their terms stay, but renewing this plan becomes unavailable and auto-renewals will stop.",
 	"plans.code_failed":            "Could not generate a plan code. Please try again.",
 	"plans.del_confirm":            "🗑 Delete plan <b>%s</b>?\n\nActive subscriptions are unaffected: the terms they were sold on are frozen at payment time and do not depend on the plan — nobody is downgraded or cut off.\n\nThe plan itself is gone for good.",
+	"squads.gone":                  "❌ %s %s — removed in panel",
+	"squads.gone_hint":             "\n\n⚠️ Squads marked ❌ were removed in the panel — users won't get them. Tap to remove from the list.",
 	"squads.title":                 "📡 <b>Squads (which nodes the user gets)</b>\n\nInternal: %d · External: %d\nActive internal: %d · External: <code>%s</code>\n\nTap a squad to toggle (multiple internal allowed, one external).",
 	"squads.btn_refresh":           "🔄 Refresh from panel",
 	"squads.no_panel":              "📡 Panel not connected — nothing to show.",

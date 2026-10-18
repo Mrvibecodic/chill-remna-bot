@@ -53,6 +53,9 @@ type Client struct {
 
 	logMu sync.Mutex
 	logs  []APIEvent
+
+	// squads — последний список сквадов панели для выдачи (см. liveLimits).
+	squads squadCache
 }
 
 // hwidSyncAttempts is how many times ResetDevicesByTelegramID tries the HWID
@@ -841,7 +844,11 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		case strings.EqualFold(existing.Status, StatusDisabled):
 			patch["status"] = "ACTIVE"
 		}
-		applyLimits(patch, limits)
+		lim, err := c.liveLimits(ctx, limits, false)
+		if err != nil {
+			return res, err
+		}
+		applyLimits(patch, lim)
 		// Unlike A, B's traffic allowance is fully bot-owned, so "unlimited"
 		// (0) must be written explicitly instead of being left as-is.
 		patch["trafficLimitBytes"] = opt.TrafficBytes
@@ -871,9 +878,13 @@ func (c *Client) createAddSub(ctx context.Context, username string, main PanelUs
 	if disabled {
 		body["status"] = StatusDisabled
 	}
-	applyLimits(body, limits)
+	lim, err := c.liveLimits(ctx, limits, true)
+	if err != nil {
+		return err
+	}
+	applyLimits(body, lim)
 	body["trafficLimitBytes"] = trafficBytes
-	_, _, err := c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	_, _, err = c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 	return err
 }
 
@@ -1034,7 +1045,11 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
 		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		applyLimits(patch, limits)
+		lim, err := c.liveLimits(ctx, limits, false)
+		if err != nil {
+			return "", "", err
+		}
+		applyLimits(patch, lim)
 		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 		if err == nil {
 			_ = c.ResetTraffic(ctx, existing.ref())
@@ -1042,8 +1057,12 @@ func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, month
 		return link, expireAt, err
 	}
 
+	lim, err := c.liveLimits(ctx, limits, true)
+	if err != nil {
+		return "", "", err
+	}
 	body := newUserBody(telegramID, expire)
-	applyLimits(body, limits)
+	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
@@ -1065,11 +1084,19 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
 		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		applyLimits(patch, limits)
+		lim, err := c.liveLimits(ctx, limits, false)
+		if err != nil {
+			return "", "", err
+		}
+		applyLimits(patch, lim)
 		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 	}
+	lim, err := c.liveLimits(ctx, limits, true)
+	if err != nil {
+		return "", "", err
+	}
 	body := newUserBody(telegramID, expire)
-	applyLimits(body, limits)
+	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
@@ -1090,15 +1117,23 @@ func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, ext
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
 		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		applyLimits(patch, limits)
+		lim, err := c.liveLimits(ctx, limits, false)
+		if err != nil {
+			return "", "", err
+		}
+		applyLimits(patch, lim)
 		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
 		if err == nil && reset {
 			_ = c.ResetTraffic(ctx, existing.ref())
 		}
 		return link, expireAt, err
 	}
+	lim, err := c.liveLimits(ctx, limits, true)
+	if err != nil {
+		return "", "", err
+	}
 	body := newUserBody(telegramID, expire)
-	applyLimits(body, limits)
+	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
 
