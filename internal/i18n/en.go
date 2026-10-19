@@ -1217,6 +1217,8 @@ var en = map[string]string{
 	"wh.btn_guide":          "📋 A: guide",
 	"wh.btn_port":           "🔌 A: bot port",
 	"web.down":              "🛑 <b>The bot's web side is down</b>\n\nPayment webhooks, the mini app and the cabinet are unavailable. Most often the port is taken by another service or a previous container.\n\n<code>%s</code>",
+	"wh.domain_bad":         "❌ The domain was not saved: send just the name, e.g. <code>bot.example.com</code> — without <code>https://</code> or a path.",
+	"wh.base_bad":           "❌ The address was not saved: send it in full, e.g. <code>https://bot.example.com</code>.",
 	"wh.port_bad":           "❌ The port was not saved: it must be a number from 1 to 65535 — for example <code>18080</code> or <code>0.0.0.0:18080</code>.",
 	"wh.port_applying":      "🚀 Applying port %d (editing compose + restarting the container)… ~10–20s.",
 	"wh.port_applied":       "✅ Port %d applied; the bot restarted and listens on it. Point your web server to 127.0.0.1:%[1]d.",

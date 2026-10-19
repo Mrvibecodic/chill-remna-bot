@@ -4,15 +4,84 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"golang.org/x/net/idna"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/model"
 )
+
+// cleanDomain достаёт из ввода голое имя хоста: «https://bot.example.com/»
+// → «bot.example.com». Пусто — ввод не похож на домен (в том числе «https://»
+// без имени): такое не сохраняем, иначе адреса для платёжек выходят
+// «https://https://».
+func cleanDomain(raw string) string {
+	s := strings.TrimSpace(raw)
+	for {
+		l := strings.ToLower(s)
+		switch {
+		case strings.HasPrefix(l, "https://"):
+			s = s[len("https://"):]
+			continue
+		case strings.HasPrefix(l, "http://"):
+			s = s[len("http://"):]
+			continue
+		}
+		break
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	s = strings.TrimSuffix(s, ".")
+	if s == "" || net.ParseIP(s) != nil {
+		return ""
+	}
+	ascii, err := idna.Lookup.ToASCII(s)
+	if err != nil || !strings.Contains(ascii, ".") {
+		return ""
+	}
+	return strings.ToLower(ascii)
+}
+
+// validBaseURL — годится ли адрес за прокси: http(s) и непустой хост.
+// «https://https://» после склейки даёт хост «https» — это тоже мусор.
+func validBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h != "" && h != "https" && h != "http"
+}
+
+// healWebhookConfig чинит сохранённые раньше домен и адрес за прокси, если
+// туда попал адрес вместо имени: домен приводится к имени хоста, негодный
+// адрес очищается. Остальные значения не трогаются.
+func healWebhookConfig(cfg *model.BotConfig) {
+	if cfg == nil {
+		return
+	}
+	w := &cfg.Webhook
+	if strings.ContainsAny(w.Domain, "/ ") {
+		w.Domain = cleanDomain(w.Domain)
+	}
+	if w.PublicBaseURL != "" {
+		base := normalizeBaseURL(w.PublicBaseURL)
+		if !validBaseURL(base) {
+			base = ""
+		}
+		w.PublicBaseURL = base
+	}
+}
 
 // webhookListenPortNum returns the numeric listen port (default 8080).
 func (a *App) webhookListenPortNum() int {
