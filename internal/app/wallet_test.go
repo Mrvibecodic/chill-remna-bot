@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -135,5 +136,68 @@ func TestWallet_HeldAmount(t *testing.T) {
 	sum, n := a.walletHeld(ctx)
 	if sum != 100000 || n != 2 {
 		t.Fatalf("на балансах = %d ₽ у %d чел., ожидалось 1000 у 2", sum/100, n)
+	}
+}
+
+// Блок «На сколько хватит» админ прячет одной кнопкой — и в чате, и в
+// мини-аппе. По умолчанию (и в конфиге без настройки) блок показан.
+func TestWallet_ForecastToggle(t *testing.T) {
+	a, fs := planApp(t)
+	msg := a.msg.(*fakeMsg)
+	ctx := context.Background()
+	const uid int64 = 1000000001
+	_ = fs.UpsertUser(ctx, uid)
+	if err := fs.AddBalance(ctx, uid, 99000); err != nil {
+		t.Fatal(err)
+	}
+	balanceText := func() string {
+		msg.texts = nil
+		a.handleCallback(ctx, cb(uid, "menu:balance"))
+		return strings.Join(msg.texts, "\n")
+	}
+
+	if txt := balanceText(); !strings.Contains(txt, "На сколько хватит") {
+		t.Fatalf("по умолчанию блок должен быть показан:\n%s", txt)
+	}
+	if w := a.MiniWallet(ctx, uid); len(w.Rows) == 0 || w.MaxMonths == 0 {
+		t.Fatalf("мини-апп по умолчанию должен показывать прогноз: %+v", w)
+	}
+
+	// Не-админ настройку не трогает.
+	a.handleCallback(ctx, cb(uid, "wal:forecast"))
+	if !a.forecastShown() {
+		t.Fatal("не-админ не должен менять настройку кошелька")
+	}
+
+	a.handleCallback(ctx, cb(100, "wal:forecast"))
+	if a.forecastShown() {
+		t.Fatal("блок должен скрыться")
+	}
+	if !strings.Contains(strings.Join(msg.texts, "\n"), "«На сколько хватит»: <b>скрыт</b>") {
+		t.Fatalf("экран кошелька в админке не показывает состояние:\n%v", msg.texts)
+	}
+	txt := balanceText()
+	if strings.Contains(txt, "На сколько хватит") || strings.Contains(txt, "<pre>") {
+		t.Fatalf("скрытый блок виден в чате:\n%s", txt)
+	}
+	if !strings.Contains(txt, "Вывод средств невозможен") {
+		t.Fatalf("остальной кошелёк пропал:\n%s", txt)
+	}
+	if w := a.MiniWallet(ctx, uid); len(w.Rows) != 0 || w.MaxMonths != 0 || w.PlanName != "" || w.BalanceK != 99000 {
+		t.Fatalf("скрытый блок виден в мини-аппе: %+v", w)
+	}
+
+	a.handleCallback(ctx, cb(100, "wal:forecast"))
+	if !a.forecastShown() || !strings.Contains(balanceText(), "На сколько хватит") {
+		t.Fatal("блок должен вернуться")
+	}
+
+	// Конфиг с версии без настройки: блок показан.
+	var cfg model.BotConfig
+	if err := json.Unmarshal([]byte(`{"wallet":{"topup":true,"init":true}}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Wallet.HideForecast {
+		t.Fatal("старый конфиг не должен прятать блок")
 	}
 }

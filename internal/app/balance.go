@@ -78,8 +78,11 @@ func (a *App) userBalance(ctx context.Context, chatID int64) int64 {
 func (a *App) showBalance(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	bal := a.userBalance(ctx, chatID)
-	table, best, planLine := a.balanceForecast(ctx, chatID, lang, bal)
 	caption := i18n.T(lang, "balance.head", kopecksToRub(bal))
+	table, best, planLine := "", 0, ""
+	if a.forecastShown() {
+		table, best, planLine = a.balanceForecast(ctx, chatID, lang, bal)
+	}
 	if table != "" {
 		hdr := i18n.T(lang, "balance.forecast_hdr")
 		if planLine != "" {
@@ -771,6 +774,13 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)
+}
+
+// forecastShown — показывать ли в кошельке блок «На сколько хватит».
+func (a *App) forecastShown() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.botCfg == nil || !a.botCfg.Wallet.HideForecast
 }
 
 // topUpEnabled — можно ли класть деньги на баланс. Оплата с баланса от этой
