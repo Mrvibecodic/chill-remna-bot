@@ -123,15 +123,15 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 			base+"/webhook/platega", base+"/webhook/heleket", base+"/webhook/tribute")
 	}
 
-	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
+	text := i18n.T(lang, "wh.screen", a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
 		"\n\n" + i18n.T(lang, "wh.torrent_line") + "\n" + i18n.T(lang, "wh.torrent_moved")
 
 	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "wh.btn_guide"), "wh:guide")},
+		{btn(i18n.T(lang, "wh.btn_port"), "wh:addr"), btn(i18n.T(lang, "wh.btn_base"), "wh:base")},
 		{btn(i18n.T(lang, "wh.btn_public"), "wh:public"), btn(i18n.T(lang, "wh.btn_domain"), "wh:domain")},
 		{btn(i18n.T(lang, "wh.btn_apply"), "wh:apply")},
-		{btn(i18n.T(lang, "wh.btn_port"), "wh:addr")},
-		{btn(i18n.T(lang, "wh.btn_base"), "wh:base"), btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
+		{btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -142,7 +142,7 @@ func (a *App) showWebhookGuide(ctx context.Context, chatID int64) {
 	p := a.webhookListenPort()
 	caddy := fmt.Sprintf("handle /webhook/* {\n    reverse_proxy %s:%s\n}", c, p)
 	nginx := fmt.Sprintf("location /webhook/ {\n    proxy_pass http://%s:%s;\n    proxy_set_header Host $host;\n}", c, p)
-	text := i18n.T(lang, "wh.guide_intro", c, p) +
+	text := i18n.T(lang, "wh.guide_intro", c, p, p) +
 		"\n\n<b>Caddy</b>\n<pre>" + caddy + "</pre>" +
 		"\n<b>nginx</b>\n<pre>" + nginx + "</pre>\n\n" +
 		i18n.T(lang, "wh.guide_after")
@@ -204,9 +204,9 @@ func (a *App) applyWebhookServer(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "wh.apply_unavailable"))
 		return
 	}
-	// Pre-flight: if host ports 80/443 are already taken (FastPanel/nginx, the
-	// panel proxy, etc.), publishing them would fail to bind and crash-loop the
-	// bot. Refuse here and steer the admin to option A (behind the proxy).
+	// Pre-flight: if host ports 80/443 are already taken by another web server,
+	// publishing them would fail to bind and crash-loop the bot. Refuse here and
+	// steer the admin to option A (behind the proxy).
 	if busy, err := a.ctl.WebhookPortsBusy(ctx); err == nil && len(busy) > 0 {
 		ports := ""
 		for i, p := range busy {

@@ -484,7 +484,7 @@ func (c *Controller) addWebhookPortsToCompose() error {
 
 // PublishBotPort maps the bot's internal HTTP port to a HOST loopback port of
 // the same number (127.0.0.1:port:port) and recreates the container, so an
-// external reverse proxy (nginx/FastPanel) can reach the bot without exposing
+// external reverse proxy can reach the bot without exposing
 // it publicly. Used by the in-bot "Bot port" setting so the admin doesn't have
 // to edit compose by hand.
 func (c *Controller) PublishBotPort(ctx context.Context, port int) error {
