@@ -194,6 +194,9 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
 	dto := web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), Currency: curRUB}
 	dto.BalanceK = a.userBalance(ctx, tgID)
+	if !a.forecastShown() {
+		return dto
+	}
 	list, plan := a.forecastEntries(ctx, tgID)
 	if plan != nil {
 		dto.PlanName = strings.TrimSpace(plan.Icon + " " + plan.Name)

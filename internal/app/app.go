@@ -379,6 +379,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
+		healWebhookConfig(cfg)
 		a.botCfg = cfg
 		a.applyTexts(cfg)
 		a.panel = a.newPanel(cfg.Panel)

@@ -22,11 +22,16 @@ func (a *App) showWalletAdmin(ctx context.Context, chatID int64) {
 	if on {
 		state = i18n.T(lang, "wallet.state_on")
 	}
+	fcState, fcLabel := i18n.T(lang, "wallet.state_shown"), i18n.T(lang, "wallet.btn_fc_hide")
+	if !a.forecastShown() {
+		fcState, fcLabel = i18n.T(lang, "wallet.state_hidden"), i18n.T(lang, "wallet.btn_fc_show")
+	}
 	// Сколько денег сейчас лежит у людей: выключать пополнение вслепую нельзя.
 	held, holders := a.walletHeld(ctx)
-	text := i18n.T(lang, "wallet.title", state, kopecksToRub(held), holders)
+	text := i18n.T(lang, "wallet.title", state, fcState, kopecksToRub(held), holders)
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(label, "wal:topup")},
+		{btn(fcLabel, "wal:forecast")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -46,11 +51,16 @@ func (a *App) walletHeld(ctx context.Context) (int64, int) {
 
 // onWalletAdmin обрабатывает кнопки экрана кошелька (только админ).
 func (a *App) onWalletAdmin(ctx context.Context, chatID int64, val string) {
-	if val == "topup" {
+	switch val {
+	case "topup", "forecast":
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.NormalizeWallet()
-			a.botCfg.Wallet.TopUp = !a.botCfg.Wallet.TopUp
+			if val == "topup" {
+				a.botCfg.Wallet.TopUp = !a.botCfg.Wallet.TopUp
+			} else {
+				a.botCfg.Wallet.HideForecast = !a.botCfg.Wallet.HideForecast
+			}
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)

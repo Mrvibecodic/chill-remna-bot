@@ -1754,6 +1754,11 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.applyBotPort(ctx, chatID)
 	case "wh_base":
 		text = normalizeBaseURL(text)
+		if !validBaseURL(text) {
+			a.sendHome(ctx, chatID, i18n.T(lang, "wh.base_bad"))
+			ui.adminInput = ""
+			return
+		}
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.Webhook.PublicBaseURL = text
@@ -1888,7 +1893,11 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.showWhitelist(ctx, chatID, 0)
 	case "wh_domain":
 		ui.adminInput = ""
-		d := strings.TrimSpace(text)
+		d := cleanDomain(text)
+		if d == "" {
+			a.sendHome(ctx, chatID, i18n.T(lang, "wh.domain_bad"))
+			return
+		}
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.Webhook.Domain = d

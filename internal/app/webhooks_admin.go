@@ -4,15 +4,84 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"golang.org/x/net/idna"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/model"
 )
+
+// cleanDomain достаёт из ввода голое имя хоста: «https://bot.example.com/»
+// → «bot.example.com». Пусто — ввод не похож на домен (в том числе «https://»
+// без имени): такое не сохраняем, иначе адреса для платёжек выходят
+// «https://https://».
+func cleanDomain(raw string) string {
+	s := strings.TrimSpace(raw)
+	for {
+		l := strings.ToLower(s)
+		switch {
+		case strings.HasPrefix(l, "https://"):
+			s = s[len("https://"):]
+			continue
+		case strings.HasPrefix(l, "http://"):
+			s = s[len("http://"):]
+			continue
+		}
+		break
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	s = strings.TrimSuffix(s, ".")
+	if s == "" || net.ParseIP(s) != nil {
+		return ""
+	}
+	ascii, err := idna.Lookup.ToASCII(s)
+	if err != nil || !strings.Contains(ascii, ".") {
+		return ""
+	}
+	return strings.ToLower(ascii)
+}
+
+// validBaseURL — годится ли адрес за прокси: http(s) и непустой хост.
+// «https://https://» после склейки даёт хост «https» — это тоже мусор.
+func validBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h != "" && h != "https" && h != "http"
+}
+
+// healWebhookConfig чинит сохранённые раньше домен и адрес за прокси, если
+// туда попал адрес вместо имени: домен приводится к имени хоста, негодный
+// адрес очищается. Остальные значения не трогаются.
+func healWebhookConfig(cfg *model.BotConfig) {
+	if cfg == nil {
+		return
+	}
+	w := &cfg.Webhook
+	if strings.ContainsAny(w.Domain, "/ ") {
+		w.Domain = cleanDomain(w.Domain)
+	}
+	if w.PublicBaseURL != "" {
+		base := normalizeBaseURL(w.PublicBaseURL)
+		if !validBaseURL(base) {
+			base = ""
+		}
+		w.PublicBaseURL = base
+	}
+}
 
 // webhookListenPortNum returns the numeric listen port (default 8080).
 func (a *App) webhookListenPortNum() int {
@@ -123,15 +192,15 @@ func (a *App) showWebhooksAdmin(ctx context.Context, chatID int64) {
 			base+"/webhook/platega", base+"/webhook/heleket", base+"/webhook/tribute")
 	}
 
-	text := i18n.T(lang, "wh.screen", a.selfContainerName(), a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
+	text := i18n.T(lang, "wh.screen", a.webhookListenPort(), pubLabel, domainDisp, secretDisp) + urls +
 		"\n\n" + i18n.T(lang, "wh.torrent_line") + "\n" + i18n.T(lang, "wh.torrent_moved")
 
 	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "wh.btn_guide"), "wh:guide")},
+		{btn(i18n.T(lang, "wh.btn_port"), "wh:addr"), btn(i18n.T(lang, "wh.btn_base"), "wh:base")},
 		{btn(i18n.T(lang, "wh.btn_public"), "wh:public"), btn(i18n.T(lang, "wh.btn_domain"), "wh:domain")},
 		{btn(i18n.T(lang, "wh.btn_apply"), "wh:apply")},
-		{btn(i18n.T(lang, "wh.btn_port"), "wh:addr")},
-		{btn(i18n.T(lang, "wh.btn_base"), "wh:base"), btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
+		{btn(i18n.T(lang, "admin.wh_btn_secret"), "wh:secret")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
@@ -142,7 +211,7 @@ func (a *App) showWebhookGuide(ctx context.Context, chatID int64) {
 	p := a.webhookListenPort()
 	caddy := fmt.Sprintf("handle /webhook/* {\n    reverse_proxy %s:%s\n}", c, p)
 	nginx := fmt.Sprintf("location /webhook/ {\n    proxy_pass http://%s:%s;\n    proxy_set_header Host $host;\n}", c, p)
-	text := i18n.T(lang, "wh.guide_intro", c, p) +
+	text := i18n.T(lang, "wh.guide_intro", c, p, p) +
 		"\n\n<b>Caddy</b>\n<pre>" + caddy + "</pre>" +
 		"\n<b>nginx</b>\n<pre>" + nginx + "</pre>\n\n" +
 		i18n.T(lang, "wh.guide_after")
@@ -204,9 +273,9 @@ func (a *App) applyWebhookServer(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "wh.apply_unavailable"))
 		return
 	}
-	// Pre-flight: if host ports 80/443 are already taken (FastPanel/nginx, the
-	// panel proxy, etc.), publishing them would fail to bind and crash-loop the
-	// bot. Refuse here and steer the admin to option A (behind the proxy).
+	// Pre-flight: if host ports 80/443 are already taken by another web server,
+	// publishing them would fail to bind and crash-loop the bot. Refuse here and
+	// steer the admin to option A (behind the proxy).
 	if busy, err := a.ctl.WebhookPortsBusy(ctx); err == nil && len(busy) > 0 {
 		ports := ""
 		for i, p := range busy {

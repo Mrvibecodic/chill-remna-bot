@@ -990,6 +990,9 @@ type MiniAppConfig struct {
 type WalletConfig struct {
 	TopUp bool `json:"topup"`
 	Init  bool `json:"init"`
+	// HideForecast прячет блок «На сколько хватит» в кошельке. Нулевое
+	// значение — блок показан, как до появления настройки.
+	HideForecast bool `json:"hide_forecast,omitempty"`
 }
 
 // NormalizeWallet включает пополнение для всех, кто обновился с версии без
