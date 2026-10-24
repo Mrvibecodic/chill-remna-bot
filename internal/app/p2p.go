@@ -346,6 +346,11 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		label := i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
+	// ЮMoney — только рубли и только при публичном адресе бота (ymSellable).
+	if a.ymSellable() && a.saleFiat(s, model.PayMethodYooMoney) != "" && gridCur && a.plGridCurrencyOK() {
+		label := i18n.T(lang, "method.ym_btn", methodName(lang, model.PayMethodYooMoney), a.saleFiat(s, model.PayMethodYooMoney)+curSuffix(curRUB))
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:ym")})
+	}
 	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
 	// привязанной подпиской (у «Базового» — со ссылкой оплаты). Сравнивается
 	// код: «Базовый» с витрины приходит строкой тарифа, а не пустым Plan.
@@ -425,6 +430,8 @@ func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
 		a.startCryptoBot(ctx, chatID)
 	case "pl":
 		a.startPlatega(ctx, chatID)
+	case "ym":
+		a.startYooMoney(ctx, chatID)
 	case "hl":
 		a.startHeleket(ctx, chatID)
 	case "trb":
@@ -1843,6 +1850,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		field := ui.adminInput
 		ui.adminInput = ""
 		a.setPlategaField(ctx, chatID, field, text)
+	case "ym_receiver", "ym_secret", "ym_client", "ym_csecret", "ym_token", "ym_return":
+		field := ui.adminInput
+		ui.adminInput = ""
+		a.setYooMoneyField(ctx, chatID, field, text)
 	case "hl_merchant", "hl_key", "hl_tocur", "hl_subtract", "hl_lifetime", "hl_return":
 		field := ui.adminInput
 		ui.adminInput = ""

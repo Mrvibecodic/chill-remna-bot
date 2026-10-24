@@ -461,7 +461,7 @@ func (a *App) noPeriodForPayment(ctx context.Context, method, extID string, chat
 // отсюда не пишем, выдачу добьёт реконсилятор. У Stars сверки нет — там пишем.
 func methodSelfHeals(method string) bool {
 	switch method {
-	case model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodPlatega, model.PayMethodHeleket:
+	case model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodPlatega, model.PayMethodHeleket, model.PayMethodYooMoney:
 		return true
 	}
 	return false

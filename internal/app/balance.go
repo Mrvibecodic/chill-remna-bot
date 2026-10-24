@@ -341,6 +341,7 @@ var topUpMethodFull = map[string]string{
 	"cb":  model.PayMethodCryptoBot,
 	"pl":  model.PayMethodPlatega,
 	"hl":  model.PayMethodHeleket,
+	"ym":  model.PayMethodYooMoney,
 }
 
 // topUpMethods — включённые способы пополнения в порядке показа. Один список
@@ -367,6 +368,9 @@ func (a *App) topUpMethods() []string {
 	}
 	if c.Heleket.Enabled {
 		out = append(out, "hl")
+	}
+	if c.YooMoney.Enabled && c.YooMoney.Ready() && a.publicBaseURLLocked() != "" {
+		out = append(out, "ym")
 	}
 	return out
 }
@@ -465,6 +469,10 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 		checkCB = "hlc:" + checkExtID
 		payBtn = i18n.T(lang, "hl.btn_pay")
 		checkBtn = i18n.T(lang, "hl.btn_check")
+	case "ym":
+		checkCB = "ymc:" + checkExtID
+		payBtn = i18n.T(lang, "ym.btn_pay")
+		checkBtn = i18n.T(lang, "ym.btn_check")
 	}
 	full := topUpMethodFull[method]
 	a.sendKB(ctx, chatID, withPayNote(lang, full, i18n.T(lang, "topup.pay_prompt", rub)), [][]models.InlineKeyboardButton{
@@ -542,6 +550,16 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 			payURL = inv.BotInvoiceURL
 		}
 		return payURL, strconv.FormatInt(inv.InvoiceID, 10), nil
+	case "ym":
+		payURL, label, e := a.ymCreateTopUp(ctx, chatID, k)
+		if e != nil {
+			var ut userText
+			if errors.As(e, &ut) {
+				return "", "", e
+			}
+			return "", "", fmt.Errorf("шлюз ЮMoney: счёт на пополнение: %w", e)
+		}
+		return payURL, label, nil
 	case "pl":
 		if a.plClient() == nil {
 			return "", "", errUserText(i18n.T(lang, "pl.not_configured"))

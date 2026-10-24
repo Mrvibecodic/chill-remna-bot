@@ -12,6 +12,7 @@ import (
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/storage"
+	"remnabot/internal/yoomoney"
 )
 
 // invoiceSnapRetentionDays — сколько держим условия выставленных счетов Stars.
@@ -128,6 +129,8 @@ func (a *App) reconcileInvoice(ctx context.Context, st storage.Storage, pi *mode
 		a.reconcilePlatega(ctx, st, pi)
 	case model.PayMethodHeleket:
 		a.reconcileHeleket(ctx, st, pi)
+	case model.PayMethodYooMoney:
+		a.reconcileYooMoney(ctx, st, pi)
 	default:
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
@@ -235,6 +238,51 @@ func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *mode
 		// счёт не гасят — оплата ещё может дойти.
 		_ = st.ResolvePending(ctx, pi.ID)
 	}
+}
+
+// reconcileYooMoney — уведомление могло потеряться (ЮMoney делает всего три
+// попытки за час): спрашиваем историю кошелька по метке. По API видна
+// только зачисленная сумма, поэтому сверка с суммой счёта — с допуском на
+// комиссию получателя.
+func (a *App) reconcileYooMoney(ctx context.Context, st storage.Storage, pi *model.PendingInvoice) {
+	client := a.ymClient()
+	if client == nil {
+		a.reconLog(ctx, pi, "reconcile_error", "no-client", "токен ЮMoney не задан — счёт нельзя перепроверить")
+		return
+	}
+	ops, err := client.OperationsByLabel(ctx, pi.ExtID)
+	if err != nil {
+		a.reconLog(ctx, pi, "reconcile_error", err.Error(), "%v", err)
+		a.ymTokenAlert(ctx, err)
+		return
+	}
+	paid := ymPaidOps(ops, pi.ExtID)
+	if len(paid) == 0 {
+		a.reconLog(ctx, pi, "reconcile", "unpaid", "оплаченных операций по метке нет (всего %d)", len(ops))
+		return
+	}
+	// Зачитывается самая ранняя операция, покрывающая счёт (то же правило,
+	// что у кнопки и вебхука); остальные — лишние, о них админу.
+	op, extra := a.ymPickOp(paid, pi)
+	if op == nil {
+		// Ни одна операция счёт не покрывает — недоплата. Показываем самую
+		// крупную; счёт закрывается: дальше разбирает админ, а не сверка
+		// каждые две минуты.
+		best := paid[0]
+		for _, o := range paid[1:] {
+			if o.AmountK() > best.AmountK() {
+				best = o
+			}
+		}
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "underpaid", "счёт на %s RUB, зачислено %s (операция %s, всего операций %d) — не выдано", yoomoney.FormatSum(pi.Kopecks), yoomoney.FormatSum(best.AmountK()), best.ID, len(paid))
+		a.ymNotifyAdmin(ctx, pi.ExtID+":under", "ym.admin_underpaid", escapeName(best.ID), yoomoney.FormatSum(best.AmountK()), yoomoney.FormatSum(pi.Kopecks), a.userLabelByID(ctx, pi.TelegramID))
+		_ = st.ResolvePending(ctx, pi.ID)
+		return
+	}
+	a.reconLog(ctx, pi, "reconcile", "paid:"+op.ID, "операция %s зачислена %s RUB при счёте %s", op.ID, yoomoney.FormatSum(op.AmountK()), yoomoney.FormatSum(pi.Kopecks))
+	a.ymReportExtra(ctx, pi.ExtID, extra)
+	// В запись платежа — цена сделки (как у finalizeYooMoney).
+	a.reconcileFinalize(ctx, st, pi, yoomoney.FormatSum(pi.Kopecks)+" RUB")
 }
 
 // reconcileFinalize добивает недоставленную оплату. Возвращает true, только

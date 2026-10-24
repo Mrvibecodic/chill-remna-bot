@@ -130,12 +130,18 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified),
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
+	// ЮMoney (ymNotified), взведённое ожидание OAuth ЮMoney (ymAuthState),
 	// паузу между торрент-предупреждениями пользователю (torSeen) и счётчик
 	// неудачных попыток открыть тариф по ссылке (planLinkFails).
-	thrMu         sync.Mutex
-	thrLast       map[string]time.Time
-	hlNotified    map[string]time.Time
+	thrMu      sync.Mutex
+	thrLast    map[string]time.Time
+	hlNotified map[string]time.Time
+	ymNotified map[string]time.Time
+	// ymAuthState/ymAuthUntil — взведённое ожидание OAuth-редиректа ЮMoney
+	// (ссылка «Авторизовать» живёт ymAuthTTL).
+	ymAuthState   string
+	ymAuthUntil   time.Time
 	torSeen       map[int64]time.Time
 	torUnbSeen    map[int64]time.Time
 	torStrikeBusy map[int64]bool

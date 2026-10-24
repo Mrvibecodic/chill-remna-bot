@@ -92,6 +92,11 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.Platega.Enabled && a.plGridCurrencyOKLocked() {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodPlatega)
 		}
+		// ЮMoney — тоже только рубли, и покупателя ведём на страницу бота:
+		// без публичного адреса способа нет.
+		if c.YooMoney.Enabled && c.YooMoney.Ready() && a.publicBaseURLLocked() != "" && a.plGridCurrencyOKLocked() {
+			dto.PayMethods = append(dto.PayMethods, model.PayMethodYooMoney)
+		}
 		if c.Heleket.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodHeleket)
 		}

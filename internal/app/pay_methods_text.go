@@ -21,7 +21,7 @@ type payMethodTexts struct {
 // payMethodOrder — способы в порядке экрана «Способы оплаты».
 var payMethodOrder = []string{
 	model.PayMethodP2P, model.PayMethodStars, model.PayMethodYooKassa, model.PayMethodCryptoBot,
-	model.PayMethodPlatega, model.PayMethodHeleket, model.PayMethodTribute,
+	model.PayMethodPlatega, model.PayMethodHeleket, model.PayMethodTribute, model.PayMethodYooMoney,
 }
 
 var payMethodKeys = map[string]payMethodTexts{
@@ -32,6 +32,7 @@ var payMethodKeys = map[string]payMethodTexts{
 	model.PayMethodPlatega:   {"method.pl_name", "method.pl_note", "method.pl_btn"},
 	model.PayMethodHeleket:   {"method.hl_name", "method.hl_note", "method.hl_btn"},
 	model.PayMethodTribute:   {"method.trb_name", "method.trb_note", "method.trb_btn"},
+	model.PayMethodYooMoney:  {"method.ym_name", "method.ym_note", "method.ym_btn"},
 }
 
 // methodBtnKey — шаблон кнопки чата для ключа названия способа ("" — ключ не
@@ -91,6 +92,7 @@ func payMethodWebTexts(lang string) (labels, notes map[string]string) {
 	labels, notes = map[string]string{}, map[string]string{}
 	short := map[string]string{
 		model.PayMethodYooKassa: "yk", model.PayMethodCryptoBot: "cb", model.PayMethodPlatega: "pl", model.PayMethodHeleket: "hl",
+		model.PayMethodYooMoney: "ym",
 	}
 	for _, m := range payMethodOrder {
 		name := ownMethodName(lang, m)
@@ -134,6 +136,8 @@ func (a *App) methodEnabled(method string) bool {
 		return c.Heleket.Enabled
 	case model.PayMethodTribute:
 		return c.Tribute.Enabled
+	case model.PayMethodYooMoney:
+		return c.YooMoney.Enabled
 	}
 	return false
 }
