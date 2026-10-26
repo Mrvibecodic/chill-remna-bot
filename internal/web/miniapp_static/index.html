@@ -718,14 +718,16 @@ function buyPlan(code,months){
 }
 function renderP2PCard(card,amount,reqID,topup){
   haptic('tap');setBack(boot);
+  // id заявки больше 2^53 — держим строкой, через Number() он округляется.
+  var rid=String(reqID==null?'':reqID).replace(/\D/g,'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+(topup?' Пополнение переводом':' Оплата переводом')+'</span>'+IC.wallet+'</div>'+
     '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
     '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
-    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(reqID||0)+',this)">'+IC.check+'Отправить подтверждение</button></div>';
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel('+Number(reqID||0)+',this)">Отменить заявку</button>';
+    '<button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this)">'+IC.check+'Отправить подтверждение</button></div>';
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel(\''+rid+'\',this)">Отменить заявку</button>';
   h+='<button class="btn ghost" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }

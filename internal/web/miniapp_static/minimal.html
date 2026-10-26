@@ -754,10 +754,12 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden&&CUR
 
 /* ---------- P2P ---------- */
 SCREENS.p2p=function(a){
+  // id заявки больше 2^53 — держим строкой, через Number() он округляется.
+  var rid=String(a.req==null?'':a.req).replace(/\D/g,'');
   var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('p2p_title'))+'</span><div class="big">'+esc(a.amount||'')+'</div><div class="hint">'+esc(T('p2p_text'))+'</div></div>';
   h+='<div class="sect">'+esc(T('p2p_card'))+'</div><div class="card flat" style="margin-top:0"><div class="mono">'+esc(a.card)+'</div><button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(a.card)+'\')">'+IC.copy+esc(T('copy_card'))+'</button></div>';
-  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(a.req||0)+',this,'+(a.topup?1:0)+')">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
-  h+='<button class="btn ghost" style="margin-top:12px" onclick="p2pCancel('+Number(a.req||0)+',this)">'+esc(T('p2p_cancel'))+'</button>';
+  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this,'+(a.topup?1:0)+')">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
+  h+='<button class="btn ghost" style="margin-top:12px" onclick="p2pCancel(\''+rid+'\',this)">'+esc(T('p2p_cancel'))+'</button>';
   view(h);
 };
 async function p2pCancel(req,el){

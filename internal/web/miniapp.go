@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -232,9 +233,12 @@ type MiniActionDTO struct {
 	Invoice bool   `json:"invoice,omitempty"`
 	// P2P web flow: the card to transfer to + the request id the cabinet uploads
 	// a payment screenshot against.
+	// Идентификатор заявки — метка времени в наносекундах, больше 2^53:
+	// числом JSON браузер его округляет и шлёт обратно чужой id, поэтому
+	// он уходит строкой.
 	P2PCard   string `json:"p2p_card,omitempty"`
 	P2PAmount string `json:"p2p_amount,omitempty"`
-	P2PReqID  int64  `json:"p2p_req_id,omitempty"`
+	P2PReqID  int64  `json:"p2p_req_id,omitempty,string"`
 	// P2PTopUp — заявка на пополнение баланса, а не на покупку.
 	P2PTopUp bool `json:"p2p_topup,omitempty"`
 }
@@ -827,7 +831,7 @@ func (s *Server) handleMiniP2PCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ReqID int64 `json:"req_id"`
+		ReqID jsonID `json:"req_id"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil || req.ReqID == 0 {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -835,7 +839,25 @@ func (s *Server) handleMiniP2PCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniP2PCancel(ctx, id, req.ReqID))
+	writeJSON(w, http.StatusOK, s.mini.MiniP2PCancel(ctx, id, int64(req.ReqID)))
+}
+
+// jsonID — 64-битный идентификатор во входящем JSON: принимается и строкой
+// (так его отдаёт сервер), и числом (старая страница из кэша браузера).
+type jsonID int64
+
+func (v *jsonID) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*v = 0
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*v = jsonID(n)
+	return nil
 }
 
 func (s *Server) handleMiniConnect(w http.ResponseWriter, r *http.Request) {
