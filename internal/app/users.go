@@ -578,7 +578,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		if a.store != nil {
 			_ = a.store.SetP2PApproved(ctx, uid, allow)
 		}
-		if allow {
+		if allow && hasChat(uid) {
 			a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
 		}
 		a.showUser(ctx, chatID, uid)

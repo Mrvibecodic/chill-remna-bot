@@ -614,6 +614,9 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 	if method == model.PayMethodYooKassa {
 		a.fiscalize(float64(kopecks)/100, "Пополнение баланса")
 	}
+	if !hasChat(chatID) {
+		return nil
+	}
 	lang := a.lang(chatID)
 	a.notifyKB(ctx, chatID, i18n.T(lang, "topup.done", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))),
 		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}})

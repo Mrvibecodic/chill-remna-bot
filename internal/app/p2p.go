@@ -1133,7 +1133,9 @@ func (a *App) adminApproveUser(ctx context.Context, adminChat int64, arg string,
 		a.sendHome(ctx, adminChat, "❌ "+err.Error())
 		return
 	}
-	a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
+	if hasChat(uid) {
+		a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
+	}
 	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_ok_done"))
 }
 
@@ -1551,7 +1553,9 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 			Amount: req.Price + curSuffix(a.curFor(model.PayMethodP2P)), Status: model.PaymentRejected, Comment: text,
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
-		a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
+		if hasChat(req.TelegramID) {
+			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
+		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
 	}

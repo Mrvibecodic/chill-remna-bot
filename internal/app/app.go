@@ -1591,6 +1591,11 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	a.setScreenSection(chatID, section)
 }
 
+// hasChat — есть ли у аккаунта чат в Telegram. У аккаунта кабинета,
+// заведённого по почте, id синтетический отрицательный: писать туда некуда,
+// Telegram отвечает «chat not found» на каждую попытку.
+func hasChat(id int64) bool { return id > 0 }
+
 func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
 }

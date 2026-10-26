@@ -15,6 +15,9 @@ func (a *App) subActiveText(ctx context.Context, chatID int64, link, expireAt st
 }
 
 func (a *App) sendSubActive(ctx context.Context, chatID int64, link, expireAt string) {
+	if !hasChat(chatID) {
+		return
+	}
 	var rows [][]models.InlineKeyboardButton
 	if sup := a.supportURL(); sup != "" {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(a.lang(chatID), "btn.support"), URL: sup}})
