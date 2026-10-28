@@ -895,7 +895,7 @@ async function topupOpen(){
     var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
       '<div class="title">Выберите сумму</div>'+
       '<div class="coins"><svg viewBox="0 0 130 48" fill="none"><ellipse cx="45" cy="24" rx="19" ry="19" fill="rgba(91,140,255,.16)" stroke="#5b8cff" stroke-width="2"/><ellipse cx="65" cy="24" rx="19" ry="19" fill="rgba(157,123,255,.16)" stroke="#9d7bff" stroke-width="2"/><ellipse cx="85" cy="24" rx="19" ry="19" fill="rgba(52,211,153,.14)" stroke="#34d399" stroke-width="2"/><text x="85" y="30" text-anchor="middle" fill="#34d399" font-size="18" font-weight="700">₽</text></svg></div></div>';
-    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+esc(a.label)+'\')">'+esc(a.label)+'</button>';});
+    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
     h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}

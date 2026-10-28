@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,9 +65,9 @@ func TestP2PRequestIDSurvivesJSON(t *testing.T) {
 		t.Fatalf("id дошли с искажением: %v", f.cancelled)
 	}
 
-	for _, body := range []string{`{"req_id":""}`, `{"req_id":"abc"}`, `{"req_id":0}`, `{}`} {
+	for i, body := range []string{`{"req_id":""}`, `{"req_id":"abc"}`, `{"req_id":0}`, `{}`, `{"req_id":"+5"}`, `{"req_id":"-5"}`, `{"req_id":-5}`} {
 		w = httptest.NewRecorder()
-		h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/p2p/cancel", body, tok, "203.0.113.42"))
+		h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/p2p/cancel", body, tok, fmt.Sprintf("203.0.113.%d", 50+i)))
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("cancel %s: ожидался 400, получен %d", body, w.Code)
 		}

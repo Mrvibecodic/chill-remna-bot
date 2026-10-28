@@ -852,6 +852,10 @@ func (v *jsonID) UnmarshalJSON(b []byte) error {
 		*v = 0
 		return nil
 	}
+	// Только цифры: знак и прочее id заявки не бывает.
+	if s[0] < '0' || s[0] > '9' {
+		return strconv.ErrSyntax
+	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return err
