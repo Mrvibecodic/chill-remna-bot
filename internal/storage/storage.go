@@ -2009,11 +2009,18 @@ func (b *base) PayLogs(ctx context.Context, extID string, telegramID int64, limi
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := b.db.QueryContext(ctx,
-		"SELECT id, ext_id, telegram_id, method, stage, detail, created_at FROM payment_log "+
-			"WHERE (ext_id <> '' AND ext_id = "+b.ph(1)+") OR ("+b.ph(2)+" > 0 AND telegram_id = "+b.ph(3)+") "+
-			"ORDER BY id ASC LIMIT "+b.ph(4),
-		extID, telegramID, telegramID, limit)
+	// Условие по человеку — только когда он задан, и ветвлением в Go:
+	// «$2 > 0» pgx выводит как int4 и роняет запрос на id больше 2^31.
+	q := "SELECT id, ext_id, telegram_id, method, stage, detail, created_at FROM payment_log " +
+		"WHERE (ext_id <> '' AND ext_id = " + b.ph(1) + ")"
+	args := []any{extID}
+	if telegramID > 0 {
+		q += " OR telegram_id = " + b.ph(2)
+		args = append(args, telegramID)
+	}
+	q += " ORDER BY id ASC LIMIT " + b.ph(len(args)+1)
+	args = append(args, limit)
+	rows, err := b.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
