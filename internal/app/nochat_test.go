@@ -39,3 +39,39 @@ func TestNoChatForEmailAccount(t *testing.T) {
 		t.Fatalf("обычному пользователю сообщение не ушло:\n%s", got)
 	}
 }
+
+// Общий барьер: уведомления и рассылка аккаунтам без чата не уходят,
+// обычным пользователям — уходят.
+func TestNotifySkipsEmailAccounts(t *testing.T) {
+	a, fm, fs := p2pTopUpApp(t, true)
+	ctx := context.Background()
+	const email int64 = -1000000001
+	const tg int64 = 1000000002
+	_ = fs.UpsertUser(ctx, email)
+	_ = fs.UpsertUser(ctx, tg)
+	a.notify(ctx, email, "n-email")
+	if id := a.notifyKB(ctx, email, "kb-email", nil); id != 0 {
+		t.Fatalf("notifyKB без чата вернул %d", id)
+	}
+	a.notifyBlockState(ctx, email, "blockbot")
+	a.notify(ctx, tg, "n-tg")
+	got := fm.joined()
+	if strings.Contains(got, "n-email") || strings.Contains(got, "kb-email") || len(fm.texts) != 1 {
+		t.Fatalf("аккаунту без чата ушло сообщение:\n%s", got)
+	}
+	if !strings.Contains(got, "n-tg") {
+		t.Fatalf("обычному пользователю не ушло:\n%s", got)
+	}
+	ids, err := a.broadcastIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if id == email {
+			t.Fatal("аккаунт без чата в списке рассылки")
+		}
+	}
+	if len(ids) != 1 || ids[0] != tg {
+		t.Fatalf("получатели рассылки: %v", ids)
+	}
+}

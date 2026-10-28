@@ -709,6 +709,9 @@ func effMode(prefix string, bot, sub bool) string {
 }
 
 func (a *App) notifyBlockState(ctx context.Context, uid int64, mode string) {
+	if !hasChat(uid) {
+		return
+	}
 	ulang := a.lang(uid)
 	if mode == "blocksub" {
 		a.notify(ctx, uid, i18n.T(ulang, "block.user_sub"))

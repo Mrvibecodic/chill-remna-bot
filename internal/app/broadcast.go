@@ -20,7 +20,7 @@ func (a *App) showBroadcast(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	count := 0
 	if a.store != nil {
-		if ids, err := a.store.AllUserIDs(ctx); err == nil {
+		if ids, err := a.broadcastIDs(ctx); err == nil {
 			count = len(ids)
 		}
 	}
@@ -72,7 +72,7 @@ func (a *App) previewBroadcast(ctx context.Context, chatID int64, text string) {
 	a.getUI(chatID).broadcastText = text
 	count := 0
 	if a.store != nil {
-		if ids, err := a.store.AllUserIDs(ctx); err == nil {
+		if ids, err := a.broadcastIDs(ctx); err == nil {
 			count = len(ids)
 		}
 	}
@@ -125,7 +125,7 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 	ctx := a.bgContext()
 	go func() {
 		defer a.bcastRunning.Store(false)
-		ids, err := a.store.AllUserIDs(ctx)
+		ids, err := a.broadcastIDs(ctx)
 		if err != nil {
 			a.sendHome(ctx, adminChat, i18n.T(lang, "bcast.failed"))
 			return
@@ -177,4 +177,20 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 			a.msg.SendKB(ctx, adminChat, doneText, doneRows)
 		}
 	}()
+}
+
+// broadcastIDs — получатели рассылки: пользователи с чатом в Telegram.
+// Аккаунты кабинета по почте (отрицательный id) писать некуда.
+func (a *App) broadcastIDs(ctx context.Context) ([]int64, error) {
+	ids, err := a.store.AllUserIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := ids[:0]
+	for _, id := range ids {
+		if hasChat(id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
