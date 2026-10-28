@@ -346,7 +346,7 @@ function view(html,back){
   app.style.animation='none'; void app.offsetWidth; app.style.animation='';
 }
 
-function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function jsq(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function rub(k){return (Math.round(k)/100).toLocaleString('ru-RU');}
 
@@ -655,10 +655,10 @@ function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')
 function daysWord(n){return plural(n,'день','дня','дней');}
 // Названия и описания способов приходят с сервера (правятся в боте, «Тексты
 // бота»); встроенные ниже — запасные для старого сервера.
-var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',p2p:'💸',yk:'💳',cb:'🪙',pl:'💳',hl:'🪙'};
+var METHOD_EMOJI={balance:'👛',stars:'⭐',yookassa:'💳',cryptobot:'🪙',platega:'💳',heleket:'🪙',tribute:'💳',yoomoney:'💜',p2p:'💸',yk:'💳',cb:'🪙',pl:'💳',hl:'🪙',ym:'💜'};
 function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m]?(METHOD_EMOJI[m]?METHOD_EMOJI[m]+' ':'')+esc(L[m]):fb;}
 function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
-var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',p2p:'💸 Перевод на карту (P2P)'};
+var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',yoomoney:'💜 ЮMoney',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(code,months){
   haptic('tap');
   var p=planByCode(code),d=durByMonths(p,months);
@@ -718,14 +718,16 @@ function buyPlan(code,months){
 }
 function renderP2PCard(card,amount,reqID,topup){
   haptic('tap');setBack(boot);
+  // id заявки больше 2^53 — держим строкой, через Number() он округляется.
+  var rid=String(reqID==null?'':reqID).replace(/\D/g,'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+(topup?' Пополнение переводом':' Оплата переводом')+'</span>'+IC.wallet+'</div>'+
     '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
     '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
-    '<button class="btn" style="margin-top:10px" onclick="p2pUpload('+Number(reqID||0)+',this)">'+IC.check+'Отправить подтверждение</button></div>';
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel('+Number(reqID||0)+',this)">Отменить заявку</button>';
+    '<button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this)">'+IC.check+'Отправить подтверждение</button></div>';
+  h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel(\''+rid+'\',this)">Отменить заявку</button>';
   h+='<button class="btn ghost" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
@@ -893,12 +895,12 @@ async function topupOpen(){
     var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
       '<div class="title">Выберите сумму</div>'+
       '<div class="coins"><svg viewBox="0 0 130 48" fill="none"><ellipse cx="45" cy="24" rx="19" ry="19" fill="rgba(91,140,255,.16)" stroke="#5b8cff" stroke-width="2"/><ellipse cx="65" cy="24" rx="19" ry="19" fill="rgba(157,123,255,.16)" stroke="#9d7bff" stroke-width="2"/><ellipse cx="85" cy="24" rx="19" ry="19" fill="rgba(52,211,153,.14)" stroke="#34d399" stroke-width="2"/><text x="85" y="30" text-anchor="middle" fill="#34d399" font-size="18" font-weight="700">₽</text></svg></div></div>';
-    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+esc(a.label)+'\')">'+esc(a.label)+'</button>';});
+    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
     h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
-var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)'};
+var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)',ym:'💜 ЮMoney'};
 function topupPick(kopecks,label){
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+

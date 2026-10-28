@@ -578,7 +578,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		if a.store != nil {
 			_ = a.store.SetP2PApproved(ctx, uid, allow)
 		}
-		if allow {
+		if allow && hasChat(uid) {
 			a.notify(ctx, uid, i18n.T(a.lang(uid), "p2p.user_approved"))
 		}
 		a.showUser(ctx, chatID, uid)
@@ -709,6 +709,9 @@ func effMode(prefix string, bot, sub bool) string {
 }
 
 func (a *App) notifyBlockState(ctx context.Context, uid int64, mode string) {
+	if !hasChat(uid) {
+		return
+	}
 	ulang := a.lang(uid)
 	if mode == "blocksub" {
 		a.notify(ctx, uid, i18n.T(ulang, "block.user_sub"))

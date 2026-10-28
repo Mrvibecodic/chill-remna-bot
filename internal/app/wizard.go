@@ -87,6 +87,8 @@ const (
 	cbHeleket   = "hl"
 	cbHLCheck   = "hlc"
 	cbPLCheck   = "plc"
+	cbYooMoney  = "ym"
+	cbYMCheck   = "ymc"
 	cbTribute   = "trb"
 	cbWebhooks  = "wh"
 	cbNotify    = "ntf"
@@ -244,6 +246,12 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 	case cbPLCheck:
 		a.onPLCheck(ctx, chatID, val)
+	case cbYooMoney:
+		if isAdmin {
+			a.onYooMoneyAdmin(ctx, chatID, val)
+		}
+	case cbYMCheck:
+		a.onYMCheck(ctx, chatID, val)
 	case cbHeleket:
 		if isAdmin {
 			a.onHeleketAdmin(ctx, chatID, val)

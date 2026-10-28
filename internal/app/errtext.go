@@ -86,7 +86,7 @@ func errKind(err error) string {
 	// Шлюзы — по тексту, и только потом по типу ошибки: таймаут бывает у кого
 	// угодно, а проверка context.DeadlineExceeded первой зачисляла в «панель»
 	// самый частый отказ платёжки.
-	for _, m := range []string{"шлюз", "gateway", "yookassa", "юkassa", "cryptobot", "platega", "heleket", "tribute"} {
+	for _, m := range []string{"шлюз", "gateway", "yookassa", "юkassa", "cryptobot", "platega", "heleket", "tribute", "yoomoney", "юmoney"} {
 		if strings.Contains(msg, m) {
 			return "gateway"
 		}

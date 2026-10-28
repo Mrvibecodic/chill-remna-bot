@@ -141,6 +141,7 @@ type BotConfig struct {
 	YooKassa  YooKassaConfig  `json:"yookassa"`
 	CryptoBot CryptoBotConfig `json:"cryptobot"`
 	Platega   PlategaConfig   `json:"platega"`
+	YooMoney  YooMoneyConfig  `json:"yoomoney"`
 	Heleket   HeleketConfig   `json:"heleket"`
 	Tribute   TributeConfig   `json:"tribute"`
 	Webhook   WebhookConfig   `json:"webhook"`
@@ -482,6 +483,7 @@ const (
 	PayMethodYooKassa  = "yookassa"
 	PayMethodCryptoBot = "cryptobot"
 	PayMethodPlatega   = "platega"
+	PayMethodYooMoney  = "yoomoney"
 	PayMethodHeleket   = "heleket"
 	PayMethodTribute   = "tribute"
 	PayMethodBalance   = "balance"
@@ -849,6 +851,32 @@ type PlategaConfig struct {
 	Secret     string `json:"secret"`
 	Method     int    `json:"method"`
 	ReturnURL  string `json:"return_url"`
+}
+
+// YooMoneyConfig — переводы на кошелёк ЮMoney через форму quickpay.
+// Способ продаётся, только когда заданы все три секрета: номер кошелька,
+// секрет HTTP-уведомлений и токен API (им проверяется оплата по метке).
+type YooMoneyConfig struct {
+	Enabled bool `json:"enabled"`
+	// Receiver — номер кошелька-получателя.
+	Receiver string `json:"receiver"`
+	// NotifySecret — секрет из настроек HTTP-уведомлений кошелька.
+	NotifySecret string `json:"notify_secret"`
+	// Token — OAuth-токен API кошелька (история операций, номер счёта).
+	Token string `json:"token"`
+	// ClientID / ClientSecret — приложение, зарегистрированное владельцем на
+	// yoomoney.ru, через которое бот получает токен. Секрет нужен только
+	// приложениям «с проверкой подлинности».
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	// PayType — чем платит покупатель: AC (карта) или PC (кошелёк ЮMoney).
+	PayType   string `json:"pay_type"`
+	ReturnURL string `json:"return_url"`
+}
+
+// Ready — все секреты на месте: без любого из них способ не включается.
+func (c YooMoneyConfig) Ready() bool {
+	return c.Receiver != "" && c.NotifySecret != "" && c.Token != ""
 }
 
 // HeleketConfig — крипто-шлюз Heleket. Счёт выставляется в валюте прайса

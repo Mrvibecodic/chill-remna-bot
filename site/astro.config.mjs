@@ -75,6 +75,7 @@ export default defineConfig({
           items: [
             { label: 'Вебхуки и reverse-proxy', slug: 'payments/webhooks' },
             { label: 'Tribute', slug: 'payments/tribute' },
+            { label: 'ЮMoney', slug: 'payments/yoomoney' },
           ],
         },
         {

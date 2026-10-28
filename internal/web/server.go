@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 // него 401, а не 500: платёжки (в частности Tribute) сутки повторяют доставку
 // при 5xx, а ретраить заведомо чужой запрос незачем.
 var ErrUnauthorized = errors.New("webhook: unauthorized")
+
+// ErrRetryLater — штатная просьба повторить доставку (операция ещё не видна
+// в API провайдера). Обработчик отвечает 500, как и на сбой, но в лог пишет
+// предупреждение, а не ошибку.
+var ErrRetryLater = errors.New("webhook: retry later")
 
 type Handlers interface {
 	Healthy(ctx context.Context) error
@@ -30,6 +36,14 @@ type Handlers interface {
 	HandleHeleketWebhook(ctx context.Context, body []byte) (handled bool, err error)
 
 	HandleTributeWebhook(ctx context.Context, signatureHex string, body []byte) (handled bool, err error)
+
+	// ЮMoney: уведомление о переводе (form-urlencoded), поля формы оплаты для
+	// страницы /webhook/yoomoney/pay/<метка>, форма запроса разрешения и
+	// редирект с кодом авторизации.
+	HandleYooMoneyWebhook(ctx context.Context, form url.Values) (handled bool, err error)
+	YooMoneyPayForm(ctx context.Context, label string) (action string, fields [][2]string, ok bool)
+	YooMoneyAuthForm(state string) (action string, fields [][2]string, ok bool)
+	HandleYooMoneyOAuth(ctx context.Context, state, code, errCode string) (message string)
 }
 
 type Server struct {
@@ -65,6 +79,12 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /webhook/platega", s.handlePlatega)
 	mux.HandleFunc("POST /webhook/heleket", s.handleHeleket)
 	mux.HandleFunc("POST /webhook/tribute", s.handleTribute)
+	mux.HandleFunc("POST /webhook/yoomoney", s.handleYooMoney)
+	// Страницы ЮMoney живут под /webhook/: установки за своим прокси часто
+	// пробрасывают к боту только этот префикс (так советует экран «Вебхуки»).
+	mux.HandleFunc("GET /webhook/yoomoney/pay/{label}", s.handleYooMoneyPay)
+	mux.HandleFunc("GET /webhook/yoomoney/auth", s.handleYooMoneyAuth)
+	mux.HandleFunc("GET /webhook/yoomoney/oauth", s.handleYooMoneyOAuth)
 
 	mux.HandleFunc("POST /api/miniapp/auth", s.handleMiniAuth)
 	mux.HandleFunc("GET /api/miniapp/me", s.handleMiniMe)

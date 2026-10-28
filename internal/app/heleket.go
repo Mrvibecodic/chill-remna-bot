@@ -64,18 +64,7 @@ func (a *App) hlCurrency() string {
 // hlCallbackURL — адрес вебхука. Пусто, если публичный адрес не настроен: тогда
 // счёт всё равно создастся, но оплату добьёт ручная проверка или реконсилятор.
 func (a *App) hlCallbackURL() string {
-	a.mu.Lock()
-	base, domain, tls := "", "", false
-	if a.botCfg != nil {
-		base = a.botCfg.Webhook.PublicBaseURL
-		domain = a.botCfg.Webhook.Domain
-		tls = a.botCfg.Webhook.TLS
-	}
-	a.mu.Unlock()
-	if tls && domain != "" {
-		base = "https://" + domain
-	}
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	base := a.publicBaseURL()
 	if base == "" {
 		return ""
 	}

@@ -130,12 +130,18 @@ type App struct {
 	reconSeen map[string]string
 
 	// thrMu защищает троттлинг журналирования неаутентифицированных вебхуков
-	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified),
+	// (thrLast), разовые уведомления админу по счёту Heleket (hlNotified) и
+	// ЮMoney (ymNotified), взведённое ожидание OAuth ЮMoney (ymAuthState),
 	// паузу между торрент-предупреждениями пользователю (torSeen) и счётчик
 	// неудачных попыток открыть тариф по ссылке (planLinkFails).
-	thrMu         sync.Mutex
-	thrLast       map[string]time.Time
-	hlNotified    map[string]time.Time
+	thrMu      sync.Mutex
+	thrLast    map[string]time.Time
+	hlNotified map[string]time.Time
+	ymNotified map[string]time.Time
+	// ymAuthState/ymAuthUntil — взведённое ожидание OAuth-редиректа ЮMoney
+	// (ссылка «Авторизовать» живёт ymAuthTTL).
+	ymAuthState   string
+	ymAuthUntil   time.Time
 	torSeen       map[int64]time.Time
 	torUnbSeen    map[int64]time.Time
 	torStrikeBusy map[int64]bool
@@ -1585,7 +1591,18 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	a.setScreenSection(chatID, section)
 }
 
+// hasChat — есть ли у аккаунта чат в Telegram. У аккаунта кабинета,
+// заведённого по почте, id синтетический отрицательный: писать туда некуда,
+// Telegram отвечает «chat not found» на каждую попытку.
+func hasChat(id int64) bool { return id > 0 }
+
+// Уведомления адресату без чата в Telegram (аккаунт кабинета по почте —
+// отрицательный id) не отправляются вовсе: это только лишний запрос и
+// ошибка «chat not found» в логе.
 func (a *App) notify(ctx context.Context, chatID int64, text string) {
+	if !hasChat(chatID) {
+		return
+	}
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
 }
 
@@ -1593,11 +1610,17 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 // Вызывающему это важно там, где факт доставки что-то закрывает (окно
 // напоминания).
 func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
+	if !hasChat(chatID) {
+		return 0
+	}
 	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
 	return a.msg.SendKB(ctx, chatID, a.applyPremium(text), withClose)
 }
 
 func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) {
+	if !hasChat(chatID) {
+		return
+	}
 	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
 	a.msg.SendPhoto(ctx, chatID, fileID, a.applyPremium(caption), withClose)
 }
@@ -1605,6 +1628,9 @@ func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption str
 // notifyDoc — то же, что notifyPhoto, но для чека, пришедшего файлом (PDF или
 // картинка «без сжатия»): такие Telegram отдаёт только как документ.
 func (a *App) notifyDoc(ctx context.Context, chatID int64, doc models.InputFile, caption string, rows [][]models.InlineKeyboardButton) {
+	if !hasChat(chatID) {
+		return
+	}
 	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
 	a.msg.SendDocumentKB(ctx, chatID, doc, a.applyPremium(caption), &models.InlineKeyboardMarkup{InlineKeyboard: withClose})
 }

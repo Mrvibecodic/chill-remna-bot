@@ -94,6 +94,18 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		url, _, err := a.plCreateTransactionSnap(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL, a.saleSnapshot(s))
 		return url, false, err
 
+	case model.PayMethodYooMoney:
+		value := a.saleFiat(s, model.PayMethodYooMoney)
+		if !a.ymSellable() || value == "" || !a.saleGridCurrency(s) || !a.plGridCurrencyOK() {
+			return "", false, errors.New("оплата недоступна")
+		}
+		valueK, okV := rubToKopecks(value)
+		if !okV || valueK <= 0 {
+			return "", false, errors.New("оплата недоступна")
+		}
+		url, _, err := a.ymCreateInvoiceSnap(ctx, tgID, months, valueK, a.saleSnapshot(s))
+		return url, false, err
+
 	case model.PayMethodHeleket:
 		price := a.saleBase(s)
 		if !a.hlConfig().Enabled || price == "" || !a.saleGridCurrency(s) {
