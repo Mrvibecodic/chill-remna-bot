@@ -262,9 +262,11 @@ func (a *App) onYMCheck(ctx context.Context, chatID int64, label string) {
 	// По API видна только зачисленная сумма — проверка с допуском комиссии.
 	// Операцию выбираем тем же правилом, что сверка и вебхук.
 	p, _ := a.store.PendingByExtID(ctx, label)
-	op, extra := a.ymPickOp(paid, p)
+	op, extra := a.ymPickOp(ctx, paid, p)
 	if op == nil {
-		op = &paid[len(paid)-1]
+		// Счёт не покрывает ни одна операция (или строки счёта нет): об этом
+		// скажет финализация, «повторной оплатой» такие операции не считаются.
+		op, extra = &paid[len(paid)-1], nil
 	}
 	res := a.finalizeYooMoney(ctx, label, op.ID, 0, op.AmountK())
 	a.ymReportExtra(ctx, label, extra)
@@ -295,13 +297,15 @@ func ymPaidOps(ops []yoomoney.Operation, label string) []yoomoney.Operation {
 // оплата или недоплата перед полной). Единое правило для кнопки «Проверить»,
 // сверки и вебхука — иначе разные пути выбирали бы разные операции и спорили
 // бы, что считать дублем. Без строки счёта выбирать не по чему: nil и все.
-func (a *App) ymPickOp(paid []yoomoney.Operation, p *model.PendingInvoice) (*yoomoney.Operation, []yoomoney.Operation) {
+// Операция, по которой уже вынесена недоплата, счёт не покрывает, даже если
+// зачисленная сумма проходит допуск: уплаченное из уведомления точнее.
+func (a *App) ymPickOp(ctx context.Context, paid []yoomoney.Operation, p *model.PendingInvoice) (*yoomoney.Operation, []yoomoney.Operation) {
 	if p == nil {
 		return nil, paid
 	}
-	payType := a.ymConfig().PayType
+	under := a.ymUnderpaidOps(ctx, p)
 	for i := range paid {
-		if ymAmountOK(p.Kopecks, 0, paid[i].AmountK(), payType) {
+		if !under[paid[i].ID] && ymAmountOK(p.Kopecks, 0, paid[i].AmountK()) {
 			extra := append(append([]yoomoney.Operation{}, paid[:i]...), paid[i+1:]...)
 			return &paid[i], extra
 		}
@@ -319,14 +323,45 @@ func (a *App) ymReportExtra(ctx context.Context, label string, extra []yoomoney.
 }
 
 // ymAmountOK — заплачено не меньше счёта. paidK — сколько отдал покупатель
-// (из уведомления, 0 — неизвестно); creditedK — сколько дошло до кошелька.
-// Когда известна только зачисленная сумма, к счёту применяется допуск на
-// комиссию получателя: 3 % с карты, 1 % с кошелька (по настройке способа).
-func ymAmountOK(expectedK, paidK, creditedK int64, payType string) bool {
-	if paidK > 0 {
-		return paidK >= expectedK
+// (из уведомления, 0 — неизвестно); creditedK — сколько дошло до кошелька по
+// истории. Зачисленная сумма проверяется всегда — решение принимается по API,
+// а не по телу уведомления, — с допуском на комиссию карты (3 %, наибольшая):
+// чем платил покупатель, бот наверняка не знает.
+func ymAmountOK(expectedK, paidK, creditedK int64) bool {
+	if creditedK < expectedK-yoomoney.MaxFee(expectedK, yoomoney.PayTypeCard) {
+		return false
 	}
-	return creditedK >= expectedK-yoomoney.MaxFee(expectedK, payType)
+	return paidK == 0 || paidK >= expectedK
+}
+
+// ymUnderpaidMark — метка операции в записи журнала о недоплате; по ней
+// ymUnderpaidOps находит вынесенные вердикты.
+const ymUnderpaidMark = "(операция "
+
+// ymUnderpaidOps — операции метки, по которым недоплата уже признана. Вердикт
+// лежит в журнале платежей: после него счёт закрыт, и сверка или кнопка не
+// должны выдать по той же операции, глядя только на зачисленную сумму.
+func (a *App) ymUnderpaidOps(ctx context.Context, p *model.PendingInvoice) map[string]bool {
+	if a.store == nil || p == nil || !p.Resolved {
+		return nil
+	}
+	entries, err := a.store.PayLogs(ctx, p.ExtID, 0, 200)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, e := range entries {
+		if e.Stage != "underpaid" {
+			continue
+		}
+		if i := strings.Index(e.Detail, ymUnderpaidMark); i >= 0 {
+			rest := e.Detail[i+len(ymUnderpaidMark):]
+			if j := strings.IndexAny(rest, "), "); j > 0 {
+				out[rest[:j]] = true
+			}
+		}
+	}
+	return out
 }
 
 // ymResult — чем закончилась финализация, чтобы вызывающий ответил человеку.
@@ -355,13 +390,20 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 		a.ymNotifyAdmin(ctx, label+":noinv", "ym.admin_no_invoice", escapeName(opID), yoomoney.FormatSum(creditedK), escapeName(label), a.userLabelByID(ctx, hint))
 		return ymNoInvoice
 	}
-	if !ymAmountOK(p.Kopecks, paidK, creditedK, a.ymConfig().PayType) {
-		a.payLog(ctx, model.PayMethodYooMoney, label, p.TelegramID, "underpaid", "счёт на %s RUB, заплачено %s, зачислено %s (операция %s) — не выдано", yoomoney.FormatSum(p.Kopecks), yoomoney.FormatSum(paidK), yoomoney.FormatSum(creditedK), opID)
+	if a.ymUnderpaidOps(ctx, p)[opID] {
+		// Недоплата по этой операции уже признана, админ знает.
+		return ymUnderpaid
+	}
+	if !ymAmountOK(p.Kopecks, paidK, creditedK) {
+		a.payLog(ctx, model.PayMethodYooMoney, label, p.TelegramID, "underpaid", "счёт на %s RUB, заплачено %s, зачислено %s "+ymUnderpaidMark+"%s) — не выдано", yoomoney.FormatSum(p.Kopecks), yoomoney.FormatSum(paidK), yoomoney.FormatSum(creditedK), opID)
 		shown := creditedK
 		if paidK > 0 {
 			shown = paidK
 		}
 		a.ymNotifyAdmin(ctx, label+":under", "ym.admin_underpaid", escapeName(opID), yoomoney.FormatSum(shown), yoomoney.FormatSum(p.Kopecks), a.userLabelByID(ctx, p.TelegramID))
+		// Счёт закрывается: дальше разбирает админ, а сверка и опрос
+		// мини-аппа по зачисленной сумме выдали бы то, что уже отклонено.
+		_ = a.store.ResolvePending(ctx, p.ID)
 		return ymUnderpaid
 	}
 	switch {
@@ -507,10 +549,16 @@ func (a *App) HandleYooMoneyOAuth(ctx context.Context, state, code, errCode stri
 		a.log.Warn("yoomoney oauth", "err", err)
 		return fail(err.Error())
 	}
+	// Код уже обменян, а прежний токен этим обменом, скорее всего, отозван:
+	// на сбой сети проверку повторяем, прежде чем выбросить новый токен.
 	account, err := yoomoney.New(token).AccountInfo(ctx)
+	if err != nil && !errors.Is(err, yoomoney.ErrInvalidToken) {
+		account, err = yoomoney.New(token).AccountInfo(ctx)
+	}
 	if err != nil {
 		a.log.Warn("yoomoney oauth: account-info", "err", err)
-		return fail(err.Error())
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_lost", escapeHTMLText(err.Error())))
+		return i18n.T(alang, "ym.oauth_fail", err.Error())
 	}
 	if ymDigits(account) != ymDigits(cfg.Receiver) {
 		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_other", escapeName(account), escapeName(cfg.Receiver)))
@@ -753,9 +801,21 @@ func (a *App) setYooMoneyField(ctx context.Context, chatID int64, field, text st
 	_ = a.saveBotConfig(ctx)
 	// Сменили кошелёк или токен — сразу сверяем их между собой: расхождение
 	// иначе всплывёт только неподтверждёнными оплатами.
+	// Явно чужой кошелёк при включённом способе — выключаем: деньги шли бы
+	// на один кошелёк, а проверялись по другому, и ни одна оплата не
+	// подтвердилась бы. Сбой API (account пуст) способ не трогает.
 	if field == "ym_receiver" || field == "ym_token" {
 		if cfg := a.ymConfig(); cfg.Token != "" {
-			if msg := a.ymWalletMismatch(ctx, lang, cfg); msg != "" {
+			if account, msg := a.ymWalletCheck(ctx, lang, cfg); msg != "" {
+				if account != "" && cfg.Enabled {
+					a.mu.Lock()
+					if a.botCfg != nil {
+						a.botCfg.YooMoney.Enabled = false
+					}
+					a.mu.Unlock()
+					_ = a.saveBotConfig(ctx)
+					msg += "\n\n" + i18n.T(lang, "ym.off_mismatch")
+				}
 				a.sendKB(ctx, chatID, msg, [][]models.InlineKeyboardButton{navBack(lang, "menu:yoomoney")})
 				return
 			}

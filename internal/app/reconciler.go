@@ -263,7 +263,7 @@ func (a *App) reconcileYooMoney(ctx context.Context, st storage.Storage, pi *mod
 	}
 	// Зачитывается самая ранняя операция, покрывающая счёт (то же правило,
 	// что у кнопки и вебхука); остальные — лишние, о них админу.
-	op, extra := a.ymPickOp(paid, pi)
+	op, extra := a.ymPickOp(ctx, paid, pi)
 	if op == nil {
 		// Ни одна операция счёт не покрывает — недоплата. Показываем самую
 		// крупную; счёт закрывается: дальше разбирает админ, а не сверка
@@ -274,7 +274,7 @@ func (a *App) reconcileYooMoney(ctx context.Context, st storage.Storage, pi *mod
 				best = o
 			}
 		}
-		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "underpaid", "счёт на %s RUB, зачислено %s (операция %s, всего операций %d) — не выдано", yoomoney.FormatSum(pi.Kopecks), yoomoney.FormatSum(best.AmountK()), best.ID, len(paid))
+		a.payLog(ctx, pi.Method, pi.ExtID, pi.TelegramID, "underpaid", "счёт на %s RUB, зачислено %s "+ymUnderpaidMark+"%s, всего операций %d) — не выдано", yoomoney.FormatSum(pi.Kopecks), yoomoney.FormatSum(best.AmountK()), best.ID, len(paid))
 		a.ymNotifyAdmin(ctx, pi.ExtID+":under", "ym.admin_underpaid", escapeName(best.ID), yoomoney.FormatSum(best.AmountK()), yoomoney.FormatSum(pi.Kopecks), a.userLabelByID(ctx, pi.TelegramID))
 		_ = st.ResolvePending(ctx, pi.ID)
 		return

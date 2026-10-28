@@ -98,7 +98,7 @@ func (a *App) HandleYooMoneyWebhook(ctx context.Context, form url.Values) (bool,
 		// Платёж уже записан (этим уведомлением раньше, кнопкой или сверкой).
 		// Зачтённую операцию все пути выбирают одним правилом (ymPickOp);
 		// всё остальное — лишние оплаты той же ссылки.
-		chosen, extra := a.ymPickOp(paid, p)
+		chosen, extra := a.ymPickOp(ctx, paid, p)
 		if chosen == nil || chosen.ID != n.OperationID {
 			for _, o := range extra {
 				if o.ID == n.OperationID {
@@ -108,15 +108,17 @@ func (a *App) HandleYooMoneyWebhook(ctx context.Context, form url.Values) (bool,
 		}
 		return true, nil
 	}
-	a.finalizeYooMoney(ctx, n.Label, n.OperationID, n.WithdrawK, n.AmountK)
-	if _, extra := a.ymPickOp(paid, p); len(extra) > 0 {
-		var others []yoomoney.Operation
-		for _, o := range extra {
-			if o.ID != n.OperationID {
-				others = append(others, o)
-			}
+	// Зачитывается операция, выбранная общим правилом, даже если уведомление
+	// пришло по другой (более поздней оплате): иначе уведомление по ранней
+	// найдёт платёж записанным и о лишней оплате никто не узнает.
+	if chosen, extra := a.ymPickOp(ctx, paid, p); chosen != nil && chosen.ID != n.OperationID {
+		a.finalizeYooMoney(ctx, n.Label, chosen.ID, 0, chosen.AmountK())
+		a.ymReportExtra(ctx, n.Label, extra)
+	} else {
+		a.finalizeYooMoney(ctx, n.Label, n.OperationID, n.WithdrawK, n.AmountK)
+		if chosen != nil {
+			a.ymReportExtra(ctx, n.Label, extra)
 		}
-		a.ymReportExtra(ctx, n.Label, others)
 	}
 	a.log.Info("yoomoney webhook: finalized", "label", n.Label)
 	return true, nil
