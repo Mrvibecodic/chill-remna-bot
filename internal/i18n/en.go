@@ -1465,8 +1465,6 @@ var en = map[string]string{
 	"mini.p2p_open_chat":         "You already have an open transfer request — it is in the bot chat. Finish or cancel it there.",
 	"mini.bad_amount":            "invalid amount",
 	"mini.topup_method":          "top-up method is unavailable",
-	"balance.col_plan":           "Plan",
-	"balance.col_price":          "Price",
 	"menu.friend":                "friend",
 	"tx.kind_html_max":           "Format: message — bold, italic, links, quotes etc. are allowed, at most %d characters.",
 	"tx.save_failed":             "⚠️ Could not save — the database did not respond. Users see the previous text. Please try again.",
