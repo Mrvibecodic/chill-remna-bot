@@ -372,7 +372,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	default:
 		if key != "" {
 			lang := a.lang(chatID)
-			a.sendKB(ctx, chatID, i18n.T(lang, "menu.outdated"), [][]models.InlineKeyboardButton{homeRow(lang)})
+			// Отдельным сообщением: правка на месте затёрла бы старое
+			// уведомление, под которым нажали устаревшую кнопку.
+			a.notify(ctx, chatID, i18n.T(lang, "menu.outdated"))
 		}
 	}
 }
