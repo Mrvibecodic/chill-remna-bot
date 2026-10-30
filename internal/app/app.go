@@ -1670,7 +1670,7 @@ func (a *App) notifyKB(ctx context.Context, chatID int64, text string, rows [][]
 	if !hasChat(chatID) {
 		return 0
 	}
-	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
+	withClose := withHome(rows, a.lang(chatID))
 	return a.msg.SendKB(ctx, chatID, a.applyPremium(text), withClose)
 }
 
@@ -1678,7 +1678,7 @@ func (a *App) notifyPhoto(ctx context.Context, chatID int64, fileID, caption str
 	if !hasChat(chatID) {
 		return
 	}
-	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
+	withClose := withHome(rows, a.lang(chatID))
 	a.msg.SendPhoto(ctx, chatID, fileID, a.applyPremium(caption), withClose)
 }
 
@@ -1688,8 +1688,22 @@ func (a *App) notifyDoc(ctx context.Context, chatID int64, doc models.InputFile,
 	if !hasChat(chatID) {
 		return
 	}
-	withClose := append(append([][]models.InlineKeyboardButton{}, rows...), backHomeRow(a.lang(chatID)))
+	withClose := withHome(rows, a.lang(chatID))
 	a.msg.SendDocumentKB(ctx, chatID, doc, a.applyPremium(caption), &models.InlineKeyboardMarkup{InlineKeyboard: withClose})
+}
+
+// withHome добавляет к уведомлению кнопку «Главная», если её там ещё нет:
+// иначе под сообщением с «Назад | Главная» вставала вторая «Главная».
+func withHome(rows [][]models.InlineKeyboardButton, lang string) [][]models.InlineKeyboardButton {
+	out := append([][]models.InlineKeyboardButton{}, rows...)
+	for _, r := range rows {
+		for _, b := range r {
+			if b.CallbackData == "menu:home" {
+				return out
+			}
+		}
+	}
+	return append(out, backHomeRow(lang))
 }
 
 func backHomeRow(lang string) []models.InlineKeyboardButton {

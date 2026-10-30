@@ -64,12 +64,18 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	body := i18n.T(lang, "trial.title",
 		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), resetStr, internalCSV, externalName)
 
+	// У возврата своя подпись, а не общий «✅ Включено»: на экране два
+	// переключателя, и одинаковые подписи не давали понять, какой что включает.
+	resetToggleKey := "trial.btn_reset_off"
+	if reset.ResetUnused {
+		resetToggleKey = "trial.btn_reset_on"
+	}
 	rows := [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
 		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
-		{toggleBtn(lang, reset.ResetUnused, "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
+		{btn(i18n.T(lang, resetToggleKey), "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
 		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
