@@ -643,9 +643,7 @@ func (a *App) applyBlock(ctx context.Context, adminChat, uid int64, mode string,
 		}
 		a.invalidateSubCache(uid)
 	}
-	if srcMsgID != 0 {
-		a.msg.Delete(ctx, adminChat, srcMsgID)
-	}
+	defer a.dropScreen(adminChat, []int{srcMsgID})
 	if eff := effMode("block", didBot, didSub); eff != "" {
 		a.notifyBlockState(ctx, uid, eff)
 		a.send(ctx, adminChat, i18n.T(alang, "block.done"))
@@ -684,9 +682,7 @@ func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode strin
 		}
 		a.invalidateSubCache(uid)
 	}
-	if srcMsgID != 0 {
-		a.msg.Delete(ctx, adminChat, srcMsgID)
-	}
+	defer a.dropScreen(adminChat, []int{srcMsgID})
 	if eff := effMode("unblock", didBot, didSub); eff != "" {
 		a.notifyUnblockState(ctx, uid, eff)
 		a.send(ctx, adminChat, i18n.T(alang, "unblock.done"))

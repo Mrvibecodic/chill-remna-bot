@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -174,11 +175,15 @@ type App struct {
 	// баннера (ключ — file_id или ссылка). Живёт под a.mu.
 	bannerFail map[string]int
 
-	scrMu         sync.Mutex
-	screen        map[int64][]int
-	kbSet         map[int64]bool
-	editTarget    map[int64]int
-	screenSection map[int64]string
+	scrMu  sync.Mutex
+	screen map[int64][]int
+	// screenDropDelay — через сколько после нового экрана удаляется старый
+	// (0 — сразу). Новый экран уходит первым: если сначала удалить старый,
+	// чат на миг пустеет и Telegram показывает кнопку «Запустить».
+	screenDropDelay time.Duration
+	kbSet           map[int64]bool
+	editTarget      map[int64]int
+	screenSection   map[int64]string
 
 	subMu    sync.Mutex
 	subCache map[int64]subCacheEntry
@@ -332,7 +337,7 @@ type subCacheEntry struct {
 
 func New(cfg *config.Config, crypter *crypto.Crypter, log *slog.Logger) *App {
 	return &App{cfg: cfg, crypter: crypter, log: log, ctl: hostctl.New(), wiz: map[int64]*wizard{}, ui: map[int64]*uiState{},
-		bootAt: time.Now(),
+		bootAt: time.Now(), screenDropDelay: 300 * time.Millisecond,
 		screen: map[int64][]int{}, kbSet: map[int64]bool{}, editTarget: map[int64]int{}, screenSection: map[int64]string{}}
 }
 
@@ -1109,12 +1114,13 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	if startMsgID == 0 || !a.msg.EditText(ctx, chatID, startMsgID, startText, startRows) {
 		// The source message can't be edited in place (e.g. it's a banner/photo
 		// "update available" notice — editMessageText fails on media messages).
-		// Delete it so it doesn't linger, then post the flow as a fresh message
-		// that can later morph into the "updated" result.
-		if startMsgID != 0 {
-			a.msg.Delete(ctx, chatID, startMsgID)
-		}
+		// Post the flow as a fresh message that can later morph into the
+		// "updated" result, then remove the old one so it doesn't linger.
+		oldID := startMsgID
 		startMsgID = a.msg.SendKB(ctx, chatID, startText, startRows)
+		if startMsgID != 0 {
+			a.dropScreen(chatID, []int{oldID})
+		}
 	}
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	// Третьим полем — версия, с которой уходим. После рестарта по нему видно,
@@ -1179,10 +1185,8 @@ func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
 		if startMsgID != 0 && a.msg != nil && a.msg.EditText(bg, chatID, startMsgID, txt, rows) {
 			return
 		}
-		if a.msg != nil && startMsgID != 0 {
-			a.msg.Delete(bg, chatID, startMsgID)
-		}
 		a.sendHome(bg, chatID, i18n.T(a.botLang(), "update.no_restart"))
+		a.dropScreen(chatID, []int{startMsgID})
 	})
 }
 
@@ -1193,10 +1197,8 @@ func (a *App) updateFailMsg(ctx context.Context, chatID int64, msgID int, err er
 	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, text, rows) {
 		return
 	}
-	if msgID != 0 {
-		a.msg.Delete(ctx, chatID, msgID)
-	}
 	a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
+	a.dropScreen(chatID, []int{msgID})
 }
 
 func (a *App) notifyUpdated(ctx context.Context) {
@@ -1232,11 +1234,11 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	doneRows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
 	doneID := msgID
 	if msgID == 0 || a.msg == nil || !a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
-		if msgID != 0 && a.msg != nil {
-			a.msg.Delete(ctx, chatID, msgID)
-		}
 		if a.msg != nil {
 			doneID = a.msg.SendKB(ctx, chatID, doneText, doneRows)
+			if doneID != 0 {
+				a.dropScreen(chatID, []int{msgID})
+			}
 		}
 	}
 	if doneID != 0 && a.msg != nil {
@@ -1336,18 +1338,49 @@ func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 			toDelete = []int{pid}
 		}
 	}
-	for _, id := range toDelete {
-		a.msg.Delete(ctx, chatID, id)
-	}
 	id := send()
-	if id != 0 {
+	if id == 0 {
+		// Новый экран не ушёл — старый остаётся на месте и текущим экраном,
+		// чтобы человек не остался с пустым чатом.
 		a.scrMu.Lock()
-		a.screen[chatID] = []int{id}
+		a.screen[chatID] = append(toDelete, a.screen[chatID]...)
 		a.scrMu.Unlock()
-		if a.store != nil {
-			_ = a.store.SetScreenMsg(ctx, chatID, id)
+		return
+	}
+	a.scrMu.Lock()
+	a.screen[chatID] = []int{id}
+	a.scrMu.Unlock()
+	if a.store != nil {
+		_ = a.store.SetScreenMsg(ctx, chatID, id)
+	}
+	a.dropScreen(chatID, toDelete)
+}
+
+// dropScreen удаляет прошлый экран уже после того, как пришёл новый, с
+// небольшой задержкой: старое сообщение к этому времени выше нового и
+// исчезает без рывка. Сообщение, которое за это время стало текущим экраном
+// (его отредактировали в новый), не трогается.
+func (a *App) dropScreen(chatID int64, ids []int) {
+	if len(ids) == 0 || a.msg == nil {
+		return
+	}
+	del := func() {
+		ctx, cancel := context.WithTimeout(a.bgContext(), 15*time.Second)
+		defer cancel()
+		a.scrMu.Lock()
+		cur := append([]int(nil), a.screen[chatID]...)
+		a.scrMu.Unlock()
+		for _, id := range ids {
+			if id != 0 && !slices.Contains(cur, id) {
+				a.msg.Delete(ctx, chatID, id)
+			}
 		}
 	}
+	if a.screenDropDelay <= 0 {
+		del()
+		return
+	}
+	time.AfterFunc(a.screenDropDelay, del)
 }
 
 func (a *App) screenMsgID(chatID int64) int {

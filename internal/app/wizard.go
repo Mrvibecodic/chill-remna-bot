@@ -364,8 +364,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 
 		switch val {
 		case "home":
-			a.msg.Delete(ctx, chatID, cqMsgID(cq))
 			a.enterHome(ctx, chatID, isAdmin, cq.From.FirstName, cq.From.Username)
+			a.dropScreen(chatID, []int{cqMsgID(cq)})
 		case "close":
 			a.msg.Delete(ctx, chatID, cqMsgID(cq))
 		}

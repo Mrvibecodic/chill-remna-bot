@@ -1255,9 +1255,7 @@ func (a *App) applyP2PAmount(ctx context.Context, chatID int64, text string) {
 	req.Kopecks = k
 	req.Price = kopecksToRub(k)
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "amount_changed", "сумма пополнения изменена админом: %s → %s ₽", old, req.Price)
-	if msgID != 0 {
-		a.msg.Delete(ctx, chatID, msgID)
-	}
+	defer a.dropScreen(chatID, []int{msgID})
 	if req.Status == model.P2PSubmitted {
 		a.resendP2PCard(ctx, req)
 		return
