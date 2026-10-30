@@ -123,8 +123,7 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 			return
 		}
 		// Старая кнопка с экрана другого тарифа: у выбранного Tribute нет.
-		a.notify(ctx, chatID, i18n.T(lang, "trb.plan_unavailable"))
-		a.showMethodsSale(ctx, chatID, s)
+		a.noticeThen(ctx, chatID, i18n.T(lang, "trb.plan_unavailable"), func() { a.showMethodsSale(ctx, chatID, s) })
 		return
 	}
 	if a.store != nil {

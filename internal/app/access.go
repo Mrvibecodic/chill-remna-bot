@@ -487,7 +487,8 @@ func (a *App) createInviteUses(ctx context.Context, chatID int64, text string) {
 	}
 	if a.accessMode() != model.AccessInvite {
 		// Ссылка бесполезна, пока режим не «по приглашениям» — подсказываем.
-		a.notify(ctx, chatID, i18n.T(lang, "inv.mode_hint"))
+		a.noticeThen(ctx, chatID, i18n.T(lang, "inv.mode_hint"), func() { a.showInvite(ctx, chatID, inv.Code) })
+		return
 	}
 	a.showInvite(ctx, chatID, inv.Code)
 }

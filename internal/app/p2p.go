@@ -270,8 +270,7 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 		// и не влезает в колонку), либо нажатие на старом экране по сроку,
 		// который админ снял с продажи, либо тариф, недоступный этому
 		// покупателю (вторая точка гейта — витрина покажет отказ сама).
-		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"))
-		a.showPlans(ctx, chatID)
+		a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"), func() { a.showPlans(ctx, chatID) })
 		return
 	}
 	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт

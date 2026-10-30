@@ -340,8 +340,7 @@ func (a *App) clearWhitelistAll(ctx context.Context, chatID int64) {
 		n += ids
 	}
 	a.log.Info("access: доступ снят со всех", "count", n)
-	a.notify(ctx, chatID, i18n.T(lang, "wl.cleared", n))
-	a.showWhitelist(ctx, chatID, 0)
+	a.noticeThen(ctx, chatID, i18n.T(lang, "wl.cleared", n), func() { a.showWhitelist(ctx, chatID, 0) })
 }
 
 func (a *App) showUser(ctx context.Context, chatID, uid int64) {

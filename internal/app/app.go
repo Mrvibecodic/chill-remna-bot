@@ -1639,6 +1639,30 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
 }
 
+// noticeThen показывает короткое пояснение и сразу под ним экран. Пояснение
+// уходит из чата вместе с этим экраном при следующем переходе: отдельным
+// уведомлением с кнопкой «Главная» оно оставалось висеть навсегда.
+func (a *App) noticeThen(ctx context.Context, chatID int64, text string, show func()) {
+	if !hasChat(chatID) {
+		show()
+		return
+	}
+	// Экран встаёт под пояснением новым сообщением, а не правкой того, что выше.
+	a.setEditTarget(chatID, 0)
+	id := a.msg.Send(ctx, chatID, a.applyPremium(text))
+	show()
+	if id == 0 {
+		return
+	}
+	a.scrMu.Lock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
+	// В начало: последним в списке должен оставаться сам экран.
+	a.screen[chatID] = append([]int{id}, a.screen[chatID]...)
+	a.scrMu.Unlock()
+}
+
 // notifyKB возвращает id отправленного сообщения; 0 — доставить не удалось.
 // Вызывающему это важно там, где факт доставки что-то закрывает (окно
 // напоминания).
