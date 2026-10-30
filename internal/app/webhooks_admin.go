@@ -310,11 +310,9 @@ func (a *App) cleanupWebhookApplyMsg(ctx context.Context) {
 	}
 	chatID, _ := strconv.ParseInt(parts[0], 10, 64)
 	msgID, _ := strconv.Atoi(parts[1])
-	if chatID != 0 && msgID != 0 && a.msg != nil {
-		a.msg.Delete(ctx, chatID, msgID)
-	}
 	if chatID != 0 {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "wh.applied"))
+		a.dropScreen(chatID, []int{msgID})
 	}
 }
 
@@ -359,11 +357,9 @@ func (a *App) cleanupBotPortMsg(ctx context.Context) {
 	}
 	chatID, _ := strconv.ParseInt(parts[0], 10, 64)
 	msgID, _ := strconv.Atoi(parts[1])
-	if chatID != 0 && msgID != 0 && a.msg != nil {
-		a.msg.Delete(ctx, chatID, msgID)
-	}
 	if chatID != 0 {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "wh.port_applied", a.webhookListenPortNum()))
+		a.dropScreen(chatID, []int{msgID})
 	}
 }
 

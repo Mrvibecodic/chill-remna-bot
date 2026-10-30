@@ -270,8 +270,7 @@ func (a *App) onBuyPlan(ctx context.Context, chatID int64, val string) {
 		// и не влезает в колонку), либо нажатие на старом экране по сроку,
 		// который админ снял с продажи, либо тариф, недоступный этому
 		// покупателю (вторая точка гейта — витрина покажет отказ сама).
-		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"))
-		a.showPlans(ctx, chatID)
+		a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "buy.period_gone"), func() { a.showPlans(ctx, chatID) })
 		return
 	}
 	// Выбор срока пишем в базу: экран со способами оплаты переживает рестарт
@@ -1255,9 +1254,7 @@ func (a *App) applyP2PAmount(ctx context.Context, chatID int64, text string) {
 	req.Kopecks = k
 	req.Price = kopecksToRub(k)
 	a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "amount_changed", "сумма пополнения изменена админом: %s → %s ₽", old, req.Price)
-	if msgID != 0 {
-		a.msg.Delete(ctx, chatID, msgID)
-	}
+	defer a.dropScreen(chatID, []int{msgID})
 	if req.Status == model.P2PSubmitted {
 		a.resendP2PCard(ctx, req)
 		return

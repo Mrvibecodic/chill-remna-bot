@@ -127,8 +127,7 @@ func (a *App) saleOrAskPrice(ctx context.Context, chatID int64, checkPrice bool)
 		return nil
 	}
 	if s == nil {
-		a.notify(ctx, chatID, i18n.T(a.lang(chatID), "buy.choice_expired"))
-		a.showPlans(ctx, chatID)
+		a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "buy.choice_expired"), func() { a.showPlans(ctx, chatID) })
 		return nil
 	}
 	// Единственная точка, через которую идут ВСЕ способы оплаты в чате, —

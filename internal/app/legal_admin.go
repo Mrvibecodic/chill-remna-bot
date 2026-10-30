@@ -195,8 +195,7 @@ func (a *App) resetLegalConsent(ctx context.Context, chatID int64) {
 		a.notify(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	a.notify(ctx, chatID, i18n.T(lang, "legal.reset_done"))
-	a.showLegalAdmin(ctx, chatID)
+	a.noticeThen(ctx, chatID, i18n.T(lang, "legal.reset_done"), func() { a.showLegalAdmin(ctx, chatID) })
 }
 
 // normalizeDocURL приводит ссылку на документ к http(s)-виду. Второе значение

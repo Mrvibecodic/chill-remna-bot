@@ -32,13 +32,23 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 		a.mu.Lock()
 		panel := a.panel
 		a.mu.Unlock()
+		// Отказ — тем же экраном, что и успех: отдельным уведомлением он
+		// оставался в чате с двумя кнопками «Главная».
+		fail := func() {
+			a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.fail"), [][]models.InlineKeyboardButton{
+				navBack(lang, "menu:mysubs"),
+			})
+		}
 		if panel == nil {
-			a.notifyKB(ctx, chatID, i18n.T(lang, "dev.fail"), [][]models.InlineKeyboardButton{navBack(lang, "menu:mysubs")})
+			fail()
 			return
 		}
 		res, found, err := panel.ResetDevicesByTelegramID(ctx, chatID)
 		if err != nil || !found {
-			a.notifyKB(ctx, chatID, i18n.T(lang, "dev.fail"), [][]models.InlineKeyboardButton{navBack(lang, "menu:mysubs")})
+			if err != nil {
+				a.log.Warn("reset devices", "tg", chatID, "err", err)
+			}
+			fail()
 			return
 		}
 		if res.HwidErr != nil {

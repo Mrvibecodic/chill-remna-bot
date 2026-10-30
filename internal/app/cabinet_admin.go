@@ -131,8 +131,7 @@ func (a *App) logoutAllSessions(ctx context.Context, chatID int64) {
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 	a.log.Info("все сессии кабинета и мини-аппа отозваны", "session_ver", ver)
-	a.notify(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.logout_done"))
-	a.showCabinetAdmin(ctx, chatID)
+	a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.logout_done"), func() { a.showCabinetAdmin(ctx, chatID) })
 }
 
 func (a *App) setCabinetPath(ctx context.Context, chatID int64, text string) {

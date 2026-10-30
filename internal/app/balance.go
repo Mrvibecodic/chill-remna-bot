@@ -118,10 +118,11 @@ func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, ba
 	if plan != nil {
 		title = planTitleHTML(lang, plan)
 	}
+	// Обычные строки, а не таблица в <pre>: на телефоне таблица переносилась,
+	// а Telegram добавлял к блоку кнопку «Копировать код».
 	var sb strings.Builder
-	sb.WriteString("<pre>")
-	sb.WriteString(padRight(i18n.T(lang, "balance.col_plan"), 6) + "  " + padRight(i18n.T(lang, "balance.col_price"), 11) + "  " + i18n.T(lang, "balance.col_lasts") + "\n")
-	sb.WriteString(strings.Repeat("─", 34) + "\n")
+	mo := escapeHTMLText(i18n.T(lang, "balance.mo"))
+	lastsLabel := escapeHTMLText(i18n.T(lang, "balance.col_lasts"))
 	best := 0
 	rows := 0
 	for _, e := range list {
@@ -137,11 +138,13 @@ func (a *App) balanceForecast(ctx context.Context, chatID int64, lang string, ba
 		}
 		lasts := "—"
 		if count > 0 {
-			lasts = fmt.Sprintf("%d× ≈ %d %s", count, total, i18n.T(lang, "balance.mo"))
+			lasts = fmt.Sprintf("%d× ≈ %d %s", count, total, mo)
 		}
-		sb.WriteString(padRight(strconv.Itoa(e.months)+"m", 6) + "  " + padRight(e.price+curSuffix(curRUB), 11) + "  " + lasts + "\n")
+		if rows > 1 {
+			sb.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "• %d %s — %s · %s: %s", e.months, mo, escapeHTMLText(e.price+curSuffix(curRUB)), lastsLabel, lasts)
 	}
-	sb.WriteString("</pre>")
 	if rows == 0 {
 		return "", 0, ""
 	}
