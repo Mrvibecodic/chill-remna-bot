@@ -529,10 +529,15 @@ func (a *App) HandleYooMoneyOAuth(ctx context.Context, state, code, errCode stri
 	}
 	a.ymDisarmAuth()
 	cfg := a.ymConfig()
+	// Итог — пояснением над свежим экраном ЮMoney: уходит из чата вместе с
+	// экраном, а не висит отдельным уведомлением.
+	report := func(text string) {
+		a.noticeThen(ctx, a.cfg.AdminID, text, func() { a.showYooMoneyAdmin(ctx, a.cfg.AdminID) })
+	}
 	// Тексты страницы в браузере — без HTML (страница их экранирует сама),
 	// уведомления в чат — с экранированием под parse_mode=HTML.
 	fail := func(reason string) string {
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_fail", escapeHTMLText(reason)))
+		report(i18n.T(alang, "ym.admin_oauth_fail", escapeHTMLText(reason)))
 		return i18n.T(alang, "ym.oauth_fail", reason)
 	}
 	if errCode != "" {
@@ -557,11 +562,11 @@ func (a *App) HandleYooMoneyOAuth(ctx context.Context, state, code, errCode stri
 	}
 	if err != nil {
 		a.log.Warn("yoomoney oauth: account-info", "err", err)
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_lost", escapeHTMLText(err.Error())))
+		report(i18n.T(alang, "ym.admin_oauth_lost", escapeHTMLText(err.Error())))
 		return i18n.T(alang, "ym.oauth_fail", err.Error())
 	}
 	if ymDigits(account) != ymDigits(cfg.Receiver) {
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_other", escapeName(account), escapeName(cfg.Receiver)))
+		report(i18n.T(alang, "ym.admin_oauth_other", escapeName(account), escapeName(cfg.Receiver)))
 		return i18n.T(alang, "ym.oauth_mismatch", account, cfg.Receiver)
 	}
 	a.mu.Lock()
@@ -570,7 +575,7 @@ func (a *App) HandleYooMoneyOAuth(ctx context.Context, state, code, errCode stri
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "ym.admin_oauth_ok", escapeName(account)))
+	report(i18n.T(alang, "ym.admin_oauth_ok", escapeName(account)))
 	return i18n.T(alang, "ym.oauth_ok", account)
 }
 

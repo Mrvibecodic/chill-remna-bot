@@ -634,3 +634,37 @@ func TestYooMoney_ForeignLabelIgnored(t *testing.T) {
 		t.Fatal("сверка выдала по чужой операции")
 	}
 }
+
+// Итог авторизации приходит над экраном ЮMoney и уходит из чата вместе с ним,
+// а не висит отдельным уведомлением.
+func TestYooMoney_OAuthNoticeLeavesWithScreen(t *testing.T) {
+	a, fm, _, st := ymStub(t)
+	ctx := context.Background()
+	a.botCfg.YooMoney.Token = ""
+	st.account = "410011000000001"
+	a.handleCallback(ctx, cb(100, "ym:auth"))
+	if msg := a.HandleYooMoneyOAuth(ctx, a.ymAuthState, "c0de", ""); !strings.Contains(msg, "сохранён") {
+		t.Fatalf("токен не сохранён: %q", msg)
+	}
+	note := 0
+	fm.mu.Lock()
+	for id, txt := range fm.live {
+		if strings.Contains(txt, "Теперь способ можно включить") {
+			note = id
+		}
+	}
+	fm.mu.Unlock()
+	if note == 0 {
+		t.Fatalf("итог не показан админу:\n%s", fm.joined())
+	}
+	if a.screenMsgID(100) == note {
+		t.Fatal("под итогом нет экрана ЮMoney")
+	}
+	a.handleCallback(ctx, cb(100, "menu:home"))
+	fm.mu.Lock()
+	_, alive := fm.live[note]
+	fm.mu.Unlock()
+	if alive {
+		t.Fatal("итог авторизации остался висеть в чате")
+	}
+}
