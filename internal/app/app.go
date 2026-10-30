@@ -1863,6 +1863,7 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 }
 
 func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) (int, error) {
+	rows = fitKeyboard(rows)
 	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -1897,6 +1898,7 @@ func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, 
 }
 
 func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {
+	rows = fitKeyboard(rows)
 	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -1924,6 +1926,7 @@ func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, en
 }
 
 func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, caption string, rows [][]models.InlineKeyboardButton) int {
+	rows = fitKeyboard(rows)
 	p := &bot.SendPhotoParams{
 		ChatID:    chatID,
 		Photo:     &models.InputFileString{Data: fileID},
@@ -1942,7 +1945,7 @@ func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, capti
 }
 
 func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
-	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: rm}
+	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: fitMarkup(rm)}
 	if len(entities) > 0 {
 		p.CaptionEntities = entities
 	} else {
@@ -1978,7 +1981,7 @@ func (m botMessenger) SendDocumentKB(ctx context.Context, chatID int64, doc mode
 		Document:    doc,
 		Caption:     caption,
 		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: rm,
+		ReplyMarkup: fitMarkup(rm),
 	})
 	if err != nil {
 		m.log.Error("send document kb", "err", err)
@@ -2047,6 +2050,7 @@ func (m botMessenger) CreateInvoiceLink(ctx context.Context, title, description,
 }
 
 func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cachedFileID string, embedBytes []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+	rows = fitKeyboard(rows)
 
 	build := func(source string) (*models.Message, string, error) {
 		var photo models.InputFile
@@ -2160,6 +2164,7 @@ func (m botMessenger) AnswerCallback(ctx context.Context, id string) {
 }
 
 func (m botMessenger) EditText(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) bool {
+	rows = fitKeyboard(rows)
 	params := &bot.EditMessageTextParams{ChatID: chatID, MessageID: msgID, Text: text, ParseMode: models.ParseModeHTML}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -2176,6 +2181,7 @@ func (m botMessenger) EditText(ctx context.Context, chatID int64, msgID int, tex
 }
 
 func (m botMessenger) EditCaption(ctx context.Context, chatID int64, msgID int, caption string, rows [][]models.InlineKeyboardButton) bool {
+	rows = fitKeyboard(rows)
 	params := &bot.EditMessageCaptionParams{ChatID: chatID, MessageID: msgID, Caption: caption, ParseMode: models.ParseModeHTML}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}

@@ -173,6 +173,20 @@ func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string)
 		}
 	}
 	rows := append(on, off...)
+	// Название и его «Описание» читаются парой: если хоть одна пара не влезает
+	// в ряд на телефоне, все пары встают столбиком, а не вперемешку.
+	for _, r := range rows {
+		if !rowFits(r) {
+			var stacked [][]models.InlineKeyboardButton
+			for _, r := range rows {
+				for _, b := range r {
+					stacked = append(stacked, []models.InlineKeyboardButton{b})
+				}
+			}
+			rows = stacked
+			break
+		}
+	}
 	rows = append(rows, navBack(lang, back))
 	text := i18n.T(lang, "tx.methods_title")
 	// Кнопка со своим текстом без {способ_оплаты} название не подхватит.

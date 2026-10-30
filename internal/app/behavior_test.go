@@ -59,6 +59,8 @@ type fakeMsg struct {
 	preOK []bool
 	// cbData — callback_data всех кнопок, ушедших с сообщениями.
 	cbData []string
+	// lastKB — ряды кнопок последнего сообщения с клавиатурой.
+	lastKB [][]models.InlineKeyboardButton
 	// failBanner — картинка (file_id/ссылка), на которой SendBanner отвечает
 	// отказом; failAllBanners — отказ на любой картинке.
 	failBanner     string
@@ -87,6 +89,7 @@ func (f *fakeMsg) allCallbackData() []string {
 func (f *fakeMsg) recordKB(rows [][]models.InlineKeyboardButton) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastKB = rows
 	for _, row := range rows {
 		for _, b := range row {
 			if b.CallbackData != "" {
