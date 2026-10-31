@@ -1110,18 +1110,7 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	}
 	startText := a.applyPremium(i18n.T(lang, "update.starting"))
 	startRows := [][]models.InlineKeyboardButton{backHomeRow(lang)}
-	startMsgID := src
-	if startMsgID == 0 || !a.msg.EditText(ctx, chatID, startMsgID, startText, startRows) {
-		// The source message can't be edited in place (e.g. it's a banner/photo
-		// "update available" notice — editMessageText fails on media messages).
-		// Post the flow as a fresh message that can later morph into the
-		// "updated" result, then remove the old one so it doesn't linger.
-		oldID := startMsgID
-		startMsgID = a.msg.SendKB(ctx, chatID, startText, startRows)
-		if startMsgID != 0 {
-			a.dropScreen(chatID, []int{oldID})
-		}
-	}
+	startMsgID := a.postUpdateStart(ctx, chatID, src, startText, startRows)
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	// Третьим полем — версия, с которой уходим. После рестарта по нему видно,
 	// обновились мы на самом деле или контейнер просто перезапустился на том
@@ -1133,6 +1122,25 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	// процесс — в горутине: скачивание образа не должно блокировать обработку
 	// апдейтов единственным воркером.
 	go a.runSelfUpdate(chatID, startMsgID, marker)
+}
+
+// postUpdateStart превращает сообщение, с которого нажали «Обновить», в
+// «запускается». Экран с баннером текстом не редактируется — тогда уходит новое
+// сообщение и становится текущим экраном, а старое удаляется: иначе экран
+// оставался в списке текущих и dropScreen его не трогал.
+func (a *App) postUpdateStart(ctx context.Context, chatID int64, src int, text string, rows [][]models.InlineKeyboardButton) int {
+	if src != 0 && a.msg.EditText(ctx, chatID, src, text, rows) {
+		return src
+	}
+	id := 0
+	a.emit(ctx, chatID, func() int {
+		id = a.msg.SendKB(ctx, chatID, text, rows)
+		return id
+	})
+	if id != 0 {
+		a.dropScreen(chatID, []int{src})
+	}
+	return id
 }
 
 func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
