@@ -89,14 +89,9 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
 		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
 	}
+	now := time.Now().UTC()
 	for _, u := range users {
-		label := "👤 " + userLabel(&u)
-		if u.Blocked {
-			label += " 🚫"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
-		})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
 	}
 	nav := paginationRow("usr:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
 	if len(nav) > 0 {
@@ -105,6 +100,33 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	rows = append(rows, homeRow(lang))
 
 	a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "users.title", total, page+1, pages), rows)
+}
+
+// userListBtn — строка пользователя в списке: значок и цвет кнопки по статусу
+// подписки. Срок берётся из зеркала в базе бота, без похода в панель; точный
+// статус — в карточке.
+func userListBtn(u *model.User, label string, now time.Time) models.InlineKeyboardButton {
+	icon, style := userSubStatus(u, now)
+	b := btn(icon+" "+label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10))
+	b.Style = style
+	return b
+}
+
+func userSubStatus(u *model.User, now time.Time) (icon, style string) {
+	if u.Blocked {
+		return "🚫", ""
+	}
+	exp, err := time.Parse(time.RFC3339, u.SubExpireAt)
+	switch {
+	case u.SubExpireAt == "" || err != nil:
+		return "⚪", ""
+	case !exp.After(now):
+		return "🔴", "danger"
+	case u.NotifyKind == "trial":
+		return "🔵", "primary"
+	default:
+		return "🟢", "success"
+	}
 }
 
 func (a *App) reconcileWhitelist(ctx context.Context, chatID int64) {
@@ -158,14 +180,9 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 	pages := (total + usersPageSize - 1) / usersPageSize
 
 	var rows [][]models.InlineKeyboardButton
+	now := time.Now().UTC()
 	for _, u := range users {
-		label := "👤 " + a.userLabelByID(ctx, u.TelegramID)
-		if u.Blocked {
-			label += " 🚫"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
-		})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userLabelByID(ctx, u.TelegramID), now)})
 	}
 	if nav := paginationRow("usr:fpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
@@ -263,14 +280,9 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	pages := (total + usersPageSize - 1) / usersPageSize
 
 	var rows [][]models.InlineKeyboardButton
+	now := time.Now().UTC()
 	for _, u := range users {
-		label := "👤 " + userLabel(&u)
-		if u.Blocked {
-			label += " 🚫"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(label, "usr:view:"+strconv.FormatInt(u.TelegramID, 10)),
-		})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
 	}
 	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)

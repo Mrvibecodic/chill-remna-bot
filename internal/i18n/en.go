@@ -276,7 +276,7 @@ var en = map[string]string{
 	"btn.prev":         "‹ Prev",
 	"btn.next":         "Next ›",
 
-	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
+	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\n" +
 		"People registered in the bot. On block and delete the bot asks " +
 		"whether to touch the panel subscription too.\n\nChoose a user:",
 	"users.empty": "👥 No users yet.",
@@ -1073,7 +1073,7 @@ var en = map[string]string{
 	"topup.disabled":        "Balance top-up is disabled.",
 	"btn.user_search":       "🔍 Find a user",
 	"users.search_ask":      "Who are you looking for? Send a Telegram ID, @handle, name or web account e-mail — a part is enough.",
-	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d",
+	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription",
 	"users.search_empty":    "🔍 Nothing found for «%s».\nSearch covers Telegram ID, handle, name and web account e-mail.",
 	"users.search_panel":    "ℹ️ The panel has an account «%s». If it is not linked to a chat, link it from the user card.",
 	"btn.wl_add_id":         "➕ Add ID to whitelist",
@@ -1084,7 +1084,7 @@ var en = map[string]string{
 	"btn.wl_ids":            "🗂 Pre-filled IDs (%d)",
 	"btn.wl_clear":          "🔒 Revoke access from everyone",
 	"btn.wl_clear_ok":       "🔒 Yes, revoke from everyone",
-	"wl.granted_title":      "🛡 <b>%d users have access</b>\nPage %d of %d\n\nTap a user to open the card and revoke access.",
+	"wl.granted_title":      "🛡 <b>%d users have access</b>\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\nTap a user to open the card and revoke access.",
 	"wl.granted_empty":      "🛡 Nobody has access yet.\nAdd Telegram IDs in advance or grant access from a user card.",
 	"wl.clear_ask":          "🔒 Revoke access from everyone who currently has it?\n\nYou stay in the bot as admin either way. Granting access back is only possible one by one or with a new invite.",
 	"wl.cleared":            "🔒 Access revoked: %d.",
