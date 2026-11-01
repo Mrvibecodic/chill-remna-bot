@@ -104,6 +104,7 @@ var en = map[string]string{
 	"buy.trial_locked":        "🎁 Your free trial is active until <b>%s</b>.\n\nYou can buy a paid plan on the trial expiry day — this way you won't lose paid days (time stacks on top of current).",
 	"buy.trial_locked_plain":  "🎁 Trial is active until %s. A paid plan can be purchased on the trial expiry day — this way you won't lose paid days.",
 	"buy.plan_btn":            "%d mo — %s",
+	"buy.discount":            "(%d%% off)",
 	"buy.choose_method":       "💳 <b>How would you like to pay?</b>\n\n💼 Balance: %s ₽\n\nPick a method below — the bot will show instructions.",
 	"buy.countries":           "🌍 <b>Countries available: %d</b>\n%s",
 	"buy.servers":             "🖥 <b>Servers: %s</b>",
@@ -276,7 +277,7 @@ var en = map[string]string{
 	"btn.prev":         "‹ Prev",
 	"btn.next":         "Next ›",
 
-	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n\n" +
+	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\n" +
 		"People registered in the bot. On block and delete the bot asks " +
 		"whether to touch the panel subscription too.\n\nChoose a user:",
 	"users.empty": "👥 No users yet.",
@@ -1073,7 +1074,7 @@ var en = map[string]string{
 	"topup.disabled":        "Balance top-up is disabled.",
 	"btn.user_search":       "🔍 Find a user",
 	"users.search_ask":      "Who are you looking for? Send a Telegram ID, @handle, name or web account e-mail — a part is enough.",
-	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d",
+	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription",
 	"users.search_empty":    "🔍 Nothing found for «%s».\nSearch covers Telegram ID, handle, name and web account e-mail.",
 	"users.search_panel":    "ℹ️ The panel has an account «%s». If it is not linked to a chat, link it from the user card.",
 	"btn.wl_add_id":         "➕ Add ID to whitelist",
@@ -1084,7 +1085,7 @@ var en = map[string]string{
 	"btn.wl_ids":            "🗂 Pre-filled IDs (%d)",
 	"btn.wl_clear":          "🔒 Revoke access from everyone",
 	"btn.wl_clear_ok":       "🔒 Yes, revoke from everyone",
-	"wl.granted_title":      "🛡 <b>%d users have access</b>\nPage %d of %d\n\nTap a user to open the card and revoke access.",
+	"wl.granted_title":      "🛡 <b>%d users have access</b>\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\nTap a user to open the card and revoke access.",
 	"wl.granted_empty":      "🛡 Nobody has access yet.\nAdd Telegram IDs in advance or grant access from a user card.",
 	"wl.clear_ask":          "🔒 Revoke access from everyone who currently has it?\n\nYou stay in the bot as admin either way. Granting access back is only possible one by one or with a new invite.",
 	"wl.cleared":            "🔒 Access revoked: %d.",
@@ -1350,7 +1351,7 @@ var en = map[string]string{
 	"panelauth.check_fail":       "❌ Panel does not answer: %s",
 	"panelauth.save_fail":        "❌ Could not save: %s",
 	"btn.webui":                  "🎨 Mini app & cabinet design",
-	"webui.title":                "🎨 <b>Mini app and web cabinet design</b>\n\nDesign: <b>%s</b>\nDefault theme: <b>%s</b>\nHeader name: <b>%s</b>\nBrand color: <b>%s</b>\nLogo: %s\nDark theme logo: %s\n\nThe new design is minimalist, with light and dark themes: people switch the theme themselves, and the one chosen here is the default. The logo and name sit in the page header, the color is used on buttons. Everything applies instantly, no restart needed.",
+	"webui.title":                "🎨 <b>Mini app and web cabinet design</b>\n\nDesign: <b>%s</b>\nDefault theme: <b>%s</b>\nHeader name: <b>%s</b>\nBrand color: <b>%s</b>\nLogo: %s\nDark theme logo: %s\n\nThe new design is minimalist, with light and dark themes: people switch the theme themselves, and the one chosen here is the default. The logo and name sit in the page header, the color is used on buttons. The «Best value» badge marks the term with the lowest price per month. Everything applies instantly, no restart needed.",
 	"webui.classic_note":         "ℹ️ The classic design is on: the name, color and logos take effect after switching to the new one.",
 	"webui.design_classic":       "classic",
 	"webui.design_minimal":       "new (minimalist)",
@@ -1370,6 +1371,8 @@ var en = map[string]string{
 	"webui.btn_logod":            "🌙 For dark theme",
 	"webui.btn_logod_url":        "🔗 Dark by link",
 	"webui.btn_logo_reset":       "🗑 Remove logos",
+	"webui.btn_best_on":          "🏷 «Best value» badge: on",
+	"webui.btn_best_off":         "🏷 «Best value» badge: off",
 	"webui.ask_name":             "✏️ Send the service name for the page header (up to 40 characters), or «-» to remove.",
 	"webui.ask_accent":           "🎨 Send the brand color like <code>#2f6bff</code>, or «-» to use the design color.",
 	"webui.ask_logourl":          "🔗 Send the logo link (https://…, or a path on this site like <code>/miniapp/logo.svg</code> from your custom static folder), or «-» to remove.",

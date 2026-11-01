@@ -103,6 +103,11 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "devices", Ru: "устройства", Desc: [2]string{"лимит устройств, например «до 5»; если на разных сроках лимит разный — список по срокам", "device limit, e.g. “up to 5”; a per-term list if it differs by term"}, Example: [2]string{"до 5", "up to 5"}},
 		}},
+	{Key: "buy.discount", Section: "buy", Kind: KindButton, Hideable: true,
+		Where: [2]string{"Скидка срока: приписка к кнопке срока в чате и к цене в мини-аппе/ЛК. Считается от цены за 1 месяц этого тарифа (нет такого срока — от самого короткого); меньше 1% не показывается", "Term discount: suffix on the term button in the chat and next to the price in the mini-app/cabinet. Computed against the plan's 1-month price (or its shortest term); under 1% is not shown"},
+		Vars: []EditVar{
+			{Name: "discount", Ru: "скидка", Desc: [2]string{"скидка в процентах, округлённая вниз: только число, без «%»", "discount in percent, rounded down: a number, without «%»"}, Example: [2]string{"16", "16"}},
+		}},
 	{Key: "buy.from_price", Section: "buy", Kind: KindButton, Hideable: true,
 		Where: [2]string{"Кнопка тарифа в витрине — приписка «от N ₽»", "Plan button in the storefront — «from N ₽» suffix"},
 		Vars: []EditVar{

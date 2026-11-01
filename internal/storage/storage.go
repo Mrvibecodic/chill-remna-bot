@@ -398,7 +398,7 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 		return nil, 0, err
 	}
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, sub_expire_at, notify_kind FROM users "+
 			"ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
 	if err != nil {
@@ -409,7 +409,7 @@ func (b *base) ListUsers(ctx context.Context, limit, offset int) ([]model.User, 
 	for rows.Next() {
 		var u model.User
 		var approved, blocked int
-		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &u.SubExpireAt, &u.NotifyKind); err != nil {
 			return nil, 0, err
 		}
 		u.P2PApproved = approved != 0
@@ -474,7 +474,7 @@ func (b *base) SearchUsers(ctx context.Context, q string, limit, offset int) ([]
 	}
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT u.telegram_id, u.username, u.first_name, u.p2p_approved, u.blocked, u.created_at "+
+		"SELECT u.telegram_id, u.username, u.first_name, u.p2p_approved, u.blocked, u.created_at, u.sub_expire_at, u.notify_kind "+
 			from+where+" ORDER BY u.created_at DESC, u.telegram_id DESC LIMIT "+b.ph(n+1)+" OFFSET "+b.ph(n+2),
 		append(args, limit, offset)...)
 	if err != nil {
@@ -485,7 +485,7 @@ func (b *base) SearchUsers(ctx context.Context, q string, limit, offset int) ([]
 	for rows.Next() {
 		var u model.User
 		var approved, blocked int
-		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &u.SubExpireAt, &u.NotifyKind); err != nil {
 			return nil, 0, err
 		}
 		u.P2PApproved = approved != 0
@@ -2696,7 +2696,7 @@ func (b *base) ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]m
 	}
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
 	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at FROM users "+
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, sub_expire_at, notify_kind FROM users "+
 			"WHERE whitelisted = 1 ORDER BY created_at DESC, telegram_id DESC LIMIT "+b.ph(1)+" OFFSET "+b.ph(2),
 		limit, offset)
 	if err != nil {
@@ -2707,7 +2707,7 @@ func (b *base) ListWhitelistedUsers(ctx context.Context, limit, offset int) ([]m
 	for rows.Next() {
 		var u model.User
 		var approved, blocked int
-		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &u.SubExpireAt, &u.NotifyKind); err != nil {
 			return nil, 0, err
 		}
 		u.P2PApproved = approved != 0

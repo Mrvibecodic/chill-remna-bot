@@ -642,7 +642,7 @@ SCREENS.plan=function(a){
   var p=planBy(a.code);if(!p){goHome();return;}
   var ds=p.durations||[];if(!ds.length){goHome();return;}
   var sel=a.months&&durBy(p,a.months)?a.months:null;
-  if(!sel){for(var i=0;i<ds.length;i++)if(ds[i].best){sel=ds[i].months;break;}}
+  if(!sel){for(var i=0;i<ds.length;i++)if(ds[i].preferred||ds[i].best){sel=ds[i].months;break;}}
   if(!sel)sel=ds[0].months;
   a.months=sel;var d=durBy(p,sel);
   var h=backBtn()+'<div style="margin-top:8px"><div class="h1">'+esc(planTitle(p))+'</div>'+(p.description?'<div class="hint">'+esc(p.description)+'</div>':'')+'</div>';
@@ -650,6 +650,7 @@ SCREENS.plan=function(a){
   h+='<div class="sect">'+esc(T('period'))+'</div>';
   ds.forEach(function(x){
     var pm='';var v=num(x.price);if(x.months>1&&isFinite(v))pm=T('per_month',(Math.round(v/x.months*100)/100).toLocaleString(loc())+' '+(x.currency||''));
+    if(x.discount)pm=pm?pm+' · '+x.discount:x.discount;
     h+='<button class="opt'+(x.months===sel?' on':'')+'" onclick="pickDur(\''+jsq(p.code)+'\','+x.months+')"><span class="rd"></span><span class="tx"><div class="t">'+esc(monthsW(x.months))+(x.best?' <span class="badge acc" style="margin-left:6px;padding:2px 8px">'+esc(T('best'))+'</span>':'')+'</div>'+(pm?'<div class="s">'+esc(pm)+'</div>':'')+'</span><span class="p">'+esc(price(x))+'</span></button>';
   });
   h+='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list">';

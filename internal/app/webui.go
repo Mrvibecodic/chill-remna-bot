@@ -181,6 +181,7 @@ func (a *App) showWebUIAdmin(ctx context.Context, chatID int64) {
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "webui.btn_design", i18n.T(lang, "webui.design_"+c.Design)), cbWebUI+":design")},
 		{btn(i18n.T(lang, "webui.btn_theme", i18n.T(lang, "webui.theme_"+c.Theme)), cbWebUI+":theme")},
+		{btn(i18n.T(lang, bestBtnKey(c.HideBest)), cbWebUI+":best")},
 		{btn(i18n.T(lang, "webui.btn_name"), cbWebUI+":name"), btn(i18n.T(lang, "webui.btn_accent"), cbWebUI+":accent")},
 		{btn(i18n.T(lang, "webui.btn_logo"), cbWebUI+":logo"), btn(i18n.T(lang, "webui.btn_logo_url"), cbWebUI+":logourl")},
 		{btn(i18n.T(lang, "webui.btn_logod"), cbWebUI+":logod"), btn(i18n.T(lang, "webui.btn_logod_url"), cbWebUI+":logodurl")},
@@ -192,6 +193,14 @@ func (a *App) showWebUIAdmin(ctx context.Context, chatID int64) {
 		btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home"),
 	})
 	a.sendIfaceKB(ctx, chatID, text, rows)
+}
+
+// bestBtnKey — подпись тумблера плашки «Выгодно».
+func bestBtnKey(hidden bool) string {
+	if hidden {
+		return "webui.btn_best_off"
+	}
+	return "webui.btn_best_on"
 }
 
 // editWebUI меняет настройки оформления под замком и сохраняет конфиг.
@@ -227,6 +236,8 @@ func (a *App) onWebUIAdmin(ctx context.Context, chatID int64, val string) {
 				w.Theme = model.WebThemeAuto
 			}
 		})
+	case "best":
+		a.editWebUI(ctx, func(w *model.WebUIConfig) { w.HideBest = !w.HideBest })
 	case "name", "accent", "logourl", "logodurl":
 		ui.adminInput = "wui_" + val
 		a.askInput(ctx, chatID, i18n.T(lang, "webui.ask_"+val), "menu:webui")
