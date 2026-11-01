@@ -275,8 +275,9 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 			}
 		}
 	}
-	if bestIdx >= 0 && len(pd.Durations) > 1 && !a.webUICfg().HideBest {
-		pd.Durations[bestIdx].Best = true
+	if bestIdx >= 0 && len(pd.Durations) > 1 {
+		pd.Durations[bestIdx].Preferred = true
+		pd.Durations[bestIdx].Best = !a.webUICfg().HideBest
 	}
 	return pd, len(pd.Durations) > 0
 }

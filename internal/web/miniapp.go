@@ -413,6 +413,9 @@ type MiniDurationDTO struct {
 	// Best — сервер отмечает самый выгодный срок (лучшая цена за месяц);
 	// раньше фронт подсвечивал третью позицию из четырёх.
 	Best bool `json:"best,omitempty"`
+	// Preferred — тот же лучший срок, но для выбора по умолчанию: ставится и
+	// тогда, когда плашка «Выгодно» выключена в админке.
+	Preferred bool `json:"preferred,omitempty"`
 	// Discount — готовая подпись скидки срока («(Скидка 16%)»); пусто —
 	// скидки нет или админ убрал её текст.
 	Discount string `json:"discount,omitempty"`

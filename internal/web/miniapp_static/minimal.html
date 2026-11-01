@@ -642,7 +642,7 @@ SCREENS.plan=function(a){
   var p=planBy(a.code);if(!p){goHome();return;}
   var ds=p.durations||[];if(!ds.length){goHome();return;}
   var sel=a.months&&durBy(p,a.months)?a.months:null;
-  if(!sel){for(var i=0;i<ds.length;i++)if(ds[i].best){sel=ds[i].months;break;}}
+  if(!sel){for(var i=0;i<ds.length;i++)if(ds[i].preferred||ds[i].best){sel=ds[i].months;break;}}
   if(!sel)sel=ds[0].months;
   a.months=sel;var d=durBy(p,sel);
   var h=backBtn()+'<div style="margin-top:8px"><div class="h1">'+esc(planTitle(p))+'</div>'+(p.description?'<div class="hint">'+esc(p.description)+'</div>':'')+'</div>';

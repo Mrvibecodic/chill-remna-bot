@@ -110,6 +110,61 @@ func TestMiniPlansDiscountAndBestToggle(t *testing.T) {
 	if best, disc := year(); best || disc != "(Скидка 16%)" {
 		t.Fatalf("плашка выключена: best=%v discount=%q", best, disc)
 	}
+	// Выключенная плашка не меняет срок, выбранный по умолчанию.
+	for _, p := range a.MiniPlans(ctx, 555).Plans {
+		if p.Code != vip.Code {
+			continue
+		}
+		for _, d := range p.Durations {
+			if (d.Months == 12) != d.Preferred {
+				t.Fatalf("выбор по умолчанию сдвинулся: %+v", p.Durations)
+			}
+		}
+	}
+}
+
+// Скидка — только на витрине: экрана способов оплаты она не касается; у
+// английского текста своя подпись.
+func TestDiscountNotOnPayScreenAndEnglish(t *testing.T) {
+	a, fm, p := storefrontApp(t)
+	ctx := context.Background()
+	const uid = int64(1000000003)
+	a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+	a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":12"))
+	if !strings.Contains(fm.last(), "Как удобнее оплатить") {
+		t.Fatalf("экран способов не открылся: %q", fm.last())
+	}
+	if strings.Contains(fm.last(), "Скидка") {
+		t.Fatalf("скидка на экране оплаты: %q", fm.last())
+	}
+	if got := discountLabel("en", p, p.Duration(12)); got != "(16% off)" {
+		t.Fatalf("английская подпись: %q", got)
+	}
+}
+
+// «🗑 Убрать» в редакторе текстов прячет скидку на кнопках, «Вернуть
+// стандартный» возвращает.
+func TestDiscountHideViaEditor(t *testing.T) {
+	a, fm, p := storefrontApp(t)
+	const uid = int64(1000000004)
+	offer := func() string {
+		n := len(fm.buttonLabels())
+		a.handleCallback(context.Background(), cb(uid, "plo:"+p.Code))
+		return strings.Join(fm.buttonLabels()[n:], "|")
+	}
+	planTap(t, a, "tx:k:buy.discount")
+	if !hasCB(fm.allCallbackData(), "tx:hd:buy.discount") {
+		t.Fatal("в карточке текста скидки нет кнопки «Убрать»")
+	}
+	planTap(t, a, "tx:hd:buy.discount")
+	planTap(t, a, "tx:hdy:buy.discount")
+	if got := offer(); strings.Contains(got, "Скидка") {
+		t.Fatalf("убранная скидка осталась: %q", got)
+	}
+	planTap(t, a, "tx:ry:buy.discount")
+	if got := offer(); !strings.Contains(got, "(Скидка 16%)") {
+		t.Fatalf("стандартный текст скидки не вернулся: %q", got)
+	}
 }
 
 // Тумблер в «Дизайне мини-аппа и кабинета» переключает и сохраняет плашку.
