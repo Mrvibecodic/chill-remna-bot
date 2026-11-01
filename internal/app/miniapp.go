@@ -263,6 +263,7 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 			Devices:   p.DeviceLimitFor(d),
 			Countries: countries,
 			Configs:   configs,
+			Discount:  discountLabel(lang, p, d),
 			// Зачёт остатка при смене тарифа — та же математика, что
 			// применит финализация (см. plans_switch.go).
 			SwitchDays: switchCredit(pc.oldSnap, pc.oldExpire, a.planSnapshotOf(p, d, d.Months)),
@@ -274,7 +275,7 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 			}
 		}
 	}
-	if bestIdx >= 0 && len(pd.Durations) > 1 {
+	if bestIdx >= 0 && len(pd.Durations) > 1 && !a.webUICfg().HideBest {
 		pd.Durations[bestIdx].Best = true
 	}
 	return pd, len(pd.Durations) > 0

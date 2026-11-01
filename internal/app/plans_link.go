@@ -176,6 +176,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 			continue
 		}
 		label := i18n.T(lang, "buy.plan_btn", d.Months, d.Base+curSuffix(cur))
+		if s := discountLabel(lang, p, d); s != "" {
+			label += " " + s
+		}
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(label, "plb:"+p.Code+":"+strconv.Itoa(d.Months)),
 		})

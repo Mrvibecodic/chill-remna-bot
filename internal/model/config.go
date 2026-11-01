@@ -1140,6 +1140,9 @@ type WebUIConfig struct {
 	LogoFile     string `json:"logo_file,omitempty"`
 	LogoDarkURL  string `json:"logo_dark_url,omitempty"`
 	LogoDarkFile string `json:"logo_dark_file,omitempty"`
+	// HideBest — не отмечать в мини-аппе и кабинете срок с лучшей ценой за
+	// месяц (плашка «Выгодно»). Нулевое значение — плашка есть, как раньше.
+	HideBest bool `json:"hide_best,omitempty"`
 }
 
 // Дизайны и темы веб-интерфейса.
