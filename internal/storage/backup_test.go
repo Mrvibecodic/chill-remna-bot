@@ -644,3 +644,34 @@ func TestBackupSQLiteTimeToPostgresInOtherZone(t *testing.T) {
 		t.Fatalf("метка сдвинута: %s, ждали %s", got.UTC(), want)
 	}
 }
+
+// Перенос базы в «Перенастроить» берёт всё: каждую таблицу и колонку, в том
+// числе те, что прежний снимок терял.
+func TestTransferMovesEverything(t *testing.T) {
+	ctx := context.Background()
+	src := openSQLiteTest(t)
+	fillEveryColumn(t, src, 1)
+	before := rawDump(t, src)
+	run := func(t *testing.T, dst Storage) {
+		fillEveryColumn(t, dst, 2)
+		if err := Transfer(ctx, src, dst); err != nil {
+			t.Fatal(err)
+		}
+		compareDumps(t, withKind(before, dst.Kind()), rawDump(t, dst))
+	}
+	t.Run("sqlite", func(t *testing.T) { run(t, openSQLiteTest(t)) })
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		t.Run("postgres", func(t *testing.T) {
+			dst, err := Open(model.DBPostgres, dsn, testCrypter(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = dst.Close() })
+			if err := dst.Migrate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			cleanPGData(t, dsn)
+			run(t, dst)
+		})
+	}
+}

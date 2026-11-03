@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -323,7 +324,41 @@ func (b *base) saveConfig(ctx context.Context, cfg *model.BotConfig, upsertSQL s
 	return err
 }
 
+// Transfer переносит базу целиком (смена движка в «Перенастроить») тем же
+// путём, что бэкап и восстановление: все таблицы и все колонки. Прежний
+// перенос шёл типизированным снимком и молча терял то, что в него не было
+// вписано руками (журнал торрент-блокера, страйки, ссылки из писем).
 func Transfer(ctx context.Context, src, dst Storage) error {
+	sb, dbase := baseOfStore(src), baseOfStore(dst)
+	if sb == nil || dbase == nil {
+		// Двойники хранилища в тестах бэкап не умеют — для них прежний путь.
+		return transferSnapshot(ctx, src, dst)
+	}
+	var buf bytes.Buffer
+	if _, err := sb.WriteBackup(ctx, &buf, "transfer"); err != nil {
+		return fmt.Errorf("выгрузка старой базы: %w", err)
+	}
+	data := buf.Bytes()
+	open := func() (io.Reader, error) { return bytes.NewReader(data), nil }
+	// Нестрого: переезд идёт и на ненастроенном боте, где конфига ещё нет.
+	if err := dbase.restoreBackup(ctx, open, nil, false); err != nil {
+		return fmt.Errorf("загрузка в новую базу: %w", err)
+	}
+	return nil
+}
+
+func baseOfStore(s Storage) *base {
+	switch st := s.(type) {
+	case *sqliteStore:
+		return &st.base
+	case *pgStore:
+		return &st.base
+	}
+	return nil
+}
+
+// transferSnapshot — прежний перенос типизированным снимком.
+func transferSnapshot(ctx context.Context, src, dst Storage) error {
 	snap, err := src.Export(ctx)
 	if err != nil {
 		return err

@@ -518,6 +518,13 @@ func walkBackup(r io.Reader, curSchema int, v backupVisitor) (*BackupInfo, error
 // CheckBackup проверяет файл целиком и сверяет его с текущей схемой: каждая
 // колонка файла должна быть в базе. Ничего не меняет.
 func (b *base) CheckBackup(ctx context.Context, open func() (io.Reader, error)) (*BackupInfo, error) {
+	return b.checkBackup(ctx, open, true)
+}
+
+// checkBackup — проверка файла. strict требует годный конфиг настроенного
+// бота: восстановление из админки без него оставило бы бота неработающим. Перенос
+// базы при смене движка идёт и на ненастроенном боте — там strict выключен.
+func (b *base) checkBackup(ctx context.Context, open func() (io.Reader, error), strict bool) (*BackupInfo, error) {
 	cur, err := currentSchema(b.dialect())
 	if err != nil {
 		return nil, err
@@ -556,7 +563,7 @@ func (b *base) CheckBackup(ctx context.Context, open func() (io.Reader, error)) 
 		row: func(row []any) error {
 			if cfgIdx >= 0 {
 				s, ok := row[cfgIdx].(string)
-				if !ok || !configUsable(s) {
+				if !ok || !configParses(s) || strict && !configUsable(s) {
 					return ErrBackupFormat
 				}
 				hasCfg = true
@@ -569,24 +576,27 @@ func (b *base) CheckBackup(ctx context.Context, open func() (io.Reader, error)) 
 	}
 	// Без годного конфига бот после замены не поднялся бы или открыл мастер
 	// первичной установки — а откатиться через бота уже нельзя.
-	if !hasCfg {
+	if strict && !hasCfg {
 		return nil, ErrBackupFormat
 	}
 	return info, nil
 }
 
-// configUsable — конфиг из файла разбирается этой версией бота и описывает
-// настроенного бота.
-func configUsable(s string) bool {
+// configParses — конфиг из файла — объект, который эта версия разбирает.
+func configParses(s string) bool {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(s), &m); err != nil || m == nil {
 		return false
 	}
 	var cfg model.BotConfig
-	if err := json.Unmarshal([]byte(s), &cfg); err != nil {
-		return false
-	}
-	return cfg.Installed
+	return json.Unmarshal([]byte(s), &cfg) == nil
+}
+
+// configUsable — конфиг из файла разбирается этой версией бота и описывает
+// настроенного бота.
+func configUsable(s string) bool {
+	var cfg model.BotConfig
+	return configParses(s) && json.Unmarshal([]byte(s), &cfg) == nil && cfg.Installed
 }
 
 // restoredConfig — конфиг из файла в том виде, в каком он ляжет в базу:
@@ -595,7 +605,7 @@ func configUsable(s string) bool {
 // Файл не новее бота (это проверено раньше), так что разбор в BotConfig
 // ничего из него не теряет.
 func restoredConfig(cfgJSON, kind string, patch func(*model.BotConfig)) ([]byte, error) {
-	if !configUsable(cfgJSON) {
+	if !configParses(cfgJSON) {
 		return nil, ErrBackupFormat
 	}
 	var cfg model.BotConfig
@@ -671,7 +681,11 @@ func restoreValue(v any, c colInfo) (any, error) {
 // patch правит восстановленный конфиг перед записью — в той же транзакции,
 // что и замена (метка «база восстановлена» не может разойтись с самой заменой).
 func (b *base) RestoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig)) error {
-	info, err := b.CheckBackup(ctx, open)
+	return b.restoreBackup(ctx, open, patch, true)
+}
+
+func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig), strict bool) error {
+	info, err := b.checkBackup(ctx, open, strict)
 	if err != nil {
 		return err
 	}
