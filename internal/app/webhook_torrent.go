@@ -623,6 +623,10 @@ func (a *App) RunTorrentUnblocker(ctx context.Context) {
 }
 
 func (a *App) torrentUnblockOnce(ctx context.Context) {
+	if !a.enterWork() {
+		return
+	}
+	defer a.leaveWork()
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
@@ -662,6 +666,9 @@ func (a *App) deliverUnblocks(ctx context.Context, st storage.Storage, due []mod
 	// тиков подряд — впустую дёргать панель.
 	subRetry := map[int64]bool{}
 	for _, r := range due {
+		if a.paused() {
+			return
+		}
 		send := notifyUser && r.TelegramID != 0
 		since, sinceOK := time.Duration(0), false
 		if t, err := time.Parse(time.RFC3339, r.WillUnblockAt); err == nil {

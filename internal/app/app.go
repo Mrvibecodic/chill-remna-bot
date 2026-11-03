@@ -74,6 +74,11 @@ type messenger interface {
 	StarTransactions(ctx context.Context, offset, limit int) ([]models.StarTransaction, error)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
+	// SendFile загружает файл и отдаёт ошибку Telegram: по ней видно, что не
+	// так (нет прав, файл велик, таймаут). Загрузка идёт с долгим таймаутом.
+	SendFile(ctx context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error)
+	// AnswerCallbackText отвечает на нажатие кнопки всплывающей надписью.
+	AnswerCallbackText(ctx context.Context, id, text string)
 	// SendDocumentKB отправляет файл (по file_id или загрузкой) с подписью и
 	// кнопками — так уходят чеки об оплате, которые пришли не картинкой.
 	SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int
@@ -303,6 +308,40 @@ type App struct {
 	rsMu   sync.Mutex
 	rsDump map[int64]*rsimport.Data
 
+	// Бэкап базы. bkMu — одна выгрузка или восстановление за раз; bkPend —
+	// присланный файл до подтверждения восстановления; bkNextTry — когда
+	// повторить бэкап по расписанию после неудачи (в памяти: перезапуск и так
+	// даёт новую попытку).
+	bkMu      sync.Mutex
+	bkPendMu  sync.Mutex
+	bkPend    map[int64]*bkPending
+	bkNextTry time.Time
+	// restoring — идёт восстановление базы: бот, вебхуки и фоновые задачи
+	// стоят, сохранение конфига запрещено. После удачного восстановления
+	// флаг не снимается до перезапуска процесса.
+	restoring atomic.Bool
+	// moneyActive — сколько денежных задач (trackMoney) сейчас идёт;
+	// bgActive — сколько фоновых проходов, вебхуков и запросов API пишут в
+	// базу. Восстановление ждёт, пока оба счётчика не обнулятся.
+	moneyActive  atomic.Int64
+	bgActive     atomic.Int64
+	restorePhase atomic.Int32
+	restartFn    func()
+	restartReq   atomic.Bool
+	// newBackupSender подменяет отдельного бота для бэкапов в тестах,
+	// quietWaitD — срок ожидания перед восстановлением (0 — quietWait).
+	newBackupSender func(token string) (backupSender, error)
+	quietWaitD      time.Duration
+	// uploadLimitD — потолок файла бэкапа в тестах (0 — tgUploadLimit).
+	uploadLimitD int
+	// Сверка сроков с панелью после восстановления базы.
+	guardMu        sync.Mutex
+	guardNextTry   time.Time
+	guardFailNoted bool
+	// reviewLines — оплаты на ручную проверку после восстановления базы.
+	reviewMu    sync.Mutex
+	reviewItems []reviewItem
+
 	bgCtx context.Context
 
 	// moneyCtx — контекст «денежных» фоновых задач: выдача по звёздам,
@@ -391,6 +430,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
+		cfg.NormalizeBackup()
 		healWebhookConfig(cfg)
 		a.botCfg = cfg
 		a.applyTexts(cfg)
@@ -590,11 +630,17 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	a.b = b
-	a.msg = botMessenger{b: b, log: a.log}
+	up, err := bot.New(a.cfg.BotToken, bot.WithSkipGetMe(),
+		bot.WithHTTPClient(time.Minute, &http.Client{Timeout: fileUploadTimeout}))
+	if err != nil {
+		up = nil
+	}
+	a.msg = botMessenger{b: b, log: a.log, up: up}
 	a.sendHealNotice(ctx)
 	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
+	a.noticeRestored(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)
 	if a.MiniEnabled() || a.CabinetEnabled() {
@@ -630,7 +676,9 @@ func (a *App) trackMoney(name string, f func(context.Context)) {
 		a.moneyWG.Add(1)
 	}
 	a.mu.Unlock()
+	a.moneyActive.Add(1)
 	go func() {
+		defer a.moneyActive.Add(-1)
 		if counted {
 			defer a.moneyWG.Done()
 		}
@@ -719,6 +767,10 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 			a.log.Error("паника в обработчике апдейта", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
+	if a.paused() {
+		a.answerMaintenance(ctx, update)
+		return
+	}
 	switch {
 	case update.CallbackQuery != nil:
 		a.handleCallback(ctx, update.CallbackQuery)
@@ -1800,6 +1852,10 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		if isAdmin {
 			a.onTexts(ctx, chatID, val)
 		}
+	case cbBackup:
+		if isAdmin {
+			a.onBackup(ctx, chatID, val)
+		}
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}
@@ -1809,6 +1865,8 @@ func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstNa
 	name := displayName(a.lang(chatID), firstName, username)
 	a.clearPanelInput(chatID)
 	if isAdmin {
+		// Брошенный файл бэкапа не должен ждать пароль после ухода в меню.
+		a.bkPendTake(chatID)
 		a.showMenu(ctx, chatID, true, name)
 		return
 	}
@@ -1903,6 +1961,9 @@ func (a *App) applyPremium(text string) string {
 type botMessenger struct {
 	b   *bot.Bot
 	log *slog.Logger
+	// up — тот же бот с долгим таймаутом: загрузка файла бэкапа в 50 МБ
+	// по медленному каналу не укладывается в минуту основного клиента.
+	up *bot.Bot
 }
 
 func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
@@ -2250,6 +2311,32 @@ func (m botMessenger) SetCommandKeyboard(ctx context.Context, chatID int64, labe
 
 func (m botMessenger) AnswerCallback(ctx context.Context, id string) {
 	_, _ = m.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: id})
+}
+
+func (m botMessenger) AnswerCallbackText(ctx context.Context, id, text string) {
+	_, _ = m.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: id, Text: text})
+}
+
+func (m botMessenger) SendFile(ctx context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error) {
+	b := m.up
+	if b == nil {
+		b = m.b
+	}
+	params := &bot.SendDocumentParams{
+		ChatID:    chatID,
+		Document:  &models.InputFileUpload{Filename: name, Data: bytes.NewReader(data)},
+		Caption:   caption,
+		ParseMode: models.ParseModeHTML,
+	}
+	if len(rows) > 0 {
+		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: fitKeyboard(rows)}
+	}
+	msg, err := b.SendDocument(ctx, params)
+	if err != nil {
+		m.log.Error("send file", "err", err)
+		return 0, err
+	}
+	return msg.ID, nil
 }
 
 func (m botMessenger) EditText(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) bool {

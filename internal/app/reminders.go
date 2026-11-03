@@ -30,6 +30,14 @@ func (a *App) RunReminders(ctx context.Context) {
 }
 
 func (a *App) remindOnce(ctx context.Context) {
+	if !a.enterWork() {
+		return
+	}
+	defer a.leaveWork()
+	// После восстановления базы срок в ней старый, пока не сверен с панелью.
+	if a.restoreSyncPending() {
+		return
+	}
 	a.mu.Lock()
 	st := a.store
 	var rc model.RemindersConfig
@@ -50,6 +58,9 @@ func (a *App) remindOnce(ctx context.Context) {
 	}
 	now := time.Now().UTC()
 	for i := range users {
+		if a.paused() {
+			return
+		}
 		a.remindUser(ctx, st, rc, &users[i], now)
 	}
 }

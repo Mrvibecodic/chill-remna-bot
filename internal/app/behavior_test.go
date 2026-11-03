@@ -36,6 +36,13 @@ type fakeMsg struct {
 	invoices []string
 	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
 	downloads map[string][]byte
+	// docTo — в какие чаты ушли загруженные документы, по порядку;
+	// docMsgIDs — id сообщений с файлами (SendFile).
+	docTo     []int64
+	docMsgIDs []int
+	// cbTexts — всплывающие ответы на нажатия кнопок.
+	cbTexts []string
+	dlDone  bool
 	// docs — документы, отправленные ботом: ключ — имя файла.
 	docs map[string][]byte
 	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
@@ -188,6 +195,30 @@ func (f *fakeMsg) SendEnt(ctx context.Context, _ int64, text string, _ []models.
 	return f.noteProt(ctx, f.add(text))
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
+func (f *fakeMsg) AnswerCallbackText(_ context.Context, _ string, text string) {
+	f.mu.Lock()
+	f.cbTexts = append(f.cbTexts, text)
+	f.mu.Unlock()
+}
+func (f *fakeMsg) SendFile(_ context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error) {
+	if f.forbidden != nil && f.forbidden[chatID] {
+		return 0, bot.ErrorForbidden
+	}
+	f.recordKB(rows)
+	f.mu.Lock()
+	f.sentDocIDs = append(f.sentDocIDs, name)
+	if f.docs == nil {
+		f.docs = map[string][]byte{}
+	}
+	f.docs[name] = append([]byte(nil), data...)
+	f.docTo = append(f.docTo, chatID)
+	f.mu.Unlock()
+	id := f.add("FILE:" + caption)
+	f.mu.Lock()
+	f.docMsgIDs = append(f.docMsgIDs, id)
+	f.mu.Unlock()
+	return id, nil
+}
 func (f *fakeMsg) RefundStars(_ context.Context, userID int64, chargeID string) error {
 	f.refunds = append(f.refunds, fmt.Sprintf("%d:%s", userID, chargeID))
 	return f.refundErr
@@ -1962,6 +1993,15 @@ func (s *fakeStore) Export(context.Context) (*storage.Snapshot, error) {
 	return &storage.Snapshot{}, nil
 }
 func (s *fakeStore) Import(context.Context, *storage.Snapshot) error { return nil }
+func (s *fakeStore) WriteBackup(context.Context, io.Writer, string) (*storage.BackupInfo, error) {
+	return nil, errors.New("fakeStore: бэкап не поддержан")
+}
+func (s *fakeStore) CheckBackup(context.Context, func() (io.Reader, error)) (*storage.BackupInfo, error) {
+	return nil, errors.New("fakeStore: бэкап не поддержан")
+}
+func (s *fakeStore) RestoreBackup(context.Context, func() (io.Reader, error), func(*model.BotConfig)) error {
+	return errors.New("fakeStore: бэкап не поддержан")
+}
 
 func (s *fakeStore) Kind() string { return "fake" }
 func (s *fakeStore) Close() error { return nil }
@@ -2833,4 +2873,16 @@ func TestP2P_ReceiptAfterRestart(t *testing.T) {
 			t.Fatalf("бот не должен был ничего отправлять:\n%s", fm.joined())
 		}
 	})
+}
+
+// downloaded / markDownloaded — для тестов с медленным скачиванием.
+func (f *fakeMsg) markDownloaded() {
+	f.mu.Lock()
+	f.dlDone = true
+	f.mu.Unlock()
+}
+func (f *fakeMsg) downloaded() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlDone
 }

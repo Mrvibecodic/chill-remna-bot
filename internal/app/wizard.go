@@ -112,6 +112,7 @@ const (
 	cbDevices   = "dev"
 	cbDevAdmin  = "devadm"
 	cbRSImport  = "rsimp"
+	cbBackup    = "bk"
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
 	cbTorrent   = "torj"
@@ -347,6 +348,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbRSImport:
 		if isAdmin {
 			a.onRSImport(ctx, chatID, val)
+		}
+	case cbBackup:
+		if isAdmin {
+			a.onBackup(ctx, chatID, val)
 		}
 	case cbPanelAuth:
 		if isAdmin {

@@ -55,6 +55,11 @@ func (a *App) saveConfigOnly(ctx context.Context) error {
 
 // saveConfigHeld — то же, но вызывающий уже держит cfgSaveMu.
 func (a *App) saveConfigHeld(ctx context.Context) error {
+	// Во время восстановления базы и до перезапуска в памяти лежит СТАРЫЙ
+	// конфиг: записать его — значит затереть только что восстановленный.
+	if a.restoring.Load() {
+		return errRestoring
+	}
 	a.mu.Lock()
 	st := a.store
 	raw, err := a.botCfg.SnapshotJSON()
@@ -1530,6 +1535,11 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	ui := a.getUI(chatID)
 	lang := a.lang(chatID)
 
+	// Пароль от присланного файла бэкапа — только когда другого ввода не ждём.
+	if ui.adminInput == "" && ui.rejectReq == 0 && a.restorePassText(ctx, chatID, text) {
+		return
+	}
+
 	if ui.rejectReq != 0 {
 		id := ui.rejectReq
 		ui.rejectReq = 0
@@ -1558,6 +1568,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	}
 
 	switch ui.adminInput {
+	case "bk_pass", "bk_chat", "bk_bot":
+		a.applyBackupInput(ctx, chatID, ui.adminInput, text)
 	case "p2p_amt":
 		a.applyP2PAmount(ctx, chatID, text)
 	case "tx_search":

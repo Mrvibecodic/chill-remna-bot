@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -185,6 +186,14 @@ type Storage interface {
 
 	Export(ctx context.Context) (*Snapshot, error)
 	Import(ctx context.Context, s *Snapshot) error
+
+	// WriteBackup пишет полный бэкап базы (все таблицы, все колонки);
+	// CheckBackup проверяет файл и сверяет его со схемой, ничего не меняя;
+	// RestoreBackup одной транзакцией заменяет все данные содержимым файла.
+	// open отдаёт файл с начала: восстановление читает его дважды.
+	WriteBackup(ctx context.Context, w io.Writer, app string) (*BackupInfo, error)
+	CheckBackup(ctx context.Context, open func() (io.Reader, error)) (*BackupInfo, error)
+	RestoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig)) error
 
 	AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error
 

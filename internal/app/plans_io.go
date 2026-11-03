@@ -105,6 +105,7 @@ func (a *App) askPlanImport(ctx context.Context, chatID int64) {
 	// Взаимоисключение с ожиданием дампа remnashop: два взведённых ожидания
 	// файла — это чей-то файл не в том разборе.
 	ui.awaitRSDump = false
+	ui.awaitBackup = false
 	lang := a.lang(chatID)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.import_ask"),
 		[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})

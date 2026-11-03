@@ -50,6 +50,13 @@ type subRepairStats struct {
 }
 
 func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
+	if !a.enterWork() {
+		return subRepairStats{}
+	}
+	defer a.leaveWork()
+	if a.restoreSyncPending() {
+		return subRepairStats{}
+	}
 	a.mu.Lock()
 	st := a.store
 	panel := a.panel
@@ -65,10 +72,15 @@ func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
 	}
 	now := time.Now().UTC()
 	for i := range targets {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || a.paused() {
 			return stats
 		}
 		t := targets[i]
+		// Срок разошёлся с бэкапом — значит, после даты файла была покупка,
+		// которой в базе нет. Откатывать условия к старой покупке нельзя.
+		if a.restoreChanged(t.TelegramID) {
+			continue
+		}
 		// Истёкшая подписка не чинится: лимиты ей всё равно применят при
 		// следующей оплате, а лишний апдейт сдвинул бы срок.
 		if exp, e := time.Parse(time.RFC3339, t.SubExpireAt); e != nil || !exp.After(now) {

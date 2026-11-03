@@ -210,7 +210,7 @@ func (a *App) RunUpdateChecker(ctx context.Context) {
 		a.mu.Lock()
 		on := a.botCfg != nil && a.botCfg.UpdateCheck.Enabled
 		a.mu.Unlock()
-		if on {
+		if on && !a.paused() {
 			a.checkUpdateOnce(ctx, 0, false)
 		}
 	}

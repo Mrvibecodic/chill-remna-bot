@@ -70,6 +70,7 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 		ui.awaitPlanImport = false
 		ui.planImport = nil
 		ui.planImportAccess = nil
+		ui.awaitBackup = false
 		a.sendSysKB(ctx, chatID, i18n.T(lang, "rsimp.await"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.back"), "menu:rsimp")},
 		})
@@ -87,6 +88,12 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 		a.sendSysKB(ctx, chatID, i18n.T(lang, "rsimp.running"), nil)
 		bg := a.bgContext()
 		a.spawn(func() {
+			// Пока идёт перенос, восстановление базы ждёт его конца.
+			if !a.enterWork() {
+				a.sendSysKB(bg, chatID, i18n.T(lang, "bk.maintenance"), nil)
+				return
+			}
+			defer a.leaveWork()
 			rep := a.applyRSImport(bg, d)
 			a.sendSysKB(bg, chatID, a.rsReportText(lang, d, rep), [][]models.InlineKeyboardButton{
 				{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -97,8 +104,8 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-// handleDocument принимает чек об оплате переводом, файл дампа remnashop или
-// файл тарифа. Другие документы боту не нужны.
+// handleDocument принимает чек об оплате переводом, файл дампа remnashop,
+// файл тарифа или файл бэкапа базы. Другие документы боту не нужны.
 func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
 	// Чек об оплате присылает обычный пользователь — эта ветка идёт до
@@ -122,6 +129,11 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 		(ui.awaitSectionBanner != "" || ui.welcomeAwait == "img") {
 		lang := a.lang(chatID)
 		a.sendKB(ctx, chatID, i18n.T(lang, "banners.need_photo"), nil)
+		return
+	}
+	if ui.awaitBackup {
+		ui.awaitBackup = false
+		a.handleBackupDoc(ctx, m)
 		return
 	}
 	if ui.awaitPlanImport {

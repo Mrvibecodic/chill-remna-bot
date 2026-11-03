@@ -296,6 +296,15 @@ func (a *App) RunAutoPay(ctx context.Context) {
 }
 
 func (a *App) autoPayOnce(ctx context.Context) {
+	if !a.enterWork() {
+		return
+	}
+	defer a.leaveWork()
+	// После восстановления базы срок в ней старый, пока не сверен с панелью,
+	// а согласие на списания — из файла, пока админ его не подтвердил.
+	if a.restoreSyncPending() || a.autoPayHeld() {
+		return
+	}
 	if a.store == nil || !a.autoPayAvailable() {
 		return
 	}
@@ -307,9 +316,12 @@ func (a *App) autoPayOnce(ctx context.Context) {
 	now := time.Now().UTC()
 	shopIssue := ""
 	for i := range list {
+		if a.paused() {
+			return
+		}
 		ap := list[i]
 		exp, due := a.autoPayDue(ctx, &ap, now)
-		if !due {
+		if !due || !a.autoPayExpiryConfirmed(ctx, &ap, exp, now) {
 			continue
 		}
 		if reason := a.chargeAutoPay(ctx, &ap, now, exp); reason != "" {

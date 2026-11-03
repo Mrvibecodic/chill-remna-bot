@@ -27,6 +27,10 @@ var (
 // больше обещать нечестно: остаток уйдёт на дренаж веб-сервера.
 const shutdownGrace = 6 * time.Second
 
+// Без этого веб-сервер молча перестал бы отвечать 503 во время
+// восстановления базы, если сигнатура разойдётся.
+var _ web.WorkTracker = (*app.App)(nil)
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -50,6 +54,8 @@ func main() {
 	defer stop()
 
 	a := app.New(cfg, crypter, log)
+	// После восстановления базы бот гасит себя сам, а docker поднимает заново.
+	a.SetRestart(stop)
 	if err := a.Bootstrap(ctx); err != nil {
 		log.Error("инициализация", "err", err)
 		os.Exit(1)
@@ -66,7 +72,7 @@ func main() {
 	webSrv.SetStaticDir(cfg.StaticDir)
 
 	var wg sync.WaitGroup
-	wg.Add(10)
+	wg.Add(11)
 	var botErr, webErr error
 
 	go func() {
@@ -127,6 +133,10 @@ func main() {
 		defer wg.Done()
 		a.RunBonusTrafficSweep(ctx)
 	}()
+	go func() {
+		defer wg.Done()
+		a.RunBackups(ctx)
+	}()
 	wg.Wait()
 	// Даём доиграть недоделанному: выдаче по звёздам, возврату на баланс.
 	// Бюджет короткий намеренно — docker убивает контейнер через 10 секунд
@@ -135,6 +145,12 @@ func main() {
 		log.Warn("не всё фоновое успело завершиться за отведённое время")
 	}
 
+	if a.RestartRequested() {
+		// Ненулевой код: docker поднимает контейнер заново и при политике
+		// on-failure, а не только always/unless-stopped.
+		log.Info("перезапуск после восстановления базы")
+		os.Exit(3)
+	}
 	if botErr != nil {
 		log.Error("работа бота", "err", botErr)
 		os.Exit(1)

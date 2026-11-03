@@ -408,7 +408,7 @@ func (a *App) showSystem(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
 		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
 		{btn(i18n.T(lang, "btn.mail"), "menu:mail")},
-		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
+		{btn(i18n.T(lang, "btn.backup"), "menu:backup"), btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
@@ -796,6 +796,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "rsimp":
 		if isAdmin {
 			a.showRSImport(ctx, chatID)
+		}
+	case "backup":
+		if isAdmin {
+			a.openBackupMenu(ctx, chatID)
 		}
 	case "cabtoggle":
 		if isAdmin {

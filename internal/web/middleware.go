@@ -88,6 +88,28 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			return
 		}
 
+		// Идёт восстановление базы: вебхуки и API отвечают «попробуйте позже».
+		// Платёжки повторяют доставку сами, а принятое сейчас легло бы в базу,
+		// которую через минуту заменят целиком. Начатые запросы восстановление
+		// дожидается — для этого каждый из них отмечается.
+		if strings.HasPrefix(path, "/webhook/") || strings.HasPrefix(path, "/api/") {
+			if wt, ok := s.handlers.(WorkTracker); ok {
+				if !wt.EnterWork() {
+					w.Header().Set("Retry-After", "120")
+					if r.Method == http.MethodGet && !strings.HasPrefix(path, "/api/") {
+						// Страницу оплаты открывают в браузере — JSON там ни к чему.
+						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						w.WriteHeader(http.StatusServiceUnavailable)
+						_, _ = w.Write([]byte("Техработы, попробуйте через пару минут.\nMaintenance, please try again in a few minutes.\n"))
+						return
+					}
+					writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "техработы, попробуйте через пару минут / maintenance, try again in a few minutes"})
+					return
+				}
+				defer wt.LeaveWork()
+			}
+		}
+
 		if b := rlBucket(r); b != "" {
 			if lim := s.limiterFor(b); lim != nil && !lim.allow(b+"|"+clientIP(r)) {
 				w.Header().Set("Retry-After", "60")
@@ -97,6 +119,15 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// WorkTracker — необязательная часть обработчиков: учёт начатых запросов на
+// время восстановления базы. Тестовым двойникам он не нужен; что бот его
+// реализует, проверяется при сборке (cmd/bot).
+type WorkTracker interface {
+	// EnterWork отмечает начало запроса; false — идут техработы, отказать.
+	EnterWork() bool
+	LeaveWork()
 }
 
 // httpsTarget собирает адрес, на который переводим с открытого HTTP. Пустая

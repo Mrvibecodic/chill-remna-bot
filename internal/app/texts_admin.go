@@ -577,6 +577,7 @@ func resetPendingInputs(ui *uiState) {
 	ui.awaitSectionBanner = ""
 	ui.awaitRSDump = false
 	ui.awaitPlanImport = false
+	ui.awaitBackup = false
 }
 
 // clearTextInput снимает ожидание текста и убирает сообщение-шаблон.
