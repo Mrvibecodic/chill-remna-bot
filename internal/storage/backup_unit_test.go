@@ -465,6 +465,12 @@ func TestBackupPostgresSnapshotIsConsistent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer other.Close()
+	// Выгрузка пишет через буфер в 256 КБ: чтобы первая запись случилась
+	// посреди выгрузки, а не в самом конце, база должна быть больше буфера.
+	if _, err := other.Exec("INSERT INTO users (telegram_id, p2p_approved, created_at) " +
+		"SELECT g, 0, '2026-01-01T00:00:00Z' FROM generate_series(2000000001, 2000006000) g"); err != nil {
+		t.Fatal(err)
+	}
 	var buf bytes.Buffer
 	w := &hookWriter{Writer: &buf, once: func() {
 		if _, err := other.Exec("INSERT INTO screen_state (chat_id, msg_id) VALUES (999, 1)"); err != nil {
