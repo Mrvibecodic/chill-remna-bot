@@ -999,6 +999,9 @@ func (a *App) waitQuiet(ctx context.Context) bool {
 	for {
 		if a.bgActive.Load() == 0 && a.moneyActive.Load() == 0 {
 			a.restorePhase.Store(phaseReplace)
+			if a.quietHook != nil {
+				a.quietHook()
+			}
 			// Оплата звёздами могла начаться ровно между проверкой и сменой
 			// фазы — тогда ждём и её.
 			if a.moneyActive.Load() == 0 {

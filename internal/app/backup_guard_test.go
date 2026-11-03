@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -450,5 +451,66 @@ func TestBackupPendingExpiry(t *testing.T) {
 	a.handleCallback(ctx, cb(100, "bk:apply"))
 	if a.paused() || !strings.Contains(lastText(fm), "ждал подтверждения больше 30 минут") {
 		t.Fatalf("протухший файл: %q", lastText(fm))
+	}
+}
+
+// Оплата, начатая ровно между проверкой «всё тихо» и сменой фазы, тоже
+// дожидается: замена базы не идёт поверх неё.
+func TestWaitQuietRechecksMoney(t *testing.T) {
+	a, _, _ := bkTestApp(t)
+	ctx := context.Background()
+	a.quietWaitD = 400 * time.Millisecond
+	a.quietHook = func() { a.moneyActive.Add(1) }
+	a.restorePhase.Store(phaseWait)
+	a.restoring.Store(true)
+	if a.waitQuiet(ctx) {
+		t.Fatal("замена пошла поверх начатой оплаты")
+	}
+	a.quietHook = nil
+	a.moneyActive.Store(0)
+	if !a.waitQuiet(ctx) {
+		t.Fatal("оплата закончилась, а восстановление всё ждёт")
+	}
+}
+
+// restoreSpy отмечает, что замена базы началась.
+type restoreSpy struct {
+	storage.Storage
+	called atomic.Bool
+}
+
+func (s *restoreSpy) RestoreBackup(ctx context.Context, open func() (io.Reader, error), g *model.RestoreGuard) error {
+	s.called.Store(true)
+	return s.Storage.RestoreBackup(ctx, open, g)
+}
+
+// Сохранение конфига, начатое до восстановления, доезжает раньше замены, а
+// не ложится поверх восстановленной базы.
+func TestRestoreWaitsForConfigSave(t *testing.T) {
+	a, fm, st := bkTestApp(t)
+	ctx := context.Background()
+	_ = st.UpsertUser(ctx, 1000000001)
+	bkSetPassword(t, a, "пароль-бэкапа")
+	a.handleCallback(ctx, cb(100, "bk:now"))
+	_, file, _ := lastDoc(t, fm)
+	restoreFile(t, a, fm, file)
+	spy := &restoreSpy{Storage: st}
+	a.store = spy
+	a.cfgSaveMu.Lock() // сохранение конфига идёт
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.handleCallback(ctx, cb(100, "bk:apply"))
+	}()
+	time.Sleep(500 * time.Millisecond)
+	if spy.called.Load() {
+		a.cfgSaveMu.Unlock()
+		<-done
+		t.Fatal("замена базы пошла посреди сохранения конфига")
+	}
+	a.cfgSaveMu.Unlock()
+	<-done
+	if !spy.called.Load() || !a.RestartRequested() {
+		t.Fatal("восстановление не прошло после сохранения конфига")
 	}
 }

@@ -341,7 +341,10 @@ type App struct {
 	// newBackupSender подменяет отдельного бота для бэкапов в тестах,
 	// quietWaitD — срок ожидания перед восстановлением (0 — quietWait).
 	newBackupSender func(token string) (backupSender, error)
-	quietWaitD      time.Duration
+	// quietHook — тесты: вызывается между сменой фазы восстановления и
+	// повторной проверкой начатых оплат.
+	quietHook  func()
+	quietWaitD time.Duration
 	// uploadLimitD — потолок файла бэкапа в тестах (0 — tgUploadLimit).
 	uploadLimitD int
 	// Сверка сроков с панелью после восстановления базы.
