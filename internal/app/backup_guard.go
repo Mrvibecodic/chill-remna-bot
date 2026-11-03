@@ -82,26 +82,25 @@ func (a *App) reviewNoted(ctx context.Context, extID string) bool {
 func (a *App) restoreGuard() *model.RestoreGuard {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.botCfg == nil || a.botCfg.Backup.Guard == nil {
+	if a.bkState.Guard == nil {
 		return nil
 	}
-	g := *a.botCfg.Backup.Guard
+	g := *a.bkState.Guard
 	g.Changed = slices.Clone(g.Changed)
 	return &g
 }
 
-// updateGuard правит метку восстановления и сохраняет конфиг.
+// updateGuard правит метку восстановления и сохраняет её.
 func (a *App) updateGuard(ctx context.Context, f func(g *model.RestoreGuard)) {
-	a.mu.Lock()
-	if a.botCfg == nil || a.botCfg.Backup.Guard == nil {
-		a.mu.Unlock()
-		return
-	}
-	g := *a.botCfg.Backup.Guard
-	f(&g)
-	a.botCfg.Backup.Guard = &g
-	a.mu.Unlock()
-	if err := a.saveConfigOnly(ctx); err != nil {
+	err := a.editBackupState(ctx, func(bc *model.BackupConfig) {
+		if bc.Guard == nil {
+			return
+		}
+		g := *bc.Guard
+		f(&g)
+		bc.Guard = &g
+	})
+	if err != nil {
 		a.log.Warn("метка восстановления не сохранена", "err", err)
 	}
 }

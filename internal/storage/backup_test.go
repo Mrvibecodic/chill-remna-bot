@@ -80,8 +80,13 @@ func fillEveryColumn(t *testing.T, st Storage, salt int) {
 	if err := st.SaveConfig(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := b.tableColumns(ctx, b.db, "backup_state"); err == nil {
+		if err := st.SaveBackupState(ctx, &model.BackupConfig{Hours: 6, Password: fmt.Sprintf("пароль-%d", salt), ChatID: -1000000000000 - int64(salt)}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for ti, table := range backupTables {
-		if table == "settings" {
+		if encryptedCol(table) != "" {
 			continue
 		}
 		cols, err := b.tableColumns(ctx, b.db, table)
@@ -152,7 +157,7 @@ func rawDump(t *testing.T, st Storage) map[string][]string {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if table == "settings" && names[i] == "config" {
+				if names[i] == encryptedCol(table) {
 					plain, err := b.crypter.Decrypt(dv.(string))
 					if err != nil {
 						t.Fatal(err)

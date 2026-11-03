@@ -159,12 +159,55 @@ func (a *App) errText(err error, tokens ...string) string {
 func (a *App) backupCfg() model.BackupConfig {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.botCfg == nil {
-		return model.BackupConfig{}
-	}
-	bc := a.botCfg.Backup
+	bc := a.bkState
 	bc.Guard = nil
 	return bc
+}
+
+// loadBackupState читает настройки бэкапа. Раньше они жили в конфиге — при
+// первом запуске новой версии переезжают в свою таблицу.
+func (a *App) loadBackupState(ctx context.Context, cfg *model.BotConfig) {
+	st, ok, err := a.store.LoadBackupState(ctx)
+	if err != nil {
+		a.log.Warn("настройки бэкапа не прочитаны", "err", err)
+		return
+	}
+	if !ok && cfg.Backup != nil {
+		st = cfg.Backup
+		if err := a.store.SaveBackupState(ctx, st); err != nil {
+			a.log.Warn("настройки бэкапа не перенесены", "err", err)
+			return
+		}
+		cfg.Backup = nil
+		if err := a.store.SaveConfig(ctx, cfg); err != nil {
+			a.log.Warn("конфиг после переноса настроек бэкапа", "err", err)
+		}
+	}
+	if st == nil {
+		return
+	}
+	st.Normalize()
+	a.mu.Lock()
+	a.bkState = *st
+	a.mu.Unlock()
+}
+
+// editBackupState правит настройки бэкапа и сохраняет их. Во время
+// восстановления — отказ: в памяти старое состояние.
+func (a *App) editBackupState(ctx context.Context, f func(*model.BackupConfig)) error {
+	if a.restoring.Load() {
+		return errRestoring
+	}
+	a.mu.Lock()
+	f(&a.bkState)
+	a.bkState.Normalize()
+	st := a.bkState
+	store := a.store
+	a.mu.Unlock()
+	if store == nil {
+		return errors.New("база не подключена")
+	}
+	return store.SaveBackupState(ctx, &st)
 }
 
 func fmtBackupTime(s string) string {
@@ -283,13 +326,8 @@ func (a *App) onBackup(ctx context.Context, chatID int64, val string) {
 			a.showBackup(ctx, chatID)
 			return
 		}
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.Backup.Hours = h
-			a.botCfg.NormalizeBackup()
-		}
-		a.mu.Unlock()
-		a.saveBackupCfg(ctx, chatID, false)
+		err = a.editBackupState(ctx, func(bc *model.BackupConfig) { bc.Hours = h })
+		a.afterBackupEdit(ctx, chatID, false, err)
 	case "pass":
 		a.askBackupInput(ctx, chatID, "bk_pass", i18n.T(lang, "bk.ask_pass", backupPassMin), "menu:backup")
 	case "dest":
@@ -335,9 +373,10 @@ func (a *App) askBackupInput(ctx context.Context, chatID int64, kind, text, back
 	a.askInput(ctx, chatID, text, back)
 }
 
-func (a *App) saveBackupCfg(ctx context.Context, chatID int64, dest bool) {
+// afterBackupEdit показывает экран после правки настроек бэкапа.
+func (a *App) afterBackupEdit(ctx context.Context, chatID int64, dest bool, err error) {
 	note := ""
-	if err := a.saveBotConfig(ctx); err != nil {
+	if err != nil {
 		note = i18n.T(a.lang(chatID), "bk.save_fail", a.errText(err))
 	}
 	if dest {
@@ -396,14 +435,12 @@ func (a *App) applyBackupDest(ctx context.Context, chatID, toChat int64, token s
 			return
 		}
 	}
-	a.mu.Lock()
-	if a.botCfg != nil {
-		a.botCfg.Backup.ChatID = toChat
-		a.botCfg.Backup.BotToken = token
-		a.botCfg.Backup.BotName = name
-	}
-	a.mu.Unlock()
-	a.saveBackupCfg(ctx, chatID, true)
+	err := a.editBackupState(ctx, func(bc *model.BackupConfig) {
+		bc.ChatID = toChat
+		bc.BotToken = token
+		bc.BotName = name
+	})
+	a.afterBackupEdit(ctx, chatID, true, err)
 }
 
 // sendBackupText — текст получателю бэкапов: этим ботом или отдельным.
@@ -433,12 +470,7 @@ func (a *App) applyBackupInput(ctx context.Context, chatID int64, kind, text str
 			return
 		}
 		ui.adminInput = ""
-		a.mu.Lock()
-		if a.botCfg != nil {
-			a.botCfg.Backup.Password = text
-		}
-		a.mu.Unlock()
-		if err := a.saveBotConfig(ctx); err != nil {
+		if err := a.editBackupState(ctx, func(bc *model.BackupConfig) { bc.Password = text }); err != nil {
 			a.showBackupNote(ctx, chatID, i18n.T(lang, "bk.save_fail", a.errText(err)))
 			return
 		}
@@ -610,12 +642,7 @@ func (a *App) sendBackupFile(ctx context.Context, d backupDest, password, titleK
 
 // markBackupSent запоминает время бэкапа: от него считается расписание.
 func (a *App) markBackupSent(ctx context.Context, at time.Time) {
-	a.mu.Lock()
-	if a.botCfg != nil {
-		a.botCfg.Backup.LastAt = at.UTC().Format(time.RFC3339)
-	}
-	a.mu.Unlock()
-	if err := a.saveConfigOnly(ctx); err != nil {
+	if err := a.editBackupState(ctx, func(bc *model.BackupConfig) { bc.LastAt = at.UTC().Format(time.RFC3339) }); err != nil {
 		a.log.Warn("время бэкапа не сохранено", "err", err)
 	}
 }
@@ -995,7 +1022,7 @@ func (a *App) runRestore(ctx context.Context, chatID int64, p *bkPending) {
 	// cfgSaveMu держим всю замену: сохранение конфига, начатое раньше, должно
 	// доехать ДО неё, а не лечь поверх восстановленного.
 	a.cfgSaveMu.Lock()
-	err := st.RestoreBackup(ctx, gunzipOpener(p.gz), func(c *model.BotConfig) { c.Backup.Guard = guard })
+	err := st.RestoreBackup(ctx, gunzipOpener(p.gz), guard)
 	a.cfgSaveMu.Unlock()
 	if err != nil {
 		a.endRestore()

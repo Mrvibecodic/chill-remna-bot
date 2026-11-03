@@ -194,7 +194,11 @@ type Storage interface {
 	// open отдаёт файл с начала: восстановление читает его дважды.
 	WriteBackup(ctx context.Context, w io.Writer, app string) (*BackupInfo, error)
 	CheckBackup(ctx context.Context, open func() (io.Reader, error)) (*BackupInfo, error)
-	RestoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig)) error
+	RestoreBackup(ctx context.Context, open func() (io.Reader, error), guard *model.RestoreGuard) error
+	// LoadBackupState / SaveBackupState — настройки бэкапа и метка
+	// восстановления (своя таблица, а не поле конфига).
+	LoadBackupState(ctx context.Context) (*model.BackupConfig, bool, error)
+	SaveBackupState(ctx context.Context, st *model.BackupConfig) error
 
 	AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error
 

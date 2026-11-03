@@ -37,8 +37,9 @@ import (
 // Конец таблицы и конец файла со счётчиками нужны, чтобы обрезанный файл не
 // восстановился «наполовину» без единого слова.
 //
-// Колонка config таблицы settings пишется расшифрованной: ключ шифрования
-// настроек у нового сервера свой, а файл целиком запирается паролем бэкапа.
+// Зашифрованные колонки (конфиг и состояние бэкапа) пишутся расшифрованными:
+// ключ шифрования у нового сервера свой, а файл целиком запирается паролем
+// бэкапа.
 
 const (
 	backupKind   = "chill-remna-bot-backup"
@@ -53,6 +54,7 @@ const (
 // полноту сторожит тест: новая таблица без строки здесь валит сборку.
 var backupTables = []string{
 	"settings",
+	"backup_state",
 	"users",
 	"web_users",
 	"email_tokens",
@@ -83,6 +85,26 @@ var (
 )
 
 var identRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// encryptedCol — колонка таблицы, которая в базе лежит зашифрованной ключом
+// сервера ("" — таких нет).
+func encryptedCol(table string) string {
+	switch table {
+	case "settings":
+		return "config"
+	case "backup_state":
+		return "data"
+	}
+	return ""
+}
+
+func (b *base) decryptText(enc string) (string, error) {
+	if enc == "" {
+		return "", nil
+	}
+	plain, err := b.crypter.Decrypt(enc)
+	return string(plain), err
+}
 
 // BackupInfo — сводка файла бэкапа.
 type BackupInfo struct {
@@ -317,11 +339,11 @@ func (b *base) dumpTable(ctx context.Context, tx *sql.Tx, w *bufio.Writer, table
 		return 0, err
 	}
 	names := make([]string, len(cols))
-	cfgIdx := -1
+	encIdx := -1
 	for i, c := range cols {
 		names[i] = c.name
-		if table == "settings" && c.name == "config" {
-			cfgIdx = i
+		if c.name == encryptedCol(table) {
+			encIdx = i
 		}
 	}
 	if err := writeLine(w, backupMeta{T: "tb", Name: table, Cols: names}); err != nil {
@@ -351,13 +373,13 @@ func (b *base) dumpTable(ctx context.Context, tx *sql.Tx, w *bufio.Writer, table
 			}
 			out[i] = dv
 		}
-		if cfgIdx >= 0 {
-			enc, _ := out[cfgIdx].(string)
-			plain, err := b.crypter.Decrypt(enc)
+		if encIdx >= 0 {
+			enc, _ := out[encIdx].(string)
+			plain, err := b.decryptText(enc)
 			if err != nil {
-				return 0, fmt.Errorf("расшифровка настроек: %w", err)
+				return 0, fmt.Errorf("расшифровка %s: %w", table, err)
 			}
-			out[cfgIdx] = string(plain)
+			out[encIdx] = plain
 		}
 		if err := writeLine(w, out); err != nil {
 			return 0, err
@@ -545,17 +567,21 @@ func (b *base) checkBackup(ctx context.Context, open func() (io.Reader, error), 
 	if err != nil {
 		return nil, err
 	}
-	cfgIdx := -1
+	cfgIdx, stateIdx := -1, -1
 	hasCfg := false
 	info, err := walkBackup(r, cur, backupVisitor{
 		table: func(name string, cols []string) error {
-			cfgIdx = -1
+			cfgIdx, stateIdx = -1, -1
 			for i, c := range cols {
 				if !schemaCols[name][c] {
 					return fmt.Errorf("%w: в базе нет колонки %s.%s", ErrBackupNewer, name, c)
 				}
-				if name == "settings" && c == "config" {
-					cfgIdx = i
+				if c == encryptedCol(name) {
+					if name == "settings" {
+						cfgIdx = i
+					} else {
+						stateIdx = i
+					}
 				}
 			}
 			return nil
@@ -567,6 +593,12 @@ func (b *base) checkBackup(ctx context.Context, open func() (io.Reader, error), 
 					return ErrBackupFormat
 				}
 				hasCfg = true
+			}
+			if stateIdx >= 0 {
+				s, ok := row[stateIdx].(string)
+				if !ok || s != "" && !isJSONObject(s) {
+					return ErrBackupFormat
+				}
 			}
 			return nil
 		},
@@ -580,6 +612,11 @@ func (b *base) checkBackup(ctx context.Context, open func() (io.Reader, error), 
 		return nil, ErrBackupFormat
 	}
 	return info, nil
+}
+
+func isJSONObject(s string) bool {
+	var m map[string]json.RawMessage
+	return json.Unmarshal([]byte(s), &m) == nil && m != nil
 }
 
 // configParses — конфиг из файла — объект, который эта версия разбирает.
@@ -599,24 +636,50 @@ func configUsable(s string) bool {
 	return configParses(s) && json.Unmarshal([]byte(s), &cfg) == nil && cfg.Installed
 }
 
-// restoredConfig — конфиг из файла в том виде, в каком он ляжет в базу:
-// движок — той базы, куда восстанавливаем (бэкап SQLite, поднятый на
-// Postgres, иначе показывал бы в статусе «sqlite»), плюс правка вызывающего.
-// Файл не новее бота (это проверено раньше), так что разбор в BotConfig
-// ничего из него не теряет.
-func restoredConfig(cfgJSON, kind string, patch func(*model.BotConfig)) ([]byte, error) {
+// restoredConfig — конфиг из файла в том виде, в каком он ляжет в базу.
+// Правится как сырой JSON, без разбора в BotConfig: поля, которых эта версия
+// не знает (файл с более свежего бота той же схемы), не теряются. Меняется
+// только движок — той базы, куда восстанавливаем (бэкап SQLite, поднятый на
+// Postgres, иначе показывал бы в статусе «sqlite»). Состояние бэкапа, которое
+// старые версии держали в конфиге (ключ backup), уезжает в свою таблицу:
+// оно возвращается вторым значением.
+func restoredConfig(cfgJSON, kind string) ([]byte, json.RawMessage, error) {
 	if !configParses(cfgJSON) {
-		return nil, ErrBackupFormat
+		return nil, nil, ErrBackupFormat
 	}
-	var cfg model.BotConfig
-	if err := json.Unmarshal([]byte(cfgJSON), &cfg); err != nil {
-		return nil, ErrBackupFormat
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(cfgJSON), &m); err != nil {
+		return nil, nil, ErrBackupFormat
 	}
-	cfg.DBKind = kind
-	if patch != nil {
-		patch(&cfg)
+	raw, err := json.Marshal(kind)
+	if err != nil {
+		return nil, nil, err
 	}
-	return json.Marshal(&cfg)
+	m["db_kind"] = raw
+	legacy := m["backup"]
+	delete(m, "backup")
+	out, err := json.Marshal(m)
+	return out, legacy, err
+}
+
+// restoredState — состояние бэкапа для записи: из файла (или из старого
+// конфига), с меткой восстановления, если она передана. Как и конфиг, правится
+// сырым JSON.
+func restoredState(stateJSON []byte, guard *model.RestoreGuard) ([]byte, error) {
+	m := map[string]json.RawMessage{}
+	if len(stateJSON) > 0 && string(stateJSON) != "null" {
+		if err := json.Unmarshal(stateJSON, &m); err != nil || m == nil {
+			return nil, ErrBackupFormat
+		}
+	}
+	if guard != nil {
+		raw, err := json.Marshal(guard)
+		if err != nil {
+			return nil, err
+		}
+		m["restore_guard"] = raw
+	}
+	return json.Marshal(m)
 }
 
 func restoreValue(v any, c colInfo) (any, error) {
@@ -678,13 +741,13 @@ func restoreValue(v any, c colInfo) (any, error) {
 // старой версии после вставки догоняется миграциями, вышедшими позже него, —
 // ровно так, как обновилась бы сама старая база.
 //
-// patch правит восстановленный конфиг перед записью — в той же транзакции,
-// что и замена (метка «база восстановлена» не может разойтись с самой заменой).
-func (b *base) RestoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig)) error {
-	return b.restoreBackup(ctx, open, patch, true)
+// guard — метка восстановления: пишется в состояние бэкапа в той же
+// транзакции, что и замена (метка не может разойтись с самой заменой).
+func (b *base) RestoreBackup(ctx context.Context, open func() (io.Reader, error), guard *model.RestoreGuard) error {
+	return b.restoreBackup(ctx, open, guard, true)
 }
 
-func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error), patch func(*model.BotConfig), strict bool) error {
+func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error), guard *model.RestoreGuard, strict bool) error {
 	info, err := b.checkBackup(ctx, open, strict)
 	if err != nil {
 		return err
@@ -708,7 +771,9 @@ func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error)
 
 	var stmt *sql.Stmt
 	var targets []colInfo
-	cfgIdx := -1
+	cfgIdx, stateIdx := -1, -1
+	var legacyState json.RawMessage
+	stateWritten := false
 	args := []any{}
 	closeStmt := func() {
 		if stmt != nil {
@@ -728,7 +793,7 @@ func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error)
 				byName[c.name] = c
 			}
 			targets = targets[:0]
-			cfgIdx = -1
+			cfgIdx, stateIdx = -1, -1
 			ph := make([]string, len(cols))
 			for i, c := range cols {
 				ci, ok := byName[c]
@@ -737,8 +802,12 @@ func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error)
 				}
 				targets = append(targets, ci)
 				ph[i] = b.ph(i + 1)
-				if name == "settings" && c == "config" {
-					cfgIdx = i
+				if c == encryptedCol(name) {
+					if name == "settings" {
+						cfgIdx = i
+					} else {
+						stateIdx = i
+					}
 				}
 			}
 			// #nosec G202 -- имя таблицы проверено по backupTables, колонки — по схеме базы, значения идут параметрами
@@ -752,9 +821,16 @@ func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error)
 		},
 		row: func(row []any) error {
 			for i, v := range row {
-				if i == cfgIdx {
+				if i == cfgIdx || i == stateIdx {
 					s, _ := v.(string)
-					plain, err := restoredConfig(s, b.kind, patch)
+					var plain []byte
+					var err error
+					if i == cfgIdx {
+						plain, legacyState, err = restoredConfig(s, b.kind)
+					} else {
+						plain, err = restoredState([]byte(s), guard)
+						stateWritten = true
+					}
 					if err != nil {
 						return err
 					}
@@ -784,10 +860,64 @@ func (b *base) restoreBackup(ctx context.Context, open func() (io.Reader, error)
 	if err != nil {
 		return err
 	}
+	// В файле нет строки состояния (файл старой версии, где оно жило в
+	// конфиге) — собираем её из конфига и метки.
+	if !stateWritten && (legacyState != nil || guard != nil) {
+		plain, err := restoredState(legacyState, guard)
+		if err != nil {
+			return err
+		}
+		enc, err := b.crypter.Encrypt(plain)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO backup_state (id, data) VALUES (1, "+b.ph(1)+")", enc); err != nil {
+			return fmt.Errorf("состояние бэкапа: %w", err)
+		}
+	}
 	if err := b.replayMigrationsTx(ctx, tx, info.Schema); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// LoadBackupState — настройки бэкапа и метка восстановления; ok=false —
+// строки ещё нет.
+func (b *base) LoadBackupState(ctx context.Context) (*model.BackupConfig, bool, error) {
+	var enc string
+	err := b.db.QueryRowContext(ctx, "SELECT data FROM backup_state WHERE id = 1").Scan(&enc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	plain, err := b.decryptText(enc)
+	if err != nil {
+		return nil, false, fmt.Errorf("расшифровка состояния бэкапа: %w", err)
+	}
+	var st model.BackupConfig
+	if plain != "" {
+		if err := json.Unmarshal([]byte(plain), &st); err != nil {
+			return nil, false, fmt.Errorf("разбор состояния бэкапа: %w", err)
+		}
+	}
+	return &st, true, nil
+}
+
+// SaveBackupState записывает настройки бэкапа и метку восстановления.
+func (b *base) SaveBackupState(ctx context.Context, st *model.BackupConfig) error {
+	plain, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	enc, err := b.crypter.Encrypt(plain)
+	if err != nil {
+		return err
+	}
+	_, err = b.db.ExecContext(ctx,
+		"INSERT INTO backup_state (id, data) VALUES (1, "+b.ph(1)+") ON CONFLICT (id) DO UPDATE SET data = excluded.data", enc)
+	return err
 }
 
 // replayMigrationsTx заново прогоняет миграции новее after внутри tx. Изменения

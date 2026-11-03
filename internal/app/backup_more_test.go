@@ -163,7 +163,7 @@ type failingStore struct {
 	err error
 }
 
-func (s *failingStore) RestoreBackup(context.Context, func() (io.Reader, error), func(*model.BotConfig)) error {
+func (s *failingStore) RestoreBackup(context.Context, func() (io.Reader, error), *model.RestoreGuard) error {
 	return s.err
 }
 
@@ -463,7 +463,7 @@ func TestRestartHooks(t *testing.T) {
 func TestRestoreGuardRetries(t *testing.T) {
 	a, fm, _ := bkTestApp(t)
 	ctx := context.Background()
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), BackupAt: "2026-11-01T10:00:00Z", Chat: 100}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), BackupAt: "2026-11-01T10:00:00Z", Chat: 100}
 	fm.kbFail = true
 	a.noticeRestored(ctx)
 	fm.kbFail = false
@@ -483,7 +483,7 @@ func TestRestoreGuardRetries(t *testing.T) {
 		t.Fatalf("тревога о сверке: %d раз", strings.Count(fm.joined(), "Не получилось сверить сроки"))
 	}
 	// Без метки восстановления ничего не делается.
-	a.botCfg.Backup.Guard = nil
+	a.bkState.Guard = nil
 	a.guardTick(ctx, now.Add(time.Hour))
 	a.noticeRestored(ctx)
 	if a.restoreSyncPending() || a.restoredBefore(time.Now()) || a.restoreChanged(1) {
@@ -630,11 +630,11 @@ func TestBackgroundPassesRespectRestore(t *testing.T) {
 		t.Fatalf("во время восстановления начались: %v", got)
 	}
 	a.restoring.Store(false)
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339)}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339)}
 	if got := run(); strings.Join(got, ",") != "torrent,reconcile" {
 		t.Fatalf("до сверки сроков работают: %v", got)
 	}
-	a.botCfg.Backup.Guard.Synced = true
+	a.bkState.Guard.Synced = true
 	if got := run(); strings.Join(got, ",") != strings.Join(all, ",") {
 		t.Fatalf("после сверки сроков стоят: %v", got)
 	}
@@ -807,7 +807,7 @@ func TestRestoreGuardTopUp(t *testing.T) {
 	a, fm, st := bkTestApp(t)
 	ctx := context.Background()
 	_ = st.UpsertUser(ctx, 1000000001)
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
 	pi := &model.PendingInvoice{Method: model.PayMethodPlatega, ExtID: "pl-old", TelegramID: 1000000001, Purpose: "topup",
 		Kopecks: 50000, CreatedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)}
 	if err := st.AddPendingInvoice(ctx, pi); err != nil {
@@ -891,7 +891,7 @@ func TestAutoPayExpiryConfirmed(t *testing.T) {
 	a, _, st := bkTestApp(t)
 	ctx := context.Background()
 	at := time.Now().UTC().Add(-time.Hour)
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: at.Format(time.RFC3339), Synced: true}
+	a.bkState.Guard = &model.RestoreGuard{At: at.Format(time.RFC3339), Synced: true}
 	exp := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	for _, id := range []int64{1000000001, 1000000002, 1000000003} {
 		_ = st.UpsertUser(ctx, id)
@@ -925,7 +925,7 @@ func TestAutoPayExpiryConfirmed(t *testing.T) {
 	if !a.autoPayExpiryConfirmed(ctx, paidAfter, exp, now) {
 		t.Fatal("заплатившему после восстановления проверка не нужна")
 	}
-	a.botCfg.Backup.Guard = nil
+	a.bkState.Guard = nil
 	if !a.autoPayExpiryConfirmed(ctx, ap(1000000003), exp, now) {
 		t.Fatal("без восстановления проверка не нужна")
 	}
@@ -938,7 +938,7 @@ func TestAutoPayHeldAfterRestore(t *testing.T) {
 	ts := &trapStore{Storage: st}
 	a.store = ts
 	a.botCfg.YooKassa = model.YooKassaConfig{Enabled: true, AutoPay: true, ShopID: "s", SecretKey: "k"}
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true, AutoPayHeld: true, Chat: 100}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true, AutoPayHeld: true, Chat: 100}
 	a.autoPayOnce(ctx)
 	if got := ts.got(); len(got) != 0 {
 		t.Fatalf("автопродление пошло до подтверждения админа: %v", got)
@@ -971,7 +971,7 @@ func TestStarsReviewOnceWithLongHistory(t *testing.T) {
 		_ = st.AddPayLog(ctx, &model.PayLogEntry{ExtID: "old-" + itoa(i), TelegramID: 1000000002, Method: "stars", Stage: "paid"})
 	}
 	a.botCfg.Stars.Enabled = true
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
 	fm.starTx = []models.StarTransaction{{ID: "st-window", Amount: 50, Date: int(time.Now().Add(-time.Hour).Unix()),
 		Source: &models.TransactionPartner{Type: models.TransactionPartnerTypeUser, User: &models.TransactionPartnerUser{
 			User: models.User{ID: 1000000002}, InvoicePayload: "stars:1"}}}}
@@ -991,7 +991,7 @@ func TestReviewNotDeliveredKeepsInvoice(t *testing.T) {
 	a, fm, st := bkTestApp(t)
 	ctx := context.Background()
 	_ = st.UpsertUser(ctx, 1000000001)
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
 	pi := &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "yk-w", TelegramID: 1000000001, Months: 1,
 		CreatedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)}
 	_ = st.AddPendingInvoice(ctx, pi)
@@ -1023,7 +1023,7 @@ func TestRestoredP2PReview(t *testing.T) {
 	_ = st.CreateP2PRequest(ctx, &model.P2PRequest{ID: 501, TelegramID: 1000000001, Months: 1, Price: "199", Status: model.P2PAwaiting, CreatedAt: old})
 	_ = st.CreateP2PRequest(ctx, &model.P2PRequest{ID: 502, TelegramID: 1000000001, Months: 1, Price: "299", Status: model.P2PSubmitted, CreatedAt: old})
 	_ = st.CreateP2PRequest(ctx, &model.P2PRequest{ID: 503, TelegramID: 1000000001, Months: 1, Price: "99", Status: model.P2PApproved, CreatedAt: old})
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339)}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339)}
 	a.panel = panelUsersStub(t, "")
 	a.guardTick(ctx, time.Now())
 	txt := fm.joined()
@@ -1052,7 +1052,7 @@ func TestAutoPayOnceConfirmsWithPanel(t *testing.T) {
 	a, _, st := bkTestApp(t)
 	ctx := context.Background()
 	a.botCfg.YooKassa = model.YooKassaConfig{Enabled: true, AutoPay: true, AutoPayDays: 3, ShopID: "s", SecretKey: "k"}
-	a.botCfg.Backup.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), Synced: true}
 	exp := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	_ = st.UpsertUser(ctx, 1000000001)
 	_ = st.SetSubExpiry(ctx, 1000000001, exp.Format(time.RFC3339), "paid")
@@ -1065,5 +1065,33 @@ func TestAutoPayOnceConfirmsWithPanel(t *testing.T) {
 	}
 	if rec := a.getAutoPay(ctx, 1000000001); rec == nil || rec.LastPayAt != "" || rec.PaidPeriod != "" {
 		t.Fatalf("автопродление списало по сроку из файла: %+v", rec)
+	}
+}
+
+// Настройки бэкапа из конфига прошлой версии при первом запуске уезжают в
+// свою таблицу.
+func TestBackupStateMovesOutOfConfig(t *testing.T) {
+	_, _, st := bkTestApp(t)
+	ctx := context.Background()
+	cfg := &model.BotConfig{Installed: true, Language: "ru",
+		Backup: &model.BackupConfig{Hours: 12, Password: "старый-пароль", ChatID: -1000000000003}}
+	if err := st.SaveConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := rebootApp(t, st)
+	if bc := b.backupCfg(); bc.Password != "старый-пароль" || bc.Hours != 12 || bc.ChatID != -1000000000003 {
+		t.Fatalf("настройки не перенесены: %+v", bc)
+	}
+	if got, ok, _ := st.LoadBackupState(ctx); !ok || got.Password != "старый-пароль" {
+		t.Fatal("настройки не записаны в свою таблицу")
+	}
+	if c, _, _ := st.LoadConfig(ctx); c.Backup != nil {
+		t.Fatal("настройки остались в конфиге")
+	}
+	// Конфиг, сохранённый без поля (старый образ после отката), их не трогает.
+	_ = st.SaveConfig(ctx, &model.BotConfig{Installed: true, Language: "ru"})
+	c, _ := rebootApp(t, st)
+	if c.backupCfg().Password != "старый-пароль" {
+		t.Fatal("сохранение конфига без поля стёрло настройки бэкапа")
 	}
 }

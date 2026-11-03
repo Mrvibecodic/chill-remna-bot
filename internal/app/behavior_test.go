@@ -377,6 +377,8 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
+	bkState *model.BackupConfig
+
 	// mu защищает ДЕНЕЖНЫЕ пути фейка: реальное хранилище — база, и параллельные
 	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
 	// триал) без этого ловили бы гонку самого двойника, а не проверяемого кода.
@@ -1993,13 +1995,25 @@ func (s *fakeStore) Export(context.Context) (*storage.Snapshot, error) {
 	return &storage.Snapshot{}, nil
 }
 func (s *fakeStore) Import(context.Context, *storage.Snapshot) error { return nil }
+func (s *fakeStore) LoadBackupState(context.Context) (*model.BackupConfig, bool, error) {
+	if s.bkState == nil {
+		return nil, false, nil
+	}
+	st := *s.bkState
+	return &st, true, nil
+}
+func (s *fakeStore) SaveBackupState(_ context.Context, st *model.BackupConfig) error {
+	c := *st
+	s.bkState = &c
+	return nil
+}
 func (s *fakeStore) WriteBackup(context.Context, io.Writer, string) (*storage.BackupInfo, error) {
 	return nil, errors.New("fakeStore: бэкап не поддержан")
 }
 func (s *fakeStore) CheckBackup(context.Context, func() (io.Reader, error)) (*storage.BackupInfo, error) {
 	return nil, errors.New("fakeStore: бэкап не поддержан")
 }
-func (s *fakeStore) RestoreBackup(context.Context, func() (io.Reader, error), func(*model.BotConfig)) error {
+func (s *fakeStore) RestoreBackup(context.Context, func() (io.Reader, error), *model.RestoreGuard) error {
 	return errors.New("fakeStore: бэкап не поддержан")
 }
 

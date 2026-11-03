@@ -184,23 +184,24 @@ func TestBackupNowAndRestoreEndToEnd(t *testing.T) {
 	if err != nil || !paid {
 		t.Fatalf("оплата не вернулась: %v %v", paid, err)
 	}
-	cfg, _, err := st.LoadConfig(ctx)
-	if err != nil || cfg.Backup.Hours != 6 {
-		t.Fatalf("настройки не вернулись: %+v %v", cfg, err)
+	bs, _, err := st.LoadBackupState(ctx)
+	if err != nil || bs.Hours != 6 {
+		t.Fatalf("настройки бэкапа не вернулись: %+v %v", bs, err)
 	}
-	if g := cfg.Backup.Guard; g == nil || g.Synced || g.Chat != 100 || g.BackupAt == "" {
+	if g := bs.Guard; g == nil || g.Synced || g.Chat != 100 || g.BackupAt == "" || !g.AutoPayHeld {
 		t.Fatalf("метка восстановления не записана вместе с заменой: %+v", g)
 	}
 	if !a.RestartRequested() || !a.paused() {
 		t.Fatal("после восстановления бот не ушёл на перезапуск")
 	}
-	// Старый конфиг в памяти не должен лечь поверх восстановленного.
+	// Старое состояние в памяти не должно лечь поверх восстановленного.
 	if err := a.saveConfigOnly(ctx); err == nil {
 		t.Fatal("сохранение конфига после восстановления не запрещено")
 	}
-	cfg, _, _ = st.LoadConfig(ctx)
-	if cfg.Backup.Hours != 6 {
-		t.Fatal("восстановленный конфиг затёрт старым")
+	a.markBackupSent(ctx, time.Now())
+	bs, _, _ = st.LoadBackupState(ctx)
+	if bs.Hours != 6 || bs.Guard == nil {
+		t.Fatal("восстановленное состояние бэкапа затёрто старым")
 	}
 
 	// После перезапуска бот пишет админу, что база на месте, — один раз.
@@ -244,9 +245,9 @@ func TestBackupRestoreAsksPassword(t *testing.T) {
 		t.Fatal("база не восстановлена")
 	}
 	// Восстановленный конфиг несёт пароль того файла.
-	cfg, _, _ := st.LoadConfig(ctx)
-	if cfg.Backup.Password != "пароль-файла" {
-		t.Fatalf("пароль после восстановления: %q", cfg.Backup.Password)
+	bs, _, _ := st.LoadBackupState(ctx)
+	if bs.Password != "пароль-файла" {
+		t.Fatalf("пароль после восстановления: %q", bs.Password)
 	}
 }
 
@@ -364,7 +365,7 @@ func TestBackupSchedule(t *testing.T) {
 	// Чат для бэкапов недоступен: одна попытка, тревога админу, повтор не
 	// раньше чем через час.
 	a.mu.Lock()
-	a.botCfg.Backup.ChatID = -1000000000001
+	a.bkState.ChatID = -1000000000001
 	a.mu.Unlock()
 	fm.forbidden = map[int64]bool{-1000000000001: true}
 	t2 := now.Add(8 * time.Hour)

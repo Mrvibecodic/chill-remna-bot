@@ -308,6 +308,11 @@ type App struct {
 	rsMu   sync.Mutex
 	rsDump map[int64]*rsimport.Data
 
+	// bkState — настройки бэкапа и метка восстановления (под mu). Хранятся
+	// в своей таблице, а не в конфиге: старый образ выбросил бы их при
+	// сохранении конфига.
+	bkState model.BackupConfig
+
 	// Бэкап базы. bkMu — одна выгрузка или восстановление за раз; bkPend —
 	// присланный файл до подтверждения восстановления; bkNextTry — когда
 	// повторить бэкап по расписанию после неудачи (в памяти: перезапуск и так
@@ -430,7 +435,6 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 		cfg.NormalizeAccess()
 		cfg.NormalizeYooKassa()
 		cfg.NormalizeLegal()
-		cfg.NormalizeBackup()
 		healWebhookConfig(cfg)
 		a.botCfg = cfg
 		a.applyTexts(cfg)
@@ -463,6 +467,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 			a.healNotice = true
 			a.mu.Unlock()
 		}
+		a.loadBackupState(ctx, cfg)
 	}
 	return nil
 }

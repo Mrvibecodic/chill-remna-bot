@@ -192,8 +192,9 @@ type BotConfig struct {
 	// Texts — свои тексты админа (раздел «Тексты бота»).
 	Texts TextsConfig `json:"texts"`
 
-	// Backup — бэкап базы по расписанию (Система → Бэкап базы).
-	Backup BackupConfig `json:"backup"`
+	// Backup — только для переезда: раньше настройки бэкапа жили в конфиге,
+	// теперь — в своей таблице (backup_state). Новые версии сюда не пишут.
+	Backup *BackupConfig `json:"backup,omitempty"`
 }
 
 // BackupConfig — бэкап базы по расписанию.
@@ -252,14 +253,14 @@ func (g *RestoreGuard) RestoreAt() (time.Time, bool) {
 // BackupIntervals — допустимые интервалы бэкапа в часах.
 var BackupIntervals = []int{1, 2, 4, 6, 12, 24}
 
-// NormalizeBackup выключает расписание с недопустимым интервалом.
-func (c *BotConfig) NormalizeBackup() {
+// Normalize выключает расписание с недопустимым интервалом.
+func (c *BackupConfig) Normalize() {
 	for _, h := range BackupIntervals {
-		if c.Backup.Hours == h {
+		if c.Hours == h {
 			return
 		}
 	}
-	c.Backup.Hours = 0
+	c.Hours = 0
 }
 
 // TextsConfig — свои тексты админа поверх стандартных.

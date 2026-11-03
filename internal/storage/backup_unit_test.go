@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -335,4 +336,145 @@ func TestBackupFromRealOldSchema(t *testing.T) {
 		cleanPGData(t, dsn)
 		run(t, old, cur)
 	})
+}
+
+// Поля конфига, которых эта версия не знает (файл с более свежего бота той
+// же схемы), восстанавливаются как были.
+func TestBackupKeepsUnknownConfigFields(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		fillEveryColumn(t, st, 1)
+		b := baseOf(t, st)
+		plain := `{"installed":true,"language":"ru","future_feature":{"x":1},"db_kind":"sqlite"}`
+		enc, _ := b.crypter.Encrypt([]byte(plain))
+		if _, err := b.db.ExecContext(ctx, "UPDATE settings SET config = "+b.ph(1), enc); err != nil {
+			t.Fatal(err)
+		}
+		data := backupBytes(t, st)
+		if err := st.RestoreBackup(ctx, opener(data), nil); err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		_ = b.db.QueryRowContext(ctx, "SELECT config FROM settings WHERE id = 1").Scan(&got)
+		raw, _ := b.crypter.Decrypt(got)
+		if !strings.Contains(string(raw), `"future_feature":{"x":1}`) || !strings.Contains(string(raw), `"db_kind":"`+st.Kind()+`"`) {
+			t.Fatalf("конфиг после восстановления: %s", raw)
+		}
+	})
+}
+
+// Метка восстановления ложится в состояние бэкапа той же транзакцией, а
+// настройки бэкапа из файла сохраняются.
+func TestRestoreWritesGuardIntoState(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		fillEveryColumn(t, st, 1)
+		data := backupBytes(t, st)
+		_ = st.SaveBackupState(ctx, &model.BackupConfig{Password: "другой"})
+		g := &model.RestoreGuard{At: "2026-11-03T12:00:00Z", BackupAt: "2026-11-02T12:00:00Z", Chat: 100, AutoPayHeld: true}
+		if err := st.RestoreBackup(ctx, opener(data), g); err != nil {
+			t.Fatal(err)
+		}
+		bs, ok, err := st.LoadBackupState(ctx)
+		if err != nil || !ok || bs.Password != "пароль-1" || bs.Hours != 6 || bs.Guard == nil || !reflect.DeepEqual(*bs.Guard, *g) {
+			t.Fatalf("состояние после восстановления: %+v %v %v", bs, ok, err)
+		}
+	})
+}
+
+// Файл версии, где настройки бэкапа жили в конфиге: они переезжают в свою
+// таблицу, из конфига уходят.
+func TestRestoreLegacyStateFromConfig(t *testing.T) {
+	st := openSQLiteTest(t)
+	ctx := context.Background()
+	fillEveryColumn(t, st, 1)
+	data := string(backupBytes(t, st))
+	// Убираем таблицу состояния и кладём настройки в конфиг, как было раньше.
+	i := strings.Index(data, `{"t":"tb","name":"backup_state"`)
+	j := i + strings.Index(data[i:], `{"t":"te"`)
+	k := j + strings.Index(data[j:], "\n") + 1
+	data = data[:i] + data[k:]
+	data = strings.Replace(data, `"tables":22}`, `"tables":21}`, 1)
+	file := replaceConfig(t, []byte(data), `{"installed":true,"backup":{"hours":12,"password":"старый","chat_id":-1000000000077}}`)
+	g := &model.RestoreGuard{At: "2026-11-03T12:00:00Z", Chat: 100}
+	if err := st.RestoreBackup(ctx, opener(file), g); err != nil {
+		t.Fatal(err)
+	}
+	bs, ok, _ := st.LoadBackupState(ctx)
+	if !ok || bs.Password != "старый" || bs.Hours != 12 || bs.ChatID != -1000000000077 || bs.Guard == nil {
+		t.Fatalf("состояние из старого файла: %+v", bs)
+	}
+	cfg, _, _ := st.LoadConfig(ctx)
+	if cfg.Backup != nil {
+		t.Fatal("настройки бэкапа остались в конфиге")
+	}
+}
+
+func TestBackupStateRoundTrip(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		if _, ok, err := st.LoadBackupState(ctx); ok || err != nil {
+			t.Fatalf("пустая база: ok=%v err=%v", ok, err)
+		}
+		want := &model.BackupConfig{Hours: 2, Password: "п", BotToken: "1:x", BotName: "b", LastAt: "2026-11-03T10:00:00Z"}
+		if err := st.SaveBackupState(ctx, want); err != nil {
+			t.Fatal(err)
+		}
+		want.Hours = 4
+		_ = st.SaveBackupState(ctx, want)
+		got, ok, err := st.LoadBackupState(ctx)
+		if err != nil || !ok || got.Hours != 4 || got.Password != "п" || got.BotToken != "1:x" {
+			t.Fatalf("состояние: %+v %v %v", got, ok, err)
+		}
+	})
+}
+
+// hookWriter выполняет действие на первой записи — посреди выгрузки.
+type hookWriter struct {
+	io.Writer
+	once func()
+}
+
+func (h *hookWriter) Write(p []byte) (int, error) {
+	if h.once != nil {
+		f := h.once
+		h.once = nil
+		f()
+	}
+	return h.Writer.Write(p)
+}
+
+// Postgres: выгрузка — один снимок. Строка, записанная посреди выгрузки, в
+// файл не попадает (иначе таблицы разъехались бы между собой).
+func TestBackupPostgresSnapshotIsConsistent(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN не задан")
+	}
+	ctx := context.Background()
+	st, err := Open(model.DBPostgres, dsn, testCrypter(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	_ = st.Migrate(ctx)
+	cleanPGData(t, dsn)
+	fillEveryColumn(t, st, 1)
+	other, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	var buf bytes.Buffer
+	w := &hookWriter{Writer: &buf, once: func() {
+		if _, err := other.Exec("INSERT INTO screen_state (chat_id, msg_id) VALUES (999, 1)"); err != nil {
+			t.Error(err)
+		}
+	}}
+	if _, err := st.WriteBackup(ctx, w, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "[999,1]") {
+		t.Fatal("строка, записанная посреди выгрузки, попала в файл")
+	}
 }
