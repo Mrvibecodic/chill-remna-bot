@@ -701,3 +701,10 @@ func TestRestoreGuardAfterRestart(t *testing.T) {
 		t.Fatal("оплата звёздами из окна выдана автоматически")
 	}
 }
+
+// bkPendPeek — присланный файл, не забирая его.
+func (a *App) bkPendPeek(chatID int64) *bkPending {
+	a.bkPendMu.Lock()
+	defer a.bkPendMu.Unlock()
+	return a.bkPend[chatID]
+}

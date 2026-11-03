@@ -290,7 +290,7 @@ func (a *App) showBackupNote(ctx context.Context, chatID int64, note string) {
 		{btn(i18n.T(lang, "bk.btn_now"), "bk:now"), btn(i18n.T(lang, "bk.btn_restore"), "bk:restore")},
 	}
 	if held {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "bk.btn_ap_on"), "bk:apon")})
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "bk.btn_ap_on"), apOnData(a.restoreGuard()))})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")})
 	a.sendSysKB(ctx, chatID, body, rows)
@@ -333,14 +333,13 @@ func (a *App) onBackup(ctx context.Context, chatID int64, val string) {
 	case "dest":
 		a.showBackupDest(ctx, chatID, "")
 	case "dme":
-		a.setBackupDest(ctx, chatID, 0, a.backupCfg().BotToken, false)
+		a.setBackupDest(ctx, chatID, destChange{chat: ptr(int64(0))})
 	case "dchat":
 		a.askBackupInput(ctx, chatID, "bk_chat", i18n.T(lang, "bk.ask_chat"), "bk:dest")
 	case "dbot":
 		a.askBackupInput(ctx, chatID, "bk_bot", i18n.T(lang, "bk.ask_bot"), "bk:dest")
 	case "dnobot":
-		bc := a.backupCfg()
-		a.setBackupDest(ctx, chatID, bc.ChatID, "", false)
+		a.setBackupDest(ctx, chatID, destChange{token: ptr("")})
 	case "now":
 		a.backupNow(ctx, chatID)
 	case "restore":
@@ -356,8 +355,7 @@ func (a *App) onBackup(ctx context.Context, chatID int64, val string) {
 	case "apply":
 		a.applyRestore(ctx, chatID)
 	case "apon":
-		a.updateGuard(ctx, func(g *model.RestoreGuard) { g.AutoPayHeld = false })
-		a.showBackupNote(ctx, chatID, i18n.T(lang, "bk.ap_on"))
+		a.restoreAutoPayOn(ctx, chatID, arg)
 	default:
 		a.showBackup(ctx, chatID)
 	}
@@ -386,23 +384,42 @@ func (a *App) afterBackupEdit(ctx context.Context, chatID int64, dest bool, err 
 	a.showBackupNote(ctx, chatID, note)
 }
 
-// setBackupDest меняет получателя и отправителя бэкапов. Проверка идёт в
+// destChange — что меняет админ: получателя или отдельного бота. Второе
+// поле берётся из настроек в момент проверки, а не нажатия: иначе две
+// быстрые правки подряд возвращали бы друг другу старое значение.
+type destChange struct {
+	chat  *int64
+	token *string
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// setBackupDest меняет получателя или отправителя бэкапов. Проверка идёт в
 // фоне: она длится до 20 секунд, а обработчик нажатия держит восстановление
 // базы, пока не закончится.
-func (a *App) setBackupDest(ctx context.Context, chatID, toChat int64, token string, checkBot bool) {
+func (a *App) setBackupDest(ctx context.Context, chatID int64, ch destChange) {
 	a.getUI(chatID).adminInput = ""
 	a.sendSysKB(ctx, chatID, i18n.T(a.lang(chatID), "bk.checking_dest"), nil)
 	bg := a.bgContext()
-	a.spawn(func() { a.applyBackupDest(bg, chatID, toChat, token, checkBot) })
+	a.spawn(func() { a.applyBackupDest(bg, chatID, ch) })
 }
 
 // applyBackupDest проверяет новое сочетание пробным сообщением и сохраняет
 // его: чат, куда писать нельзя, иначе всплыл бы только на первом бэкапе по
-// расписанию.
-func (a *App) applyBackupDest(ctx context.Context, chatID, toChat int64, token string, checkBot bool) {
+// расписанию. Проверки идут по одной.
+func (a *App) applyBackupDest(ctx context.Context, chatID int64, ch destChange) {
+	a.bkDestMu.Lock()
+	defer a.bkDestMu.Unlock()
 	lang := a.lang(chatID)
-	name := a.backupCfg().BotName
-	if checkBot {
+	bc := a.backupCfg()
+	toChat, token, name := bc.ChatID, bc.BotToken, bc.BotName
+	if ch.chat != nil {
+		toChat = *ch.chat
+	}
+	if ch.token != nil {
+		token = *ch.token
+	}
+	if ch.token != nil && token != "" {
 		s, err := a.backupSenderFor(token)
 		if err == nil {
 			tctx, cancel := context.WithTimeout(ctx, backupNetTimeout)
@@ -436,9 +453,13 @@ func (a *App) applyBackupDest(ctx context.Context, chatID, toChat int64, token s
 		}
 	}
 	err := a.editBackupState(ctx, func(bc *model.BackupConfig) {
-		bc.ChatID = toChat
-		bc.BotToken = token
-		bc.BotName = name
+		if ch.chat != nil {
+			bc.ChatID = toChat
+		}
+		if ch.token != nil {
+			bc.BotToken = token
+			bc.BotName = name
+		}
 	})
 	a.afterBackupEdit(ctx, chatID, true, err)
 }
@@ -483,7 +504,7 @@ func (a *App) applyBackupInput(ctx context.Context, chatID int64, kind, text str
 			a.askInput(ctx, chatID, i18n.T(lang, "bk.chat_bad"), "bk:dest")
 			return
 		}
-		a.setBackupDest(ctx, chatID, id, a.backupCfg().BotToken, false)
+		a.setBackupDest(ctx, chatID, destChange{chat: &id})
 	case "bk_bot":
 		if !botTokenRe.MatchString(text) {
 			a.askInput(ctx, chatID, i18n.T(lang, "bk.bot_bad"), "bk:dest")
@@ -493,7 +514,7 @@ func (a *App) applyBackupInput(ctx context.Context, chatID int64, kind, text str
 			a.askInput(ctx, chatID, i18n.T(lang, "bk.bot_same"), "bk:dest")
 			return
 		}
-		a.setBackupDest(ctx, chatID, a.backupCfg().ChatID, text, true)
+		a.setBackupDest(ctx, chatID, destChange{token: &text})
 	}
 }
 
@@ -682,6 +703,7 @@ func (a *App) RunBackups(ctx context.Context) {
 			return
 		case <-t.C:
 			now := time.Now()
+			a.bkPendPurge(now)
 			a.guardTick(ctx, now)
 			a.backupOnce(ctx, now)
 		}
@@ -755,10 +777,16 @@ func (a *App) bkPendSet(chatID int64, p *bkPending) {
 	a.bkPend[chatID] = p
 }
 
-func (a *App) bkPendPeek(chatID int64) *bkPending {
+// bkPendPurge выбрасывает файлы, брошенные без подтверждения: каждый держит
+// в памяти до 20 МБ плюс распакованную копию.
+func (a *App) bkPendPurge(now time.Time) {
 	a.bkPendMu.Lock()
 	defer a.bkPendMu.Unlock()
-	return a.bkPend[chatID]
+	for id, p := range a.bkPend {
+		if p != nil && now.Sub(p.at) > bkPendTTL && !p.checking {
+			delete(a.bkPend, id)
+		}
+	}
 }
 
 // bkPendReplace меняет файл, только если он всё ещё тот же: админ мог нажать
@@ -929,8 +957,12 @@ func (a *App) backupErrText(lang string, err error) string {
 func (a *App) applyRestore(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	p := a.bkPendTake(chatID)
-	if p == nil || p.info == nil || time.Since(p.at) > bkPendTTL {
+	if p == nil || p.info == nil {
 		a.showBackup(ctx, chatID)
+		return
+	}
+	if time.Since(p.at) > bkPendTTL {
+		a.showBackupNote(ctx, chatID, i18n.T(lang, "bk.pend_expired"))
 		return
 	}
 	if !a.bkMu.TryLock() {
@@ -1036,4 +1068,33 @@ func (a *App) runRestore(ctx context.Context, chatID int64, p *bkPending) {
 	a.log.Info("база восстановлена из бэкапа, перезапуск", "backup_at", p.info.CreatedAt)
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.restored", html.EscapeString(fmtBackupTime(p.info.CreatedAt))), nil)
 	a.requestRestart()
+}
+
+// apOnData — кнопка «Включить автопродление», привязанная к этому
+// восстановлению: кнопка из уведомления прошлого раза не должна снимать
+// придержку после нового.
+func apOnData(g *model.RestoreGuard) string {
+	at, _ := g.RestoreAt()
+	return "bk:apon:" + strconv.FormatInt(at.Unix(), 10)
+}
+
+// restoreAutoPayOn снимает придержку автопродления после восстановления.
+func (a *App) restoreAutoPayOn(ctx context.Context, chatID int64, arg string) {
+	lang := a.lang(chatID)
+	g := a.restoreGuard()
+	if g == nil || !g.AutoPayHeld {
+		a.showBackup(ctx, chatID)
+		return
+	}
+	if "bk:apon:"+arg != apOnData(g) {
+		a.showBackupNote(ctx, chatID, i18n.T(lang, "bk.ap_stale"))
+		return
+	}
+	a.updateGuard(ctx, func(g *model.RestoreGuard) { g.AutoPayHeld = false })
+	note := i18n.T(lang, "bk.ap_on")
+	if !g.Synced {
+		// Пока сроки не сверены с панелью, автопродление всё равно ждёт.
+		note = i18n.T(lang, "bk.ap_on_later")
+	}
+	a.showBackupNote(ctx, chatID, note)
 }

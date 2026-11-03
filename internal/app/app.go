@@ -54,6 +54,9 @@ type messenger interface {
 	// доехала по другой причине.
 	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error)
 	Delete(ctx context.Context, chatID int64, msgID int)
+	// DeleteErr — то же, но с ответом Telegram: сообщения старше 48 часов
+	// бот удалить не может, и об этом надо сказать.
+	DeleteErr(ctx context.Context, chatID int64, msgID int) error
 	RemoveKeyboard(ctx context.Context, chatID int64)
 
 	SetCommandKeyboard(ctx context.Context, chatID int64, label string)
@@ -317,8 +320,10 @@ type App struct {
 	// присланный файл до подтверждения восстановления; bkNextTry — когда
 	// повторить бэкап по расписанию после неудачи (в памяти: перезапуск и так
 	// даёт новую попытку).
-	bkMu      sync.Mutex
-	bkPendMu  sync.Mutex
+	bkMu     sync.Mutex
+	bkPendMu sync.Mutex
+	// bkDestMu — проверки нового получателя бэкапов идут по одной.
+	bkDestMu  sync.Mutex
 	bkPend    map[int64]*bkPending
 	bkNextTry time.Time
 	// restoring — идёт восстановление базы: бот, вебхуки и фоновые задачи
@@ -2193,6 +2198,14 @@ func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {
 		return
 	}
 	_, _ = m.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
+}
+
+func (m botMessenger) DeleteErr(ctx context.Context, chatID int64, msgID int) error {
+	if msgID == 0 {
+		return errors.New("нет сообщения")
+	}
+	_, err := m.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
+	return err
 }
 
 func (m botMessenger) SendInvoice(ctx context.Context, chatID int64, title, description, payload, currency string, amount int) {

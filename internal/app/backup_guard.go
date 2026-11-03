@@ -213,7 +213,7 @@ func (a *App) noticeRestored(ctx context.Context) {
 	var rows [][]models.InlineKeyboardButton
 	if g.AutoPayHeld {
 		text += "\n\n" + i18n.T(lang, "bk.ap_held")
-		rows = [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "bk.btn_ap_on"), "bk:apon")}}
+		rows = [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "bk.btn_ap_on"), apOnData(g))}}
 	}
 	if a.msg.SendKB(ctx, g.Chat, text, rows) == 0 {
 		return

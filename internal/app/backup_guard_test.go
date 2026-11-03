@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -357,5 +358,97 @@ func TestRestoreApplyThroughHandle(t *testing.T) {
 	a.handle(ctx, nil, &models.Update{CallbackQuery: cb(100, "bk:apply")})
 	if !a.RestartRequested() {
 		t.Fatalf("восстановление через обработчик не прошло: %q", lastText(fm))
+	}
+}
+
+// Включили автопродление до сверки сроков — честно говорим, что оно пойдёт
+// после сверки.
+func TestAutoPayOnBeforeSync(t *testing.T) {
+	a, fm, _ := bkTestApp(t)
+	ctx := context.Background()
+	a.bkState.Guard = &model.RestoreGuard{At: time.Now().UTC().Format(time.RFC3339), AutoPayHeld: true}
+	a.handleCallback(ctx, cb(100, apOnData(a.restoreGuard())))
+	if a.autoPayHeld() || !strings.Contains(lastText(fm), "как только сроки подписок сверятся") {
+		t.Fatalf("ответ до сверки: %q", lastText(fm))
+	}
+	if !a.restoreSyncPending() {
+		t.Fatal("кнопка отменила сверку сроков")
+	}
+}
+
+// Две быстрые правки получателя: чат и отдельный бот. Вторая проверка не
+// возвращает первое поле к старому значению.
+func TestBackupDestEditsDoNotClobber(t *testing.T) {
+	a, _, _ := bkTestApp(t)
+	ctx := context.Background()
+	// Проверка бота медленная: правка чата успевает закончиться раньше.
+	fs := &slowSender{fakeSender: &fakeSender{name: "backup_bot"}, delay: 200 * time.Millisecond}
+	a.newBackupSender = func(string) (backupSender, error) { return fs, nil }
+	a.runInline = false
+	a.setBackupDest(ctx, 100, destChange{token: ptr("123456:" + strings.Repeat("a", 35))})
+	time.Sleep(20 * time.Millisecond)
+	a.setBackupDest(ctx, 100, destChange{chat: ptr(int64(-1000000000055))})
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		bc := a.backupCfg()
+		if bc.ChatID != 0 && bc.BotToken != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	a.bkDestMu.Lock()
+	bc := a.backupCfg()
+	a.bkDestMu.Unlock()
+	if bc.ChatID != -1000000000055 || bc.BotName != "backup_bot" {
+		t.Fatalf("правки затёрли друг друга: %+v", bc)
+	}
+}
+
+type slowSender struct {
+	*fakeSender
+	delay time.Duration
+}
+
+func (s *slowSender) Check(ctx context.Context) (string, error) {
+	time.Sleep(s.delay)
+	return s.fakeSender.Check(ctx)
+}
+
+// «Убрать» под старым файлом: Telegram отказал — админ видит, почему, и что
+// делать.
+func TestRemoveOldBackupMessage(t *testing.T) {
+	a, fm, _ := bkTestApp(t)
+	ctx := context.Background()
+	fm.deleteErr = errors.New("Bad Request: message can't be deleted for everyone")
+	a.handleCallback(ctx, cbOn(100, cbClose+":close", 77))
+	fm.mu.Lock()
+	answers := strings.Join(fm.cbTexts, "\n")
+	fm.mu.Unlock()
+	if !strings.Contains(answers, "48 часов") {
+		t.Fatalf("нет объяснения: %q", answers)
+	}
+	fm.deleteErr = nil
+	a.handleCallback(ctx, cbOn(100, cbClose+":close", 77))
+	if !slices.Contains(fm.deleted, 77) {
+		t.Fatal("сообщение не удалено")
+	}
+}
+
+// Файл, брошенный без подтверждения, не висит в памяти до входа в меню, а
+// «Заменить базу» по протухшему файлу объясняет, что случилось.
+func TestBackupPendingExpiry(t *testing.T) {
+	a, fm, _ := bkTestApp(t)
+	ctx := context.Background()
+	old := &bkPending{at: time.Now().Add(-bkPendTTL - time.Minute), info: &storage.BackupInfo{}}
+	a.bkPendSet(100, old)
+	a.bkPendSet(101, &bkPending{at: time.Now()})
+	a.bkPendPurge(time.Now())
+	if a.bkPendPeek(100) != nil || a.bkPendPeek(101) == nil {
+		t.Fatal("чистка брошенных файлов")
+	}
+	a.bkPendSet(100, old)
+	a.handleCallback(ctx, cb(100, "bk:apply"))
+	if a.paused() || !strings.Contains(lastText(fm), "ждал подтверждения больше 30 минут") {
+		t.Fatalf("протухший файл: %q", lastText(fm))
 	}
 }

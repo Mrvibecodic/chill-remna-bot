@@ -51,6 +51,8 @@ type fakeMsg struct {
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
+	// deleteErr — Telegram не даёт удалить сообщение (старше 48 часов).
+	deleteErr error
 	// forbidden — чаты, где Telegram отвечает 403 («человек заблокировал
 	// бота»): так проверяется, что рассылка отличает это от временной ошибки.
 	forbidden map[int64]bool
@@ -270,6 +272,13 @@ func (f *fakeMsg) Delete(_ context.Context, _ int64, id int) {
 	delete(f.live, id)
 	f.deleted = append(f.deleted, id)
 	f.mu.Unlock()
+}
+func (f *fakeMsg) DeleteErr(ctx context.Context, chatID int64, id int) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.Delete(ctx, chatID, id)
+	return nil
 }
 func (f *fakeMsg) RemoveKeyboard(_ context.Context, _ int64)               {}
 func (f *fakeMsg) SetCommandKeyboard(_ context.Context, _ int64, _ string) {}

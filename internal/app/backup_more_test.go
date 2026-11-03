@@ -949,14 +949,20 @@ func TestAutoPayHeldAfterRestore(t *testing.T) {
 		t.Fatalf("автопродление пошло до подтверждения админа: %v", got)
 	}
 	a.noticeRestored(ctx)
-	if !hasButton(fm, "bk:apon") || !strings.Contains(fm.joined(), "Автопродление после восстановления стоит") {
+	apon := apOnData(a.restoreGuard())
+	if !hasButton(fm, apon) || !strings.Contains(fm.joined(), "Автопродление после восстановления стоит") {
 		t.Fatal("после перезапуска нет кнопки включить автопродление")
 	}
 	a.handleCallback(ctx, cb(100, "menu:backup"))
 	if !strings.Contains(lastText(fm), "Автопродление после восстановления стоит") {
 		t.Fatal("экран бэкапа не говорит, что автопродление стоит")
 	}
-	a.handleCallback(ctx, cb(100, "bk:apon"))
+	// Кнопка из уведомления прошлого восстановления не включает.
+	a.handleCallback(ctx, cb(100, "bk:apon:1700000000"))
+	if !a.autoPayHeld() || !strings.Contains(lastText(fm), "от прошлого восстановления") {
+		t.Fatal("старая кнопка сняла придержку нового восстановления")
+	}
+	a.handleCallback(ctx, cb(100, apon))
 	if a.autoPayHeld() {
 		t.Fatal("кнопка не включила автопродление")
 	}
