@@ -157,8 +157,8 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "rsimp.parsing"), nil)
 
-	// Скачивание и разбор — в фоне: апдейты обрабатываются одним воркером, и
-	// на большом дампе бот иначе перестал бы отвечать всем остальным.
+	// Скачивание и разбор — в фоне: на большом дампе это минуты, а обработчик
+	// апдейта всё это время держал бы восстановление базы.
 	bg := a.bgContext()
 	a.spawn(func() {
 		dlCtx, cancel := context.WithTimeout(bg, dumpDownloadTimeout)

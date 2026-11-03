@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -287,5 +288,74 @@ func TestRestoreHeldError(t *testing.T) {
 	}
 	if got := a.clientErr(context.Background(), 555, "тест", err); !strings.Contains(got, "проверит администратор") {
 		t.Fatalf("текст человеку: %q", got)
+	}
+}
+
+// Обработчик апдейта, начатый до восстановления (библиотека зовёт каждый в
+// своей горутине), восстановление ждёт; новые апдейты в это время получают
+// ответ «техработы».
+func TestRestoreWaitsForInflightHandler(t *testing.T) {
+	hit := make(chan struct{}, 1)
+	release := make(chan struct{})
+	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+		<-release
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(panel.Close)
+	var once sync.Once
+	free := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(free) // раньше закрытия панели: иначе оно ждёт висящий запрос
+	a, fm, st := bkTestApp(t)
+	ctx := context.Background()
+	_ = st.UpsertUser(ctx, 555)
+	a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: panel.URL, APIToken: "t"})
+	a.quietWaitD = 300 * time.Millisecond
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.handle(ctx, nil, &models.Update{CallbackQuery: cb(555, "menu:mysubs")})
+	}()
+	select {
+	case <-hit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("обработчик не дошёл до панели")
+	}
+	a.restorePhase.Store(phaseWait)
+	a.restoring.Store(true)
+	if a.waitQuiet(ctx) {
+		t.Fatal("восстановление не дождалось начатого обработчика")
+	}
+	a.handle(ctx, nil, &models.Update{CallbackQuery: cb(556, "menu:mysubs")})
+	fm.mu.Lock()
+	answers := strings.Join(fm.cbTexts, "\n")
+	fm.mu.Unlock()
+	if !strings.Contains(answers, "Техработы") {
+		t.Fatalf("новый апдейт во время восстановления: %q", answers)
+	}
+	free()
+	<-done
+	a.quietWaitD = 5 * time.Second
+	if !a.waitQuiet(ctx) {
+		t.Fatal("обработчик закончился, а восстановление всё ждёт")
+	}
+}
+
+// Нажатие «Заменить базу» само запускает восстановление и себя не ждёт.
+func TestRestoreApplyThroughHandle(t *testing.T) {
+	a, fm, st := bkTestApp(t)
+	ctx := context.Background()
+	_ = st.UpsertUser(ctx, 1000000001)
+	a.quietWaitD = 2 * time.Second
+	bkSetPassword(t, a, "пароль-бэкапа")
+	a.handleCallback(ctx, cb(100, "bk:now"))
+	_, file, _ := lastDoc(t, fm)
+	restoreFile(t, a, fm, file)
+	a.handle(ctx, nil, &models.Update{CallbackQuery: cb(100, "bk:apply")})
+	if !a.RestartRequested() {
+		t.Fatalf("восстановление через обработчик не прошло: %q", lastText(fm))
 	}
 }

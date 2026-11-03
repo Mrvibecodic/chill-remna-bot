@@ -387,8 +387,8 @@ func (a *App) afterBackupEdit(ctx context.Context, chatID int64, dest bool, err 
 }
 
 // setBackupDest меняет получателя и отправителя бэкапов. Проверка идёт в
-// фоне: обработчик апдейтов у бота один, и сетевые вызовы в нём держали бы
-// всех (а pre_checkout звёзд ждёт ответа не дольше 10 секунд).
+// фоне: она длится до 20 секунд, а обработчик нажатия держит восстановление
+// базы, пока не закончится.
 func (a *App) setBackupDest(ctx context.Context, chatID, toChat int64, token string, checkBot bool) {
 	a.getUI(chatID).adminInput = ""
 	a.sendSysKB(ctx, chatID, i18n.T(a.lang(chatID), "bk.checking_dest"), nil)

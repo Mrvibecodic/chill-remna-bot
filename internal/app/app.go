@@ -772,7 +772,17 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 			a.log.Error("паника в обработчике апдейта", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
-	if a.paused() {
+	// Библиотека запускает каждый апдейт в своей горутине, поэтому начатый
+	// обработчик учитывается так же, как фоновая работа: восстановление базы
+	// ждёт, пока он доиграет. Кроме нажатия, которое само запускает
+	// восстановление, — иначе оно ждало бы себя.
+	if !isRestoreApply(update) {
+		if !a.enterWork() {
+			a.answerMaintenance(ctx, update)
+			return
+		}
+		defer a.leaveWork()
+	} else if a.paused() {
 		a.answerMaintenance(ctx, update)
 		return
 	}
@@ -782,10 +792,10 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	case update.PreCheckoutQuery != nil:
 		a.handlePreCheckout(ctx, update.PreCheckoutQuery)
 	case update.Message != nil && update.Message.SuccessfulPayment != nil:
-		// Финализация ходит в панель (до трёх HTTP-вызовов по 15 секунд) и при
-		// одном воркере библиотеки блокировала бы очередь апдейтов — а на
-		// pre_checkout_query Telegram требует ответ за 10 секунд. Уводим в
-		// горутину: внутри finalizePurchase свои замки и идемпотентность.
+		// Финализация ходит в панель (до трёх HTTP-вызовов по 15 секунд), и
+		// её нельзя оборвать посреди: уводим в trackMoney — он переживает
+		// остановку процесса. Внутри finalizePurchase свои замки и
+		// идемпотентность.
 		msg := update.Message
 		// Через trackMoney: перезапуск ровно в этот момент раньше обрывал
 		// выдачу — деньги списаны, подписки нет, и сверка её не подбирала.
@@ -801,6 +811,11 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	case update.Message != nil && update.Message.Document != nil:
 		a.handleDocument(ctx, update.Message)
 	}
+}
+
+// isRestoreApply — нажатие «Заменить базу».
+func isRestoreApply(u *models.Update) bool {
+	return u.CallbackQuery != nil && u.CallbackQuery.Data == "bk:apply"
 }
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
