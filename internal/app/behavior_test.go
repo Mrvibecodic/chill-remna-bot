@@ -75,6 +75,35 @@ type fakeMsg struct {
 	// emptyBtns — кнопки без подписи: Telegram отвергает такое сообщение
 	// целиком.
 	emptyBtns int
+	// prot — сообщения, ушедшие с запретом пересылки.
+	prot map[int]bool
+	// edits — сообщения, которые бот пытался править; editOK — правка
+	// удаётся.
+	edits  []int
+	editOK bool
+}
+
+// noteProt запоминает, ушло ли сообщение с запретом пересылки.
+func (f *fakeMsg) noteProt(ctx context.Context, id int) int {
+	if id == 0 || !protectedCtx(ctx) {
+		return id
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prot == nil {
+		f.prot = map[int]bool{}
+	}
+	f.prot[id] = true
+	return id
+}
+
+func (f *fakeMsg) isProt(id int) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.prot[id] }
+
+func (f *fakeMsg) noteEdit(id int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.edits = append(f.edits, id)
+	return f.editOK
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -134,7 +163,9 @@ func hasCB(list []string, want string) bool {
 	return false
 }
 
-func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
+func (f *fakeMsg) Send(ctx context.Context, _ int64, text string) int {
+	return f.noteProt(ctx, f.add(text))
+}
 func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, error) {
 	if f.forbidden != nil && f.forbidden[chatID] {
 		return 0, bot.ErrorForbidden
@@ -145,16 +176,16 @@ func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, er
 	}
 	return id, nil
 }
-func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
+func (f *fakeMsg) SendKB(ctx context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
 	id := f.add(text)
 	if f.kbFail {
 		return 0
 	}
-	return id
+	return f.noteProt(ctx, id)
 }
-func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
-	return f.add(text)
+func (f *fakeMsg) SendEnt(ctx context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
+	return f.noteProt(ctx, f.add(text))
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
 func (f *fakeMsg) RefundStars(_ context.Context, userID int64, chargeID string) error {
@@ -171,21 +202,21 @@ func (f *fakeMsg) StarTransactions(_ context.Context, offset, limit int) ([]mode
 	}
 	return f.starTx[offset:end], nil
 }
-func (f *fakeMsg) EditText(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
-	return false
+func (f *fakeMsg) EditText(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
+	return f.noteEdit(id)
 }
-func (f *fakeMsg) EditCaption(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
-	return false
+func (f *fakeMsg) EditCaption(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
+	return f.noteEdit(id)
 }
 func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
 	f.recordKB(rows)
-	return f.add(caption), ""
+	return f.noteProt(ctx, f.add(caption)), ""
 }
-func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) (int, error) {
+func (f *fakeMsg) SendBanner(ctx context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
 	// failBanner имитирует отказ Telegram на конкретной картинке (битый
 	// file_id или недоступная ссылка), failAllBanners — отказ на любой.
 	if f.failAllBanners {
@@ -198,7 +229,10 @@ func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile,
 		}
 		return 0, errors.New(msg)
 	}
-	return f.add(caption), nil
+	if kb, ok := rm.(models.InlineKeyboardMarkup); ok {
+		f.recordKB(kb.InlineKeyboard)
+	}
+	return f.noteProt(ctx, f.add(caption)), nil
 }
 func (f *fakeMsg) Delete(_ context.Context, _ int64, id int) {
 	f.mu.Lock()

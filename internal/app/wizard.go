@@ -126,6 +126,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	a.msg.AnswerCallback(ctx, cq.ID)
 	chatID := cq.From.ID
 	a.setEditTarget(chatID, cqMsgID(cq))
+	if m := cq.Message.Message; m != nil && m.HasProtectedContent {
+		a.markEditProt(chatID)
+	}
 	isAdmin := chatID == a.cfg.AdminID
 	a.rememberUser(ctx, chatID, cq.From.Username, cq.From.FirstName)
 	if a.denyAccess(ctx, chatID, isAdmin) {

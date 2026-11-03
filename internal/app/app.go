@@ -183,6 +183,7 @@ type App struct {
 	screenDropDelay time.Duration
 	kbSet           map[int64]bool
 	editTarget      map[int64]int
+	editProt        map[int64]bool
 	screenSection   map[int64]string
 
 	subMu    sync.Mutex
@@ -1272,6 +1273,7 @@ func (a *App) setEditTarget(chatID int64, msgID int) {
 	if a.editTarget == nil {
 		a.editTarget = map[int64]int{}
 	}
+	delete(a.editProt, chatID)
 	if msgID == 0 {
 		delete(a.editTarget, chatID)
 		return
@@ -1402,7 +1404,8 @@ func (a *App) screenMsgID(chatID int64) int {
 
 func (a *App) send(ctx context.Context, chatID int64, text string) {
 	t := a.applyPremium(text)
-	a.emit(ctx, chatID, func() int { return a.msg.Send(ctx, chatID, t) })
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableText(t)))
+	a.emit(ctx, chatID, func() int { return a.msg.Send(pctx, chatID, t) })
 }
 
 func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
@@ -1411,11 +1414,13 @@ func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
 
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
 	t := a.applyPremium(text)
+	prot := a.screenProtect(ctx, chatID, copyableText(t))
 	a.setScreenSection(chatID, "")
-	if a.tryEditScreen(ctx, chatID, t, rows) {
+	if a.editMatches(chatID, prot) && a.tryEditScreen(ctx, chatID, t, rows) {
 		return
 	}
-	a.emit(ctx, chatID, func() int { return a.msg.SendKB(ctx, chatID, t, rows) })
+	pctx := withProtect(ctx, prot)
+	a.emit(ctx, chatID, func() int { return a.msg.SendKB(pctx, chatID, t, rows) })
 }
 
 // sendKBParts отправляет экран, не влезающий в одно сообщение Telegram.
@@ -1462,8 +1467,9 @@ func (a *App) sendKBParts(ctx context.Context, chatID int64, parts []string, row
 // приходит. На отказе пробуем встроенный баннер, а негодную настройку снимаем
 // — иначе бот остаётся «мёртвым» до вмешательства администратора.
 func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableEnts(caption, ents)))
 	a.emit(ctx, chatID, func() int {
-		id, err := a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm)
+		id, err := a.msg.SendBanner(pctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
 			a.noteBannerOK(photo)
 			return id
@@ -1473,7 +1479,7 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 		// баннер у всех.
 		a.dropBrokenWelcomeImage(ctx, photo, photoErrKind(err))
 		fallback := &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
-		if id, _ := a.msg.SendBanner(ctx, chatID, fallback, caption, ents, rm); id != 0 {
+		if id, _ := a.msg.SendBanner(pctx, chatID, fallback, caption, ents, rm); id != 0 {
 			return id
 		}
 		// Не принялась и картинка по умолчанию (например, подпись длиннее
@@ -1483,9 +1489,9 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 			rows = kb.InlineKeyboard
 		}
 		if len(ents) > 0 {
-			return a.msg.SendEnt(ctx, chatID, caption, ents, rows)
+			return a.msg.SendEnt(pctx, chatID, caption, ents, rows)
 		}
-		return a.msg.SendKB(ctx, chatID, caption, rows)
+		return a.msg.SendKB(pctx, chatID, caption, rows)
 	})
 }
 
@@ -1590,10 +1596,12 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		return
 	}
 	t := a.applyPremium(caption)
+	prot := a.screenProtect(ctx, chatID, copyableText(t))
+	match := a.editMatches(chatID, prot)
 	// Same-section re-render (toggle/pagination/refresh): edit the caption in
 	// place instead of delete+resend. Different section (navigation) or any
 	// failure falls through to the normal resend below.
-	if target := a.takeEditTarget(chatID); target != 0 && a.getScreenSection(chatID) == section {
+	if target := a.takeEditTarget(chatID); target != 0 && match && a.getScreenSection(chatID) == section {
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
 			a.scrMu.Lock()
 			old := a.screen[chatID]
@@ -1619,8 +1627,9 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	}
 	var newFileID string
 	embed := assets.Bytes(section)
+	pctx := withProtect(ctx, prot)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, t, rows)
+		id, nf := a.msg.SendPhotoCacheable(pctx, chatID, cached, embed, t, rows)
 		newFileID = nf
 		return id
 	})
@@ -1943,7 +1952,7 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 
 func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) (int, error) {
 	rows = fitKeyboard(rows)
-	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML, ProtectContent: protectedCtx(ctx)}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
@@ -1978,7 +1987,7 @@ func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, 
 
 func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {
 	rows = fitKeyboard(rows)
-	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities}
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities, ProtectContent: protectedCtx(ctx)}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
@@ -2024,7 +2033,7 @@ func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, capti
 }
 
 func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
-	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: fitMarkup(rm)}
+	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: fitMarkup(rm), ProtectContent: protectedCtx(ctx)}
 	if len(entities) > 0 {
 		p.CaptionEntities = entities
 	} else {
@@ -2140,10 +2149,11 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 			photo = &models.InputFileUpload{Filename: "banner.jpg", Data: bytes.NewReader(embedBytes)}
 		}
 		p := &bot.SendPhotoParams{
-			ChatID:    chatID,
-			Photo:     photo,
-			Caption:   caption,
-			ParseMode: models.ParseModeHTML,
+			ChatID:         chatID,
+			Photo:          photo,
+			Caption:        caption,
+			ParseMode:      models.ParseModeHTML,
+			ProtectContent: protectedCtx(ctx),
 		}
 		if len(rows) > 0 {
 			p.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
