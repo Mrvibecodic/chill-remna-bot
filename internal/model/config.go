@@ -239,6 +239,8 @@ type RestoreGuard struct {
 	// согласие на списания восстанавливается из файла, а человек мог его
 	// отозвать уже после даты бэкапа.
 	AutoPayHeld bool `json:"autopay_held"`
+	// P2PNoted — заявки на перевод из файла дошли до админа.
+	P2PNoted bool `json:"p2p_noted,omitempty"`
 }
 
 // RestoreAt — момент восстановления базы; ok=false — не восстанавливали.

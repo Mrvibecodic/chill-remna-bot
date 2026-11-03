@@ -1297,6 +1297,7 @@ var en = map[string]string{
 	"bk.ap_held":          "⏸ Auto-renewal is paused after the restore: consent to charges comes from the file, and someone may have turned it off after the backup date. Turn it on once you have checked.",
 	"bk.btn_ap_on":        "▶️ Turn auto-renewal on",
 	"bk.ap_on":            "✅ Auto-renewal is running again.",
+	"bk.pay_held":         "This payment is for an invoice created before the bot database was restored. An administrator will check it and issue it by hand if needed.",
 	"bk.p2p_review":       "⚠️ <b>Transfer requests from the restored database</b>\n\nThey may have been approved after the backup date. Before approving, check that the subscription or top-up was not issued already.\n\n%s",
 	"bk.title":            "💾 <b>Database backup</b>\n\nA full copy of the database in one file: users, subscriptions, payments, plans and all settings. Opens only with the password.\n\n🔑 Password: %s\n📨 Send to: %s\n🕑 Schedule: %s\n📄 Last: %s",
 	"bk.pass_none":        "not set",

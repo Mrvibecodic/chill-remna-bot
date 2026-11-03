@@ -252,6 +252,9 @@ func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO 
 	// следующая сверка выдала бы дни второй раз.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
+	// Оплаты до восстановления базы сверка кладёт в список админу — его
+	// нужно отправить, как в обычном проходе.
+	defer a.flushReview(rctx)
 	for i := range list {
 		pi := &list[i]
 		if !busy {

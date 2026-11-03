@@ -71,6 +71,7 @@ func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
 		return stats
 	}
 	now := time.Now().UTC()
+	keep := a.restoreKeep(ctx, st)
 	for i := range targets {
 		if ctx.Err() != nil || a.paused() {
 			return stats
@@ -78,7 +79,7 @@ func (a *App) repairSubscriptions(ctx context.Context) subRepairStats {
 		t := targets[i]
 		// Срок разошёлся с бэкапом — значит, после даты файла была покупка,
 		// которой в базе нет. Откатывать условия к старой покупке нельзя.
-		if a.restoreChanged(t.TelegramID) {
+		if keep[t.TelegramID] {
 			continue
 		}
 		// Истёкшая подписка не чинится: лимиты ей всё равно применят при

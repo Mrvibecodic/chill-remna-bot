@@ -15,6 +15,7 @@ import (
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/storage"
 )
 
 // Защита после восстановления базы из бэкапа.
@@ -29,9 +30,13 @@ import (
 //     восстанавливается из файла, а человек мог отозвать его позже;
 //   - первое списание каждого человека после восстановления идёт только
 //     после того, как его срок подтвердила панель;
-//   - счета и оплаты звёздами, созданные до восстановления и найденные
-//     сверкой оплаченными, бот сам не выдаёт — они уходят админу списком;
-//   - заявки на перевод из файла приходят админу списком для проверки.
+//   - оплаты по счетам, выставленным до восстановления (сверка, старые
+//     кнопки «Проверить оплату», повторные вебхуки), и оплаты звёздами между
+//     датой файла и восстановлением бот сам не выдаёт — они уходят админу
+//     списком;
+//   - заявки на перевод из файла приходят админу списком для проверки;
+//   - тем, чей срок в панели разошёлся с файлом, сверка лимитов не
+//     откатывает условия, пока они не купят снова.
 
 const (
 	// guardSyncRetry — пауза между попытками сверить сроки с панелью.
@@ -42,6 +47,15 @@ const (
 	reviewChunk = 30
 	// stageReview — отметка в журнале платежей: оплата ушла админу.
 	stageReview = "restore_review"
+	// stageHeld — оплату по старому счёту не выдали: ждёт решения админа.
+	stageHeld = "restore_held"
+	// reviewQuietAfter — после этого срока оплаты до восстановления админу
+	// снова не приходят. Журнал, где лежит отметка «уже на проверке», живёт
+	// 90 дней, а за два месяца список давно разобран.
+	reviewQuietAfter = 60 * 24 * time.Hour
+	// starsWindowSlack — запас до даты файла в окне звёзд: оплату за минуту
+	// до бэкапа сверка могла выдать уже после него.
+	starsWindowSlack = time.Hour
 )
 
 var errNoPanel = errors.New("панель не подключена")
@@ -50,8 +64,30 @@ var errNoPanel = errors.New("панель не подключена")
 // доставлен (закрыть счёт, поставить отметку). До доставки ничего не
 // закрывается: потерянное сообщение не должно хоронить оплату.
 type reviewItem struct {
+	extID  string
 	line   string
 	onSent func(ctx context.Context)
+}
+
+// restoreHeld — оплата по счёту до восстановления базы ушла админу на
+// проверку. Для вызывающих это «уже обработано» (вебхук отвечает 200 и не
+// повторяется), для человека — готовый текст.
+type restoreHeld struct{ msg string }
+
+func (e restoreHeld) Error() string { return e.msg }
+func (e restoreHeld) Unwrap() []error {
+	return []error{userText(e), storage.ErrDuplicateExtID}
+}
+
+// invoiceMethod — способ, где бот сам выставляет счёт и записывает его. У
+// таких оплат по строке счёта видно, выставлен ли он до восстановления.
+func invoiceMethod(method string) bool {
+	switch method {
+	case model.PayMethodYooKassa, model.PayMethodCryptoBot, model.PayMethodHeleket,
+		model.PayMethodPlatega, model.PayMethodYooMoney:
+		return true
+	}
+	return false
 }
 
 // reviewNoted — эта оплата уже ушла админу на проверку (отметка в журнале
@@ -61,6 +97,9 @@ func (a *App) reviewNoted(ctx context.Context, extID string) bool {
 	st := a.store
 	a.mu.Unlock()
 	if st == nil {
+		return true
+	}
+	if at, ok := a.restoreGuard().RestoreAt(); ok && time.Since(at) > reviewQuietAfter {
 		return true
 	}
 	// Только по ext_id: выборка по человеку отдала бы его старые записи, и
@@ -124,10 +163,43 @@ func (a *App) restoredBefore(t time.Time) bool {
 	return ok && t.Before(at)
 }
 
-// restoreChanged — срок этого человека в панели разошёлся с файлом.
-func (a *App) restoreChanged(id int64) bool {
+// restoreKeep — кому сверка лимитов не откатывает условия: срок в панели
+// разошёлся с файлом (была покупка после даты бэкапа, которой в базе нет), а
+// новой покупки после восстановления ещё не было. Считается раз на проход.
+func (a *App) restoreKeep(ctx context.Context, st storage.Storage) map[int64]bool {
 	g := a.restoreGuard()
-	return g != nil && slices.Contains(g.Changed, id)
+	at, ok := g.RestoreAt()
+	if !ok || len(g.Changed) == 0 {
+		return nil
+	}
+	keep := make(map[int64]bool, len(g.Changed))
+	for _, id := range g.Changed {
+		if !a.paidSince(ctx, st, id, at) {
+			keep[id] = true
+		}
+	}
+	return keep
+}
+
+// paidSince — у человека есть покупка подписки не раньше since. Не смогли
+// прочитать — считаем, что нет: так сверка ничего не откатит.
+func (a *App) paidSince(ctx context.Context, st storage.Storage, id int64, since time.Time) bool {
+	p, err := st.LastPaidSubPayment(ctx, id)
+	if err != nil || p == nil {
+		return false
+	}
+	t, ok := parseStamp(p.CreatedAt)
+	return ok && !t.Before(since)
+}
+
+// parseStamp разбирает время записи базы (RFC3339 или вид SQLite).
+func parseStamp(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // noticeRestored пишет админу после перезапуска, что база на месте.
@@ -149,9 +221,11 @@ func (a *App) noticeRestored(ctx context.Context) {
 	a.updateGuard(ctx, func(g *model.RestoreGuard) { g.Notified = true })
 }
 
-// guardTick — сверка сроков с панелью, пока она не прошла.
+// guardTick — сверка сроков с панелью, пока она не прошла, и список
+// заявок на перевод из файла, пока он не дошёл до админа.
 func (a *App) guardTick(ctx context.Context, now time.Time) {
-	if !a.restoreSyncPending() || !a.guardMu.TryLock() {
+	g := a.restoreGuard()
+	if g == nil || (g.Synced && g.P2PNoted) || !a.guardMu.TryLock() {
 		return
 	}
 	defer a.guardMu.Unlock()
@@ -159,24 +233,30 @@ func (a *App) guardTick(ctx context.Context, now time.Time) {
 		return
 	}
 	defer a.leaveWork()
-	changed, err := a.syncExpiryFromPanel(ctx)
 	lang := a.lang(a.cfg.AdminID)
-	if err != nil {
-		a.guardNextTry = now.Add(guardSyncRetry)
-		a.log.Warn("сверка сроков после восстановления не прошла", "err", err)
-		if !a.guardFailNoted {
-			a.guardFailNoted = true
-			a.notify(ctx, a.cfg.AdminID, i18n.T(lang, "bk.sync_fail", a.errText(err)))
+	if !g.Synced {
+		changed, err := a.syncExpiryFromPanel(ctx)
+		if err != nil {
+			a.guardNextTry = now.Add(guardSyncRetry)
+			a.log.Warn("сверка сроков после восстановления не прошла", "err", err)
+			if !a.guardFailNoted {
+				a.guardFailNoted = true
+				a.notify(ctx, a.cfg.AdminID, i18n.T(lang, "bk.sync_fail", a.errText(err)))
+			}
+			return
 		}
+		a.updateGuard(ctx, func(g *model.RestoreGuard) {
+			g.Synced = true
+			g.Changed = changed
+		})
+		a.log.Info("сроки после восстановления сверены с панелью", "changed", len(changed))
+		a.notify(ctx, a.cfg.AdminID, i18n.T(lang, "bk.synced", len(changed)))
+	}
+	if a.reviewRestoredP2P(ctx) {
+		a.updateGuard(ctx, func(g *model.RestoreGuard) { g.P2PNoted = true })
 		return
 	}
-	a.updateGuard(ctx, func(g *model.RestoreGuard) {
-		g.Synced = true
-		g.Changed = changed
-	})
-	a.log.Info("сроки после восстановления сверены с панелью", "changed", len(changed))
-	a.notify(ctx, a.cfg.AdminID, i18n.T(lang, "bk.synced", len(changed)))
-	a.reviewRestoredP2P(ctx)
+	a.guardNextTry = now.Add(guardSyncRetry)
 }
 
 // panelUserID — чей это аккаунт в панели. У аккаунтов кабинета по почте
@@ -207,6 +287,9 @@ func (a *App) syncExpiryFromPanel(ctx context.Context) ([]int64, error) {
 	if panel == nil || st == nil {
 		return nil, errNoPanel
 	}
+	// Покупка посреди сверки уже записала новый срок, а панель прочитана
+	// раньше: такой срок не трогаем. Время платежа в базе — до секунды.
+	started := time.Now().Truncate(time.Second)
 	expire := map[int64]string{}
 	dup := map[int64]bool{}
 	for start := 0; start < guardScanMax; start += panelScanPageSize {
@@ -243,7 +326,7 @@ func (a *App) syncExpiryFromPanel(ctx context.Context) ([]int64, error) {
 		if err != nil {
 			return nil, err
 		}
-		if u == nil || sameMoment(u.SubExpireAt, exp) {
+		if u == nil || sameMoment(u.SubExpireAt, exp) || a.paidSince(ctx, st, id, started) {
 			continue
 		}
 		// Срок в панели позже файла — была покупка после даты бэкапа.
@@ -311,7 +394,8 @@ func (a *App) autoPayExpiryConfirmed(ctx context.Context, ap *model.AutoPay, exp
 	return true
 }
 
-// addReview кладёт оплату в список на ручную проверку.
+// addReview кладёт оплату в список на ручную проверку. Оплата, которая уже
+// ждёт отправки, второй раз не добавляется.
 func (a *App) addReview(method, purpose string, months int, amount string, userID int64, extID string, onSent func(context.Context)) {
 	lang := a.lang(a.cfg.AdminID)
 	what := i18n.T(lang, "bk.review_months", months)
@@ -321,12 +405,17 @@ func (a *App) addReview(method, purpose string, months int, amount string, userI
 	line := i18n.T(lang, "bk.review_line", html.EscapeString(methodLabel(method)), what,
 		html.EscapeString(amount), userID, html.EscapeString(extID))
 	a.reviewMu.Lock()
-	a.reviewItems = append(a.reviewItems, reviewItem{line: line, onSent: onSent})
-	a.reviewMu.Unlock()
+	defer a.reviewMu.Unlock()
+	for _, it := range a.reviewItems {
+		if it.extID == extID {
+			return
+		}
+	}
+	a.reviewItems = append(a.reviewItems, reviewItem{extID: extID, line: line, onSent: onSent})
 }
 
 // flushReview отправляет админу накопленный список на проверку. Что не
-// доставлено — не закрывается и найдётся сверкой снова.
+// доставлено — остаётся в очереди до следующего раза.
 func (a *App) flushReview(ctx context.Context) {
 	a.reviewMu.Lock()
 	items := a.reviewItems
@@ -336,6 +425,7 @@ func (a *App) flushReview(ctx context.Context) {
 		return
 	}
 	lang := a.lang(a.cfg.AdminID)
+	var left []reviewItem
 	for len(items) > 0 {
 		n := min(len(items), reviewChunk)
 		lines := make([]string, n)
@@ -348,42 +438,111 @@ func (a *App) flushReview(ctx context.Context) {
 					items[i].onSent(ctx)
 				}
 			}
+		} else {
+			left = append(left, items[:n]...)
 		}
 		items = items[n:]
 	}
+	if len(left) == 0 {
+		return
+	}
+	a.reviewMu.Lock()
+	a.reviewItems = append(left, a.reviewItems...)
+	a.reviewMu.Unlock()
+}
+
+// holdRestoredPayment не даёт выдать оплату по счёту, выставленному до
+// восстановления базы: его могли оплатить и выдать уже после даты файла, а
+// база этого не помнит. Так ведут себя старые кнопки «Проверить оплату» и
+// повторные вебхуки. Оплата уходит админу; true — выдавать нельзя.
+func (a *App) holdRestoredPayment(ctx context.Context, method, purpose string, months int, amount string, userID int64, extID string) bool {
+	at, ok := a.restoreGuard().RestoreAt()
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if !ok || st == nil || extID == "" || !invoiceMethod(method) {
+		return false
+	}
+	// Уже выданная оплата — обычный дубль, его гасит барьер ниже.
+	if done, _ := st.PaymentByExtID(ctx, extID); done {
+		return false
+	}
+	// Счёт после восстановления записан всегда. Нет строки — значит, счёт
+	// выставлен после даты файла и до восстановления.
+	p, _ := st.PendingByExtID(ctx, extID)
+	if p != nil {
+		if t, ok := parseStamp(p.CreatedAt); !ok || !t.Before(at) {
+			return false
+		}
+	}
+	a.payLog(ctx, method, extID, userID, stageHeld, "счёт до восстановления базы: %s — не выдано, решает админ", amount)
+	if !a.reviewNoted(ctx, extID) {
+		var pid int64
+		if p != nil {
+			pid = p.ID
+		}
+		a.addReview(method, purpose, months, amount, userID, extID, func(c context.Context) {
+			a.payLog(c, method, extID, userID, stageReview,
+				"оплата по счёту до восстановления базы: %s — на ручную проверку", amount)
+			if pid != 0 {
+				_ = st.ResolvePending(c, pid)
+			}
+		})
+		a.flushReview(ctx)
+	}
+	return true
+}
+
+// restoreHeldErr — ответ человеку на оплату, которую решает админ.
+func (a *App) restoreHeldErr(userID int64) error {
+	return restoreHeld{msg: i18n.T(a.lang(userID), "bk.pay_held")}
 }
 
 // reviewRestoredP2P присылает админу заявки на перевод из файла: их могли
 // одобрить и выдать уже после даты бэкапа, а в файле они снова ждут решения.
-func (a *App) reviewRestoredP2P(ctx context.Context) {
+// true — список дошёл (или посылать нечего).
+func (a *App) reviewRestoredP2P(ctx context.Context) bool {
 	at, ok := a.restoreGuard().RestoreAt()
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
 	if !ok || st == nil {
-		return
+		return true
 	}
 	var lines []string
 	for _, status := range []string{model.P2PAwaiting, model.P2PSubmitted} {
 		reqs, err := st.ListP2PRequestsByStatus(ctx, status, 500)
 		if err != nil {
 			a.log.Warn("заявки на перевод после восстановления", "err", err)
-			return
+			return false
 		}
 		for _, r := range reqs {
-			if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil && !t.Before(at) {
+			if t, ok := parseStamp(r.CreatedAt); ok && !t.Before(at) {
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("• #%d · <code>%d</code> · %s", r.ID, r.TelegramID, html.EscapeString(r.Price)))
 		}
 	}
-	if len(lines) == 0 {
-		return
-	}
 	lang := a.lang(a.cfg.AdminID)
 	for len(lines) > 0 {
 		n := min(len(lines), reviewChunk)
-		a.notify(ctx, a.cfg.AdminID, i18n.T(lang, "bk.p2p_review", strings.Join(lines[:n], "\n")))
+		if a.notifyKB(ctx, a.cfg.AdminID, i18n.T(lang, "bk.p2p_review", strings.Join(lines[:n], "\n")), nil) == 0 {
+			return false
+		}
 		lines = lines[n:]
 	}
+	return true
+}
+
+// restoredStarsWindow — оплата звёздами могла быть выдана между датой файла
+// и восстановлением, и база этого не помнит. Раньше даты файла каждая
+// выданная оплата в файле есть.
+func (a *App) restoredStarsWindow(t time.Time) bool {
+	g := a.restoreGuard()
+	at, ok := g.RestoreAt()
+	if !ok || !t.Before(at) {
+		return false
+	}
+	from, err := time.Parse(time.RFC3339, g.BackupAt)
+	return err != nil || !t.Before(from.Add(-starsWindowSlack))
 }

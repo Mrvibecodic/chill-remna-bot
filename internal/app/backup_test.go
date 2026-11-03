@@ -662,7 +662,7 @@ func TestRestoreGuardAfterRestart(t *testing.T) {
 	if !sameMoment(u.SubExpireAt, "2027-01-10T00:00:00Z") {
 		t.Fatalf("срок из панели не перенесён: %q", u.SubExpireAt)
 	}
-	if !b.restoreChanged(1000000001) || b.restoreChanged(1000000002) {
+	if keep := b.restoreKeep(ctx, st); !keep[1000000001] || keep[1000000002] {
 		t.Fatalf("список разошедшихся сроков: %v", b.restoreGuard().Changed)
 	}
 	if !strings.Contains(fm2.joined(), "Обновлено: 1") {

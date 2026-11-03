@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -486,7 +487,7 @@ func TestRestoreGuardRetries(t *testing.T) {
 	a.bkState.Guard = nil
 	a.guardTick(ctx, now.Add(time.Hour))
 	a.noticeRestored(ctx)
-	if a.restoreSyncPending() || a.restoredBefore(time.Now()) || a.restoreChanged(1) {
+	if a.restoreSyncPending() || a.restoredBefore(time.Now()) || a.restoreKeep(ctx, a.store) != nil {
 		t.Fatal("защита сработала без восстановления")
 	}
 }
@@ -836,7 +837,11 @@ func TestRestoreGuardTopUp(t *testing.T) {
 	}
 	// Длинный список режется на несколько сообщений.
 	for i := 0; i < reviewChunk+1; i++ {
-		a.addReview("x", "", 1, "1", 1, "id", nil)
+		a.addReview("x", "", 1, "1", 1, "id"+strconv.Itoa(i), nil)
+	}
+	a.addReview("x", "", 1, "1", 1, "id0", nil) // та же оплата второй раз не добавляется
+	if len(a.reviewItems) != reviewChunk+1 {
+		t.Fatalf("дубль в списке на проверку: %d строк", len(a.reviewItems))
 	}
 	before := strings.Count(fm.joined(), "Оплаты на ручную проверку")
 	a.flushReview(ctx)

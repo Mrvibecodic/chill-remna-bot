@@ -1378,6 +1378,12 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	// the panel if it's already been finalized (the panel extend happens below,
 	// before the AddPayment idempotency barrier, so without this two concurrent
 	// deliveries would each extend the subscription).
+	//
+	// Счёт до восстановления базы проверяется до замка: проверка ничего не
+	// выдаёт, а список админу уходит по сети — ей под шардовым замком не место.
+	if a.holdRestoredPayment(ctx, method, "", months, amount, telegramID, extID) {
+		return "", "", nil, a.restoreHeldErr(telegramID)
+	}
 	if extID != "" {
 		lk := &a.finalizeLk[extLockIndex(extID)]
 		lk.Lock()

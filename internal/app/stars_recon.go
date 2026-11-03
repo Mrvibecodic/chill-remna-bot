@@ -105,9 +105,10 @@ func (a *App) reconcileStarTx(ctx context.Context, tx *models.StarTransaction) {
 	if done, _ := a.store.PaymentByExtID(ctx, tx.ID); done {
 		return
 	}
-	// Оплата до восстановления базы: её могли выдать уже после даты бэкапа.
-	// Сами не выдаём — в список админу, один раз (отметка — в журнале).
-	if a.restoredBefore(time.Unix(int64(tx.Date), 0)) {
+	// Оплата между датой файла и восстановлением: её могли выдать уже после
+	// даты бэкапа. Сами не выдаём — в список админу, один раз (отметка — в
+	// журнале).
+	if a.restoredStarsWindow(time.Unix(int64(tx.Date), 0)) {
 		if !a.reviewNoted(ctx, tx.ID) {
 			id, amount := tx.ID, tx.Amount
 			a.addReview(model.PayMethodStars, "", months, strconv.Itoa(amount)+" ⭐", payer, id, func(c context.Context) {
