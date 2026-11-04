@@ -48,4 +48,4 @@ description: Приём оплат на кошелёк ЮMoney — что нас
 
 ## Журнал
 
-В [логе заказа](/admin/sales/#история-платежей-и-аналитика) по метке счёта (`ym:…`) видна вся цепочка: `invoice_created` → `webhook` → `finalize` → `done`, а также `underpaid`, `overpaid`, `duplicate_payment`, `api_amount` и `verify_pending` (уведомление пришло раньше, чем операция появилась в истории, — ЮMoney повторит доставку через 10 минут).
+В [логе заказа](/admin/sales/#istoriya-platezhey-i-analitika) по метке счёта (`ym:…`) видна вся цепочка: `invoice_created` → `webhook` → `finalize` → `done`, а также `underpaid`, `overpaid`, `duplicate_payment`, `api_amount` и `verify_pending` (уведомление пришло раньше, чем операция появилась в истории, — ЮMoney повторит доставку через 10 минут).
