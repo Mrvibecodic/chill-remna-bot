@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/url"
 	"os"
@@ -209,12 +210,23 @@ func (a *App) showWebhookGuide(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	c := a.selfContainerName()
 	p := a.webhookListenPort()
-	caddy := fmt.Sprintf("handle /webhook/* {\n    reverse_proxy %s:%s\n}", c, p)
-	nginx := fmt.Sprintf("location /webhook/ {\n    proxy_pass http://%s:%s;\n    proxy_set_header Host $host;\n}", c, p)
+	host := "bot.example.com"
+	a.mu.Lock()
+	if a.botCfg != nil {
+		if h := cleanDomain(a.botCfg.Webhook.PublicBaseURL); h != "" {
+			host = h
+		}
+	}
+	a.mu.Unlock()
+	// Блок отдаёт боту весь домен: мини-апп, кабинет и их API живут не под
+	// /webhook/, и блок «только вебхуки» молча ломает их.
+	caddy := fmt.Sprintf("%s {\n    reverse_proxy %s:%s\n}", html.EscapeString(host), c, p)
+	nginx := fmt.Sprintf("location / {\n    proxy_pass http://%s:%s;\n    proxy_set_header Host $host;\n    proxy_set_header X-Forwarded-Proto $scheme;\n    proxy_set_header X-Forwarded-For $remote_addr;\n    client_max_body_size 16m;\n}", c, p)
+	paths := "/webhook/ /miniapp/ /api/ " + html.EscapeString(a.CabinetPath()) + " /flags/ /brand/"
 	text := i18n.T(lang, "wh.guide_intro", c, p, p) +
 		"\n\n<b>Caddy</b>\n<pre>" + caddy + "</pre>" +
 		"\n<b>nginx</b>\n<pre>" + nginx + "</pre>\n\n" +
-		i18n.T(lang, "wh.guide_after")
+		i18n.T(lang, "wh.guide_after", paths)
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.back"), "menu:webhooks"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
