@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { latinHeadingIds, legacyAnchorScript } from './src/heading-ids.mjs';
 
 // Сайт документации chill-remna-bot. Собирается в статику и выкладывается на
 // GitHub Pages (домен remna.shop), поэтому никакого рантайма на сервере нет.
@@ -9,6 +10,7 @@ export default defineConfig({
   trailingSlash: 'ignore',
   build: { format: 'directory' },
   integrations: [
+    latinHeadingIds(),
     starlight({
       title: 'Chill Remna bot',
       description:
@@ -43,6 +45,9 @@ export default defineConfig({
           tag: 'script',
           content: `(function(){if(location.pathname!=='/'&&location.pathname!=='/index.html')return;var m={'#features':'/start/features/','#channels':'/ops/channels/','#install':'/start/install/','#wizard':'/start/wizard/','#admin':'/admin/overview/','#payments':'/start/features/','#webhooks':'/payments/webhooks/','#commands':'/reference/commands/','#env':'/reference/env/','#update':'/ops/update/','#faq':'/ops/faq/'};var t=m[location.hash];if(t)location.replace(t);})();`,
         },
+
+        // Ссылки со старыми кириллическими якорями ведут на тот же заголовок.
+        { tag: 'script', content: legacyAnchorScript },
 
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://remna.shop/og.png' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
