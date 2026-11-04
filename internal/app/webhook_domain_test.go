@@ -17,7 +17,7 @@ func TestCleanDomain(t *testing.T) {
 		"https://https://bot.example.com":   "bot.example.com",
 		"http://bot.example.com:8443/x?y=1": "bot.example.com",
 		"bot.example.com.":                  "bot.example.com",
-		"бот.рф":                            "xn--90a0am.xn--p1ai",
+		"бот.испытание":                     "xn--90a0am.xn--80akhbyknj4f",
 		"https://":                          "",
 		"https:// ":                         "",
 		"":                                  "",
