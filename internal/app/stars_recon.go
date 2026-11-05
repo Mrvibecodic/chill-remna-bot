@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 
@@ -34,6 +35,11 @@ const starsReconPages = 3
 // reconcileStars догоняет оплаты звёздами, апдейт о которых не дожил до выдачи,
 // и подхватывает возвраты, о которых бот не узнал.
 func (a *App) reconcileStars(ctx context.Context) {
+	if !a.enterWork() {
+		return
+	}
+	defer a.leaveWork()
+	defer a.flushReview(ctx)
 	a.mu.Lock()
 	st := a.store
 	msg := a.msg
@@ -97,6 +103,19 @@ func (a *App) reconcileStarTx(ctx context.Context, tx *models.StarTransaction) {
 		return
 	}
 	if done, _ := a.store.PaymentByExtID(ctx, tx.ID); done {
+		return
+	}
+	// Оплата между датой файла и восстановлением: её могли выдать уже после
+	// даты бэкапа. Сами не выдаём — в список админу, один раз (отметка — в
+	// журнале).
+	if a.restoredStarsWindow(time.Unix(int64(tx.Date), 0)) {
+		if !a.reviewNoted(ctx, tx.ID) {
+			id, amount := tx.ID, tx.Amount
+			a.addReview(model.PayMethodStars, "", months, strconv.Itoa(amount)+" ⭐", payer, id, func(c context.Context) {
+				a.payLog(c, model.PayMethodStars, id, payer, stageReview,
+					"оплата %d⭐ до восстановления базы — на ручную проверку", amount)
+			})
+		}
 		return
 	}
 	snap, ok := a.starsSnapshotForAmount(ctx, payer, months, tx.Amount)

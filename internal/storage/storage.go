@@ -1,11 +1,14 @@
 package storage
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -186,6 +189,18 @@ type Storage interface {
 	Export(ctx context.Context) (*Snapshot, error)
 	Import(ctx context.Context, s *Snapshot) error
 
+	// WriteBackup пишет полный бэкап базы (все таблицы, все колонки);
+	// CheckBackup проверяет файл и сверяет его со схемой, ничего не меняя;
+	// RestoreBackup одной транзакцией заменяет все данные содержимым файла.
+	// open отдаёт файл с начала: восстановление читает его дважды.
+	WriteBackup(ctx context.Context, w io.Writer, app string) (*BackupInfo, error)
+	CheckBackup(ctx context.Context, open func() (io.Reader, error)) (*BackupInfo, error)
+	RestoreBackup(ctx context.Context, open func() (io.Reader, error), guard *model.RestoreGuard) error
+	// LoadBackupState / SaveBackupState — настройки бэкапа и метка
+	// восстановления (своя таблица, а не поле конфига).
+	LoadBackupState(ctx context.Context) (*model.BackupConfig, bool, error)
+	SaveBackupState(ctx context.Context, st *model.BackupConfig) error
+
 	AddPendingInvoice(ctx context.Context, p *model.PendingInvoice) error
 
 	ListUnresolvedPending(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error)
@@ -314,7 +329,56 @@ func (b *base) saveConfig(ctx context.Context, cfg *model.BotConfig, upsertSQL s
 	return err
 }
 
+// Transfer переносит базу целиком (смена движка в «Перенастроить») тем же
+// путём, что бэкап и восстановление: все таблицы и все колонки. Прежний
+// перенос шёл типизированным снимком и молча терял то, что в него не было
+// вписано руками (журнал торрент-блокера, страйки, ссылки из писем).
 func Transfer(ctx context.Context, src, dst Storage) error {
+	sb, dbase := baseOfStore(src), baseOfStore(dst)
+	if sb == nil || dbase == nil {
+		// Двойники хранилища в тестах бэкап не умеют — для них прежний путь.
+		return transferSnapshot(ctx, src, dst)
+	}
+	// Выгрузка держится в памяти сжатой: несжатая на большой базе — сотни
+	// мегабайт.
+	var buf bytes.Buffer
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
+	if _, err := sb.WriteBackup(ctx, zw, "transfer"); err != nil {
+		return fmt.Errorf("выгрузка старой базы: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("выгрузка старой базы: %w", err)
+	}
+	data := buf.Bytes()
+	open := func() (io.Reader, error) {
+		zr, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		return zr, nil
+	}
+	// Нестрого: переезд идёт и на ненастроенном боте, где конфига ещё нет.
+	if err := dbase.restoreBackup(ctx, open, nil, false); err != nil {
+		return fmt.Errorf("загрузка в новую базу: %w", err)
+	}
+	return nil
+}
+
+func baseOfStore(s Storage) *base {
+	switch st := s.(type) {
+	case *sqliteStore:
+		return &st.base
+	case *pgStore:
+		return &st.base
+	}
+	return nil
+}
+
+// transferSnapshot — прежний перенос типизированным снимком.
+func transferSnapshot(ctx context.Context, src, dst Storage) error {
 	snap, err := src.Export(ctx)
 	if err != nil {
 		return err

@@ -598,6 +598,14 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 			escapeName(method), escapeName(extID), escapeName(amount), chatID))
 		return nil
 	}
+	// Счёт до восстановления базы: зачислять второй раз нельзя, решает админ.
+	// Для вызывающего это успех — счёт закрыт, повторять нечего.
+	if a.holdRestoredPayment(ctx, method, model.P2PPurposeTopUp, 0, amount, chatID, extID) {
+		if hasChat(chatID) {
+			a.notify(ctx, chatID, a.restoreHeldErr(chatID).Error())
+		}
+		return nil
+	}
 	// Запись платежа и зачисление — одной транзакцией. Порознь сбой между
 	// ними оставлял барьер повтора стоять при нулевом балансе, и пополнение
 	// пропадало навсегда: повторную доставку гасил тот же барьер, а сверка

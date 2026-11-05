@@ -75,6 +75,9 @@ type uiState struct {
 	// Мастер переезда с remnashop: ждём файл дампа.
 	awaitRSDump bool
 
+	// Восстановление базы: ждём файл бэкапа.
+	awaitBackup bool
+
 	// Импорт тарифа: ждём JSON-файл; разобранный тариф держится здесь до
 	// подтверждения (pln:impok).
 	awaitPlanImport  bool

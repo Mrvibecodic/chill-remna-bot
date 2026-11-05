@@ -112,6 +112,7 @@ const (
 	cbDevices   = "dev"
 	cbDevAdmin  = "devadm"
 	cbRSImport  = "rsimp"
+	cbBackup    = "bk"
 	cbAutoPay   = "ap"
 	cbAccess    = "acc"
 	cbTorrent   = "torj"
@@ -123,12 +124,23 @@ const (
 )
 
 func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
-	a.msg.AnswerCallback(ctx, cq.ID)
+	// «Убрать» отвечает на нажатие сам: удалить старое сообщение Telegram
+	// может не дать, и это нужно показать всплывающей надписью.
+	removing := cq.Data == cbClose+":close"
+	if !removing {
+		a.msg.AnswerCallback(ctx, cq.ID)
+	}
 	chatID := cq.From.ID
 	a.setEditTarget(chatID, cqMsgID(cq))
+	if m := cq.Message.Message; m != nil && m.HasProtectedContent {
+		a.markEditProt(chatID)
+	}
 	isAdmin := chatID == a.cfg.AdminID
 	a.rememberUser(ctx, chatID, cq.From.Username, cq.From.FirstName)
 	if a.denyAccess(ctx, chatID, isAdmin) {
+		if removing {
+			a.msg.AnswerCallback(ctx, cq.ID)
+		}
 		return
 	}
 	key, val, _ := strings.Cut(cq.Data, ":")
@@ -345,6 +357,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		if isAdmin {
 			a.onRSImport(ctx, chatID, val)
 		}
+	case cbBackup:
+		if isAdmin {
+			a.onBackup(ctx, chatID, val)
+		}
 	case cbPanelAuth:
 		if isAdmin {
 			a.onPanelAuth(ctx, chatID, val)
@@ -367,7 +383,12 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 			a.enterHome(ctx, chatID, isAdmin, cq.From.FirstName, cq.From.Username)
 			a.dropScreen(chatID, []int{cqMsgID(cq)})
 		case "close":
-			a.msg.Delete(ctx, chatID, cqMsgID(cq))
+			if err := a.msg.DeleteErr(ctx, chatID, cqMsgID(cq)); err != nil {
+				a.log.Info("сообщение не удалено", "err", err)
+				a.msg.AnswerCallbackText(ctx, cq.ID, i18n.T(a.lang(chatID), "msg.remove_fail"))
+				return
+			}
+			a.msg.AnswerCallback(ctx, cq.ID)
 		}
 	default:
 		if key != "" {

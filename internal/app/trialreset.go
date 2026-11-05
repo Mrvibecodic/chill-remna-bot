@@ -54,6 +54,13 @@ func (a *App) RunTrialReset(ctx context.Context) {
 }
 
 func (a *App) resetTrialsOnce(ctx context.Context) int {
+	if !a.enterWork() {
+		return 0
+	}
+	defer a.leaveWork()
+	if a.restoreSyncPending() {
+		return 0
+	}
 	a.mu.Lock()
 	st := a.store
 	panel := a.panel
@@ -75,7 +82,7 @@ func (a *App) resetTrialsOnce(ctx context.Context) int {
 	now := time.Now().UTC()
 	done := 0
 	for i, t := range targets {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || a.paused() {
 			return done
 		}
 		if i > 0 && !a.runInline {

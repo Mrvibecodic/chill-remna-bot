@@ -125,6 +125,10 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 	ctx := a.bgContext()
 	go func() {
 		defer a.bcastRunning.Store(false)
+		if !a.enterWork() {
+			return
+		}
+		defer a.leaveWork()
 		ids, err := a.broadcastIDs(ctx)
 		if err != nil {
 			a.sendHome(ctx, adminChat, i18n.T(lang, "bcast.failed"))
@@ -143,7 +147,8 @@ func (a *App) runBroadcast(adminChat int64, text string, statusID int) {
 				return
 			case <-ticker.C:
 			}
-			if a.bcastStop.Load() {
+			// Восстановление базы останавливает рассылку так же, как кнопка «Стоп».
+			if a.bcastStop.Load() || a.paused() {
 				stopped = true
 				break
 			}

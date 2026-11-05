@@ -190,7 +190,7 @@ func TestWrap_HTTPSRedirectHost(t *testing.T) {
 		t.Fatalf("код %d, Location %q", w.Code, w.Header().Get("Location"))
 	}
 	// Подделанный Host: увести на чужой сайт нельзя — вместо перевода отказ.
-	for _, bad := range []string{"evil.com/path", "evil.com\\@x", "user@evil.com", "evil com"} {
+	for _, bad := range []string{"evil.test/path", "evil.test\\@x", "user@evil.test", "evil com"} {
 		w := get(s, bad, "/cabinet/")
 		if w.Code != http.StatusUpgradeRequired {
 			t.Fatalf("Host %q: код %d, ожидался 426 без перевода (Location %q)", bad, w.Code, w.Header().Get("Location"))
@@ -199,11 +199,11 @@ func TestWrap_HTTPSRedirectHost(t *testing.T) {
 	// Домен настроен — он и стоит в адресе, что бы ни прислал клиент.
 	sd := newServer(nil, nil)
 	sd.domain = "vpn.example.com"
-	if got := get(sd, "evil.com", "/cabinet/").Header().Get("Location"); got != "https://vpn.example.com/cabinet/" {
+	if got := get(sd, "evil.test", "/cabinet/").Header().Get("Location"); got != "https://vpn.example.com/cabinet/" {
 		t.Fatalf("Location %q — должен быть настроенный домен", got)
 	}
 	// Абсолютная форма запроса не должна протаскивать чужой адрес в Location.
-	r := httptest.NewRequest(http.MethodGet, "http://evil.com/x", nil)
+	r := httptest.NewRequest(http.MethodGet, "http://evil.test/x", nil)
 	r.Host = "vpn.example.com"
 	r.RemoteAddr = "198.51.100.9:1234"
 	w = httptest.NewRecorder()

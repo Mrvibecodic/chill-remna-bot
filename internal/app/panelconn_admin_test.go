@@ -191,7 +191,7 @@ func TestNormalizePanelURL(t *testing.T) {
 		"remnawave:3000":                      remnawave.LocalBaseURL,
 		"https://remnawave:3000/api":          remnawave.LocalBaseURL,
 		"panel.example.com.":                  "https://panel.example.com",
-		"https://Панель.рф":                   "https://xn--80aksgi6f.xn--p1ai",
+		"https://Панель.испытание":            "https://xn--80aksgi6f.xn--80akhbyknj4f",
 		"http://203.0.113.5:3000":             "http://203.0.113.5:3000",
 		"https://[2001:db8::1]:3000/":         "https://[2001:db8::1]:3000",
 	}
@@ -251,8 +251,8 @@ func TestSubdomainValidation(t *testing.T) {
 	}
 
 	a.handleCallback(ctx, cb(100, "subd:edit"))
-	a.handleMessage(ctx, msgText(100, "https://Впн.Пример.рф:8443/sub/abc"))
-	if fs.cfg == nil || fs.cfg.SubscriptionDomain != "xn--b1awf.xn--e1afmkfd.xn--p1ai:8443" {
+	a.handleMessage(ctx, msgText(100, "https://Впн.Пример.испытание:8443/sub/abc"))
+	if fs.cfg == nil || fs.cfg.SubscriptionDomain != "xn--b1awf.xn--e1afmkfd.xn--80akhbyknj4f:8443" {
 		t.Fatalf("домен не сохранён в punycode: %+v", fs.cfg)
 	}
 

@@ -166,8 +166,8 @@ func TestCanonicalRedirectFollowed(t *testing.T) {
 func TestSameSite(t *testing.T) {
 	same := [][2]string{{"panel.example.com", "panel.example.com"}, {"www.panel.example.com", "panel.example.com"}, {"panel.example.com.", "panel.example.com"}}
 	diff := [][2]string{
-		{"panel.example.com", "evil.com"},
-		{"panel.example.com.evil.com", "panel.example.com"},
+		{"panel.example.com", "evil.test"},
+		{"panel.example.com.evil.test", "panel.example.com"},
 		{"evil-panel.example.com", "panel.example.com"},
 		// Апекс не роднится с произвольным поддоменом: иначе панель на
 		// example.com делилась бы ключом с sub.example.com.

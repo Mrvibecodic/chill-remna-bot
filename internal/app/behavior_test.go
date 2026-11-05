@@ -36,6 +36,13 @@ type fakeMsg struct {
 	invoices []string
 	// downloads подменяет скачивание файлов из Telegram: ключ — file_id.
 	downloads map[string][]byte
+	// docTo — в какие чаты ушли загруженные документы, по порядку;
+	// docMsgIDs — id сообщений с файлами (SendFile).
+	docTo     []int64
+	docMsgIDs []int
+	// cbTexts — всплывающие ответы на нажатия кнопок.
+	cbTexts []string
+	dlDone  bool
 	// docs — документы, отправленные ботом: ключ — имя файла.
 	docs map[string][]byte
 	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
@@ -44,6 +51,8 @@ type fakeMsg struct {
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
+	// deleteErr — Telegram не даёт удалить сообщение (старше 48 часов).
+	deleteErr error
 	// forbidden — чаты, где Telegram отвечает 403 («человек заблокировал
 	// бота»): так проверяется, что рассылка отличает это от временной ошибки.
 	forbidden map[int64]bool
@@ -75,6 +84,35 @@ type fakeMsg struct {
 	// emptyBtns — кнопки без подписи: Telegram отвергает такое сообщение
 	// целиком.
 	emptyBtns int
+	// prot — сообщения, ушедшие с запретом пересылки.
+	prot map[int]bool
+	// edits — сообщения, которые бот пытался править; editOK — правка
+	// удаётся.
+	edits  []int
+	editOK bool
+}
+
+// noteProt запоминает, ушло ли сообщение с запретом пересылки.
+func (f *fakeMsg) noteProt(ctx context.Context, id int) int {
+	if id == 0 || !protectedCtx(ctx) {
+		return id
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prot == nil {
+		f.prot = map[int]bool{}
+	}
+	f.prot[id] = true
+	return id
+}
+
+func (f *fakeMsg) isProt(id int) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.prot[id] }
+
+func (f *fakeMsg) noteEdit(id int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.edits = append(f.edits, id)
+	return f.editOK
 }
 
 // allCallbackData возвращает callback_data всех отправленных кнопок.
@@ -134,7 +172,9 @@ func hasCB(list []string, want string) bool {
 	return false
 }
 
-func (f *fakeMsg) Send(_ context.Context, _ int64, text string) int { return f.add(text) }
+func (f *fakeMsg) Send(ctx context.Context, _ int64, text string) int {
+	return f.noteProt(ctx, f.add(text))
+}
 func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, error) {
 	if f.forbidden != nil && f.forbidden[chatID] {
 		return 0, bot.ErrorForbidden
@@ -145,18 +185,42 @@ func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, er
 	}
 	return id, nil
 }
-func (f *fakeMsg) SendKB(_ context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
+func (f *fakeMsg) SendKB(ctx context.Context, _ int64, text string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
 	id := f.add(text)
 	if f.kbFail {
 		return 0
 	}
-	return id
+	return f.noteProt(ctx, id)
 }
-func (f *fakeMsg) SendEnt(_ context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
-	return f.add(text)
+func (f *fakeMsg) SendEnt(ctx context.Context, _ int64, text string, _ []models.MessageEntity, _ [][]models.InlineKeyboardButton) int {
+	return f.noteProt(ctx, f.add(text))
 }
 func (f *fakeMsg) AnswerCallback(_ context.Context, _ string) {}
+func (f *fakeMsg) AnswerCallbackText(_ context.Context, _ string, text string) {
+	f.mu.Lock()
+	f.cbTexts = append(f.cbTexts, text)
+	f.mu.Unlock()
+}
+func (f *fakeMsg) SendFile(_ context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error) {
+	if f.forbidden != nil && f.forbidden[chatID] {
+		return 0, bot.ErrorForbidden
+	}
+	f.recordKB(rows)
+	f.mu.Lock()
+	f.sentDocIDs = append(f.sentDocIDs, name)
+	if f.docs == nil {
+		f.docs = map[string][]byte{}
+	}
+	f.docs[name] = append([]byte(nil), data...)
+	f.docTo = append(f.docTo, chatID)
+	f.mu.Unlock()
+	id := f.add("FILE:" + caption)
+	f.mu.Lock()
+	f.docMsgIDs = append(f.docMsgIDs, id)
+	f.mu.Unlock()
+	return id, nil
+}
 func (f *fakeMsg) RefundStars(_ context.Context, userID int64, chargeID string) error {
 	f.refunds = append(f.refunds, fmt.Sprintf("%d:%s", userID, chargeID))
 	return f.refundErr
@@ -171,21 +235,21 @@ func (f *fakeMsg) StarTransactions(_ context.Context, offset, limit int) ([]mode
 	}
 	return f.starTx[offset:end], nil
 }
-func (f *fakeMsg) EditText(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
-	return false
+func (f *fakeMsg) EditText(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
+	return f.noteEdit(id)
 }
-func (f *fakeMsg) EditCaption(_ context.Context, _ int64, _ int, _ string, _ [][]models.InlineKeyboardButton) bool {
-	return false
+func (f *fakeMsg) EditCaption(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
+	return f.noteEdit(id)
 }
 func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows [][]models.InlineKeyboardButton) int {
 	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(_ context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
 	f.recordKB(rows)
-	return f.add(caption), ""
+	return f.noteProt(ctx, f.add(caption)), ""
 }
-func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, _ models.ReplyMarkup) (int, error) {
+func (f *fakeMsg) SendBanner(ctx context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
 	// failBanner имитирует отказ Telegram на конкретной картинке (битый
 	// file_id или недоступная ссылка), failAllBanners — отказ на любой.
 	if f.failAllBanners {
@@ -198,13 +262,23 @@ func (f *fakeMsg) SendBanner(_ context.Context, _ int64, photo models.InputFile,
 		}
 		return 0, errors.New(msg)
 	}
-	return f.add(caption), nil
+	if kb, ok := rm.(models.InlineKeyboardMarkup); ok {
+		f.recordKB(kb.InlineKeyboard)
+	}
+	return f.noteProt(ctx, f.add(caption)), nil
 }
 func (f *fakeMsg) Delete(_ context.Context, _ int64, id int) {
 	f.mu.Lock()
 	delete(f.live, id)
 	f.deleted = append(f.deleted, id)
 	f.mu.Unlock()
+}
+func (f *fakeMsg) DeleteErr(ctx context.Context, chatID int64, id int) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.Delete(ctx, chatID, id)
+	return nil
 }
 func (f *fakeMsg) RemoveKeyboard(_ context.Context, _ int64)               {}
 func (f *fakeMsg) SetCommandKeyboard(_ context.Context, _ int64, _ string) {}
@@ -312,6 +386,8 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
+	bkState *model.BackupConfig
+
 	// mu защищает ДЕНЕЖНЫЕ пути фейка: реальное хранилище — база, и параллельные
 	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
 	// триал) без этого ловили бы гонку самого двойника, а не проверяемого кода.
@@ -1928,6 +2004,27 @@ func (s *fakeStore) Export(context.Context) (*storage.Snapshot, error) {
 	return &storage.Snapshot{}, nil
 }
 func (s *fakeStore) Import(context.Context, *storage.Snapshot) error { return nil }
+func (s *fakeStore) LoadBackupState(context.Context) (*model.BackupConfig, bool, error) {
+	if s.bkState == nil {
+		return nil, false, nil
+	}
+	st := *s.bkState
+	return &st, true, nil
+}
+func (s *fakeStore) SaveBackupState(_ context.Context, st *model.BackupConfig) error {
+	c := *st
+	s.bkState = &c
+	return nil
+}
+func (s *fakeStore) WriteBackup(context.Context, io.Writer, string) (*storage.BackupInfo, error) {
+	return nil, errors.New("fakeStore: бэкап не поддержан")
+}
+func (s *fakeStore) CheckBackup(context.Context, func() (io.Reader, error)) (*storage.BackupInfo, error) {
+	return nil, errors.New("fakeStore: бэкап не поддержан")
+}
+func (s *fakeStore) RestoreBackup(context.Context, func() (io.Reader, error), *model.RestoreGuard) error {
+	return errors.New("fakeStore: бэкап не поддержан")
+}
 
 func (s *fakeStore) Kind() string { return "fake" }
 func (s *fakeStore) Close() error { return nil }
@@ -2799,4 +2896,16 @@ func TestP2P_ReceiptAfterRestart(t *testing.T) {
 			t.Fatalf("бот не должен был ничего отправлять:\n%s", fm.joined())
 		}
 	})
+}
+
+// downloaded / markDownloaded — для тестов с медленным скачиванием.
+func (f *fakeMsg) markDownloaded() {
+	f.mu.Lock()
+	f.dlDone = true
+	f.mu.Unlock()
+}
+func (f *fakeMsg) downloaded() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlDone
 }

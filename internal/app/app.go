@@ -54,6 +54,9 @@ type messenger interface {
 	// доехала по другой причине.
 	SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error)
 	Delete(ctx context.Context, chatID int64, msgID int)
+	// DeleteErr — то же, но с ответом Telegram: сообщения старше 48 часов
+	// бот удалить не может, и об этом надо сказать.
+	DeleteErr(ctx context.Context, chatID int64, msgID int) error
 	RemoveKeyboard(ctx context.Context, chatID int64)
 
 	SetCommandKeyboard(ctx context.Context, chatID int64, label string)
@@ -74,6 +77,11 @@ type messenger interface {
 	StarTransactions(ctx context.Context, offset, limit int) ([]models.StarTransaction, error)
 
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string)
+	// SendFile загружает файл и отдаёт ошибку Telegram: по ней видно, что не
+	// так (нет прав, файл велик, таймаут). Загрузка идёт с долгим таймаутом.
+	SendFile(ctx context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error)
+	// AnswerCallbackText отвечает на нажатие кнопки всплывающей надписью.
+	AnswerCallbackText(ctx context.Context, id, text string)
 	// SendDocumentKB отправляет файл (по file_id или загрузкой) с подписью и
 	// кнопками — так уходят чеки об оплате, которые пришли не картинкой.
 	SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int
@@ -183,6 +191,7 @@ type App struct {
 	screenDropDelay time.Duration
 	kbSet           map[int64]bool
 	editTarget      map[int64]int
+	editProt        map[int64]bool
 	screenSection   map[int64]string
 
 	subMu    sync.Mutex
@@ -301,6 +310,50 @@ type App struct {
 	// разбора, а читает обработчик кнопки «Импортировать».
 	rsMu   sync.Mutex
 	rsDump map[int64]*rsimport.Data
+
+	// bkState — настройки бэкапа и метка восстановления (под mu). Хранятся
+	// в своей таблице, а не в конфиге: старый образ выбросил бы их при
+	// сохранении конфига.
+	bkState model.BackupConfig
+
+	// Бэкап базы. bkMu — одна выгрузка или восстановление за раз; bkPend —
+	// присланный файл до подтверждения восстановления; bkNextTry — когда
+	// повторить бэкап по расписанию после неудачи (в памяти: перезапуск и так
+	// даёт новую попытку).
+	bkMu     sync.Mutex
+	bkPendMu sync.Mutex
+	// bkDestMu — проверки нового получателя бэкапов идут по одной.
+	bkDestMu  sync.Mutex
+	bkPend    map[int64]*bkPending
+	bkNextTry time.Time
+	// restoring — идёт восстановление базы: бот, вебхуки и фоновые задачи
+	// стоят, сохранение конфига запрещено. После удачного восстановления
+	// флаг не снимается до перезапуска процесса.
+	restoring atomic.Bool
+	// moneyActive — сколько денежных задач (trackMoney) сейчас идёт;
+	// bgActive — сколько фоновых проходов, вебхуков и запросов API пишут в
+	// базу. Восстановление ждёт, пока оба счётчика не обнулятся.
+	moneyActive  atomic.Int64
+	bgActive     atomic.Int64
+	restorePhase atomic.Int32
+	restartFn    func()
+	restartReq   atomic.Bool
+	// newBackupSender подменяет отдельного бота для бэкапов в тестах,
+	// quietWaitD — срок ожидания перед восстановлением (0 — quietWait).
+	newBackupSender func(token string) (backupSender, error)
+	// quietHook — тесты: вызывается между сменой фазы восстановления и
+	// повторной проверкой начатых оплат.
+	quietHook  func()
+	quietWaitD time.Duration
+	// uploadLimitD — потолок файла бэкапа в тестах (0 — tgUploadLimit).
+	uploadLimitD int
+	// Сверка сроков с панелью после восстановления базы.
+	guardMu        sync.Mutex
+	guardNextTry   time.Time
+	guardFailNoted bool
+	// reviewLines — оплаты на ручную проверку после восстановления базы.
+	reviewMu    sync.Mutex
+	reviewItems []reviewItem
 
 	bgCtx context.Context
 
@@ -422,6 +475,7 @@ func (a *App) loadConfigIfStore(ctx context.Context) error {
 			a.healNotice = true
 			a.mu.Unlock()
 		}
+		a.loadBackupState(ctx, cfg)
 	}
 	return nil
 }
@@ -589,11 +643,17 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	a.b = b
-	a.msg = botMessenger{b: b, log: a.log}
+	up, err := bot.New(a.cfg.BotToken, bot.WithSkipGetMe(),
+		bot.WithHTTPClient(time.Minute, &http.Client{Timeout: fileUploadTimeout}))
+	if err != nil {
+		up = nil
+	}
+	a.msg = botMessenger{b: b, log: a.log, up: up}
 	a.sendHealNotice(ctx)
 	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
+	a.noticeRestored(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)
 	if a.MiniEnabled() || a.CabinetEnabled() {
@@ -629,7 +689,9 @@ func (a *App) trackMoney(name string, f func(context.Context)) {
 		a.moneyWG.Add(1)
 	}
 	a.mu.Unlock()
+	a.moneyActive.Add(1)
 	go func() {
+		defer a.moneyActive.Add(-1)
 		if counted {
 			defer a.moneyWG.Done()
 		}
@@ -718,16 +780,30 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 			a.log.Error("паника в обработчике апдейта", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
+	// Библиотека запускает каждый апдейт в своей горутине, поэтому начатый
+	// обработчик учитывается так же, как фоновая работа: восстановление базы
+	// ждёт, пока он доиграет. Кроме нажатия, которое само запускает
+	// восстановление, — иначе оно ждало бы себя.
+	if !a.isRestoreApply(update) {
+		if !a.enterWork() {
+			a.answerMaintenance(ctx, update)
+			return
+		}
+		defer a.leaveWork()
+	} else if a.paused() {
+		a.answerMaintenance(ctx, update)
+		return
+	}
 	switch {
 	case update.CallbackQuery != nil:
 		a.handleCallback(ctx, update.CallbackQuery)
 	case update.PreCheckoutQuery != nil:
 		a.handlePreCheckout(ctx, update.PreCheckoutQuery)
 	case update.Message != nil && update.Message.SuccessfulPayment != nil:
-		// Финализация ходит в панель (до трёх HTTP-вызовов по 15 секунд) и при
-		// одном воркере библиотеки блокировала бы очередь апдейтов — а на
-		// pre_checkout_query Telegram требует ответ за 10 секунд. Уводим в
-		// горутину: внутри finalizePurchase свои замки и идемпотентность.
+		// Финализация ходит в панель (до трёх HTTP-вызовов по 15 секунд), и
+		// её нельзя оборвать посреди: уводим в trackMoney — он переживает
+		// остановку процесса. Внутри finalizePurchase свои замки и
+		// идемпотентность.
 		msg := update.Message
 		// Через trackMoney: перезапуск ровно в этот момент раньше обрывал
 		// выдачу — деньги списаны, подписки нет, и сверка её не подбирала.
@@ -743,6 +819,13 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	case update.Message != nil && update.Message.Document != nil:
 		a.handleDocument(ctx, update.Message)
 	}
+}
+
+// isRestoreApply — нажатие «Заменить базу» админом. Кнопку с той же
+// строкой может прислать кто угодно, а мимо учёта работы пускаем только её.
+func (a *App) isRestoreApply(u *models.Update) bool {
+	return u.CallbackQuery != nil && u.CallbackQuery.Data == "bk:apply" &&
+		u.CallbackQuery.From.ID == a.cfg.AdminID
 }
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
@@ -1272,6 +1355,7 @@ func (a *App) setEditTarget(chatID int64, msgID int) {
 	if a.editTarget == nil {
 		a.editTarget = map[int64]int{}
 	}
+	delete(a.editProt, chatID)
 	if msgID == 0 {
 		delete(a.editTarget, chatID)
 		return
@@ -1402,7 +1486,8 @@ func (a *App) screenMsgID(chatID int64) int {
 
 func (a *App) send(ctx context.Context, chatID int64, text string) {
 	t := a.applyPremium(text)
-	a.emit(ctx, chatID, func() int { return a.msg.Send(ctx, chatID, t) })
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableText(t)))
+	a.emit(ctx, chatID, func() int { return a.msg.Send(pctx, chatID, t) })
 }
 
 func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
@@ -1411,11 +1496,13 @@ func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
 
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
 	t := a.applyPremium(text)
+	prot := a.screenProtect(ctx, chatID, copyableText(t))
 	a.setScreenSection(chatID, "")
-	if a.tryEditScreen(ctx, chatID, t, rows) {
+	if a.editMatches(chatID, prot) && a.tryEditScreen(ctx, chatID, t, rows) {
 		return
 	}
-	a.emit(ctx, chatID, func() int { return a.msg.SendKB(ctx, chatID, t, rows) })
+	pctx := withProtect(ctx, prot)
+	a.emit(ctx, chatID, func() int { return a.msg.SendKB(pctx, chatID, t, rows) })
 }
 
 // sendKBParts отправляет экран, не влезающий в одно сообщение Telegram.
@@ -1462,8 +1549,9 @@ func (a *App) sendKBParts(ctx context.Context, chatID int64, parts []string, row
 // приходит. На отказе пробуем встроенный баннер, а негодную настройку снимаем
 // — иначе бот остаётся «мёртвым» до вмешательства администратора.
 func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableEnts(caption, ents)))
 	a.emit(ctx, chatID, func() int {
-		id, err := a.msg.SendBanner(ctx, chatID, photo, caption, ents, rm)
+		id, err := a.msg.SendBanner(pctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
 			a.noteBannerOK(photo)
 			return id
@@ -1473,7 +1561,7 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 		// баннер у всех.
 		a.dropBrokenWelcomeImage(ctx, photo, photoErrKind(err))
 		fallback := &models.InputFileUpload{Filename: "welcome.jpg", Data: bytes.NewReader(defaultBanner)}
-		if id, _ := a.msg.SendBanner(ctx, chatID, fallback, caption, ents, rm); id != 0 {
+		if id, _ := a.msg.SendBanner(pctx, chatID, fallback, caption, ents, rm); id != 0 {
 			return id
 		}
 		// Не принялась и картинка по умолчанию (например, подпись длиннее
@@ -1483,9 +1571,9 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 			rows = kb.InlineKeyboard
 		}
 		if len(ents) > 0 {
-			return a.msg.SendEnt(ctx, chatID, caption, ents, rows)
+			return a.msg.SendEnt(pctx, chatID, caption, ents, rows)
 		}
-		return a.msg.SendKB(ctx, chatID, caption, rows)
+		return a.msg.SendKB(pctx, chatID, caption, rows)
 	})
 }
 
@@ -1590,10 +1678,12 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		return
 	}
 	t := a.applyPremium(caption)
+	prot := a.screenProtect(ctx, chatID, copyableText(t))
+	match := a.editMatches(chatID, prot)
 	// Same-section re-render (toggle/pagination/refresh): edit the caption in
 	// place instead of delete+resend. Different section (navigation) or any
 	// failure falls through to the normal resend below.
-	if target := a.takeEditTarget(chatID); target != 0 && a.getScreenSection(chatID) == section {
+	if target := a.takeEditTarget(chatID); target != 0 && match && a.getScreenSection(chatID) == section {
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
 			a.scrMu.Lock()
 			old := a.screen[chatID]
@@ -1619,8 +1709,9 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	}
 	var newFileID string
 	embed := assets.Bytes(section)
+	pctx := withProtect(ctx, prot)
 	a.emit(ctx, chatID, func() int {
-		id, nf := a.msg.SendPhotoCacheable(ctx, chatID, cached, embed, t, rows)
+		id, nf := a.msg.SendPhotoCacheable(pctx, chatID, cached, embed, t, rows)
 		newFileID = nf
 		return id
 	})
@@ -1791,6 +1882,10 @@ func (a *App) cancelInput(ctx context.Context, chatID int64, isAdmin bool, fname
 		if isAdmin {
 			a.onTexts(ctx, chatID, val)
 		}
+	case cbBackup:
+		if isAdmin {
+			a.onBackup(ctx, chatID, val)
+		}
 	default:
 		a.enterHome(ctx, chatID, isAdmin, fname, uname)
 	}
@@ -1800,6 +1895,8 @@ func (a *App) enterHome(ctx context.Context, chatID int64, isAdmin bool, firstNa
 	name := displayName(a.lang(chatID), firstName, username)
 	a.clearPanelInput(chatID)
 	if isAdmin {
+		// Брошенный файл бэкапа не должен ждать пароль после ухода в меню.
+		a.bkPendTake(chatID)
 		a.showMenu(ctx, chatID, true, name)
 		return
 	}
@@ -1894,6 +1991,9 @@ func (a *App) applyPremium(text string) string {
 type botMessenger struct {
 	b   *bot.Bot
 	log *slog.Logger
+	// up — тот же бот с долгим таймаутом: загрузка файла бэкапа в 50 МБ
+	// по медленному каналу не укладывается в минуту основного клиента.
+	up *bot.Bot
 }
 
 func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
@@ -1943,7 +2043,7 @@ func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, row
 
 func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) (int, error) {
 	rows = fitKeyboard(rows)
-	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML, ProtectContent: protectedCtx(ctx)}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
@@ -1978,7 +2078,7 @@ func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, 
 
 func (m botMessenger) SendEnt(ctx context.Context, chatID int64, text string, entities []models.MessageEntity, rows [][]models.InlineKeyboardButton) int {
 	rows = fitKeyboard(rows)
-	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities}
+	params := &bot.SendMessageParams{ChatID: chatID, Text: text, Entities: entities, ProtectContent: protectedCtx(ctx)}
 	if len(rows) > 0 {
 		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
@@ -2024,7 +2124,7 @@ func (m botMessenger) SendPhoto(ctx context.Context, chatID int64, fileID, capti
 }
 
 func (m botMessenger) SendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, entities []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
-	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: fitMarkup(rm)}
+	p := &bot.SendPhotoParams{ChatID: chatID, Photo: photo, Caption: caption, ReplyMarkup: fitMarkup(rm), ProtectContent: protectedCtx(ctx)}
 	if len(entities) > 0 {
 		p.CaptionEntities = entities
 	} else {
@@ -2105,6 +2205,14 @@ func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {
 	_, _ = m.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
 }
 
+func (m botMessenger) DeleteErr(ctx context.Context, chatID int64, msgID int) error {
+	if msgID == 0 {
+		return errors.New("нет сообщения")
+	}
+	_, err := m.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
+	return err
+}
+
 func (m botMessenger) SendInvoice(ctx context.Context, chatID int64, title, description, payload, currency string, amount int) {
 	if _, err := m.b.SendInvoice(ctx, &bot.SendInvoiceParams{
 		ChatID:      chatID,
@@ -2140,10 +2248,11 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 			photo = &models.InputFileUpload{Filename: "banner.jpg", Data: bytes.NewReader(embedBytes)}
 		}
 		p := &bot.SendPhotoParams{
-			ChatID:    chatID,
-			Photo:     photo,
-			Caption:   caption,
-			ParseMode: models.ParseModeHTML,
+			ChatID:         chatID,
+			Photo:          photo,
+			Caption:        caption,
+			ParseMode:      models.ParseModeHTML,
+			ProtectContent: protectedCtx(ctx),
 		}
 		if len(rows) > 0 {
 			p.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -2240,6 +2349,32 @@ func (m botMessenger) SetCommandKeyboard(ctx context.Context, chatID int64, labe
 
 func (m botMessenger) AnswerCallback(ctx context.Context, id string) {
 	_, _ = m.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: id})
+}
+
+func (m botMessenger) AnswerCallbackText(ctx context.Context, id, text string) {
+	_, _ = m.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: id, Text: text})
+}
+
+func (m botMessenger) SendFile(ctx context.Context, chatID int64, name string, data []byte, caption string, rows [][]models.InlineKeyboardButton) (int, error) {
+	b := m.up
+	if b == nil {
+		b = m.b
+	}
+	params := &bot.SendDocumentParams{
+		ChatID:    chatID,
+		Document:  &models.InputFileUpload{Filename: name, Data: bytes.NewReader(data)},
+		Caption:   caption,
+		ParseMode: models.ParseModeHTML,
+	}
+	if len(rows) > 0 {
+		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: fitKeyboard(rows)}
+	}
+	msg, err := b.SendDocument(ctx, params)
+	if err != nil {
+		m.log.Error("send file", "err", err)
+		return 0, err
+	}
+	return msg.ID, nil
 }
 
 func (m botMessenger) EditText(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) bool {

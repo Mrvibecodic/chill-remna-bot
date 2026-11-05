@@ -672,10 +672,10 @@ func TestUserCard_PlanAccessToggle(t *testing.T) {
 
 	// E-mail-аккаунт кабинета: допуск пишется по почте.
 	web := int64(-33)
-	fs.webUsers = map[string]*model.WebUser{"w@e.com": {TgID: web, Email: "w@e.com"}}
+	fs.webUsers = map[string]*model.WebUser{"w@example.com": {TgID: web, Email: "w@example.com"}}
 	_ = fs.UpsertUser(ctx, web)
 	planTap(t, a, "usr:pg:"+itoa64(web)+":"+p.Code)
-	if ok, _ := fs.HasPlanAccess(ctx, p.Code, 0, "w@e.com"); !ok {
+	if ok, _ := fs.HasPlanAccess(ctx, p.Code, 0, "w@example.com"); !ok {
 		t.Fatal("допуск по почте не выдан")
 	}
 }

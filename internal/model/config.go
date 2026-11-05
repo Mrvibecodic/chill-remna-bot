@@ -191,6 +191,78 @@ type BotConfig struct {
 
 	// Texts — свои тексты админа (раздел «Тексты бота»).
 	Texts TextsConfig `json:"texts"`
+
+	// Backup — только для переезда: раньше настройки бэкапа жили в конфиге,
+	// теперь — в своей таблице (backup_state). Новые версии сюда не пишут.
+	Backup *BackupConfig `json:"backup,omitempty"`
+}
+
+// BackupConfig — бэкап базы по расписанию.
+type BackupConfig struct {
+	// Hours — интервал в часах из BackupIntervals; 0 — расписание выключено.
+	Hours int `json:"hours"`
+	// ChatID — куда слать файлы; 0 — админу бота.
+	ChatID int64 `json:"chat_id"`
+	// Password запирает файл бэкапа. Пока он пуст, бэкапы не создаются.
+	Password string `json:"password"`
+	// LastAt — время последнего отправленного бэкапа (RFC3339, UTC).
+	LastAt string `json:"last_at"`
+	// BotToken — токен отдельного бота, который шлёт файлы вместо этого
+	// (пусто — шлёт этот бот); BotName — его @username для экрана.
+	BotToken string `json:"bot_token,omitempty"`
+	BotName  string `json:"bot_name,omitempty"`
+	// Guard — метка восстановления базы из бэкапа (nil — не восстанавливали).
+	Guard *RestoreGuard `json:"restore_guard,omitempty"`
+}
+
+// RestoreGuard — что бот обязан сделать после восстановления базы из бэкапа.
+//
+// Восстановленная база не знает об оплатах после даты файла, а панель знает.
+// Пока сроки не сверены с панелью, автопродление списало бы деньги повторно,
+// а сверки оплат выдали бы дни ещё раз. Поэтому: сначала сверка сроков,
+// а оплаты, которые сверки найдут по счетам до восстановления, — только админу.
+type RestoreGuard struct {
+	// At — момент восстановления (RFC3339, UTC). Счета и оплаты звёздами
+	// раньше него сверки сами не выдают.
+	At string `json:"at"`
+	// BackupAt — дата восстановленного файла.
+	BackupAt string `json:"backup_at"`
+	// Synced — сроки подписок сверены с панелью.
+	Synced bool `json:"synced"`
+	// Changed — у кого срок в панели разошёлся с файлом: им сверка лимитов
+	// не откатывает условия к последней покупке из файла.
+	Changed []int64 `json:"changed,omitempty"`
+	// Chat — кому написать после перезапуска; Notified — уже написали.
+	Chat     int64 `json:"chat"`
+	Notified bool  `json:"notified"`
+	// AutoPayHeld — автопродление стоит, пока админ не включит его сам:
+	// согласие на списания восстанавливается из файла, а человек мог его
+	// отозвать уже после даты бэкапа.
+	AutoPayHeld bool `json:"autopay_held"`
+	// P2PNoted — заявки на перевод из файла дошли до админа.
+	P2PNoted bool `json:"p2p_noted,omitempty"`
+}
+
+// RestoreAt — момент восстановления базы; ok=false — не восстанавливали.
+func (g *RestoreGuard) RestoreAt() (time.Time, bool) {
+	if g == nil {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, g.At)
+	return t, err == nil
+}
+
+// BackupIntervals — допустимые интервалы бэкапа в часах.
+var BackupIntervals = []int{1, 2, 4, 6, 12, 24}
+
+// Normalize выключает расписание с недопустимым интервалом.
+func (c *BackupConfig) Normalize() {
+	for _, h := range BackupIntervals {
+		if c.Hours == h {
+			return
+		}
+	}
+	c.Hours = 0
 }
 
 // TextsConfig — свои тексты админа поверх стандартных.

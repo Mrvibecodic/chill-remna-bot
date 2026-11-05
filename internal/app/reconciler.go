@@ -42,6 +42,10 @@ func (a *App) RunReconciler(ctx context.Context) {
 }
 
 func (a *App) reconcileOnce(ctx context.Context) {
+	if !a.enterWork() {
+		return
+	}
+	defer a.leaveWork()
 	a.mu.Lock()
 	st := a.store
 	a.mu.Unlock()
@@ -64,7 +68,11 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		a.log.Warn("reconciler: list pending", "err", err)
 		return
 	}
+	defer a.flushReview(ctx)
 	for i := range list {
+		if a.paused() {
+			return
+		}
 		a.reconcileInvoice(ctx, st, &list[i])
 	}
 	a.reconPrune(list)
@@ -289,6 +297,19 @@ func (a *App) reconcileYooMoney(ctx context.Context, st storage.Storage, pi *mod
 // если подписка была выдана именно этим вызовом (дубли и ошибки — false), чтобы
 // вызывающий не повторял разовые действия вроде предложения автопродления.
 func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *model.PendingInvoice, amount string) bool {
+	// Счёт из восстановленной базы: его могли оплатить и выдать уже после
+	// даты бэкапа, а восстановленная база этого не знает. Выдать второй раз
+	// нельзя — решает админ.
+	// Счёт закрывается, только когда список дошёл до админа.
+	if t, err := time.Parse(time.RFC3339, pi.CreatedAt); err == nil && a.restoredBefore(t) {
+		id := pi.ID
+		a.addReview(pi.Method, pi.Purpose, pi.Months, amount, pi.TelegramID, pi.ExtID, func(c context.Context) {
+			a.payLog(c, pi.Method, pi.ExtID, pi.TelegramID, stageReview,
+				"оплата найдена сверкой после восстановления базы: %s — на ручную проверку", amount)
+			_ = st.ResolvePending(c, id)
+		})
+		return false
+	}
 	// Пользователя удалили, а счёт остался незакрытым. Прежде сверка добивала
 	// его и ЗАВОДИЛА человека заново — с деньгами, но без принятых документов,
 	// без допуска к тарифам и без вайтлиста. Удалять счета вместе с

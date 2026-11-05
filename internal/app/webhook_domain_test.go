@@ -17,7 +17,7 @@ func TestCleanDomain(t *testing.T) {
 		"https://https://bot.example.com":   "bot.example.com",
 		"http://bot.example.com:8443/x?y=1": "bot.example.com",
 		"bot.example.com.":                  "bot.example.com",
-		"бот.рф":                            "xn--90a0am.xn--p1ai",
+		"бот.испытание":                     "xn--90a0am.xn--80akhbyknj4f",
 		"https://":                          "",
 		"https:// ":                         "",
 		"":                                  "",
@@ -117,5 +117,45 @@ func TestHealWebhookConfig(t *testing.T) {
 	healWebhookConfig(cfg)
 	if cfg.Webhook.PublicBaseURL != "http://203.0.113.5:8080" {
 		t.Fatalf("рабочий адрес изменён: %q", cfg.Webhook.PublicBaseURL)
+	}
+}
+
+// Инструкция для своего прокси отдаёт боту весь домен и перечисляет все пути
+// бота с текущим путём кабинета: блок «только /webhook/» ломал мини-апп и
+// кабинет.
+func TestWebhookGuideWholeDomain(t *testing.T) {
+	cases := []struct {
+		name, base, cabPath, host, path string
+	}{
+		{"без адреса", "", "", "bot.example.com {", " /cabinet/ "},
+		{"адрес за прокси и свой путь", "https://shop.example.com/", "/my-cab/", "shop.example.com {", " /my-cab/ "},
+		{"адрес по IP", "http://203.0.113.5:8080", "", "bot.example.com {", " /cabinet/ "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, msg, fs := newTestApp(t)
+			a.store = fs
+			a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+			a.botCfg.Webhook.PublicBaseURL = tc.base
+			a.botCfg.Cabinet.Init = true
+			a.botCfg.Cabinet.Path = tc.cabPath
+			a.botCfg.NormalizeCabinet()
+			a.handleCallback(context.Background(), cb(100, "wh:guide"))
+			out := msg.joined()
+			for _, want := range []string{
+				tc.host,
+				"reverse_proxy remnabot:8080",
+				"location / {",
+				"X-Forwarded-Proto $scheme",
+				"/webhook/ /miniapp/ /api/" + tc.path + "/flags/ /brand/",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("в инструкции нет %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "handle /webhook/") || strings.Contains(out, "location /webhook/") || strings.Contains(out, "%!") {
+				t.Errorf("в инструкции блок только для вебхуков или битый шаблон:\n%s", out)
+			}
+		})
 	}
 }

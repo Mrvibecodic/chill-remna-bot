@@ -292,6 +292,7 @@ func (a *App) askLegal(ctx context.Context, chatID int64) {
 	// увеличивает длину в разы.
 	if full, ok := legalInline(lang, docs); ok && len([]rune(a.applyPremium(body+"\n\n"+full))) <= 4000 {
 		body += "\n\n" + full
+		ctx = withKeepCopy(ctx)
 	} else {
 		body += "\n\n" + i18n.T(lang, "legal.open_hint")
 		rows = legalDocRows(lang, docs)
