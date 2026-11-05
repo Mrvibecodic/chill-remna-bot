@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -338,12 +339,27 @@ func Transfer(ctx context.Context, src, dst Storage) error {
 		// Двойники хранилища в тестах бэкап не умеют — для них прежний путь.
 		return transferSnapshot(ctx, src, dst)
 	}
+	// Выгрузка держится в памяти сжатой: несжатая на большой базе — сотни
+	// мегабайт.
 	var buf bytes.Buffer
-	if _, err := sb.WriteBackup(ctx, &buf, "transfer"); err != nil {
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
+	if _, err := sb.WriteBackup(ctx, zw, "transfer"); err != nil {
+		return fmt.Errorf("выгрузка старой базы: %w", err)
+	}
+	if err := zw.Close(); err != nil {
 		return fmt.Errorf("выгрузка старой базы: %w", err)
 	}
 	data := buf.Bytes()
-	open := func() (io.Reader, error) { return bytes.NewReader(data), nil }
+	open := func() (io.Reader, error) {
+		zr, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		return zr, nil
+	}
 	// Нестрого: переезд идёт и на ненастроенном боте, где конфига ещё нет.
 	if err := dbase.restoreBackup(ctx, open, nil, false); err != nil {
 		return fmt.Errorf("загрузка в новую базу: %w", err)
