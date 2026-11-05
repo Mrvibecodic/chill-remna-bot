@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 )
 
 func searchApp(t *testing.T) (*App, *fakeMsg, *fakeStore) {
@@ -164,5 +167,73 @@ func TestWhitelist_ClearAlsoDropsPrefilledIDs(t *testing.T) {
 	a.handleCallback(ctx, cb(100, "usr:wlclearok"))
 	if ok, _ := fs.IsWhitelistID(ctx, 6001); ok {
 		t.Fatal("предзаполненный ID пережил снятие доступа у всех")
+	}
+}
+
+// В боте никого, учётка нашлась в панели: подсказка зависит от того, есть ли
+// у учётки Telegram ID и заходил ли человек в бота. Кнопка на карточку —
+// только когда карточка существует.
+func TestUserSearch_PanelHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		tg := map[string]string{"freeacc": "null", "newacc": "1000000001", "knownacc": "1000000002", "knownacc_addsub": "null"}
+		if name, ok := strings.CutPrefix(r.URL.Path, "/api/users/by-username/"); ok {
+			if id, found := tg[name]; found {
+				tag := "null"
+				if strings.HasSuffix(name, "_addsub") {
+					tag = `"` + remnawave.BotTagAdd + `"`
+				}
+				_, _ = w.Write([]byte(`{"response":{"uuid":"u-` + name + `","username":"` + name + `","telegramId":` + id + `,"tag":` + tag + `,"expireAt":"2099-01-01T00:00:00Z"}}`))
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"User not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	tests := []struct {
+		query, mode, want, card string
+	}{
+		{"freeacc", model.AccessPublic, "Telegram ID у неё не указан", ""},
+		{"newacc", model.AccessPublic, "ещё не заходил в бота", ""},
+		{"newacc", model.AccessWhitelist, "Добавить ID в вайтлист", ""},
+		{"knownacc", model.AccessPublic, "по кнопке ниже", "usr:view:1000000002"},
+		{"knownacc_addsub", model.AccessPublic, "доп-подписка", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query+"/"+tt.mode, func(t *testing.T) {
+			a, msg, fs := searchApp(t)
+			a.botCfg.AccessMode = tt.mode
+			ctx := context.Background()
+			a.panel = remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+			_ = fs.UpsertUser(ctx, 1000000002)
+
+			a.handleCallback(ctx, cb(100, "usr:find"))
+			a.handleMessage(ctx, msgText(100, tt.query))
+
+			if countContains(msg.texts, tt.want) == 0 {
+				t.Fatalf("нет подсказки %q: %v", tt.want, msg.texts)
+			}
+			closed := countContains(msg.texts, "открыт не для всех") > 0
+			if closed != (tt.mode != model.AccessPublic) {
+				t.Fatalf("строка про закрытый бот: %v, режим %s", closed, tt.mode)
+			}
+			if strings.HasSuffix(tt.query, "_addsub") && countContains(msg.texts, "Впишите") > 0 {
+				t.Fatalf("доп-подписке советуют вписать Telegram ID: %v", msg.texts)
+			}
+			var cards []string
+			for _, d := range msg.cbData {
+				if strings.HasPrefix(d, "usr:view:") {
+					cards = append(cards, d)
+				}
+			}
+			switch {
+			case tt.card == "" && len(cards) > 0:
+				t.Fatalf("кнопка на несуществующую карточку: %v", cards)
+			case tt.card != "" && (len(cards) != 1 || cards[0] != tt.card):
+				t.Fatalf("карточка %q, получили %v", tt.card, cards)
+			}
+		})
 	}
 }
