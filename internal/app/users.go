@@ -195,11 +195,34 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 		title = i18n.T(lang, "users.search_empty", escapeName(q))
 		// В боте пусто — может, человек есть в панели, но не связан с чатом.
 		if pu := a.searchPanelUser(ctx, q); pu != nil {
-			title += "\n\n" + i18n.T(lang, "users.search_panel", escapeName(pu.Username))
+			name := escapeName(pu.Username)
+			// Карточка есть только у тех, кто заходил в бота: кнопка на
+			// несуществующую карточку молча вернула бы к списку.
+			var inBot bool
 			if pu.TelegramID != 0 {
+				u, err := a.store.GetUser(ctx, pu.TelegramID)
+				if err != nil {
+					a.log.Warn("user search: карточка по учётке панели", "tg_id", pu.TelegramID, "err", err)
+				}
+				inBot = err == nil && u != nil
+			}
+			switch {
+			case pu.Tag == remnawave.BotTagAdd:
+				// Совет вписать Telegram ID доп-подписке сделал бы её «основной»
+				// учёткой человека при поиске по Telegram ID.
+				title += "\n\n" + i18n.T(lang, "users.panel_addsub", name)
+			case pu.TelegramID == 0:
+				title += "\n\n" + i18n.T(lang, "users.panel_free", name)
+			case inBot:
+				title += "\n\n" + i18n.T(lang, "users.search_panel", name, pu.TelegramID)
 				rows = append(rows, []models.InlineKeyboardButton{
 					btn("👤 "+pu.Username, "usr:view:"+strconv.FormatInt(pu.TelegramID, 10)),
 				})
+			default:
+				title += "\n\n" + i18n.T(lang, "users.panel_new", name, pu.TelegramID)
+				if a.accessMode() != model.AccessPublic && !a.accessGranted(ctx, pu.TelegramID) {
+					title += "\n" + i18n.T(lang, "users.panel_closed")
+				}
 			}
 		}
 	}
