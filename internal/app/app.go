@@ -784,7 +784,7 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	// обработчик учитывается так же, как фоновая работа: восстановление базы
 	// ждёт, пока он доиграет. Кроме нажатия, которое само запускает
 	// восстановление, — иначе оно ждало бы себя.
-	if !isRestoreApply(update) {
+	if !a.isRestoreApply(update) {
 		if !a.enterWork() {
 			a.answerMaintenance(ctx, update)
 			return
@@ -821,9 +821,11 @@ func (a *App) handle(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 }
 
-// isRestoreApply — нажатие «Заменить базу».
-func isRestoreApply(u *models.Update) bool {
-	return u.CallbackQuery != nil && u.CallbackQuery.Data == "bk:apply"
+// isRestoreApply — нажатие «Заменить базу» админом. Кнопку с той же
+// строкой может прислать кто угодно, а мимо учёта работы пускаем только её.
+func (a *App) isRestoreApply(u *models.Update) bool {
+	return u.CallbackQuery != nil && u.CallbackQuery.Data == "bk:apply" &&
+		u.CallbackQuery.From.ID == a.cfg.AdminID
 }
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {

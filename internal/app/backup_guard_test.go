@@ -362,6 +362,28 @@ func TestRestoreApplyThroughHandle(t *testing.T) {
 	}
 }
 
+// Мимо учёта начатой работы проходит только нажатие «Заменить базу» самим
+// админом: ту же строку кнопки может прислать кто угодно.
+func TestRestoreApplyOnlyAdmin(t *testing.T) {
+	a, _, _ := bkTestApp(t)
+	for _, tc := range []struct {
+		name string
+		uid  int64
+		data string
+		want bool
+	}{
+		{"админ", 100, "bk:apply", true},
+		{"не админ", 1000000001, "bk:apply", false},
+		{"другая кнопка", 100, "bk:now", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.isRestoreApply(&models.Update{CallbackQuery: cb(tc.uid, tc.data)}); got != tc.want {
+				t.Fatalf("isRestoreApply = %v, ждали %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // Включили автопродление до сверки сроков — честно говорим, что оно пойдёт
 // после сверки.
 func TestAutoPayOnBeforeSync(t *testing.T) {
