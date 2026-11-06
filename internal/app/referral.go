@@ -100,11 +100,15 @@ func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string, on
 	if err := a.store.SetReferredBy(ctx, chatID, ref); err != nil {
 		return
 	}
-	if a.referralCfg().OnFirstPay {
+	// Отметка ставится в любом режиме: переключат на «за регистрацию» —
+	// отложенный бонус всё равно дождётся оплаты, а не пропадёт.
+	if onPay {
+		if err := a.store.SetRefOnPay(ctx, chatID); err != nil {
+			a.log.Warn("реферальный бонус не отложен до оплаты", "err", err, "invitee", chatID)
+		}
 		return
 	}
-	if onPay {
-		_ = a.store.SetRefOnPay(ctx, chatID)
+	if a.referralCfg().OnFirstPay {
 		return
 	}
 	a.payReferralBonus(ctx, chatID, false)

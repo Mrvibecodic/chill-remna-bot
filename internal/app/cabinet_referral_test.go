@@ -152,3 +152,24 @@ func TestReferral_ModeSwitchNoLateBonus(t *testing.T) {
 		t.Fatalf("поздний бонус после смены режима: %d", r.Balance)
 	}
 }
+
+// Аккаунт по почте, привязанный, пока бонус шёл за оплату, после
+// переключения на «за регистрацию» получает бонус своей первой оплатой —
+// отметка ставится в любом режиме.
+func TestCabinetRegisterReferral_ModeSwitchKeepsDeferred(t *testing.T) {
+	a, fs := cabinetRefApp(t)
+	ctx := context.Background()
+	a.botCfg.Referral.OnFirstPay = true
+	const inviter int64 = 1000000069
+	_ = fs.UpsertUser(ctx, inviter)
+	id, err := a.CabinetEmailRegister(ctx, "switch@example.com", "password1", "ref_1000000069")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.waitMail()
+	a.botCfg.Referral.OnFirstPay = false
+	a.grantReferralBonus(ctx, id)
+	if r, _ := fs.GetUser(ctx, inviter); r.Balance != 5000 {
+		t.Fatalf("отложенный бонус пропал при смене режима: %d", r.Balance)
+	}
+}
