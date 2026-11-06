@@ -381,6 +381,7 @@ const IC={
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
   tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><path d="M7 7h.01"/></svg>',
+  reset:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
   globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
   download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>',
   plane:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 13.5 2 9l2-1 6 1 5-5c1-1 3-1.6 3.6-1 .6.6 0 2.6-1 3.6l-5 5 1 6-1 2-4.5-8.5Z"/></svg>',
@@ -715,8 +716,8 @@ function planInfoDesk(p){
   d=d||ds[0];if(!d)return '';
   var h='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.reset+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
-  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
   h+='</div>';
   if(d.countries&&d.countries.length){
@@ -912,8 +913,8 @@ function buyPlan(code,months){
     '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+monthsWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
   h+='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.reset+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
-  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
   if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
