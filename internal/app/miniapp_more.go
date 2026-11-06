@@ -47,14 +47,17 @@ func (a *App) MiniStart(ctx context.Context, tgID int64, param string, cabinet b
 	if a.userBlocked(ctx, tgID) || a.MiniAccessDenied(ctx, tgID) {
 		return notice
 	}
-	// К пригласившему — до проверки кабинета вручную: тот же человек, пришедший
-	// по ссылке в чат, привязался бы сразу (чат одобрением кабинета не закрыт),
-	// а после одобрения строка уже есть и привязка невозможна.
-	a.bindReferrer(ctx, tgID, param)
+	// К пригласившему — до проверки кабинета вручную: после одобрения строка
+	// уже есть и привязка невозможна. Но бонусы такого новичка ждут его первой
+	// оплаты: одобрения ещё не было, а отказ бонус не вернёт.
+	pending := false
 	if cabinet && a.cabinetNeedsApproval(false) {
-		if u, _ := a.store.GetUser(ctx, tgID); u == nil || !u.WebApproved {
-			return notice
-		}
+		u, _ := a.store.GetUser(ctx, tgID)
+		pending = u == nil || !u.WebApproved
+	}
+	a.bindReferrer(ctx, tgID, param, pending)
+	if pending {
+		return notice
 	}
 	// Синхронно, как /start в чате: иначе человек успел бы взять триал до
 	// того, как найдётся его аккаунт в панели.
@@ -201,7 +204,7 @@ func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
 // MiniPayCheck — «Проверить оплату» из мини-аппа и кабинета: незакрытые счета
 // человека перепроверяются у платёжек тем же ядром, что и фоновая сверка, и
 // оплаченные добиваются. Не чаще раза в несколько секунд на человека.
-func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO {
+func (a *App) MiniPayCheck(ctx context.Context, tgID, sinceUnix int64) web.MiniPayCheckDTO {
 	st := a.store
 	if st == nil {
 		return web.MiniPayCheckDTO{Error: "хранилище недоступно"}
@@ -250,9 +253,21 @@ func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO 
 	if left, err := st.ListUserPending(rctx, tgID, since, payCheckMax); err == nil {
 		dto.Pending = len(left)
 	}
-	if u, _ := st.GetUser(rctx, tgID); u != nil {
-		dto.BalanceK = u.Balance
-		dto.SubExpire = u.SubExpireAt
+	// Счёт, оплату которого уже провёл вебхук, закрыт и выше не виден: об
+	// оплате говорит запись платежа после выставления счёта. Метку времени
+	// прислал клиент — держим её в пределах суток назад.
+	if sinceUnix > 0 && !dto.Paid {
+		s := time.Unix(sinceUnix, 0)
+		if floor := now.Add(-reconcileGiveUp); s.Before(floor) {
+			s = floor
+		}
+		if s.After(now) {
+			s = now
+		}
+		// Запас на округление до секунды в created_at.
+		if ok, _ := st.HasPaidPaymentSince(rctx, tgID, s.Add(-2*time.Second).UTC().Format(time.RFC3339)); ok {
+			dto.Paid = true
+		}
 	}
 	return dto
 }

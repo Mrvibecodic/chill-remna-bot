@@ -66,7 +66,7 @@ func TestReferral_TelegramStillPaidOnBind(t *testing.T) {
 	ctx := context.Background()
 	const inviter, friend int64 = 1000000061, 1000000062
 	_ = fs.UpsertUser(ctx, inviter)
-	a.bindReferrer(ctx, friend, "ref_1000000061")
+	a.bindReferrer(ctx, friend, "ref_1000000061", false)
 	if r, _ := fs.GetUser(ctx, inviter); r.Balance != 5000 {
 		t.Fatalf("бонус при привязке: %d", r.Balance)
 	}
@@ -110,7 +110,7 @@ func TestReferral_OldLinkAfterTelegramBind(t *testing.T) {
 	if got, err := a.CabinetBindTelegram(ctx, old, tg); err != nil || got != tg {
 		t.Fatalf("привязка: got=%d err=%v", got, err)
 	}
-	a.bindReferrer(ctx, friend, "ref_"+strconv.FormatInt(old, 10))
+	a.bindReferrer(ctx, friend, "ref_"+strconv.FormatInt(old, 10), false)
 	if u, _ := fs.GetUser(ctx, friend); u == nil || u.ReferredBy != tg {
 		t.Fatalf("старая ссылка не привела к пригласившему: %+v", u)
 	}
@@ -133,5 +133,22 @@ func TestMiniReferral_CabinetLink(t *testing.T) {
 	a.botCfg.Cabinet.Enabled = false
 	if r := a.MiniReferral(ctx, tg); r.CabinetLink != "" {
 		t.Fatalf("кабинет выключен, а ссылка есть: %+v", r)
+	}
+}
+
+// Приглашённый, привязанный, пока бонус шёл за оплату, после переключения
+// на «за регистрацию» оплатой бонус не получает: так было и раньше, а
+// отложенные бонусы помечены при привязке явно.
+func TestReferral_ModeSwitchNoLateBonus(t *testing.T) {
+	a, fs := cabinetRefApp(t)
+	ctx := context.Background()
+	a.botCfg.Referral.OnFirstPay = true
+	const inviter, friend int64 = 1000000067, 1000000068
+	_ = fs.UpsertUser(ctx, inviter)
+	a.bindReferrer(ctx, friend, "ref_1000000067", false)
+	a.botCfg.Referral.OnFirstPay = false
+	a.grantReferralBonus(ctx, friend)
+	if r, _ := fs.GetUser(ctx, inviter); r.Balance != 0 {
+		t.Fatalf("поздний бонус после смены режима: %d", r.Balance)
 	}
 }

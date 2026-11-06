@@ -1279,6 +1279,20 @@ func (s *fakeStore) SetReferredBy(_ context.Context, id, ref int64) error {
 	}
 	return nil
 }
+func (s *fakeStore) SetRefOnPay(_ context.Context, id int64) error {
+	if s.users != nil && s.users[id] != nil {
+		s.users[id].RefOnPay = true
+	}
+	return nil
+}
+func (s *fakeStore) HasPaidPaymentSince(_ context.Context, id int64, since string) (bool, error) {
+	for _, p := range s.pays {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (s *fakeStore) SetRefBonusPaid(_ context.Context, id int64) error {
 	if s.users != nil && s.users[id] != nil {
 		s.users[id].RefBonusPaid = true

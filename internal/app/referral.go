@@ -66,7 +66,10 @@ func (a *App) referralCfg() model.ReferralConfig {
 	return a.botCfg.Referral
 }
 
-func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string) {
+// bindReferrer привязывает новичка к пригласившему по ссылке ref_<id>.
+// onPay — разовые бонусы ждут первой оплаты новичка даже в режиме «за
+// регистрацию» (аккаунт по почте, вход в кабинет до ручной проверки).
+func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string, onPay bool) {
 	if a.store == nil || !a.referralCfg().Enabled {
 		return
 	}
@@ -97,22 +100,27 @@ func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string) {
 	if err := a.store.SetReferredBy(ctx, chatID, ref); err != nil {
 		return
 	}
-	// Аккаунт по почте заводится бесплатно и без счёта: разовые бонусы за него
-	// — только после его первой оплаты, иначе их собирают пачкой адресов.
-	if !a.referralCfg().OnFirstPay && a.webAccount(ctx, chatID) == nil {
-		a.payReferralBonus(ctx, chatID, false)
+	if a.referralCfg().OnFirstPay {
+		return
 	}
+	if onPay {
+		_ = a.store.SetRefOnPay(ctx, chatID)
+		return
+	}
+	a.payReferralBonus(ctx, chatID, false)
 }
 
 func (a *App) grantReferralBonus(ctx context.Context, telegramID int64) {
 	cfg := a.referralCfg()
-	if !cfg.Enabled {
+	if !cfg.Enabled || a.store == nil {
 		return
 	}
-	// В режиме «бонус за регистрацию» сюда доходит только аккаунт по почте:
-	// его бонусы отложены до оплаты (см. bindReferrer).
-	if !cfg.OnFirstPay && a.webAccount(ctx, telegramID) == nil {
-		return
+	// В режиме «бонус за регистрацию» платим здесь только отложенным при
+	// привязке (см. bindReferrer).
+	if !cfg.OnFirstPay {
+		if u, _ := a.store.GetUser(ctx, telegramID); u == nil || !u.RefOnPay {
+			return
+		}
 	}
 	a.payReferralBonus(ctx, telegramID, true)
 }

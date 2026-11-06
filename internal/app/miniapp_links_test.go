@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	"remnabot/internal/model"
 )
@@ -152,25 +153,37 @@ func TestMiniPayCheck(t *testing.T) {
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "pay-1", TelegramID: uid, Months: 1})
 	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: uid, Method: model.PayMethodYooKassa, Months: 1, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-1"})
-	r := a.MiniPayCheck(ctx, uid)
+	r := a.MiniPayCheck(ctx, uid, 0)
 	if !r.OK || !r.Paid || r.Pending != 0 {
 		t.Fatalf("оплаченный счёт: %+v", r)
 	}
 	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "pay-2", TelegramID: uid, Months: 1})
-	if r := a.MiniPayCheck(ctx, uid); r.Paid || r.Pending != 1 {
+	if r := a.MiniPayCheck(ctx, uid, 0); r.Paid || r.Pending != 1 {
 		t.Fatalf("неоплаченный счёт: %+v", r)
 	}
-	if r := a.MiniPayCheck(ctx, 1000000041); r.Pending != 0 {
+	if r := a.MiniPayCheck(ctx, 1000000041, 0); r.Pending != 0 {
 		t.Fatalf("чужие счета посчитаны: %+v", r)
 	}
-	// Оплату, проведённую вебхуком, экран ожидания узнаёт по балансу и сроку.
-	_ = fs.AddBalance(ctx, uid, 700)
-	_ = fs.SetSubExpiry(ctx, uid, "2030-01-01T00:00:00Z", "paid")
-	if r := a.MiniPayCheck(ctx, uid); r.BalanceK != 700 || r.SubExpire != "2030-01-01T00:00:00Z" {
-		t.Fatalf("баланс и срок в проверке: %+v", r)
+	// Оплату, которую уже провёл вебхук (счёт закрыт), экран ожидания узнаёт
+	// по записи платежа после выставления своего счёта.
+	const fresh int64 = 1000000042
+	_ = fs.UpsertUser(ctx, fresh)
+	issued := time.Now().Unix()
+	if r := a.MiniPayCheck(ctx, fresh, issued); r.Paid {
+		t.Fatalf("оплаты ещё не было: %+v", r)
 	}
-	if m := a.MiniMe(ctx, uid); m.SubExpire != "2030-01-01T00:00:00Z" {
-		t.Fatalf("срок в профиле: %+v", m)
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: fresh, Method: model.PayMethodYooKassa, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-3", Comment: "topup",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339)})
+	if r := a.MiniPayCheck(ctx, fresh, issued); !r.Paid {
+		t.Fatalf("оплата после счёта не замечена: %+v", r)
+	}
+	// Оплата до выставления счёта не засчитывается.
+	const old int64 = 1000000043
+	_ = fs.UpsertUser(ctx, old)
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: old, Method: model.PayMethodYooKassa, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-4",
+		CreatedAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)})
+	if r := a.MiniPayCheck(ctx, old, issued); r.Paid {
+		t.Fatalf("засчитана оплата до счёта: %+v", r)
 	}
 }
 
@@ -193,5 +206,42 @@ func TestMiniStart_CabinetApproval(t *testing.T) {
 	}
 	if u.WebApproved {
 		t.Fatal("привязка не должна одобрять вход в кабинет")
+	}
+}
+
+// Новичок кабинета до ручной проверки: бонус «за регистрацию» ждёт его первой
+// оплаты — одобрения ещё не было, а отказ бонус не вернёт. Одобренному и
+// пришедшему в чат бонус по-прежнему сразу.
+func TestMiniStart_CabinetApprovalBonusOnPay(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	a.botCfg.NormalizeReferral()
+	a.botCfg.Referral.Enabled = true
+	a.botCfg.Referral.OnFirstPay = false
+	a.botCfg.Referral.BonusKind = model.ReferralBonusBalance
+	a.botCfg.Referral.BonusValue = 50
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Approval = model.CabinetApprovalTG
+	const ref, fresh, chat int64 = 1000000052, 1000000053, 1000000054
+	_ = fs.UpsertUser(ctx, ref)
+	a.MiniStart(ctx, fresh, "ref_1000000052", true)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 0 {
+		t.Fatalf("бонус до одобрения: %d", r.Balance)
+	}
+	if u, _ := fs.GetUser(ctx, fresh); u == nil || !u.RefOnPay {
+		t.Fatalf("бонус не отложен: %+v", u)
+	}
+	a.grantReferralBonus(ctx, fresh)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 5000 {
+		t.Fatalf("после оплаты бонуса нет: %d", r.Balance)
+	}
+	// Чат — как раньше: сразу, и оплата не повторяет.
+	a.MiniStart(ctx, chat, "ref_1000000052", false)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 10000 {
+		t.Fatalf("бонус за вход в мини-апп: %d", r.Balance)
+	}
+	a.grantReferralBonus(ctx, chat)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 10000 {
+		t.Fatalf("оплата повторила бонус: %d", r.Balance)
 	}
 }

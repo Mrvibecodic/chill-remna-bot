@@ -22,6 +22,8 @@ type fakeMini struct {
 	forgot  []string
 	bound   int64
 	start   string
+	payURL  string
+	since   int64
 }
 
 const fakeBotToken = "123456:TESTTOKEN"
@@ -46,7 +48,11 @@ func (f *fakeMini) CabinetForgotPassword(_ context.Context, e string) {
 }
 func (f *fakeMini) MiniAutoPay(context.Context, int64) MiniAutoPayDTO { return MiniAutoPayDTO{} }
 func (f *fakeMini) MiniCheckout(context.Context, int64, string, int, string, string, bool, bool) MiniActionDTO {
-	return MiniActionDTO{OK: true}
+	return MiniActionDTO{OK: true, PayURL: f.payURL}
+}
+func (f *fakeMini) MiniPayCheck(_ context.Context, _, since int64) MiniPayCheckDTO {
+	f.since = since
+	return MiniPayCheckDTO{OK: true}
 }
 func (f *fakeMini) CabinetAccount(_ context.Context, id int64) CabinetAccountDTO {
 	return CabinetAccountDTO{TgID: id}
@@ -241,5 +247,35 @@ func TestCabinetRegisterPassesStart(t *testing.T) {
 		`{"email":"b@example.com","password":"password1","start":"`+strings.Repeat("x", 65)+`"}`, "", "203.0.113.41"))
 	if w.Code != http.StatusOK || f.start != "" {
 		t.Fatalf("длинный параметр обязан отбрасываться: code=%d start=%q", w.Code, f.start)
+	}
+}
+
+// Счёт по ссылке несёт время выставления, а проверка оплаты — возвращает его
+// серверу: так экран ожидания узнаёт оплату, которую уже провёл вебхук.
+func TestCheckoutIssuedAtAndPayCheckSince(t *testing.T) {
+	f := &fakeMini{payURL: "https://pay.example.com/x"}
+	h := gateServer(t, f)
+	tok := webToken(f, -7, 0)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/checkout", `{"months":1}`, tok, "203.0.113.50"))
+	var res MiniActionDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.IssuedAt == 0 {
+		t.Fatalf("нет времени выставления: %s", w.Body.String())
+	}
+	f.payURL = ""
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/checkout", `{"months":1}`, tok, "203.0.113.51"))
+	if strings.Contains(w.Body.String(), "issued_at") {
+		t.Fatalf("время выставления без счёта: %s", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/paycheck", `{"since":`+strconv.FormatInt(res.IssuedAt, 10)+`}`, tok, "203.0.113.52"))
+	if w.Code != http.StatusOK || f.since != res.IssuedAt {
+		t.Fatalf("проверка оплаты: code=%d since=%d", w.Code, f.since)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/paycheck", "", tok, "203.0.113.53"))
+	if w.Code != http.StatusOK || f.since != 0 {
+		t.Fatalf("старый фронт без тела: code=%d since=%d", w.Code, f.since)
 	}
 }

@@ -63,7 +63,9 @@ type MiniProvider interface {
 	MiniWallet(ctx context.Context, tgID int64) MiniWalletDTO
 	// MiniPayCheck перепроверяет у платёжек незакрытые счета человека — то же,
 	// что кнопка «Проверить оплату» в чате.
-	MiniPayCheck(ctx context.Context, tgID int64) MiniPayCheckDTO
+	// since — когда выставлен счёт, которого ждёт экран (unix; 0 — не знаем):
+	// оплата после него засчитывается, даже если счёт уже закрыл вебхук.
+	MiniPayCheck(ctx context.Context, tgID, since int64) MiniPayCheckDTO
 	// MiniStart разбирает start-параметр входа (inv_, ref_) и привязывает
 	// аккаунт панели новичку — как /start в чате. Возвращает текст для
 	// человека (пусто — сказать нечего).
@@ -207,11 +209,6 @@ type MiniPayCheckDTO struct {
 	// Pending — сколько счетов всё ещё ждут оплаты.
 	Pending int    `json:"pending"`
 	Error   string `json:"error,omitempty"`
-	// BalanceK/SubExpire — баланс и срок после проверки. Счёт, оплату которого
-	// уже провёл вебхук, в проверку не попадает (он закрыт), поэтому экран
-	// ожидания узнаёт об оплате и по сдвигу баланса или срока.
-	BalanceK  int64  `json:"balance_kopecks"`
-	SubExpire string `json:"sub_expire,omitempty"`
 }
 
 // MiniActionDTO is the result of an action (trial/checkout): on success it
@@ -239,6 +236,9 @@ type MiniActionDTO struct {
 	P2PReqID  int64  `json:"p2p_req_id,omitempty,string"`
 	// P2PTopUp — заявка на пополнение баланса, а не на покупку.
 	P2PTopUp bool `json:"p2p_topup,omitempty"`
+	// IssuedAt — когда выставлен счёт по PayURL (unix, время сервера): экран
+	// ожидания спрашивает, была ли оплата после этого момента.
+	IssuedAt int64 `json:"issued_at,omitempty"`
 }
 
 // MiniAutoPayDTO describes automatic renewal for the current user: whether the
@@ -261,9 +261,6 @@ type MiniMeDTO struct {
 	BalanceK int64  `json:"balance_kopecks"`
 	Name     string `json:"name,omitempty"`
 	Email    string `json:"email,omitempty"`
-	// SubExpire — срок подписки по записи бота (RFC3339, "" — нет): экран
-	// ожидания оплаты сравнивает его с тем, что вернёт проверка.
-	SubExpire string `json:"sub_expire,omitempty"`
 }
 
 // CabinetAccountDTO — экран «Аккаунт» веб-кабинета: чем человек входит, что
@@ -737,7 +734,12 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp))
+	issued := time.Now().Unix()
+	res := s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp)
+	if res.PayURL != "" {
+		res.IssuedAt = issued
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.
@@ -836,7 +838,12 @@ func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web))
+	issued := time.Now().Unix()
+	res := s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web)
+	if res.PayURL != "" {
+		res.IssuedAt = issued
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleMiniP2PCancel(w http.ResponseWriter, r *http.Request) {
@@ -920,7 +927,14 @@ func (s *Server) handleMiniPayCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Тело необязательное: старый фронт из кэша шлёт пустой объект.
+	var req struct {
+		Since int64 `json:"since"`
+	}
+	if body, err := readAllLimited(r, 1024); err == nil && len(body) > 0 {
+		_ = json.Unmarshal(body, &req)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniPayCheck(ctx, id))
+	writeJSON(w, http.StatusOK, s.mini.MiniPayCheck(ctx, id, req.Since))
 }

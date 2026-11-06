@@ -198,8 +198,9 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password, start s
 	}
 	// Пришёл по ссылке на кабинет — к пригласившему, как /start в чате. До
 	// заведения строки пользователя: привязка действует только для новичка.
-	// Бонусы такому приглашённому — только после его оплаты (grantReferralBonus).
-	a.bindReferrer(ctx, tgID, start)
+	// Адрес заводится бесплатно: бонусы такому приглашённому — только после
+	// его оплаты (grantReferralBonus).
+	a.bindReferrer(ctx, tgID, start, true)
 	_ = a.store.UpsertUser(ctx, tgID)
 	// Письмо уходит в фоне и на своём контексте: разговор с почтовым сервером
 	// занимает секунды, а ждать их регистрация не должна — тем более что

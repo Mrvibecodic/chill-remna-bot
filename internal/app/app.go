@@ -944,7 +944,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		}
 		if _, payload, ok := strings.Cut(text, " "); ok {
 			payload = strings.TrimSpace(payload)
-			a.bindReferrer(ctx, chatID, payload)
+			a.bindReferrer(ctx, chatID, payload, false)
 			if code, isPromo := strings.CutPrefix(payload, "promo_"); isPromo && code != "" {
 				if a.store != nil {
 					_ = a.store.UpsertUser(ctx, chatID)

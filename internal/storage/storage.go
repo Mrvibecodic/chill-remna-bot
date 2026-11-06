@@ -145,6 +145,9 @@ type Storage interface {
 	DeductBalance(ctx context.Context, telegramID int64, kopecks int64) (bool, error)
 
 	SetReferredBy(ctx context.Context, telegramID, referrerID int64) error
+	// SetRefOnPay откладывает разовые бонусы приглашения до первой оплаты.
+	SetRefOnPay(ctx context.Context, telegramID int64) error
+	HasPaidPaymentSince(ctx context.Context, telegramID int64, since string) (bool, error)
 	SetRefBonusPaid(ctx context.Context, telegramID int64) error
 	AddRefEarned(ctx context.Context, telegramID int64, kopecks int64) error
 	CountReferrals(ctx context.Context, referrerID int64) (int, error)
@@ -438,17 +441,17 @@ func (b *base) GetUser(ctx context.Context, telegramID int64) (*model.User, erro
 	var refEarned int64
 	var webApproved, webDenied int
 	var snapRaw, bonusRaw string
-	var trialResets, sessEpoch int
+	var trialResets, sessEpoch, refOnPay int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch FROM users WHERE telegram_id = "+b.ph(1), telegramID).
-		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets, &bonusRaw, &sessEpoch)
+		"SELECT username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch, ref_on_pay FROM users WHERE telegram_id = "+b.ph(1), telegramID).
+		Scan(&username, &firstName, &approved, &blocked, &created, &terms, &trial, &subExp, &notifyKind, &notifySent, &balance, &referredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &trialResets, &bonusRaw, &sessEpoch, &refOnPay)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets, TrafficBonus: model.DecodeTrafficBonus(bonusRaw), SessEpoch: sessEpoch}, nil
+	return &model.User{TelegramID: telegramID, Username: username, FirstName: firstName, P2PApproved: approved != 0, Blocked: blocked != 0, CreatedAt: created, TermsAcceptedAt: terms.String, TrialUsedAt: trial.String, SubExpireAt: subExp, NotifyKind: notifyKind, NotifySent: notifySent, Balance: balance, ReferredBy: referredBy, RefBonusPaid: refBonusPaid != 0, Whitelisted: whitelisted != 0, RefEarned: refEarned, WebApproved: webApproved != 0, WebDenied: webDenied != 0, Snapshot: model.DecodePlanSnapshot(snapRaw), TrialResets: trialResets, TrafficBonus: model.DecodeTrafficBonus(bonusRaw), SessEpoch: sessEpoch, RefOnPay: refOnPay != 0}, nil
 }
 
 func (b *base) SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error {
@@ -1431,24 +1434,25 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 
 	urows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch FROM users")
+		"SELECT telegram_id, username, first_name, p2p_approved, blocked, created_at, terms_accepted_at, trial_used_at, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, plan_snapshot, trial_resets, traffic_bonus, sess_epoch, ref_on_pay FROM users")
 	if err != nil {
 		return nil, err
 	}
 	for urows.Next() {
 		var u model.User
-		var approved, blocked, refBonusPaid, whitelisted int
+		var approved, blocked, refBonusPaid, whitelisted, refOnPay int
 		var refEarned int64
 		var webApproved, webDenied int
 		var terms, trial sql.NullString
 		var snapRaw, bonusRaw string
-		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets, &bonusRaw, &u.SessEpoch); err != nil {
+		if err := urows.Scan(&u.TelegramID, &u.Username, &u.FirstName, &approved, &blocked, &u.CreatedAt, &terms, &trial, &u.SubExpireAt, &u.NotifyKind, &u.NotifySent, &u.Balance, &u.ReferredBy, &refBonusPaid, &whitelisted, &refEarned, &webApproved, &webDenied, &snapRaw, &u.TrialResets, &bonusRaw, &u.SessEpoch, &refOnPay); err != nil {
 			_ = urows.Close()
 			return nil, err
 		}
 		u.P2PApproved = approved != 0
 		u.Blocked = blocked != 0
 		u.RefBonusPaid = refBonusPaid != 0
+		u.RefOnPay = refOnPay != 0
 		u.Whitelisted = whitelisted != 0
 		u.RefEarned = refEarned
 		u.WebApproved = webApproved != 0
@@ -1808,15 +1812,15 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 
 func (b *base) importUser(ctx context.Context, u *model.User) error {
 	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, trial_resets, sess_epoch) "+
-			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+", "+b.ph(18)+") "+
+		"INSERT INTO users (telegram_id, p2p_approved, blocked, created_at, username, first_name, sub_expire_at, notify_kind, notify_sent, balance, referred_by, ref_bonus_paid, whitelisted, ref_earned, web_approved, web_denied, trial_resets, sess_epoch, ref_on_pay) "+
+			"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+", "+b.ph(18)+", "+b.ph(19)+") "+
 			"ON CONFLICT (telegram_id) DO UPDATE SET "+
 			"p2p_approved = excluded.p2p_approved, blocked = excluded.blocked, "+
 			"created_at = excluded.created_at, username = excluded.username, first_name = excluded.first_name, "+
 			"sub_expire_at = excluded.sub_expire_at, notify_kind = excluded.notify_kind, notify_sent = excluded.notify_sent, "+
-			"balance = excluded.balance, referred_by = excluded.referred_by, ref_bonus_paid = excluded.ref_bonus_paid, whitelisted = excluded.whitelisted, ref_earned = excluded.ref_earned, web_approved = excluded.web_approved, web_denied = excluded.web_denied, trial_resets = excluded.trial_resets, sess_epoch = excluded.sess_epoch",
+			"balance = excluded.balance, referred_by = excluded.referred_by, ref_bonus_paid = excluded.ref_bonus_paid, whitelisted = excluded.whitelisted, ref_earned = excluded.ref_earned, web_approved = excluded.web_approved, web_denied = excluded.web_denied, trial_resets = excluded.trial_resets, sess_epoch = excluded.sess_epoch, ref_on_pay = excluded.ref_on_pay",
 		u.TelegramID, boolToInt(u.P2PApproved), boolToInt(u.Blocked), u.CreatedAt, u.Username, u.FirstName,
-		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid), boolToInt(u.Whitelisted), u.RefEarned, boolToInt(u.WebApproved), boolToInt(u.WebDenied), u.TrialResets, u.SessEpoch)
+		u.SubExpireAt, u.NotifyKind, u.NotifySent, u.Balance, u.ReferredBy, boolToInt(u.RefBonusPaid), boolToInt(u.Whitelisted), u.RefEarned, boolToInt(u.WebApproved), boolToInt(u.WebDenied), u.TrialResets, u.SessEpoch, boolToInt(u.RefOnPay))
 	if err != nil {
 		return err
 	}
@@ -2261,6 +2265,22 @@ func (b *base) AddRefEarned(ctx context.Context, telegramID int64, kopecks int64
 		"UPDATE users SET ref_earned = ref_earned + "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		kopecks, telegramID)
 	return err
+}
+
+func (b *base) SetRefOnPay(ctx context.Context, telegramID int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET ref_on_pay = 1 WHERE telegram_id = "+b.ph(1), telegramID)
+	return err
+}
+
+// HasPaidPaymentSince — была ли у человека оплата (подписка или пополнение),
+// записанная не раньше since (RFC3339 UTC, как created_at).
+func (b *base) HasPaidPaymentSince(ctx context.Context, telegramID int64, since string) (bool, error) {
+	var n int
+	err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+" AND created_at >= "+b.ph(3),
+		telegramID, model.PaymentPaid, since).Scan(&n)
+	return n > 0, err
 }
 
 func (b *base) SetRefBonusPaid(ctx context.Context, telegramID int64) error {

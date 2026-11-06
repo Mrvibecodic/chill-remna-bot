@@ -35,7 +35,6 @@ func (a *App) MiniMe(ctx context.Context, tgID int64) web.MiniMeDTO {
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
 			dto.BalanceK = u.Balance
-			dto.SubExpire = u.SubExpireAt
 			dto.Name = displayName(a.lang(tgID), u.FirstName, u.Username)
 		}
 		// Знак идентификатора больше не признак «аккаунт по почте»: после

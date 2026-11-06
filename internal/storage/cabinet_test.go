@@ -279,3 +279,44 @@ func TestSnapshotCarriesWebUsers(t *testing.T) {
 		}
 	})
 }
+
+// Отложенный бонус приглашения хранится и переживает переезд базы; оплата
+// после выставления счёта находится по времени записи.
+func TestRefOnPayAndPaidSince(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const id = int64(61)
+		if err := st.UpsertUser(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetRefOnPay(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, id); u == nil || !u.RefOnPay {
+			t.Fatalf("отметка не сохранилась: %+v", u)
+		}
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, u := range snap.Users {
+			if u.TelegramID == id {
+				found = u.RefOnPay
+			}
+		}
+		if !found {
+			t.Fatal("отметки нет в снимке")
+		}
+		if err := st.AddPayment(ctx, &model.Payment{TelegramID: id, Method: "yk", Amount: "100", Status: model.PaymentPaid,
+			CreatedAt: "2030-01-01T10:00:00Z"}); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := st.HasPaidPaymentSince(ctx, id, "2030-01-01T09:59:58Z"); err != nil || !ok {
+			t.Fatalf("оплата после счёта: ok=%v err=%v", ok, err)
+		}
+		if ok, err := st.HasPaidPaymentSince(ctx, id, "2030-01-01T10:00:01Z"); err != nil || ok {
+			t.Fatalf("оплата до счёта засчитана: ok=%v err=%v", ok, err)
+		}
+	})
+}
