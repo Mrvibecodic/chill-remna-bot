@@ -339,7 +339,7 @@ var L={ru:{
  connect:'Подключить',renew:'Продлить',
  no_sub:'Нет активной подписки',no_sub_hint:'Выберите тариф — подключение займёт минуту.',
  try_free:'Попробовать бесплатно',choose_plan:'Выбрать тариф',trial_fail:'Не удалось активировать пробный период',trial_ok:'Пробный период активирован',
- plans:'Тарифы',from:'от',your_plan:'Ваш тариф',best:'Выгодно',period:'Срок',whats_in:'Что входит',
+ plans:'Тарифы',from:'от',per_mo:'/мес',per_n:'/{n} мес',your_plan:'Ваш тариф',best:'Выгодно',period:'Срок',whats_in:'Что входит',
  traffic:'Трафик',traffic_unl:'Безлимит',reset:'Сброс трафика',countries:'Страны',servers:'Серверов',hwid:'Устройств',hwid_unl:'без ограничений',dev_unl:'без лимита устройств',included:'включено',
  switch_credit:'Зачёт остатка',switch_hint:'Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен.',
  checkout:'Оформить за',pay_with:'Способ оплаты',no_methods:'Оплата сейчас недоступна. Попробуйте в боте.',
@@ -395,7 +395,7 @@ var L={ru:{
  connect:'Connect',renew:'Renew',
  no_sub:'No active subscription',no_sub_hint:'Pick a plan — connecting takes a minute.',
  try_free:'Try for free',choose_plan:'Choose a plan',trial_fail:'Could not activate the trial',trial_ok:'Trial activated',
- plans:'Plans',from:'from',your_plan:'Your plan',best:'Best value',period:'Period',whats_in:'What’s included',
+ plans:'Plans',from:'from',per_mo:'/mo',per_n:'/{n} mo',your_plan:'Your plan',best:'Best value',period:'Period',whats_in:'What’s included',
  traffic:'Traffic',traffic_unl:'Unlimited',reset:'Traffic reset',countries:'Countries',servers:'Servers',hwid:'Devices',hwid_unl:'unlimited',dev_unl:'unlimited devices',included:'included',
  switch_credit:'Remaining credit',switch_hint:'The rest of your current plan is not lost: it is converted into days of this plan by price ratio.',
  checkout:'Pay',pay_with:'Payment method',no_methods:'Payment is unavailable right now. Try in the bot.',
@@ -627,7 +627,7 @@ function confirmAsk(msg,yes,cb){
 function planBy(c){for(var i=0;i<STATE.plans.length;i++)if(STATE.plans[i].code===c)return STATE.plans[i];return null;}
 function durBy(p,m){var l=(p&&p.durations)||[];for(var i=0;i<l.length;i++)if(l[i].months==m)return l[i];return null;}
 function planTitle(p){return (p.icon?p.icon+' ':'')+(p.name||p.code);}
-function planMin(p){var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)};});return b?b.l:'';}
+function planMin(p){var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)+(d.months>1?T('per_n').replace('{n}',d.months):d.months===1?T('per_mo'):'')};});return b?b.l:'';}
 function trafficT(d){return d&&d.traffic_gb>0?d.traffic_gb+' '+T('gb'):T('traffic_unl');}
 function planSubT(d){return trafficT(d)+(!d?'':d.devices>0?' · '+d.devices+' '+plural(d.devices,T('dev1'),T('dev2'),T('dev5')):d.devices_unlim?' · '+T('dev_unl'):'');}
 function legalDocs(){return (STATE.menu&&STATE.menu.legal)||[];}

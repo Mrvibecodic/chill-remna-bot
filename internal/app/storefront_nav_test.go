@@ -39,8 +39,8 @@ func TestStorefrontFromPriceHide(t *testing.T) {
 	const uid = int64(1000000001)
 
 	labels := strings.Join(storefrontLabels(t, a, fm, uid), "|")
-	if !strings.Contains(labels, "VIP · от 990 ₽") {
-		t.Fatalf("по умолчанию цена на кнопке тарифа: %q", labels)
+	if !strings.Contains(labels, "VIP · от 990 ₽/мес") {
+		t.Fatalf("по умолчанию цена на кнопке тарифа со сроком: %q", labels)
 	}
 
 	planTap(t, a, "tx:k:buy.from_price")
@@ -247,5 +247,15 @@ func TestPayMethodIconRemovable(t *testing.T) {
 	labels := strings.Join(fm.buttonLabels()[n:], "|")
 	if !strings.Contains(labels, "Оплатить через Tribute") || strings.Contains(labels, "🎁") {
 		t.Fatalf("значок Tribute не убрался: %q", labels)
+	}
+}
+
+// Самая низкая цена — не всегда месячная: у тарифа без месяца рядом с ценой
+// стоит её срок.
+func TestPlanMinPriceTerm(t *testing.T) {
+	p := &model.Plan{Durations: []model.PlanDuration{{Months: 6, Base: "1500"}, {Months: 3, Base: "800"}}}
+	from, months := planMinPrice(p)
+	if from != "800" || months != 3 || termSuffix("ru", months) != "/3 мес" || termSuffix("ru", 1) != "/мес" {
+		t.Fatalf("got %q %d %q", from, months, termSuffix("ru", months))
 	}
 }

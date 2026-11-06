@@ -167,10 +167,12 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 	for i := range plans {
 		p := &plans[i]
 		label := planTitle(lang, p)
-		if from := planMinPrice(p); from != "" {
+		if from, months := planMinPrice(p); from != "" {
 			// Приписку админ может убрать в «Текстах бота» — тогда без
-			// разделителя.
-			if s := i18n.T(lang, "buy.from_price", from+curSuffix(planCurrencyOr(p, a.pricing().Currency))); s != "" {
+			// разделителя. Срок рядом с ценой: самая низкая цена — не всегда
+			// месячная.
+			price := from + curSuffix(planCurrencyOr(p, a.pricing().Currency)) + termSuffix(lang, months)
+			if s := i18n.T(lang, "buy.from_price", price); s != "" {
 				label += " · " + s
 			}
 		}
@@ -235,9 +237,9 @@ func planSellsAnything(p *model.Plan) bool {
 }
 
 // planMinPrice — минимальная базовая цена тарифа для подписи «от …».
-func planMinPrice(p *model.Plan) string {
+func planMinPrice(p *model.Plan) (string, int) {
 	best := int64(-1)
-	out := ""
+	out, months := "", 0
 	for i := range p.Durations {
 		d := &p.Durations[i]
 		if d.Months <= 0 || d.Base == "" {
@@ -249,10 +251,21 @@ func planMinPrice(p *model.Plan) string {
 		}
 		if best < 0 || k < best {
 			best = k
-			out = d.Base
+			out, months = d.Base, d.Months
 		}
 	}
-	return out
+	return out, months
+}
+
+// termSuffix — за какой срок цена: «/мес», «/3 мес».
+func termSuffix(lang string, months int) string {
+	switch {
+	case months == 1:
+		return i18n.T(lang, "buy.per_mo")
+	case months > 1:
+		return i18n.T(lang, "buy.per_n_mo", months)
+	}
+	return ""
 }
 
 // planCurrencyOr — валюта тарифа или запасная (валюта сетки). Через

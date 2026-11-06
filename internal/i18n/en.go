@@ -95,6 +95,8 @@ var en = map[string]string{
 	"buy.not_available":       "🔒 Purchasing is currently unavailable for your account. If you believe this is a mistake, contact support.",
 	"buy.choose_tariff":       "📦 <b>Pick a plan</b>\n\nEach plan has its own terms and periods — tap one to see the details.",
 	"buy.from_price":          "from %s",
+	"buy.per_mo":              "/mo",
+	"buy.per_n_mo":            "/%d mo",
 	"buy.btn_switch_plan":     "🔀 Pick another plan",
 	"buy.addsub_line":         "➕ <b>%s</b> — included in the plan",
 	"buy.switch_note":         "💱 The remainder of your current plan is not lost: when switching it is converted into days by price ratio. The exact shift is shown before payment.",

@@ -837,9 +837,9 @@ function planMinLabel(p){
   (p.durations||[]).forEach(function(d){
     var v=parseFloat(String(d.price).replace(/[\s ]/g,'').replace(',','.'));
     if(!isFinite(v))return;
-    if(!best||v<best.v)best={v:v,lab:d.price+' '+(d.currency||'')};
+    if(!best||v<best.v)best={v:v,lab:(d.price+' '+(d.currency||'')).trim()+(d.months>1?'/'+d.months+' мес':d.months===1?'/мес':'')};
   });
-  return best?best.lab.trim():'';
+  return best?best.lab:'';
 }
 // Список сроков тарифа («выгодный» приходит с сервера — цена за месяц).
 function durListHTML(p){

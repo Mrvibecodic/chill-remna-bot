@@ -113,7 +113,7 @@ var editableList = []Editable{
 	{Key: "buy.from_price", Section: "buy", Kind: KindButton, Hideable: true,
 		Where: [2]string{"Кнопка тарифа в витрине — приписка «от N ₽»", "Plan button in the storefront — «from N ₽» suffix"},
 		Vars: []EditVar{
-			{Name: "price", Ru: "цена", Desc: [2]string{"минимальная цена тарифа среди его сроков, с валютой", "the plan's lowest price across its terms, with currency"}, Example: [2]string{"290 ₽", "290 ₽"}},
+			{Name: "price", Ru: "цена", Desc: [2]string{"минимальная цена тарифа среди его сроков, с валютой и сроком", "the plan's lowest price across its terms, with currency and term"}, Example: [2]string{"290 ₽/мес", "290 ₽/mo"}},
 		}},
 	{Key: "buy.just_bought", Section: "buy", Kind: KindPlain,
 		Where: [2]string{"Мини-апп/ЛК: ошибка при повторном нажатии сразу после покупки", "Mini-app/cabinet: error on a repeat tap right after a purchase"}},
