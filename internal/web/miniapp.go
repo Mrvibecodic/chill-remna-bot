@@ -408,9 +408,11 @@ type MiniDurationDTO struct {
 	Currency string `json:"currency"`
 	// TrafficGB is the duration's traffic allowance in GB; 0 means unlimited.
 	TrafficGB int `json:"traffic_gb"`
-	// Devices is the HWID device limit; 0 means no explicit limit (panel
-	// default).
-	Devices int `json:"devices"`
+	// Devices — лимит устройств срока: свой у тарифа, а без него — по
+	// умолчанию панели; 0 — показать нечего. DevicesUnlim — панель устройства
+	// не ограничивает (контроль устройств выключен).
+	Devices      int  `json:"devices"`
+	DevicesUnlim bool `json:"devices_unlim,omitempty"`
 	// Countries are the distinct countries available to the duration's squads.
 	Countries []MiniCountryDTO `json:"countries,omitempty"`
 	// Servers — хосты панели, которые получит подписка срока (как строка

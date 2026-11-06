@@ -90,6 +90,7 @@ func (a *App) showDevices(ctx context.Context, chatID int64) {
 		a.sendKB(ctx, chatID, i18n.T(lang, "dev.list_empty"), rows)
 		return
 	}
+	info = a.withHwidDefault(ctx, info)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
 		val += " / " + strconv.Itoa(info.Limit)

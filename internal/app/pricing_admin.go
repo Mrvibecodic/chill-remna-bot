@@ -103,7 +103,7 @@ func (a *App) formatTrafficLimits() string {
 	return strings.Join(parts, " ")
 }
 
-func (a *App) formatDeviceLimits(lang string) string {
+func (a *App) formatDeviceLimits(ctx context.Context, lang string) string {
 	pr := a.pricing()
 	var parts []string
 	for _, mo := range model.PlanMonths {
@@ -117,7 +117,7 @@ func (a *App) formatDeviceLimits(lang string) string {
 	if pr.DeviceLimit > 0 {
 		return strconv.Itoa(pr.DeviceLimit)
 	}
-	return i18n.T(lang, "pricing.hwid_default")
+	return a.hwidDefaultLabel(ctx, lang, "")
 }
 
 // Старый сводный экран цен (menu:pricing) убран: его содержимое целиком живёт

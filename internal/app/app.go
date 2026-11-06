@@ -263,6 +263,9 @@ type App struct {
 	infraMu    sync.Mutex
 	infraCache *infraCacheEntry
 
+	// hwidDef — лимит устройств по умолчанию из панели (hwid_defaults.go).
+	hwidDef hwidDefCache
+
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
 	// connectFail — когда в последний раз не вышло достать конфиг приложений,

@@ -237,7 +237,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		b.WriteString("\n\n")
 		b.WriteString(line)
 	}
-	if terms := planTermsText(lang, p); terms != "" {
+	def, defOK := a.hwidDefaults(ctx)
+	dev := func(d *model.PlanDuration) devShown { return planDevShown(p, d, def, defOK) }
+	if terms := planTermsText(lang, p, dev); terms != "" {
 		b.WriteString("\n\n")
 		b.WriteString(terms)
 	}
@@ -259,18 +261,24 @@ func planCardTitleHTML(lang string, p *model.Plan) string {
 
 // planTermsText — условия тарифа для карточки покупателя: трафик и устройства.
 // Значения одинаковы у всех продаваемых сроков — одной строкой; различаются —
-// с разбивкой по срокам. Лимит устройств 0 означает дефолт панели — это число
-// боту неизвестно, поэтому тариф без единого своего лимита строку устройств
-// не показывает.
-func planTermsText(lang string, p *model.Plan) string {
-	type cond struct{ months, traffic, devices int }
+// с разбивкой по срокам. dev — лимит устройств срока (свой у тарифа или по
+// умолчанию панели); nil — только свой. Тариф, у которого показать нечего ни
+// у одного срока, строку устройств не показывает.
+func planTermsText(lang string, p *model.Plan, dev func(d *model.PlanDuration) devShown) string {
+	if dev == nil {
+		dev = func(d *model.PlanDuration) devShown { return devShown{n: p.DeviceLimitFor(d)} }
+	}
+	type cond struct {
+		months, traffic int
+		devices         devShown
+	}
 	var conds []cond
 	for i := range p.Durations {
 		d := &p.Durations[i]
 		if d.Months <= 0 || d.Base == "" {
 			continue
 		}
-		conds = append(conds, cond{d.Months, p.TrafficGBFor(d), p.DeviceLimitFor(d)})
+		conds = append(conds, cond{d.Months, p.TrafficGBFor(d), dev(d)})
 	}
 	if len(conds) == 0 {
 		return ""
@@ -283,7 +291,7 @@ func planTermsText(lang string, p *model.Plan) string {
 		if c.devices != conds[0].devices {
 			sameDevices = false
 		}
-		if c.devices > 0 {
+		if c.devices.any() {
 			anyDevices = true
 		}
 	}
@@ -331,12 +339,15 @@ func trafficValue(lang, strategy string, gb int) string {
 	return i18n.T(lang, key, gb)
 }
 
-// devicesValue — лимит устройств; 0 — дефолт панели, числа у бота нет.
-func devicesValue(lang string, n int) string {
-	if n <= 0 {
-		return i18n.T(lang, "buy.dev_default")
+// devicesValue — лимит устройств срока; ничего не известно — «по умолчанию».
+func devicesValue(lang string, v devShown) string {
+	switch {
+	case v.unlim:
+		return i18n.T(lang, "buy.dev_unlim")
+	case v.n > 0:
+		return i18n.T(lang, "buy.dev_n", v.n)
 	}
-	return i18n.T(lang, "buy.dev_n", n)
+	return i18n.T(lang, "buy.dev_default")
 }
 
 // onPlanView — карточка тарифа из списка витрины: plo:<код>. Тот же троттлинг

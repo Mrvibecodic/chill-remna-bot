@@ -400,7 +400,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
 		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn), mark(ymOn),
-		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
+		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat,
 		internalCSV, externalName,
 	)
 	if addsubOn {

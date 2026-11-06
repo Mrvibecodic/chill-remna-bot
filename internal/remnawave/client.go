@@ -513,7 +513,10 @@ type panelUser struct {
 	byEmail bool
 
 	TrafficLimitStrategy string `json:"trafficLimitStrategy"`
-	HwidDeviceLimit      int    `json:"hwidDeviceLimit"`
+	// HwidDeviceLimit: null — действует лимит по умолчанию панели, 0 —
+	// устройства не ограничены, N — свой лимит.
+	HwidDeviceLimit   *int   `json:"hwidDeviceLimit"`
+	ExternalSquadUuid string `json:"externalSquadUuid"`
 
 	TrafficLimitBytes int64 `json:"trafficLimitBytes"`
 	// Used traffic moved into the nested userTraffic object in the panel
@@ -531,6 +534,14 @@ type panelUser struct {
 	// счётчик периода. Единственный ТОЧНЫЙ признак того, что период
 	// сменился: сравнивать сам счётчик бесполезно, он и так бывает нулём.
 	LastTrafficResetAt string `json:"lastTrafficResetAt"`
+}
+
+// hwidLimit — свой лимит устройств; 0 — своего нет или он снят.
+func (u *panelUser) hwidLimit() int {
+	if u.HwidDeviceLimit == nil || *u.HwidDeviceLimit < 0 {
+		return 0
+	}
+	return *u.HwidDeviceLimit
 }
 
 // ref is how this user is addressed by this panel: uuid before 3.0.0, numeric
@@ -607,7 +618,7 @@ func toPanelUser(u *panelUser) *PanelUser {
 		SubscriptionURL: u.SubscriptionURL,
 		Tag:             u.Tag,
 		Strategy:        u.TrafficLimitStrategy,
-		DeviceLimit:     u.HwidDeviceLimit,
+		DeviceLimit:     u.hwidLimit(),
 		Status:          u.Status,
 		TrafficLimit:    u.TrafficLimitBytes,
 		TrafficUsed:     u.usedBytes(),
@@ -1698,12 +1709,14 @@ func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (Su
 // DeviceInfo is a read-only snapshot of a user's HWID devices.
 // Used is the number of devices currently registered on the subscription;
 // Limit is the per-user device limit. HasLimit is false when no explicit
-// per-user limit is set (0) — the panel-wide HWID_FALLBACK_DEVICE_LIMIT then
-// applies and is unknown to the bot, so callers show only the connected count.
+// positive limit is set: OwnLimit=false means the panel default applies (see
+// HwidDefaults, ExtSquad picks the rule), OwnLimit=true with 0 — no limit.
 type DeviceInfo struct {
 	Used     int
 	Limit    int
 	HasLimit bool
+	OwnLimit bool
+	ExtSquad string
 	// List — сами устройства, как их вернула панель. Пусто, если панель отдала
 	// только счётчик: список — не обязательная часть ответа, и экран обязан
 	// пережить его отсутствие.
@@ -1764,7 +1777,12 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
-	info := DeviceInfo{Limit: u.HwidDeviceLimit, HasLimit: u.HwidDeviceLimit > 0}
+	info := DeviceInfo{
+		Limit:    u.hwidLimit(),
+		HasLimit: u.hwidLimit() > 0,
+		OwnLimit: u.HwidDeviceLimit != nil,
+		ExtSquad: u.ExternalSquadUuid,
+	}
 
 	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+u.ref().path(), nil)
 	if err != nil {

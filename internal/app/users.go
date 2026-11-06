@@ -1152,6 +1152,7 @@ func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Cl
 	if !ok {
 		return "", false
 	}
+	info = a.withHwidDefault(ctx, info)
 	lang := a.lang(chatID)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {

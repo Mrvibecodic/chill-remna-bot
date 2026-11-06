@@ -92,7 +92,9 @@ var editableList = []Editable{
 			{Name: "payment_currency", Ru: "валюта_оплаты", Desc: [2]string{"валюта, в которой настроена оплата (сетка цен): «₽» или код валюты", "currency the payments are set up in (price grid): «₽» or a currency code"}, Example: [2]string{"₽", "₽"}},
 		}},
 	{Key: "buy.dev_default", Section: "buy", Kind: KindButton,
-		Where: [2]string{"Карточка тарифа — лимит устройств «по умолчанию» (задан в панели)", "Plan card — «default» device limit (set in the panel)"}},
+		Where: [2]string{"Карточка тарифа — лимит устройств «по умолчанию», если бот не смог прочитать его из панели", "Plan card — «default» device limit when the bot could not read it from the panel"}},
+	{Key: "buy.dev_unlim", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — устройства не ограничены (контроль устройств в панели выключен)", "Plan card — devices not limited (device control is off in the panel)"}},
 	{Key: "buy.dev_n", Section: "buy", Kind: KindButton,
 		Where: [2]string{"Карточка тарифа — значение лимита устройств «до N»", "Plan card — device limit value «up to N»"},
 		Vars: []EditVar{

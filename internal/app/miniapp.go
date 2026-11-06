@@ -140,6 +140,7 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.ExpireTS = t.Unix()
 	}
 	if info, dok := panel.DevicesByTelegramID(ctx, tgID); dok {
+		info = a.withHwidDefault(ctx, info)
 		dto.DevicesOK = true
 		dto.DevicesUsed = info.Used
 		dto.DeviceLimit = info.Limit
@@ -207,6 +208,9 @@ type miniPlanCtxT struct {
 	oldSnap     *model.PlanSnapshot
 	oldExpire   string
 	own         string
+	// hwid — лимит устройств по умолчанию из панели, для сроков без своего.
+	hwid   remnawave.HwidDefaults
+	hwidOK bool
 }
 
 func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
@@ -219,6 +223,7 @@ func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
 		}
 	}
 	pc.own = planCodeOf(pc.oldSnap)
+	pc.hwid, pc.hwidOK = a.hwidDefaults(ctx)
 	return pc
 }
 
@@ -257,18 +262,20 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 		}
 		// squadGeo ходит в панель (кэш) и сам берёт a.mu.
 		g := a.squadGeo(ctx, p.IntSquadsFor(d))
+		dv := planDevShown(p, d, pc.hwid, pc.hwidOK)
 		var countries []web.MiniCountryDTO
 		for _, c := range g.countries {
 			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
 		}
 		pd.Durations = append(pd.Durations, web.MiniDurationDTO{
-			Months:    d.Months,
-			Price:     d.Base,
-			Currency:  cur,
-			TrafficGB: p.TrafficGBFor(d),
-			Devices:   p.DeviceLimitFor(d),
-			Countries: countries,
-			Discount:  discountLabel(lang, p, d),
+			Months:       d.Months,
+			Price:        d.Base,
+			Currency:     cur,
+			TrafficGB:    p.TrafficGBFor(d),
+			Devices:      dv.n,
+			DevicesUnlim: dv.unlim,
+			Countries:    countries,
+			Discount:     discountLabel(lang, p, d),
 			// Зачёт остатка при смене тарифа — та же математика, что
 			// применит финализация (см. plans_switch.go).
 			SwitchDays: switchCredit(pc.oldSnap, pc.oldExpire, a.planSnapshotOf(p, d, d.Months)),
