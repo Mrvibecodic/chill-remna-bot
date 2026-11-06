@@ -269,11 +269,83 @@ body.web .authwrap{max-width:480px;margin:0 auto}
   body.web .btnrow>.btn{margin-top:0}
   body.web .sec-title{margin-top:26px}
 }
+/* ---- кабинет на широком экране: меню слева, панель из карточек ---- */
+.side{display:none}
+.mainc{min-width:0}
+@media(min-width:960px){
+  body.desk .wrap{max-width:1240px;display:grid;grid-template-columns:236px minmax(0,1fr);gap:32px;align-items:start;padding:28px 32px 48px}
+  body.desk.noside .wrap{display:block;max-width:960px}
+  body.desk.noside .side{display:none}
+  body.desk .side{display:flex;flex-direction:column;gap:4px;position:sticky;top:28px;min-height:calc(100vh - 76px);
+    background:var(--surface);border:1px solid var(--stroke);border-radius:var(--radius);padding:18px 12px 14px;
+    backdrop-filter:blur(18px) saturate(140%);box-shadow:0 8px 30px rgba(0,0,0,.28)}
+  body.desk .head{margin:6px 2px 22px;min-height:36px}
+  body.desk .head h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+  body.desk #balchip{display:none !important}
+  body.desk:not(.noside) .btn.back,body.desk:not(.noside) .deskhide{display:none}
+  body.desk .card{margin-bottom:16px}
+  body.desk .sec-title{margin:10px 4px 12px}
+  body.desk .split .cols{grid-template-columns:minmax(0,1fr)}
+  .sbrand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:-.2px;padding:2px 10px 18px}
+  .sbrand .lg{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff}
+  .sbrand .lg svg{width:17px;height:17px}
+  .snav{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:0;border-radius:12px;background:transparent;
+    color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+  .snav:hover{background:var(--surface-2);color:var(--text)}
+  .snav.on{color:var(--text);background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 24%,transparent),color-mix(in srgb,var(--accent-2) 14%,transparent))}
+  .snav.on svg{color:var(--accent)}
+  .snav .bdg{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ssep{height:1px;background:var(--stroke);margin:10px 8px}
+  .sfoot{margin-top:auto;padding:14px 4px 0;border-top:1px solid var(--stroke);display:flex;align-items:center;gap:10px}
+  .sfoot .uava{width:36px;height:36px;font-size:15px}
+  .sfoot .uname{font-size:14px}
+  .sout{flex:none;width:34px;height:34px;border-radius:10px;border:1px solid var(--stroke);background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .sout:hover{color:var(--text);background:var(--surface-2)}
+  .sout svg{width:16px;height:16px}
+  .dgrid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:0 20px;align-items:start}
+  .dgrid>.c7{grid-column:span 7;min-width:0}
+  .dgrid>.c5{grid-column:span 5;min-width:0}
+  .split{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:start}
+  .split>div{min-width:0}
+  .narrow{max-width:640px}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-bottom:16px}
+  .pcard{position:relative;display:flex;flex-direction:column;gap:6px;min-height:150px;padding:18px;border-radius:18px;cursor:pointer;
+    background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(12px);transition:border-color .2s,background .2s}
+  .pcard:hover{border-color:var(--stroke-strong);background:var(--surface-2)}
+  .pcard .pn{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:17px;font-weight:800}
+  .pcard .ps{font-size:13px;color:var(--muted);flex:1}
+  .pcard .pf{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}
+  .pcard .pf span{padding:3px 9px;border-radius:999px;border:1px solid var(--stroke)}
+  .pcard .pp{font-size:20px;font-weight:800;letter-spacing:-.3px;font-variant-numeric:tabular-nums;margin-top:6px}
+  .pcard.own{border-color:transparent;background:linear-gradient(var(--bg-2),var(--bg-2)) padding-box,linear-gradient(120deg,var(--accent),var(--accent-2)) border-box}
+  .paygrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+  .paygrid .btn{margin-top:0;min-height:56px}
+  .paygrid .pcell .hint{margin:8px 2px 0 !important}
+  .tline{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tline b{font-variant-numeric:tabular-nums}
+  .tbar{height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:12px}
+  .tbar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+  .tbar.hi i{background:linear-gradient(90deg,var(--warn),var(--bad))}
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .duo .btn{margin-top:0}
+  .dcard .feat{margin:12px 0 0}
+  .dhead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .dhead b{font-size:15px;font-variant-numeric:tabular-nums}
+  .lab2{font-size:12px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px}
+  .lrow{display:flex;gap:8px;align-items:stretch}
+  .lrow .mono{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;word-break:normal}
+  .icbtn{flex:none;width:44px;border-radius:12px;border:1px solid var(--stroke);background:var(--surface-2);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .icbtn:hover{border-color:var(--stroke-strong)}
+  .acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+  .acts .btn{width:auto;margin-top:0;padding:13px 22px}
+}
 </style>
 </head>
 <body>
 <div class="bg"></div>
 <div class="wrap">
+  <aside id="side" class="side"></aside>
+  <div class="mainc">
   <div class="head">
     <h1>Личный кабинет</h1>
     <span id="balchip" class="chip" style="display:none" onclick="openMore()"></span>
@@ -283,6 +355,7 @@ body.web .authwrap{max-width:480px;margin:0 auto}
     <div class="sk sk-row"></div>
     <div class="sk sk-row"></div>
     <div class="sk sk-row"></div>
+  </div>
   </div>
 </div>
 <div id="toast" class="toast"></div>
@@ -323,6 +396,19 @@ function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}cat
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
 let STATE={balanceK:0,methods:[]};
 let backFn=null; // current back handler for TG BackButton
+// Кабинет в браузере на широком экране: меню слева и раскладка по колонкам.
+// Узкий экран и мини-апп в Telegram остаются как были.
+var DESKMQ=null;try{DESKMQ=WEB&&window.matchMedia?window.matchMedia('(min-width:960px)'):null;}catch(e){}
+var DESK=false;
+function setDesk(){DESK=!!(DESKMQ&&DESKMQ.matches);try{document.body.classList.toggle('desk',DESK);}catch(e){}}
+setDesk();
+if(DESKMQ){var onDeskMQ=function(){var was=DESK;setDesk();if(was===DESK||!TOKEN||!STATE.menu)return;
+  var re={plans:openPlans,wallet:openMore,connect:openConnect,account:openAccount}[PAGE];if(re)re();else boot();};
+  try{if(DESKMQ.addEventListener)DESKMQ.addEventListener('change',onDeskMQ);else if(DESKMQ.addListener)DESKMQ.addListener(onDeskMQ);}catch(e){}}
+// PAGE — раздел меню, к которому относится открытый экран; null — меню нет
+// (вход, восстановление пароля, согласие с документами на входе).
+var PAGE=null;
+var PAGE_TITLES={home:'Главная',plans:'Тарифы',wallet:'Кошелёк',connect:'Подключение',account:'Аккаунт'};
 
 /* ---- TG init + premium chrome ---- */
 if(tg){
@@ -345,6 +431,40 @@ function view(html,back){
   setBack(back||null);
   app.innerHTML=html;
   app.style.animation='none'; void app.offsetWidth; app.style.animation='';
+  renderSide();
+}
+function renderSide(){
+  var side=document.getElementById('side'),h1=document.querySelector('.head h1');
+  if(!side)return;
+  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.textContent='Личный кабинет';return;}
+  document.body.classList.remove('noside');
+  if(h1)h1.textContent=PAGE_TITLES[PAGE]||'Личный кабинет';
+  var m=STATE.menu||{},sub=STATE.sub||{};
+  function item(key,ic,label,fn,bdg){return '<button class="snav'+(PAGE===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+label+'</span>'+(bdg?'<span class="bdg">'+bdg+'</span>':'')+'</button>';}
+  var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+  h+=item('home',IC.layers,'Главная','boot()');
+  if((STATE.plans&&STATE.plans.length)||STATE.plansNotice)h+=item('plans',IC.tag,'Тарифы','openPlans()');
+  h+=item('wallet',IC.wallet,'Кошелёк','openMore()',esc(rub(STATE.balanceK))+' ₽');
+  if(sub.sub_url)h+=item('connect',IC.download,'Подключение','openConnect()');
+  h+=item('account',IC.users,'Аккаунт','openAccount()');
+  if(m.support_url||m.group_url){
+    h+='<div class="ssep"></div>';
+    if(m.support_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.support_url)+'\')">'+IC.life+'<span>Поддержка</span></button>';
+    if(m.group_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>Наша группа</span></button>';
+  }
+  var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
+  h+='<div class="sfoot"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
+    '<button class="sout" title="Выйти" aria-label="Выйти" onclick="cabLogout()">'+IC.login+'</button></div>';
+  side.innerHTML=h;
+}
+// deskSplit — на широком экране две колонки, на узком — подряд, как было.
+// Правой колонки нет — левая не растягивается на всю ширину.
+function deskSplit(left,right){
+  var st='<div class="stagger">';
+  if(!DESK)return left+right;
+  var body=left.indexOf(st)===0?left.slice(st.length):left;
+  if(!right)return st+'<div class="narrow">'+body+'</div>';
+  return st+'<div class="split"><div>'+body+'</div><div>'+right+'</div></div>';
 }
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -452,16 +572,7 @@ function skMain(){
 function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px"></div><div class="sk sk-row"></div><div class="sk sk-row"></div>';}
 
 /* ---- main screen ---- */
-function render(me,menu,sub,plans){
-  STATE.plans=(plans&&plans.plans)||[];
-  STATE.plansNotice=(plans&&plans.notice)||'';
-  // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
-  if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
-  var ub='';
-  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
-  let h='<div class="stagger">';
-  h+=verifyBanner();
-  if(sub.active){
+function passHTML(sub){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
@@ -475,6 +586,22 @@ function render(me,menu,sub,plans){
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
         (atext!==null?'<div class="c"><div class="k">'+esc((sub.addsub_name||'Доп-сервер').toUpperCase())+'</div><div class="v">'+esc(atext)+'</div></div>':'')+
       '</div></div>';
+    return pass;
+}
+function render(me,menu,sub,plans){
+  STATE.plans=(plans&&plans.plans)||[];
+  STATE.plansNotice=(plans&&plans.notice)||'';
+  STATE.sub=sub||{};
+  // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
+  if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
+  PAGE='home';
+  if(DESK){renderHomeDesk(menu,sub);return;}
+  var ub='';
+  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
+  let h='<div class="stagger">';
+  h+=verifyBanner();
+  if(sub.active){
+    var pass=passHTML(sub);
     h+='<div class="acctgrp">'+ub+pass+'</div>';
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
@@ -514,6 +641,99 @@ function render(me,menu,sub,plans){
   h+='<div class="btnrow">'+acts+'</div>';
   h+='</div>';
   view(h,null);
+}
+
+// Главная на широком экране: слева подписка, трафик и устройства, справа
+// ссылка подписки и автопродление, ниже тарифы карточками.
+function renderHomeDesk(menu,sub){
+  var h='<div class="stagger">'+verifyBanner();
+  if(sub.active){
+    var right='';
+    if(sub.sub_url)right+='<div class="card"><div class="lab2">Ссылка подписки</div><div class="lrow"><div class="mono">'+esc(sub.sub_url)+'</div>'+
+      '<button class="icbtn" title="Скопировать" aria-label="Скопировать ссылку" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'</button></div>'+
+      '<button class="btn" style="margin-top:14px" onclick="openConnect()">'+IC.download+'Подключить</button></div>';
+    right+=devicesCard(sub);
+    var left=passHTML(sub)+trafficCard(sub)+autoPayBlock();
+    if(menu.can_renew&&STATE.plans.length)left+='<div class="hint" style="margin:0 4px 16px">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
+    h+='<div class="dgrid"><div class="c7">'+left+'</div><div class="c5">'+right+'</div></div>';
+  }else{
+    h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>'+
+      '<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div>'+
+      (menu.trial_available?'<div class="acts"><button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button></div>':'')+'</div>';
+    if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
+  }
+  if(STATE.plans.length===1){
+    h+='<div class="sec-title">'+IC.tag+esc(planTitle(STATE.plans[0]))+'</div>'+durListHTML(STATE.plans[0]);
+  }else if(STATE.plans.length){
+    h+='<div class="sec-title">'+IC.tag+'Тарифы</div>'+plansGridHTML();
+  }else if(STATE.plansNotice){
+    h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice)+'</div></div>';
+  }
+  h+='</div>';
+  view(h,null);
+}
+function trafficCard(sub){
+  if(!sub.traffic_ok)return '';
+  var used=Number(sub.traffic_used)||0,lim=Number(sub.traffic_limit)||0;
+  var pct=lim>0?Math.min(100,Math.round(used*100/lim)):0;
+  return '<div class="card"><div class="tline"><span class="status">'+IC.bolt+'Трафик</span><b>'+(lim>0?gbText(used)+' из '+gbText(lim):gbText(used)+' · безлимит')+'</b></div>'+
+    (lim>0?'<div class="tbar'+(pct>=90?' hi':'')+'"><i style="width:'+pct+'%"></i></div>':'')+'</div>';
+}
+function devicesCard(sub){
+  var dt=devicesText(sub),list=(sub&&sub.devices)||[];
+  var h='<div class="card dcard"><div class="dhead"><span class="status">'+IC.device+'Устройства</span>'+(dt!==null?'<b>'+esc(dt)+'</b>':'')+'</div>';
+  if(list.length){
+    h+='<div class="feat">';
+    list.forEach(function(d){h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'</div>';});
+    h+='</div>';
+  }
+  return h+'<button class="btn sec" style="margin-top:14px" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button></div>';
+}
+// Тарифы карточками — главная и раздел «Тарифы» на широком экране.
+function plansGridHTML(){
+  var h='<div class="pgrid">';
+  STATE.plans.forEach(function(p){
+    var d=(p.durations||[])[0]||{},f=[];
+    if(d.countries&&d.countries.length)f.push('🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран'));
+    if(d.servers>0)f.push('🖥 Серверов: '+d.servers);
+    h+='<div class="pcard'+(p.own?' own':'')+'" onclick="openPlan(\''+jsq(p.code)+'\')">'+
+      '<div class="pn">'+esc(planTitle(p))+(p.own?'<span class="fbadge">Ваш тариф</span>':'')+'</div>'+
+      '<div class="ps">'+esc(planCardSub(p))+'</div>'+
+      (f.length?'<div class="pf">'+f.map(function(x){return '<span>'+esc(x)+'</span>';}).join('')+'</div>':'')+
+      '<div class="pp">от '+esc(planMinLabel(p))+'</div></div>';
+  });
+  return h+'</div>';
+}
+// Условия тарифа рядом со сроками: на широком экране экран тарифа не пустой.
+// Берётся срок, который витрина выбирает по умолчанию.
+function planInfoDesk(p){
+  var ds=p.durations||[],d=null;
+  for(var i=0;i<ds.length;i++)if(ds[i].preferred){d=ds[i];break;}
+  d=d||ds[0];if(!d)return '';
+  var h='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
+  h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
+  if(d.devices>0)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+d.devices+'</b></div>';
+  if(p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
+  h+='</div>';
+  if(d.countries&&d.countries.length){
+    h+='<div class="sec-title">'+IC.globe+'Доступные страны</div><div class="chips">';
+    d.countries.forEach(function(c){
+      var fl=c.code?('<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">'):(c.flag?esc(c.flag)+' ':'');
+      h+='<span class="chip2">'+fl+esc(c.name||c.flag||'')+'</span>';
+    });
+    h+='</div>';
+  }
+  return h;
+}
+function openPlans(){
+  haptic('tap');PAGE='plans';
+  if(STATE.plans.length===1){openPlan(STATE.plans[0].code);return;}
+  var h='<div class="stagger">';
+  if(STATE.plans.length)h+=plansGridHTML();
+  else h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice||'Тарифов пока нет')+'</div></div>';
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
 }
 
 /* ---- автопродление (сохранённая карта ЮKassa) ---- */
@@ -634,6 +854,7 @@ function durListHTML(p){
 }
 // Экран тарифа: описание, опция доп-подписки и выбор срока.
 function openPlan(code){
+  PAGE='plans';
   haptic('tap');
   var p=planByCode(code);
   if(!p){boot();return;}
@@ -644,9 +865,12 @@ function openPlan(code){
     h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
       (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
   }
+  if(DESK)h+=planInfoDesk(p);
+  var hl=h;h='';
   h+='<div class="sec-title">'+IC.tag+'Срок подписки</div>';
   h+=durListHTML(p);
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
@@ -661,6 +885,7 @@ function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m
 function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',yoomoney:'💜 ЮMoney',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(code,months){
+  PAGE='plans';
   haptic('tap');
   var p=planByCode(code),d=durByMonths(p,months);
   if(!p||!d){boot();return;}
@@ -696,9 +921,12 @@ function buyPlan(code,months){
     });
     h+='</div>';
   }
+  var hl=h;h='';
   h+='<div class="sec-title">Способ оплаты</div>';
   var apOn=STATE.ap&&STATE.ap.available;
+  if(DESK)h+='<div class="paygrid">';
   methods.forEach(function(m){
+    if(DESK)h+='<div class="pcell">';
     // Цена уходит на сервер ровно та, что нарисована выше в bigprice: список
     // тарифов кэшируется до перезагрузки, и сервер обязан отличить показанную
     // цену от сегодняшней, а не списать молча другую сумму.
@@ -709,15 +937,19 @@ function buyPlan(code,months){
     if(m==='yookassa'&&apOn){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
+    if(DESK)h+='</div>';
   });
+  if(DESK)h+='</div>';
   if(STATE.menu&&STATE.menu.legal_on_pay&&legalDocs().length){
     STATE.legalBack=function(){buyPlan(code,months);};
     h+='<div class="hint" style="margin-top:12px">Оплачивая, вы принимаете '+legalLinks()+'.</div>';
   }
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 function renderP2PCard(card,amount,reqID,topup){
+  PAGE=topup?'wallet':'plans';
   haptic('tap');setBack(boot);
   // id заявки больше 2^53 — держим строкой, через Number() он округляется.
   var rid=String(reqID==null?'':reqID).replace(/\D/g,'');
@@ -725,11 +957,13 @@ function renderP2PCard(card,amount,reqID,topup){
     '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
+  var hl=h;h='';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
     '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
     '<button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this)">'+IC.check+'Отправить подтверждение</button></div>';
   h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel(\''+rid+'\',this)">Отменить заявку</button>';
-  h+='<button class="btn ghost" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function p2pUpload(reqID,el){
@@ -784,6 +1018,7 @@ async function pay(plan,months,method,el,shownPrice){
 
 /* ---- "more": balance, promo, referral ---- */
 async function openMore(){
+  PAGE='wallet';
   haptic('tap');skSimple();setBack(boot);
   var ref={enabled:false};
   try{ref=await api('/api/miniapp/referral');}catch(e){}
@@ -791,6 +1026,7 @@ async function openMore(){
     '<div class="title">'+rub(STATE.balanceK)+' ₽</div>'+
     (topupOn()?'<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button>':'')+
     '<div class="hint" style="margin-top:12px">Баланс тратится только на подписку. Вывод средств невозможен.</div></div>';
+  var hl=h;h='';
   h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
     '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
   if(ref&&ref.enabled){
@@ -812,9 +1048,10 @@ async function openMore(){
     STATE.legalBack=openMore;
     h+='<div class="sec-title">📜 Документы</div>'+legalRows();
   }
-  if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="openAccount()">'+IC.users+'Аккаунт</button>';
-  if(WEB)h+='<button class="btn sec" style="margin-top:10px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
-  h+='<button class="btn ghost" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  if(WEB)h+='<button class="btn sec deskhide" style="margin-top:16px" onclick="openAccount()">'+IC.users+'Аккаунт</button>';
+  if(WEB)h+='<button class="btn sec deskhide" style="margin-top:10px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
+  h+='<button class="btn ghost back" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function promoApply(el){
@@ -864,6 +1101,7 @@ async function legalAccept(el,then){
   finally{busy(el,false);}
 }
 function legalStartGate(){
+  PAGE=null;
   STATE.legalBack=legalStartGate;
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
     '<div class="title">Документы сервиса</div>'+
@@ -875,19 +1113,21 @@ function legalStartGate(){
   view(h,null);
 }
 function legalGate(code,months){
+  PAGE='plans';
   STATE.legalBack=function(){buyPlan(code,months);};
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
     '<div class="title">Перед оплатой</div>'+
     '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз.</div></div>';
   h+=legalRows();
   h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){buyPlan(\''+jsq(code)+'\','+months+');})">✅ Принимаю</button>';
-  h+='<button class="btn ghost" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 
 /* ---- top-up ---- */
 function topupOn(){return !(STATE.menu&&STATE.menu.topup_on===false);}
 async function topupOpen(){
+  PAGE='wallet';
   if(!topupOn())return;
   haptic('tap');skSimple();setBack(openMore);
   try{var o=await api('/api/miniapp/topup/options');
@@ -896,18 +1136,23 @@ async function topupOpen(){
     var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
       '<div class="title">Выберите сумму</div>'+
       '<div class="coins"><svg viewBox="0 0 130 48" fill="none"><ellipse cx="45" cy="24" rx="19" ry="19" fill="rgba(91,140,255,.16)" stroke="#5b8cff" stroke-width="2"/><ellipse cx="65" cy="24" rx="19" ry="19" fill="rgba(157,123,255,.16)" stroke="#9d7bff" stroke-width="2"/><ellipse cx="85" cy="24" rx="19" ry="19" fill="rgba(52,211,153,.14)" stroke="#34d399" stroke-width="2"/><text x="85" y="30" text-anchor="middle" fill="#34d399" font-size="18" font-weight="700">₽</text></svg></div></div>';
+    if(DESK)h+='<div class="paygrid">';
     o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
-    h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
+    if(DESK)h+='</div>';
+    h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
 var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)',ym:'💜 ЮMoney'};
 function topupPick(kopecks,label){
+  PAGE='wallet';
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
     '<div class="title">'+esc(label)+'</div><div class="until">Способ пополнения</div></div>';
-  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+payLabel(m,METHOD_LABELS2[m]||m)+'</button>'+payNote(m);});
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
+  if(DESK)h+='<div class="paygrid">';
+  (STATE.tuMethods||[]).forEach(function(m){h+=(DESK?'<div class="pcell">':'')+'<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+payLabel(m,METHOD_LABELS2[m]||m)+'</button>'+payNote(m)+(DESK?'</div>':'');});
+  if(DESK)h+='</div>';
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
   view(h,topupOpen);
 }
 async function topupPay(kopecks,method,el){
@@ -950,6 +1195,7 @@ function connectList(){var p=curPlatform();return (p&&p.apps)||[];}
 // это кросс-доменный запрос к странице подписки без CORS. Пустой ответ
 // сервера уже обработан внятно: «скопируйте ссылку и добавьте вручную».
 async function openConnect(){
+  PAGE='connect';
   haptic('tap');skSimple();setBack(boot);
   try{
     var d=await api('/api/miniapp/connect');CONNECT=d;
@@ -976,6 +1222,7 @@ function renderConnect(){
   if(d.sub_url)h+='<div id="qrwrap" style="display:flex;flex-direction:column;align-items:center;margin-top:16px"><div id="qrbox" class="qrbox"></div>'+
     '<div class="hint center" style="margin-top:8px">Наведите камеру другого устройства, чтобы перенести подписку</div></div>';
   h+='</div>';
+  var hl=h;h='';
   var ps=cnPlatforms();
   if(ps.length>1){
     h+='<div class="seg">';
@@ -999,7 +1246,8 @@ function renderConnect(){
     h+='</div>';
   });
   if(grid)h+='</div>';
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
   drawQR(d.sub_url);
 }
@@ -1020,10 +1268,16 @@ async function resendVerify(el){
   busy(el,false);
 }
 async function openAccount(){
+  PAGE='account';
   var a=STATE.acct||{};
   try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
   var h='<div class="stagger">';
-  h+='<div class="sec-title">'+IC.users+'Аккаунт</div><div class="card">';
+  if(DESK){
+    var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
+    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" style="width:52px;height:52px;font-size:22px">'+esc(ini)+'</div>'+
+      '<div class="uinfo"><div class="uname" style="font-size:17px">'+esc(who)+'</div><div class="usub">'+(a.email?'Вход по почте':'Вход через Telegram')+'</div></div></div></div>';
+  }
+  h+='<div class="sec-title'+(DESK?' deskhide':'')+'">'+IC.users+'Аккаунт</div><div class="card">';
   if(a.email){
     h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b style="min-width:0;text-align:right">'+esc(a.email)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Адрес</span><b style="color:'+(a.email_verified?'var(--good)':'var(--bad)')+'">'+(a.email_verified?'подтверждён':'не подтверждён')+'</b></div>';
@@ -1040,6 +1294,7 @@ async function openAccount(){
       '<div class="hint" style="margin-top:6px">Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.</div>'+
       '<div class="tgwrap" style="margin-top:12px"><div id="tgbind"></div></div></div>';
   }
+  var hl=h;h='';
   if(a.has_password){
     h+='<div class="sec-title">'+IC.tag+'Сменить пароль</div><div class="card">'+
       '<input id="pwOld" class="field" type="password" placeholder="Текущий пароль" autocomplete="current-password">'+
@@ -1048,7 +1303,10 @@ async function openAccount(){
       '<button class="btn" style="margin-top:10px" onclick="changePass(this)">'+IC.check+'Сменить пароль</button>'+
       '<div class="hint" style="margin-top:8px;font-size:12px">Все остальные входы в этот аккаунт будут завершены.</div></div>';
   }
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
+  if(DESK&&!h)h='<div class="card"><b>Выход</b><div class="hint" style="margin-top:6px">Завершить вход в кабинет на этом устройстве. Подписка и баланс останутся, войти снова можно через Telegram.</div>'+
+    '<button class="btn sec" style="margin-top:14px" onclick="cabLogout()">'+IC.login+'Выйти</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
   view(h,openMore);
   if(!a.tg_linked)mountTGWidget('tgbind','onTGBind(user)');
 }
@@ -1107,6 +1365,7 @@ async function runVerifyLink(tok){
   STATE.acct=null;
 }
 function openReset(tok){
+  PAGE=null;
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Новый пароль</span></div>'+
@@ -1132,6 +1391,7 @@ async function doReset(el,tok){
   busy(el,false);
 }
 function openForgot(){
+  PAGE=null;
   setBack(null);
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Восстановление</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Пришлём ссылку на смену пароля.</div></div>'+
@@ -1156,6 +1416,7 @@ async function doForgot(el){
 function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
+  PAGE=null;
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   var known=STATE.botUser;
