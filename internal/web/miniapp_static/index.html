@@ -399,12 +399,22 @@ function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}cat
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
 function lsGet(k){try{return WEB?localStorage.getItem(k):null;}catch(e){return null;}}
 function lsSet(k,v){try{if(!WEB)return;if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
-// Параметр ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
-// или ?start=. Работает как /start в чате.
+// Параметры ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
+// или ?start=. Работают как /start в чате, их можно сочетать. Хранятся одной
+// строкой через пробел.
 function startParams(){
-  var p={};try{var q=new URLSearchParams(location.search);['start','promo','plan','ref','inv'].forEach(function(k){var v=q.get(k);if(v)p[k]=v.slice(0,64);});}catch(e){}
-  if(p.promo)return 'promo_'+p.promo;if(p.plan)return 'plan_'+p.plan;if(p.ref)return 'ref_'+p.ref;if(p.inv)return 'inv_'+p.inv;
-  return p.start||'';
+  var out=[];
+  try{var q=new URLSearchParams(location.search);
+    ['ref','inv','promo','plan'].forEach(function(k){var v=q.get(k);if(v)out.push(k+'_'+v);});
+    var s=q.get('start');if(s)out.push(s);
+  }catch(e){}
+  return out.map(function(t){return t.replace(/[^A-Za-z0-9_-]/g,'').slice(0,64);}).filter(Boolean).join(' ');
+}
+// На сервер при входе уходит одно: приглашение в закрытый бот или
+// пригласивший друг.
+function serverStart(s){
+  var t=String(s||'').split(' ');
+  return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
 }
 let STATE={balanceK:0,methods:[]};
 let backFn=null; // current back handler for TG BackButton
@@ -1030,14 +1040,14 @@ async function pay(plan,months,method,el,shownPrice){
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   // p2p_inapp: реквизиты перевода и чек принимаются прямо здесь, а не в чате.
   try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true});
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,0);return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,r.issued_at);return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
         tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
-      }else{openPay(r.pay_url);openWait(r.pay_url,0);}
+      }else{openPay(r.pay_url);openWait(r.pay_url,r.issued_at);}
       return;
     }
     if(r.redirect){toast(r.message||'Этот способ оплаты доступен в боте','ok');if(tg&&tg.close)setTimeout(function(){try{tg.close();}catch(e){}},2200);return;}
@@ -1051,8 +1061,9 @@ async function pay(plan,months,method,el,shownPrice){
 // с платёжкой) и уходит на главную, как только оплата прошла.
 var WAIT=null;
 function stopWait(){if(WAIT){clearInterval(WAIT.t);document.removeEventListener('visibilitychange',WAIT.v);WAIT=null;}}
-// topupK — сумма пополнения в копейках; 0 — покупка подписки.
-function openWait(url,topupK){
+// issuedAt — когда сервер выставил счёт (unix): проверка спрашивает, была ли
+// оплата после него, — так видна и оплата, которую уже провёл вебхук.
+function openWait(url,issuedAt){
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оплата</span>'+IC.wallet+'</div>'+
     '<div class="title">Ждём оплату</div><div class="hint" style="margin-top:6px">Завершите оплату на открывшейся странице. Как только платёж пройдёт, всё обновится само — эту страницу можно не закрывать.</div></div>';
   h+='<button class="btn" onclick="payCheck(this,true)">'+IC.reset+'Проверить оплату</button>';
@@ -1060,11 +1071,7 @@ function openWait(url,topupK){
   h=deskSplit(h,'');
   h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← На главную</button></div>';
   view(h,boot);
-  // Счёт, проведённый вебхуком, в проверку уже не попадёт: об оплате тогда
-  // говорит пополнение баланса на сумму счёта или новый срок подписки.
-  // Снимок свежий — сохранённый на экране мог устареть.
-  var w={k:topupK||0,n:0,ready:false};
-  api('/api/miniapp/me').then(function(m){w.b0=m.balance_kopecks||0;w.e0=m.sub_expire||'';w.ready=true;},function(){});
+  var w={since:issuedAt||0,n:0};
   // Через 3 минуты автопроверка стихает, кнопка «Проверить оплату» работает дальше.
   w.t=setInterval(function(){if(document.hidden)return;if(++w.n>30){clearInterval(w.t);return;}payCheck(null,false);},6000);
   w.v=function(){if(!document.hidden)setTimeout(function(){if(WAIT===w)payCheck(null,false);},700);};
@@ -1074,10 +1081,9 @@ function openWait(url,topupK){
 async function payCheck(el,manual){
   var w=WAIT;if(!w)return;
   if(el)busy(el,true);
-  try{var r=await post('/api/miniapp/paycheck',{});
+  try{var r=await post('/api/miniapp/paycheck',{since:w.since});
     if(WAIT!==w)return;
-    var moved=w.ready&&typeof r.balance_kopecks==='number'&&(w.k>0?r.balance_kopecks-w.b0>=w.k:!!r.sub_expire&&r.sub_expire!==w.e0);
-    if(r.paid||moved){stopWait();haptic('ok');toast('Оплата получена','ok');boot();return;}
+    if(r.paid){stopWait();haptic('ok');toast('Оплата получена','ok');boot();return;}
     if(manual){haptic('err');toast(r.error||'Оплата пока не поступила. Если вы уже оплатили, подождите минуту.','err');}
   }catch(e){if(manual){haptic('err');toast('Ошибка: '+e.message,'err');}}
   finally{if(el)busy(el,false);}
@@ -1126,12 +1132,13 @@ async function openMore(){
   h+='<button class="btn ghost back" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
-async function promoApply(el,given){
+// stay — не уходить на главную после применения (ссылка ведёт дальше, к тарифу).
+async function promoApply(el,given,stay){
   var inp=document.getElementById('promoIn'); var code=given||(inp?inp.value.trim():'');
   if(!code)return;
   haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/promo',{code:code});
-    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');boot();return;}
+    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');if(!stay)boot();return;}
     haptic('err');toast(r.message||'Не удалось','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{busy(el,false);}
@@ -1245,8 +1252,8 @@ async function topupPay(kopecks,method,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.redirect){toast(r.message||'Запрос отправлен администратору','ok');return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,kopecks);return;}
-    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url,kopecks);return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,r.issued_at);return;}
+    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url,r.issued_at);return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -1528,7 +1535,7 @@ async function renderLogin(){
   view(h,null);
   if(cfg.bot_username){STATE.botUser=cfg.bot_username;mountTGWidget('tglogin','onTGAuth(user)');}
 }
-window.onTGAuth=function(user){renderLoginBusy();var body=Object.assign({},user);var st=lsGet('cab_start');if(st)body.start=st;post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
+window.onTGAuth=function(user){renderLoginBusy();var body=Object.assign({},user);var st=serverStart(lsGet('cab_start'));if(st)body.start=st;post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
 function renderLoginBusy(){skSimple();}
 async function cabEmail(path,el){
   var email=cabVal('lemail'),pass=cabVal('lpass');
@@ -1536,7 +1543,7 @@ async function cabEmail(path,el){
   haptic('tap');busy(el,true);
   // Регистрация несёт параметр ссылки: по нему новичок привязывается к
   // пригласившему (вход его не использует).
-  var body={email:email,password:pass};if(path.indexOf('/register')>0){var st=lsGet('cab_start');if(st)body.start=st;}
+  var body={email:email,password:pass};if(path.indexOf('/register')>0){var st=serverStart(lsGet('cab_start'));if(st)body.start=st;}
   try{var r=await post(path,body);if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
   catch(e){toast(e.message||'Ошибка','err');}
   busy(el,false);
@@ -1546,16 +1553,20 @@ function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 
 /* ---- вход по ссылке ---- */
 // promo_ и plan_ разбираются здесь; ref_ и inv_ — на сервере при входе.
-async function handleStart(p){
-  if(p.indexOf('promo_')===0){
-    var code=p.slice(6);
+async function handleStart(s){
+  var t=String(s||'').split(' ');
+  var promo=t.filter(function(x){return x.indexOf('promo_')===0;})[0];
+  var plan=t.filter(function(x){return x.indexOf('plan_')===0;})[0];
+  if(promo){
+    var code=promo.slice(6);
     // До подтверждения почты промокод закрыт: ссылка ждёт подтверждения.
-    if(WEB&&STATE.acct&&STATE.acct.money_blocked){lsSet('cab_start',p);if(!STATE.promoWait){STATE.promoWait=true;toast('Подтвердите почту — промокод применится после этого','err');}return false;}
-    if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalPromoGate(code);return true;}
-    await promoApply(null,code);return true;
+    if(WEB&&STATE.acct&&STATE.acct.money_blocked){lsSet('cab_start',promo);if(!STATE.promoWait){STATE.promoWait=true;toast('Подтвердите почту — промокод применится после этого','err');}}
+    else if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalPromoGate(code);return true;}
+    else if(!plan){await promoApply(null,code);return true;}
+    else await promoApply(null,code,true);
   }
-  if(p.indexOf('plan_')===0){
-    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(p.slice(5)));
+  if(plan){
+    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(plan.slice(5)));
       if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;
         STATE.plans=(STATE.plans||[]).filter(function(x){return x.code!==lp.code;}).concat([lp]);
         openPlan(lp.code);return true;}
@@ -1612,14 +1623,16 @@ async function boot(){
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);
-    // Параметр ссылки снимается, только когда кабинет загрузился: с протухшим
-    // входом он дождётся нового.
-    if(WEB)lsSet('cab_start',null);
     // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
-    // вызовется снова.
-    if(start)STATE.pendingStart=start;
-    if(STATE.pendingStart&&!(menu.legal_accept&&menu.legal_gate_start&&legalDocs().length)){
-      var ps=STATE.pendingStart;STATE.pendingStart='';await handleStart(ps);
+    // вызовется снова. В кабинете она до тех пор лежит в localStorage и
+    // переживает перезагрузку; снимается, только когда кабинет загрузился
+    // (с протухшим входом дождётся нового).
+    var gate=!!(menu.legal_accept&&menu.legal_gate_start&&legalDocs().length);
+    if(!WEB&&start)STATE.pendingStart=start;
+    if(!gate){
+      if(WEB)lsSet('cab_start',null);
+      var ps=WEB?start:STATE.pendingStart;STATE.pendingStart='';
+      if(ps)await handleStart(ps);
     }
   }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }

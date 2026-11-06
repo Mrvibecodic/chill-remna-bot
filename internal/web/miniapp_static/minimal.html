@@ -862,14 +862,14 @@ async function pay(code,months,method,el,shown){
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   try{
     var r=await post('/api/miniapp/checkout',{plan:code,months:months,method:method,price:shown||'',p2p_inapp:true});
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url,since:r.issued_at});return;}
     if(r.ok&&r.sub_url){toast(T('paid_ok'),'ok');await refresh();goHome();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup},{replace:true});return;}
     if(r.ok&&r.pay_url){
       guardOn();
       if(r.invoice&&tg&&tg.openInvoice){tg.openInvoice(r.pay_url,function(st){guardOff();if(st==='paid'){toast(T('paid_ok'),'ok');refresh().then(goHome,goHome);}});return;}
       if(openSmart(r.pay_url))return;
-      go('wait',{url:r.pay_url});return;
+      go('wait',{url:r.pay_url,since:r.issued_at});return;
     }
     if(r.redirect){toast(r.message||T('pay_fail'));return;}
     toast(r.error||T('pay_fail'),'err');
@@ -881,10 +881,6 @@ async function pay(code,months,method,el,shown){
 /* ---------- ожидание оплаты ---------- */
 function stopPoll(){if(POLL){clearInterval(POLL);POLL=null;}}
 SCREENS.wait=function(a){
-  // Счёт, проведённый вебхуком, в проверку уже не попадёт: об оплате тогда
-  // говорит пополнение баланса на сумму счёта (a.k) или новый срок подписки.
-  // Снимок свежий — сохранённый на экране мог устареть.
-  if(a&&!a.snap){a.snap=true;api('/api/miniapp/me').then(function(m){a.b0=m.balance_kopecks||0;a.e0=m.sub_expire||'';a.ready=true;},function(){});}
   var h=(DESK?'<div class="dcenter">':'')+'<div class="card center" style="margin-top:18px">'+'<div class="spin"></div><div class="h2" style="margin-top:14px">'+esc(T('wait_title'))+'</div><div class="hint">'+esc(T('wait_text'))+'</div>'+
     '<div class="stack" style="margin-top:16px"><button class="btn" onclick="payCheck(this,true)">'+IC.refresh+esc(T('wait_check'))+'</button>'+
     (a&&a.url?'<button class="btn sec" onclick="openL(\''+jsq(a.url)+'\')">'+esc(T('wait_again'))+'</button>':'')+
@@ -894,9 +890,10 @@ SCREENS.wait=function(a){
 };
 async function payCheck(el,manual){
   if(el)busy(el,true);
-  try{var r=await post('/api/miniapp/paycheck',{});
-    var w=CUR&&CUR.name==='wait'?CUR.arg:null;
-    if(!r.paid&&w&&w.ready&&typeof r.balance_kopecks==='number'&&(w.k>0?r.balance_kopecks-w.b0>=w.k:!!r.sub_expire&&r.sub_expire!==w.e0))r.paid=true;
+  // since — когда сервер выставил счёт: оплата после него засчитывается,
+  // даже если счёт уже закрыл вебхук.
+  var w=CUR&&CUR.name==='wait'?CUR.arg:null;
+  try{var r=await post('/api/miniapp/paycheck',{since:(w&&w.since)||0});
     if(r.paid){stopPoll();guardOff();toast(T('paid_ok'),'ok');await refresh();goHome();return;}
     if(manual)toast(T('wait_none'));
   }catch(e){if(manual)toast(e.message||T('error'),'err');}
@@ -992,8 +989,8 @@ async function tuPay(m,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:a.k,method:m});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup});return;}
     if(r.redirect){toast(r.message||T('pay_fail'));return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url,k:a.k});return;}
-    if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url,k:a.k});return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url,since:r.issued_at});return;}
+    if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url,since:r.issued_at});return;}
     toast(r.error||T('pay_fail'),'err');
   }catch(e){toast(e.message||T('error'),'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -1190,6 +1187,9 @@ async function legalAccept(el){
   busy(el,true);
   try{var r=await post('/api/miniapp/legal/accept',{});
     if(r.ok){STATE.menu.legal_accept=false;
+      // Экран документов на входе пройден — параметр ссылки отработан. Промокод,
+      // ждущий подтверждения почты, остаётся ждать.
+      if(WEB&&!(CUR&&CUR.arg)&&!(STATE.acct&&STATE.acct.money_blocked))store('cab_start',null);
       if(STATE.pendingPromo){var pc=STATE.pendingPromo;STATE.pendingPromo='';promoApply(null,pc);}
       var t=CUR&&CUR.arg;if(t&&t.code){go('checkout',t,{replace:true});}else if(t&&t.act){toast(T('done'),'ok');goBack();}else{goHome();}return;}
     toast(r.error||T('error'),'err');
@@ -1260,10 +1260,21 @@ async function changePass(el){
 function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang,botUser:STATE.botUser};paintBalance();renderLogin();}
 
 /* ---------- вход в кабинет ---------- */
+// Параметры ссылки (?ref=, ?inv=, ?promo=, ?plan=, ?start=) — их можно
+// сочетать; хранятся одной строкой через пробел.
 function startParams(){
-  var p={};try{var q=new URLSearchParams(location.search);['start','promo','plan','ref','inv'].forEach(function(k){var v=q.get(k);if(v)p[k]=v.slice(0,64);});}catch(e){}
-  if(p.promo)p.start='promo_'+p.promo;else if(p.plan)p.start='plan_'+p.plan;else if(p.ref)p.start='ref_'+p.ref;else if(p.inv)p.start='inv_'+p.inv;
-  return p.start||'';
+  var out=[];
+  try{var q=new URLSearchParams(location.search);
+    ['ref','inv','promo','plan'].forEach(function(k){var v=q.get(k);if(v)out.push(k+'_'+v);});
+    var s=q.get('start');if(s)out.push(s);
+  }catch(e){}
+  return out.map(function(t){return t.replace(/[^A-Za-z0-9_-]/g,'').slice(0,64);}).filter(Boolean).join(' ');
+}
+// На сервер при входе уходит одно: приглашение в закрытый бот или
+// пригласивший друг.
+function serverStart(s){
+  var t=String(s||'').split(' ');
+  return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
 }
 async function renderLogin(){
   STACK=[];CUR={name:'login'};setBack(false);paintBalance();
@@ -1280,7 +1291,7 @@ async function renderLogin(){
   if(cfg.bot_username)mountTG('tglogin','onTGAuth(user)');
 }
 window.onTGAuth=function(u){
-  var body=Object.assign({},u);var st=load('cab_start');if(st)body.start=st;
+  var body=Object.assign({},u);var st=serverStart(load('cab_start'));if(st)body.start=st;
   view('<div class="sk" style="height:200px"></div>');
   post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);boot();}else{toast(T('login_fail'),'err');renderLogin();}}).catch(function(e){toast(e.message||T('login_fail'),'err');renderLogin();});
 };
@@ -1290,7 +1301,7 @@ async function cabAuth(kind,el){
   busy(el,true);
   // Регистрация несёт параметр ссылки: по нему новичок привязывается к
   // пригласившему (вход его не использует).
-  var body={email:em,password:pw};if(kind==='register'){var st=load('cab_start');if(st)body.start=st;}
+  var body={email:em,password:pw};if(kind==='register'){var st=serverStart(load('cab_start'));if(st)body.start=st;}
   try{var r=await post('/api/cabinet/auth/'+kind,body);if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);boot();return;}toast(T('login_fail'),'err');}
   catch(x){toast(x.message||T('login_fail'),'err');}
   busy(el,false);
@@ -1327,17 +1338,19 @@ async function refresh(){
   if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
   paintBalance();paintBrand();
 }
-async function handleStart(p){
-  if(!p)return false;
-  if(p.indexOf('promo_')===0){
+async function handleStart(s){
+  var t=String(s||'').split(' ');
+  var promo=t.filter(function(x){return x.indexOf('promo_')===0;})[0];
+  var plan=t.filter(function(x){return x.indexOf('plan_')===0;})[0];
+  if(promo){
     // До подтверждения почты промокод закрыт: ссылка ждёт подтверждения.
-    if(WEB&&STATE.acct&&STATE.acct.money_blocked){store('cab_start',p);if(!STATE.promoWait){STATE.promoWait=true;toast(T('promo_wait_mail'),'err');}return false;}
+    if(WEB&&STATE.acct&&STATE.acct.money_blocked){store('cab_start',promo);if(!STATE.promoWait){STATE.promoWait=true;toast(T('promo_wait_mail'),'err');}}
     // Сначала документы, если их нужно принять: промокод применится после.
-    if(STATE.menu.legal_accept&&legalDocs().length){STATE.pendingPromo=p.slice(6);return false;}
-    await promoApply(null,p.slice(6));return false;
+    else if(STATE.menu.legal_accept&&legalDocs().length)STATE.pendingPromo=promo.slice(6);
+    else await promoApply(null,promo.slice(6));
   }
-  if(p.indexOf('plan_')===0){
-    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(p.slice(5)));
+  if(plan){
+    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(plan.slice(5)));
       if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;STATE.plans=STATE.plans.filter(function(x){return x.code!==lp.code;}).concat([lp]);STACK=[{name:'home'}];CUR={name:'plan',arg:{code:lp.code}};SCREENS.plan(CUR.arg);return true;}
       toast(r.notice||T('plan_link_fail'),'err');
     }catch(e){toast(e.message||T('error'),'err');}
@@ -1365,9 +1378,11 @@ async function boot(){
     }
     if(!STATE.me)view('<div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div>');
     await refresh();
-    // Параметр ссылки снимается, только когда кабинет загрузился: с протухшим
-    // входом он дождётся нового.
-    if(WEB)store('cab_start',null);
+    // Параметр ссылки снимается, только когда кабинет загрузился (с протухшим
+    // входом дождётся нового) и нет экрана документов на входе: до «Принимаю»
+    // он переживает перезагрузку, снимает его legalAccept.
+    var m0=STATE.menu||{};
+    if(WEB&&!(m0.legal_accept&&m0.legal_gate_start&&legalDocs().length))store('cab_start',null);
     if(start&&await handleStart(start))return;
     goHome();
   }catch(e){
