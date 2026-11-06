@@ -401,19 +401,21 @@ function lsGet(k){try{return WEB?localStorage.getItem(k):null;}catch(e){return n
 function lsSet(k,v){try{if(!WEB)return;if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
 // Параметры ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
 // или ?start=. Работают как /start в чате, их можно сочетать. Хранятся одной
-// строкой через пробел.
+// строкой через перевод строки.
 function startParams(){
   var out=[];
   try{var q=new URLSearchParams(location.search);
     ['ref','inv','promo','plan'].forEach(function(k){var v=q.get(k);if(v)out.push(k+'_'+v);});
     var s=q.get('start');if(s)out.push(s);
   }catch(e){}
-  return out.map(function(t){return t.replace(/[^A-Za-z0-9_-]/g,'').slice(0,64);}).filter(Boolean).join(' ');
+  // Разделитель — перевод строки: в коде промокода бывает что угодно, кроме
+  // пробельных символов.
+  return out.map(function(t){return t.replace(/\s/g,'').slice(0,64);}).filter(Boolean).join('\n');
 }
 // На сервер при входе уходит одно: приглашение в закрытый бот или
 // пригласивший друг.
 function serverStart(s){
-  var t=String(s||'').split(' ');
+  var t=String(s||'').split('\n');
   return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
 }
 let STATE={balanceK:0,methods:[]};
@@ -1554,7 +1556,7 @@ function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 /* ---- вход по ссылке ---- */
 // promo_ и plan_ разбираются здесь; ref_ и inv_ — на сервере при входе.
 async function handleStart(s){
-  var t=String(s||'').split(' ');
+  var t=String(s||'').split('\n');
   var promo=t.filter(function(x){return x.indexOf('promo_')===0;})[0];
   var plan=t.filter(function(x){return x.indexOf('plan_')===0;})[0];
   if(promo){
