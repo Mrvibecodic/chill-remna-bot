@@ -927,6 +927,7 @@ var en = map[string]string{
 	"btn.referral_admin":           "👥 Referrals",
 	"ref.disabled":                 "The referral program is currently disabled.",
 	"ref.user":                     "👥 <b>Referral program</b>\n\nInvite friends and get a bonus: <b>%s</b> %s.%s\n\nInvited: <b>%d</b> · Earned: <b>%s ₽</b>\n\nYour link (tap to copy):\n<code>%s</code>",
+	"ref.cabinet_link":             "\n\nWebsite link — for friends without Telegram:\n<code>%s</code>",
 	"ref.bonus_balance_n":          "%d ₽ to balance",
 	"ref.bonus_days_n":             "%d days of subscription",
 	"ref.when_pay":                 "after the invited user's first payment",

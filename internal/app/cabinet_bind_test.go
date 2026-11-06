@@ -13,7 +13,7 @@ func TestBindTelegramMovesAccount(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
 
-	id, err := a.CabinetEmailRegister(ctx, "bind@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "bind@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestBindTelegramMovesAccount(t *testing.T) {
 func TestBindTelegramRefusesBusyAccount(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "busy@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "busy@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestBindTelegramRefusesBusyAccount(t *testing.T) {
 func TestBindTelegramAllowsBareStartRow(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "bare@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "bare@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestBindTelegramAllowsBareStartRow(t *testing.T) {
 func TestBindTelegramRefusesWhenBotClosed(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "closed@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "closed@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestBindTelegramOnlyForEmailAccounts(t *testing.T) {
 func TestBindTelegramBumpsEpoch(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "epoch@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "epoch@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}

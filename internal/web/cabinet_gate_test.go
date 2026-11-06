@@ -21,6 +21,7 @@ type fakeMini struct {
 	blocked bool
 	forgot  []string
 	bound   int64
+	start   string
 }
 
 const fakeBotToken = "123456:TESTTOKEN"
@@ -55,6 +56,11 @@ func (f *fakeMini) CabinetBindTelegram(_ context.Context, _, newID int64) (int64
 	return newID, nil
 }
 func (f *fakeMini) CabinetBindName(context.Context, int64, string, string) {}
+func (f *fakeMini) CabinetEmailRegister(_ context.Context, _, _, start string) (int64, error) {
+	f.start = start
+	return -9, nil
+}
+func (f *fakeMini) CabinetEmailLogin(context.Context, string, string) (int64, error) { return -9, nil }
 
 func gateServer(t *testing.T, f *fakeMini) http.Handler {
 	t.Helper()
@@ -215,5 +221,25 @@ func TestBindRequiresValidSignature(t *testing.T) {
 	}
 	if f.bound != 900 {
 		t.Fatalf("привязка не дошла до приложения: %d", f.bound)
+	}
+}
+
+// Параметр ссылки доходит до регистрации (по нему новичок привязывается к
+// пригласившему), а вход его не несёт.
+func TestCabinetRegisterPassesStart(t *testing.T) {
+	f := &fakeMini{}
+	h := gateServer(t, f)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/cabinet/auth/register",
+		`{"email":"a@example.com","password":"password1","start":"ref_1000000001"}`, "", "203.0.113.40"))
+	if w.Code != http.StatusOK || f.start != "ref_1000000001" {
+		t.Fatalf("регистрация: code=%d start=%q", w.Code, f.start)
+	}
+	f.start = ""
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/cabinet/auth/register",
+		`{"email":"b@example.com","password":"password1","start":"`+strings.Repeat("x", 65)+`"}`, "", "203.0.113.41"))
+	if w.Code != http.StatusOK || f.start != "" {
+		t.Fatalf("длинный параметр обязан отбрасываться: code=%d start=%q", w.Code, f.start)
 	}
 }

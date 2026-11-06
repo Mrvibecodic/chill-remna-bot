@@ -160,7 +160,7 @@ func emailLinkApp(t *testing.T, verified bool) (*App, *fakeStore, *fakeMsg, *ema
 	p := newEmailPanel(t)
 	a.panel = a.newPanel(model.PanelConfig{BaseURL: p.srv.URL, APIToken: "t"})
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "client@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "client@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}

@@ -110,7 +110,9 @@ type MiniProvider interface {
 	CabinetFavicon() string
 	CabinetAntiFP() bool
 	CabinetEnsureUser(ctx context.Context, tgID int64)
-	CabinetEmailRegister(ctx context.Context, email, password string) (int64, error)
+	// CabinetEmailRegister заводит аккаунт по почте; start — параметр ссылки,
+	// по которой открыли кабинет (ref_ привязывает к пригласившему).
+	CabinetEmailRegister(ctx context.Context, email, password, start string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
 	CabinetGate(ctx context.Context, tgID int64, isEmail bool) error
 	// CabinetAccount — состояние аккаунта для экрана «Аккаунт».
@@ -164,6 +166,11 @@ type MiniReferralDTO struct {
 	InviteeKind   string `json:"invitee_kind,omitempty"`
 	InviteeValue  int    `json:"invitee_value"`
 	Percent       int    `json:"percent"`
+	// CabinetLink — та же ссылка, но на сайт кабинета (для тех, кто без
+	// Telegram); пусто, когда кабинет выключен.
+	CabinetLink string `json:"cabinet_link,omitempty"`
+	// CabinetFirst — у аккаунта нет Telegram: ссылку на кабинет показать первой.
+	CabinetFirst bool `json:"cabinet_first,omitempty"`
 }
 
 type MiniPromoDTO struct {

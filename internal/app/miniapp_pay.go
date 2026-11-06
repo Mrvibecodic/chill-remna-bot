@@ -303,6 +303,8 @@ func (a *App) MiniReferral(ctx context.Context, tgID int64) web.MiniReferralDTO 
 		InviteeKind:   cfg.InviteeKind,
 		InviteeValue:  cfg.InviteeValue,
 		Percent:       cfg.Percent,
+		CabinetLink:   a.cabinetReferralLink(tgID),
+		CabinetFirst:  tgID < 0,
 	}
 }
 

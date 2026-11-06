@@ -197,6 +197,9 @@ func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register b
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		// Start — параметр ссылки, по которой открыли кабинет: действует
+		// только при заведении нового аккаунта, как /start в чате.
+		Start string `json:"start"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -206,7 +209,11 @@ func (s *Server) cabinetEmail(w http.ResponseWriter, r *http.Request, register b
 	defer cancel()
 	var id int64
 	if register {
-		id, err = s.mini.CabinetEmailRegister(ctx, req.Email, req.Password)
+		st := strings.TrimSpace(req.Start)
+		if len(st) > 64 {
+			st = ""
+		}
+		id, err = s.mini.CabinetEmailRegister(ctx, req.Email, req.Password, st)
 	} else {
 		id, err = s.mini.CabinetEmailLogin(ctx, req.Email, req.Password)
 	}

@@ -16,7 +16,7 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	a.botCfg.Cabinet.Enabled = true
 	ctx := context.Background()
 
-	id, err := a.CabinetEmailRegister(ctx, "User@Example.com", "secret12")
+	id, err := a.CabinetEmailRegister(ctx, "User@Example.com", "secret12", "")
 	if err != nil || id >= 0 {
 		t.Fatalf("register: id=%d err=%v (id must be negative synthetic)", id, err)
 	}
@@ -26,10 +26,10 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	// Anti-enumeration: re-registering an existing email no longer reveals it
 	// exists. With the CORRECT password it logs the user in (same id, no error);
 	// with a WRONG password it returns the generic auth error.
-	if rid, err := a.CabinetEmailRegister(ctx, "user@example.com", "secret12"); err != nil || rid != id {
+	if rid, err := a.CabinetEmailRegister(ctx, "user@example.com", "secret12", ""); err != nil || rid != id {
 		t.Fatalf("re-register w/ correct pass should log in (case-insensitive): rid=%d err=%v", rid, err)
 	}
-	if _, err := a.CabinetEmailRegister(ctx, "user@example.com", "wrongpass9"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "user@example.com", "wrongpass9", ""); err == nil {
 		t.Fatal("re-register with wrong password must be rejected")
 	}
 	if lid, err := a.CabinetEmailLogin(ctx, "user@example.com", "secret12"); err != nil || lid != id {
@@ -38,7 +38,7 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	if _, err := a.CabinetEmailLogin(ctx, "user@example.com", "wrong"); err == nil {
 		t.Fatal("wrong password must be rejected")
 	}
-	if _, err := a.CabinetEmailRegister(ctx, "a@b.io", "123"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "a@b.io", "123", ""); err == nil {
 		t.Fatal("short password must be rejected")
 	}
 }
@@ -52,7 +52,7 @@ func TestCabinetApprovalGate(t *testing.T) {
 	a.botCfg.Cabinet.Approval = model.CabinetApprovalAll
 	ctx := context.Background()
 
-	if _, err := a.CabinetEmailRegister(ctx, "x@example.com", "password1"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "x@example.com", "password1", ""); err == nil {
 		t.Fatal("registration must be gated when approval=all")
 	}
 	wu, _ := fs.GetWebUserByEmail(ctx, "x@example.com")
@@ -85,7 +85,7 @@ func TestCabinetDeniedGate(t *testing.T) {
 	a.botCfg.Cabinet.Approval = model.CabinetApprovalAll
 	ctx := context.Background()
 
-	if _, err := a.CabinetEmailRegister(ctx, "denied@example.com", "password1"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "denied@example.com", "password1", ""); err == nil {
 		t.Fatal("регистрация должна быть загейчена при approval=all")
 	}
 	wu, _ := fs.GetWebUserByEmail(ctx, "denied@example.com")
@@ -181,7 +181,7 @@ func TestCabinetDeletedUserCannotSignIn(t *testing.T) {
 			a.botCfg.Cabinet.Enabled = true
 			ctx := context.Background()
 
-			id, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1")
+			id, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1", "")
 			if err != nil {
 				t.Fatalf("регистрация: %v", err)
 			}
@@ -198,7 +198,7 @@ func TestCabinetDeletedUserCannotSignIn(t *testing.T) {
 				t.Fatalf("старый пропуск удалённого аккаунта не должен приниматься: поколение %d", e)
 			}
 			// Тот же адрес можно зарегистрировать заново — это новый аккаунт.
-			nid, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password2")
+			nid, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password2", "")
 			if err != nil || nid == id {
 				t.Fatalf("повторная регистрация: id=%d (старый %d) err=%v", nid, id, err)
 			}
@@ -251,7 +251,7 @@ func TestSessionEpochStaleReadNotCached(t *testing.T) {
 	a.botCfg.Cabinet.Enabled = true
 	ctx := context.Background()
 
-	id, err := a.CabinetEmailRegister(ctx, "race@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "race@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}

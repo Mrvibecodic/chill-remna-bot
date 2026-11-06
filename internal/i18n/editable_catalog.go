@@ -910,6 +910,11 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "percent", Ru: "процент", Desc: [2]string{"процент от каждой оплаты приглашённого — целое число; знак % уже в тексте", "percent of each invitee payment — integer; the % sign is already in the text"}, Example: [2]string{"10", "10"}},
 		}},
+	{Key: "ref.cabinet_link", Section: "ref", Kind: KindHTML,
+		Where: [2]string{"Экран «Реферальная программа» — вторая ссылка, на сайт кабинета (когда кабинет включён)", "«Referral program» screen — second link, to the web cabinet (when the cabinet is on)"},
+		Vars: []EditVar{
+			{Name: "site_link", Ru: "ссылка_сайт", Desc: [2]string{"личная ссылка на сайт кабинета для друзей без Telegram", "personal link to the web cabinet for friends without Telegram"}, Example: [2]string{"https://example.com/cabinet/?ref=1000000001", "https://example.com/cabinet/?ref=1000000001"}},
+		}},
 	{Key: "ref.bonus_balance", Section: "ref", Kind: KindHTML,
 		Where: [2]string{"Уведомление пригласившему: начислен бонус на баланс за друга", "Notice to the referrer: balance bonus credited for a friend"},
 		Vars: []EditVar{
