@@ -101,6 +101,9 @@ type Storage interface {
 	CreateWebUser(ctx context.Context, u *model.WebUser) error
 	GetWebUserByEmail(ctx context.Context, email string) (*model.WebUser, error)
 	GetWebUserByTgID(ctx context.Context, tgID int64) (*model.WebUser, error)
+	// WebUserByPrevID — нынешний номер аккаунта кабинета, который переехал с
+	// номера prev при привязке Telegram; 0 — такого нет.
+	WebUserByPrevID(ctx context.Context, prev int64) (int64, error)
 	SetWebApproved(ctx context.Context, tgID int64, approved bool) error
 	SetWebDenied(ctx context.Context, tgID int64, denied bool) error
 	SetWebUserVerified(ctx context.Context, tgID int64, at string) error
@@ -1585,13 +1588,13 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	_ = snapRows.Close()
 
-	wrows, err := b.db.QueryContext(ctx, "SELECT tg_id, email, pass_hash, created_at, email_verified_at FROM web_users")
+	wrows, err := b.db.QueryContext(ctx, "SELECT tg_id, email, pass_hash, created_at, email_verified_at, prev_tg_id FROM web_users")
 	if err != nil {
 		return nil, err
 	}
 	for wrows.Next() {
 		var wu model.WebUser
-		if err := wrows.Scan(&wu.TgID, &wu.Email, &wu.PassHash, &wu.CreatedAt, &wu.VerifiedAt); err != nil {
+		if err := wrows.Scan(&wu.TgID, &wu.Email, &wu.PassHash, &wu.CreatedAt, &wu.VerifiedAt, &wu.PrevTgID); err != nil {
 			_ = wrows.Close()
 			return nil, err
 		}
@@ -1765,11 +1768,11 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	for i := range s.WebUsers {
 		wu := &s.WebUsers[i]
 		if _, err := b.db.ExecContext(ctx,
-			"INSERT INTO web_users (tg_id, email, pass_hash, created_at, email_verified_at) "+
-				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+") "+
+			"INSERT INTO web_users (tg_id, email, pass_hash, created_at, email_verified_at, prev_tg_id) "+
+				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+") "+
 				"ON CONFLICT (tg_id) DO UPDATE SET email = excluded.email, pass_hash = excluded.pass_hash, "+
-				"created_at = excluded.created_at, email_verified_at = excluded.email_verified_at",
-			wu.TgID, wu.Email, wu.PassHash, wu.CreatedAt, wu.VerifiedAt); err != nil && !isUniqueViolation(err) {
+				"created_at = excluded.created_at, email_verified_at = excluded.email_verified_at, prev_tg_id = excluded.prev_tg_id",
+			wu.TgID, wu.Email, wu.PassHash, wu.CreatedAt, wu.VerifiedAt, wu.PrevTgID); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}
@@ -2319,6 +2322,19 @@ func (b *base) GetWebUserByTgID(ctx context.Context, tgID int64) (*model.WebUser
 		return nil, err
 	}
 	return u, nil
+}
+
+func (b *base) WebUserByPrevID(ctx context.Context, prev int64) (int64, error) {
+	if prev == 0 {
+		return 0, nil
+	}
+	var id int64
+	err := b.db.QueryRowContext(ctx,
+		"SELECT tg_id FROM web_users WHERE prev_tg_id = "+b.ph(1), prev).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }
 
 func (b *base) SetWebApproved(ctx context.Context, tgID int64, approved bool) error {

@@ -1303,6 +1303,14 @@ func (s *fakeStore) CreateWebUser(_ context.Context, u *model.WebUser) error {
 	s.webUsers[u.Email] = &cp
 	return nil
 }
+func (s *fakeStore) WebUserByPrevID(_ context.Context, prev int64) (int64, error) {
+	for _, u := range s.webUsers {
+		if prev != 0 && u.PrevTgID == prev {
+			return u.TgID, nil
+		}
+	}
+	return 0, nil
+}
 func (s *fakeStore) GetWebUserByTgID(_ context.Context, tgID int64) (*model.WebUser, error) {
 	var out *model.WebUser
 	for _, u := range s.webUsers {
@@ -1447,6 +1455,12 @@ func (s *fakeStore) MoveAccount(_ context.Context, from, to int64) error {
 	for _, u := range s.webUsers {
 		if u.TgID == from {
 			u.TgID = to
+			u.PrevTgID = from
+		}
+	}
+	for _, u := range s.users {
+		if u.ReferredBy == from {
+			u.ReferredBy = to
 		}
 	}
 	for _, p := range s.pays {

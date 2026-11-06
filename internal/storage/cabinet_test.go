@@ -165,6 +165,14 @@ func TestMoveAccount(t *testing.T) {
 		if err := st.UpsertUser(ctx, to); err != nil {
 			t.Fatal(err)
 		}
+		// Приглашённый этим аккаунтом обязан остаться за ним и после переезда.
+		const invitee = int64(42)
+		if err := st.UpsertUser(ctx, invitee); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetReferredBy(ctx, invitee, from); err != nil {
+			t.Fatal(err)
+		}
 
 		if err := st.MoveAccount(ctx, from, to); err != nil {
 			t.Fatalf("перенос: %v", err)
@@ -182,6 +190,33 @@ func TestMoveAccount(t *testing.T) {
 		}
 		if ok, err := st.HasPaidPayment(ctx, to); err != nil || !ok {
 			t.Fatalf("платежи не переехали: ok=%v err=%v", ok, err)
+		}
+		if iu, _ := st.GetUser(ctx, invitee); iu == nil || iu.ReferredBy != to {
+			t.Fatalf("приглашённый не переехал: %+v", iu)
+		}
+		if n, err := st.CountReferrals(ctx, to); err != nil || n != 1 {
+			t.Fatalf("счётчик приглашённых: n=%d err=%v", n, err)
+		}
+		// Старые ссылки несут прежний номер — по нему находится новый.
+		if id, err := st.WebUserByPrevID(ctx, from); err != nil || id != to {
+			t.Fatalf("прежний номер: id=%d err=%v", id, err)
+		}
+		if id, err := st.WebUserByPrevID(ctx, -999); err != nil || id != 0 {
+			t.Fatalf("незнакомый прежний номер: id=%d err=%v", id, err)
+		}
+		// Прежний номер переживает переезд базы.
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prev int64
+		for _, wu := range snap.WebUsers {
+			if wu.TgID == to {
+				prev = wu.PrevTgID
+			}
+		}
+		if prev != from {
+			t.Fatalf("в снимке нет прежнего номера: %d", prev)
 		}
 	})
 }

@@ -203,6 +203,9 @@ var accountTables = []struct{ table, col string }{
 	{"plan_access", "telegram_id"},
 	{"torrent_reports", "telegram_id"},
 	{"torrent_strikes", "tg_id"},
+	// Приглашённые этим аккаунтом: без переноса пригласивший терял их вместе с
+	// процентом с их оплат.
+	{"users", "referred_by"},
 }
 
 // MoveAccount переносит аккаунт с одного идентификатора на другой одной
@@ -232,6 +235,12 @@ func (b *base) MoveAccount(ctx context.Context, from, to int64) error {
 			"UPDATE "+t.table+" SET "+t.col+" = "+b.ph(1)+" WHERE "+t.col+" = "+b.ph(2), to, from); err != nil {
 			return fmt.Errorf("перенос %s: %w", t.table, err)
 		}
+	}
+	// Прежний номер запоминается: реферальные ссылки, разосланные до привязки,
+	// несут его.
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE web_users SET prev_tg_id = "+b.ph(1)+" WHERE tg_id = "+b.ph(2), from, to); err != nil {
+		return fmt.Errorf("перенос web_users: %w", err)
 	}
 	return tx.Commit()
 }
