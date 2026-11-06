@@ -59,22 +59,31 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 	}
 	text += "\n\n" + i18n.T(lang, "cabinet.steps")
 
-	appr := i18n.T(lang, "cabinet.appr_"+func() string {
-		a.mu.Lock()
-		m := model.CabinetApprovalOff
-		if a.botCfg != nil && a.botCfg.Cabinet.Approval != "" {
-			m = a.botCfg.Cabinet.Approval
-		}
-		a.mu.Unlock()
-		return m
-	}())
-	text += "\n" + i18n.T(lang, "cabinet.approval", appr)
 	a.mu.Lock()
 	cab := model.CabinetConfig{}
 	if a.botCfg != nil {
 		cab = a.botCfg.Cabinet
 	}
 	a.mu.Unlock()
+	apprTG, apprEmail := approvalSplit(cab.Approval)
+	yesNo := func(on bool) string {
+		if on {
+			return i18n.T(lang, "cabinet.appr_yes")
+		}
+		return i18n.T(lang, "cabinet.appr_no")
+	}
+	emailLine := yesNo(apprEmail)
+	// В закрытом боте почту одобряет админ всегда (см. CabinetGate).
+	if !apprEmail && a.accessMode() != model.AccessPublic {
+		emailLine = i18n.T(lang, "cabinet.appr_yes") + i18n.T(lang, "cabinet.appr_closed")
+	}
+	text += "\n" + i18n.T(lang, "cabinet.approval", yesNo(apprTG), emailLine)
+	mark := func(on bool) string {
+		if on {
+			return "✅"
+		}
+		return "❌"
+	}
 	yn := func(set bool) string {
 		if set {
 			return i18n.T(lang, "user.yes")
@@ -88,7 +97,8 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 	}
 	rows := [][]models.InlineKeyboardButton{
 		{btn(toggle, "menu:cabtoggle")},
-		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath"), btn(i18n.T(lang, "cabinet.btn_approval"), "menu:cabapprove")},
+		{btn(i18n.T(lang, "cabinet.btn_appr_tg", mark(apprTG)), "menu:cabapptg"), btn(i18n.T(lang, "cabinet.btn_appr_email", mark(apprEmail)), "menu:cabappem")},
+		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath")},
 		{btn(i18n.T(lang, "cabinet.btn_title"), "menu:cabtitle"), btn(i18n.T(lang, "cabinet.btn_desc"), "menu:cabdesc")},
 		{btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav"), btn(fpLabel, "menu:cabfp")},
 		{btn(i18n.T(lang, "cabinet.btn_logout_all"), "menu:cablogout")},
@@ -198,20 +208,39 @@ func (a *App) adminApproveWebUser(ctx context.Context, adminChat int64, arg stri
 	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.user_ok_done"))
 }
 
-func (a *App) cycleCabinetApproval(ctx context.Context, chatID int64) {
+// approvalSplit — режим одобрения как пара «вход через Telegram, вход по
+// почте». Неизвестное значение — как «выкл»: так же его читает
+// cabinetNeedsApproval.
+func approvalSplit(mode string) (tg, email bool) {
+	return mode == model.CabinetApprovalTG || mode == model.CabinetApprovalAll,
+		mode == model.CabinetApprovalEmail || mode == model.CabinetApprovalAll
+}
+
+func approvalJoin(tg, email bool) string {
+	switch {
+	case tg && email:
+		return model.CabinetApprovalAll
+	case tg:
+		return model.CabinetApprovalTG
+	case email:
+		return model.CabinetApprovalEmail
+	}
+	return model.CabinetApprovalOff
+}
+
+// toggleCabinetApproval переключает одобрение для одного типа входа, второй не
+// трогает.
+func (a *App) toggleCabinetApproval(ctx context.Context, chatID int64, email bool) {
 	a.mu.Lock()
 	if a.botCfg != nil {
 		a.botCfg.NormalizeCabinet()
-		switch a.botCfg.Cabinet.Approval {
-		case model.CabinetApprovalOff:
-			a.botCfg.Cabinet.Approval = model.CabinetApprovalAll
-		case model.CabinetApprovalAll:
-			a.botCfg.Cabinet.Approval = model.CabinetApprovalTG
-		case model.CabinetApprovalTG:
-			a.botCfg.Cabinet.Approval = model.CabinetApprovalEmail
-		default:
-			a.botCfg.Cabinet.Approval = model.CabinetApprovalOff
+		tg, em := approvalSplit(a.botCfg.Cabinet.Approval)
+		if email {
+			em = !em
+		} else {
+			tg = !tg
 		}
+		a.botCfg.Cabinet.Approval = approvalJoin(tg, em)
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)

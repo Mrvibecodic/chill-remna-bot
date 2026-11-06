@@ -14,7 +14,6 @@ import (
 var dynamicPrefixes = []string{
 	"access.mode_",
 	"access.hint_",
-	"cabinet.appr_",
 	"mail.ask_",
 	"hl.admin_",
 	"plans.av_",

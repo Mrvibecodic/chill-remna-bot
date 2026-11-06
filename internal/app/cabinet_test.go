@@ -266,3 +266,50 @@ func TestSessionEpochStaleReadNotCached(t *testing.T) {
 	}
 }
 
+// Одобрение новых в кабинете — два независимых тумблера; кнопка из старых
+// сообщений режим не меняет.
+func TestCabinetApprovalToggles(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	ctx := context.Background()
+	mode := func() string {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.botCfg.Cabinet.Approval
+	}
+
+	steps := []struct{ tap, want, screen string }{
+		{"menu:cabappem", model.CabinetApprovalEmail, "Telegram — <b>нет</b>, почта — <b>да</b>"},
+		{"menu:cabapptg", model.CabinetApprovalAll, "Telegram — <b>да</b>, почта — <b>да</b>"},
+		{"menu:cabappem", model.CabinetApprovalTG, "Telegram — <b>да</b>, почта — <b>нет</b>"},
+		{"menu:cabapprove", model.CabinetApprovalTG, "Telegram — <b>да</b>, почта — <b>нет</b>"},
+		{"menu:cabapptg", model.CabinetApprovalOff, "Telegram — <b>нет</b>, почта — <b>нет</b>"},
+	}
+	for _, s := range steps {
+		fm.texts = nil
+		a.handleCallback(ctx, cb(100, s.tap))
+		if got := mode(); got != s.want {
+			t.Fatalf("%s: режим %q, want %q", s.tap, got, s.want)
+		}
+		if !strings.Contains(fm.joined(), s.screen) {
+			t.Fatalf("%s: на экране нет %q:\n%s", s.tap, s.screen, fm.joined())
+		}
+	}
+	// Не админ режим не меняет.
+	a.handleCallback(ctx, cb(1000000001, "menu:cabappem"))
+	if got := mode(); got != model.CabinetApprovalOff {
+		t.Fatalf("не админ поменял режим: %q", got)
+	}
+	// В закрытом боте почту одобряет админ всегда — экран это говорит.
+	a.mu.Lock()
+	a.botCfg.AccessMode = model.AccessWhitelist
+	a.mu.Unlock()
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "menu:cabinet"))
+	if !strings.Contains(fm.joined(), "почта — <b>да (бот закрыт)</b>") {
+		t.Fatalf("закрытый бот: %s", fm.joined())
+	}
+}

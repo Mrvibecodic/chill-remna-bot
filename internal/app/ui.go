@@ -854,9 +854,14 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 			a.getUI(chatID).adminInput = "cab_path"
 			a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.ask_path"), "menu:cabinet")
 		}
-	case "cabapprove":
+	case "cabapptg", "cabappem":
 		if isAdmin {
-			a.cycleCabinetApproval(ctx, chatID)
+			a.toggleCabinetApproval(ctx, chatID, val == "cabappem")
+		}
+	case "cabapprove":
+		// Кнопка из старых сообщений: режим не меняет, показывает экран.
+		if isAdmin {
+			a.showCabinetAdmin(ctx, chatID)
 		}
 	case "cabtitle":
 		if isAdmin {
