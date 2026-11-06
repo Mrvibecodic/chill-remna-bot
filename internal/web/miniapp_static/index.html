@@ -1026,9 +1026,9 @@ async function openMore(){
     '<div class="title">'+rub(STATE.balanceK)+' ₽</div>'+
     (topupOn()?'<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button>':'')+
     '<div class="hint" style="margin-top:12px">Баланс тратится только на подписку. Вывод средств невозможен.</div></div>';
-  var hl=h;h='';
   h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
     '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
+  var hl=h;h='';
   if(ref&&ref.enabled){
     var bonus=(ref.bonus_kind==='days')?(ref.bonus_value+' дн.'):(ref.bonus_value+' ₽');
     h+='<div class="sec-title">'+IC.gift+'Пригласить друга</div><div class="card">';
@@ -1222,6 +1222,9 @@ function renderConnect(){
   if(d.sub_url)h+='<div id="qrwrap" style="display:flex;flex-direction:column;align-items:center;margin-top:16px"><div id="qrbox" class="qrbox"></div>'+
     '<div class="hint center" style="margin-top:8px">Наведите камеру другого устройства, чтобы перенести подписку</div></div>';
   h+='</div>';
+  // На компьютере ссылку часто вставляют в программу вручную — кнопка нужна и
+  // при списке приложений.
+  if(DESK&&d.sub_url&&connectList().length)h+='<button class="btn sec" style="margin-top:0" onclick="copy(\''+jsq(d.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';
   var hl=h;h='';
   var ps=cnPlatforms();
   if(ps.length>1){

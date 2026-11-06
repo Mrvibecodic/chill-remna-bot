@@ -249,6 +249,11 @@ input[type=file].field{padding:12px;height:auto}
   .tbar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:14px}
   .tbar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
   .tbar.hi i{background:var(--warn)}
+  .prow{display:flex;gap:12px;align-items:center}
+  .prow .field{flex:1;min-width:0}
+  .prow .btn{width:auto;flex:none;padding:8px 28px}
+  .dgrid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 16px}
+  .dcenter{max-width:520px;margin:40px auto 0}
   .drow{padding:11px 0}
   .drow+.drow{border-top:1px solid var(--line)}
   .drow .t{font-weight:600;font-size:14.5px}
@@ -550,7 +555,7 @@ function post(p,b){return api(p,{method:'POST',body:JSON.stringify(b||{})});}
 
 /* ---------- навигация ---------- */
 function setBack(on){try{if(tg&&tg.BackButton){if(on)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}}
-function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();var sd=sideOn();if(sd&&!/\b(dgrid|dsplit|dwide)\b/.test(html))html='<div class="dnarrow">'+html+'</div>';app.innerHTML=html;renderSide(sd);app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
+function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();var sd=sideOn();if(sd&&!/\b(dgrid|dsplit|dwide|dcenter)\b/.test(html))html='<div class="dnarrow">'+html+'</div>';app.innerHTML=html;renderSide(sd);app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
 var SCREENS={};
 function go(name,arg,opt){
   haptic();
@@ -869,10 +874,10 @@ async function pay(code,months,method,el,shown){
 /* ---------- ожидание оплаты ---------- */
 function stopPoll(){if(POLL){clearInterval(POLL);POLL=null;}}
 SCREENS.wait=function(a){
-  var h='<div class="card center" style="margin-top:18px">'+'<div class="spin"></div><div class="h2" style="margin-top:14px">'+esc(T('wait_title'))+'</div><div class="hint">'+esc(T('wait_text'))+'</div>'+
+  var h=(DESK?'<div class="dcenter">':'')+'<div class="card center" style="margin-top:18px">'+'<div class="spin"></div><div class="h2" style="margin-top:14px">'+esc(T('wait_title'))+'</div><div class="hint">'+esc(T('wait_text'))+'</div>'+
     '<div class="stack" style="margin-top:16px"><button class="btn" onclick="payCheck(this,true)">'+IC.refresh+esc(T('wait_check'))+'</button>'+
     (a&&a.url?'<button class="btn sec" onclick="openL(\''+jsq(a.url)+'\')">'+esc(T('wait_again'))+'</button>':'')+
-    '<button class="btn ghost" onclick="guardOff();refresh().then(goHome,goHome)">'+esc(T('home'))+'</button></div></div>';
+    '<button class="btn ghost" onclick="guardOff();refresh().then(goHome,goHome)">'+esc(T('home'))+'</button></div></div>'+(DESK?'</div>':'');
   view(h);
   var n=0;POLL=setInterval(function(){if(document.hidden)return;if(++n>30){stopPoll();return;}payCheck(null,false);},6000);
 };
@@ -892,9 +897,10 @@ SCREENS.p2p=function(a){
   var rid=String(a.req==null?'':a.req).replace(/\D/g,'');
   var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('p2p_title'))+'</span><div class="big">'+esc(a.amount||'')+'</div><div class="hint">'+esc(T('p2p_text'))+'</div></div>';
   h+='<div class="sect">'+esc(T('p2p_card'))+'</div><div class="card flat" style="margin-top:0"><div class="mono">'+esc(a.card)+'</div><button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(a.card)+'\')">'+IC.copy+esc(T('copy_card'))+'</button></div>';
-  h+='<div class="sect">'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this,'+(a.topup?1:0)+')">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
+  var hl=h;h='';
+  h+='<div class="sect"'+(DESK?' style="margin-top:8px"':'')+'>'+esc(T('p2p_proof'))+'</div><div class="card flat" style="margin-top:0"><label class="btn line" style="position:relative;overflow:hidden">'+IC.doc+'<span id="p2pn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(T('choose_file'))+'</span><input id="p2pf" type="file" accept="image/*,application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="var f=this.files&&this.files[0];document.getElementById(\'p2pn\').textContent=f?f.name:\''+jsq(T('choose_file'))+'\'"></label><button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this,'+(a.topup?1:0)+')">'+IC.upload+esc(T('p2p_send'))+'</button></div>';
   h+='<button class="btn ghost" style="margin-top:12px" onclick="p2pCancel(\''+rid+'\',this)">'+esc(T('p2p_cancel'))+'</button>';
-  view(h);
+  view(dsplit(hl,h));
 };
 async function p2pCancel(req,el){
   busy(el,true);
@@ -989,6 +995,9 @@ async function tuPay(m,el){
 
 /* ---------- промокод ---------- */
 SCREENS.promo=function(){
+  if(DESK){view('<div class="dwide"><div class="h1" style="margin-top:8px">'+esc(T('promo'))+'</div><div class="hint">'+esc(T('promo_hint'))+'</div>'+
+    '<div class="card"><div class="prow"><input id="promoIn" class="field" autocomplete="off" autocapitalize="characters" placeholder="'+esc(T('promo_ph'))+'" onkeydown="if(event.key===\'Enter\')promoApply(this.nextSibling)">'+
+    '<button class="btn" onclick="promoApply(this)">'+esc(T('apply'))+'</button></div></div></div>');return;}
   var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('promo'))+'</div><div class="hint">'+esc(T('promo_hint'))+'</div>'+
     '<div class="card flat"><input id="promoIn" class="field" autocomplete="off" autocapitalize="characters" placeholder="'+esc(T('promo_ph'))+'"><button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+esc(T('apply'))+'</button></div>';
   view(h);
@@ -1129,15 +1138,21 @@ function legalLinks(){
   return legalDocs().map(function(x,i){var oc=x.html?'go(\'doc\','+i+')':'openSmart(\''+jsq(x.url)+'\')';return '<a href="#" onclick="'+oc+';return false">'+esc(x.title)+'</a>';}).join(' '+esc(T('and'))+' ');
 }
 function legalItems(){var h='<div class="list">';legalDocs().forEach(function(x,i){h+=x.html?item(IC.doc,x.title,'','','go(\'doc\','+i+')'):item(IC.doc,x.title,'','','openSmart(\''+jsq(x.url)+'\')');});return h+'</div>';}
-SCREENS.docs=function(){view(backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('docs'))+'</div>'+legalItems());};
+SCREENS.docs=function(){
+  if(DESK){var g='<div class="dgrid2">';legalDocs().forEach(function(x,i){g+='<div class="list">'+(x.html?item(IC.doc,x.title,'','','go(\'doc\','+i+')'):item(IC.doc,x.title,'','','openSmart(\''+jsq(x.url)+'\')'))+'</div>';});
+    view('<div class="dwide"><div class="h1" style="margin-top:8px">'+esc(T('docs'))+'</div>'+g+'</div></div>');return;}
+  view(backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('docs'))+'</div>'+legalItems());};
 SCREENS.doc=function(i){
   var x=legalDocs()[i];if(!x){goBack();return;}
-  var h=backBtn().replace('class="back"','class="back keep"')+'<div class="h1" style="margin-top:8px">'+esc(x.title)+'</div><div class="card legal">'+(x.html||'')+'</div>';
-  if(x.url)h+='<button class="btn sec" style="margin-top:12px" onclick="openSmart(\''+jsq(x.url)+'\')">'+IC.link+esc(T('open_full'))+'</button>';
+  var h=(DESK?'<div class="dwide">':'')+backBtn().replace('class="back"','class="back keep"')+'<div class="h1" style="margin-top:8px">'+esc(x.title)+'</div><div class="card legal">'+(x.html||'')+'</div>';
+  if(x.url)h+='<button class="btn sec" style="margin-top:12px'+(DESK?';width:auto;padding:8px 22px':'')+'" onclick="openSmart(\''+jsq(x.url)+'\')">'+IC.link+esc(T('open_full'))+'</button>';
+  if(DESK)h+='</div>';
   view(h);
 };
 function legalGate(){STACK=[];CUR={name:'legalgate',arg:null};SCREENS.legalgate(null);}
 SCREENS.legalgate=function(t){
+  if(DESK&&t){view(dsplit('<div class="h1" style="margin-top:8px">'+esc(t.code?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+
+    '<button class="btn" style="margin-top:16px" onclick="legalAccept(this)">'+IC.check+esc(T('accept'))+'</button>','<div style="margin-top:44px">'+legalItems()+'</div>'));return;}
   var h=backBtn()+'<div class="h1" style="margin-top:'+(STACK.length?'8':'18')+'px">'+esc(t&&t.code?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+legalItems()+
     '<button class="btn" style="margin-top:16px" onclick="legalAccept(this)">'+IC.check+esc(T('accept'))+'</button>';
   if(WEB&&!t)h+='<button class="btn ghost" style="margin-top:8px" onclick="logout()">'+esc(T('logout'))+'</button>';
