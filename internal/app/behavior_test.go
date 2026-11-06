@@ -414,9 +414,9 @@ type fakeStore struct {
 	// afterWebUserRead — вызывается после чтения аккаунта кабинета: тесты гонок
 	// вклинивают сюда действие посреди чтения.
 	afterWebUserRead func()
-	mailTokens  map[string]*model.EmailToken
-	paylogs     []model.PayLogEntry
-	torrents    []model.TorrentReport
+	mailTokens       map[string]*model.EmailToken
+	paylogs          []model.PayLogEntry
+	torrents         []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
