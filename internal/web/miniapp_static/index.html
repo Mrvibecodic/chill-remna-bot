@@ -954,7 +954,7 @@ function renderP2PCard(card,amount,reqID,topup){
   // id заявки больше 2^53 — держим строкой, через Number() он округляется.
   var rid=String(reqID==null?'':reqID).replace(/\D/g,'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+(topup?' Пополнение переводом':' Оплата переводом')+'</span>'+IC.wallet+'</div>'+
-    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
+    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Администратор проверит платёж вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
   var hl=h;h='';
