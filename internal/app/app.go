@@ -516,7 +516,24 @@ func (a *App) foldLegacyP2PSquad(ctx context.Context) {
 // работает при любом типе установки — в том числе там, где мастер про ключ не
 // спрашивает (eGames, локальная панель за общим Caddy).
 func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
-	return remnawave.New(a.panelWithEnv(pc))
+	c := remnawave.New(a.panelWithEnv(pc))
+	c.SetEmailResolver(a.panelEmailFor)
+	return c
+}
+
+// panelEmailFor — почта, по которой аккаунт кабинета ищет свою учётку в панели.
+// Только подтверждённая: иначе зарегистрировавшийся на чужой адрес получил бы
+// чужую подписку. a.mu не берётся: поиск в панели бывает и под ним.
+func (a *App) panelEmailFor(ctx context.Context, tgID int64) string {
+	st := a.store
+	if tgID >= 0 || st == nil {
+		return ""
+	}
+	wu, err := st.GetWebUserByTgID(ctx, tgID)
+	if err != nil || wu == nil || wu.VerifiedAt == "" {
+		return ""
+	}
+	return model.NormalizeEmail(wu.Email)
 }
 
 // panelWithEnv накладывает CADDY_AUTH_API_TOKEN на конфиг панели.

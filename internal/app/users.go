@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	nav := paginationRow("usr:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
 	if len(nav) > 0 {
@@ -305,7 +306,7 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	var rows [][]models.InlineKeyboardButton
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
@@ -482,12 +483,15 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
+		[]models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id),
+			btn(i18n.T(lang, "btn.unlink_panel"), "usr:unlink:"+id),
+		},
 		// «Назад» из карточки возвращает в выдачу поиска, если админ пришёл
 		// оттуда: иначе найденный человек стоил бы нового поиска.
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), backToUserList(a.getUI(chatID))), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
-	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock)+torLine, rows)
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", a.userLabelFor(ctx, u), created, p2p, status, subBlock)+torLine, rows)
 }
 
 func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExists, subBlocked bool) {
@@ -625,7 +629,8 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.toggleUserPlanAccess(ctx, chatID, uid, code)
 	case "del":
 		lang := a.lang(chatID)
-		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
+		delUID, _ := strconv.ParseInt(arg, 10, 64)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", a.userLabelByID(ctx, delUID)), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.del_with_sub"), "usr:delfull:"+arg)},
 			{btn(i18n.T(lang, "btn.del_bot_only"), "usr:delbot:"+arg)},
 			{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)},
@@ -638,7 +643,19 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		ui := a.getUI(chatID)
 		ui.linkUID = uid
 		ui.adminInput = "link_panel"
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "user.link_ask", uid), "usr:view:"+arg)
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "user.link_ask", a.userLabelByID(ctx, uid)), "usr:view:"+arg)
+	case "unlink":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.askUnlinkPanel(ctx, chatID, uid)
+	case "unlinkok":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.adminUnlinkPanel(ctx, chatID, uid)
 	case "delfull":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		a.adminDeleteUser(ctx, chatID, uid, true)
@@ -1153,4 +1170,32 @@ func subDeadKey(status, expireAt string) string {
 		return "subs.expired"
 	}
 	return ""
+}
+
+// askUnlinkPanel показывает, какая учётка отвяжется, и просит подтвердить.
+func (a *App) askUnlinkPanel(ctx context.Context, chatID, uid int64) {
+	lang := a.lang(chatID)
+	id := strconv.FormatInt(uid, 10)
+	panel := a.panelClient()
+	if panel == nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "user.unlink_fail", i18n.T(lang, "squads.no_panel")))
+		return
+	}
+	pu, reason, err := a.adminUnlinkTarget(ctx, panel, uid)
+	if err != nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "user.unlink_fail", html.EscapeString(err.Error())))
+		return
+	}
+	if reason != "" {
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, reason), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.back"), "usr:view:"+id)},
+		})
+		return
+	}
+	ui := a.getUI(chatID)
+	ui.unlinkUID, ui.unlinkRef = uid, pu.Ref.Key()
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.unlink_ask", escapeName(pu.Username), a.userLabelByID(ctx, uid)), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.unlink_confirm"), "usr:unlinkok:"+id)},
+		{btn(i18n.T(lang, "btn.back"), "usr:view:"+id)},
+	})
 }

@@ -56,6 +56,16 @@ type Client struct {
 
 	// squads — последний список сквадов панели для выдачи (см. liveLimits).
 	squads squadCache
+
+	// emailFor — подтверждённая почта аккаунта кабинета ("" — искать по почте
+	// нельзя). Задаётся один раз при создании клиента.
+	emailFor func(ctx context.Context, telegramID int64) string
+}
+
+// SetEmailResolver подключает поиск учётки по почте для аккаунтов кабинета.
+// Вызывать до первого запроса.
+func (c *Client) SetEmailResolver(f func(ctx context.Context, telegramID int64) string) {
+	c.emailFor = f
 }
 
 // hwidSyncAttempts is how many times ResetDevicesByTelegramID tries the HWID
@@ -495,7 +505,12 @@ type panelUser struct {
 	Tag             string `json:"tag"`
 	Username        string `json:"username"`
 	TelegramID      int64  `json:"telegramId"`
+	Email           string `json:"email"`
 	Status          string `json:"status"`
+
+	// byEmail — учётка найдена по подтверждённой почте аккаунта кабинета
+	// (см. findByAccountEmail): владение тогда доказано самим поиском.
+	byEmail bool
 
 	TrafficLimitStrategy string `json:"trafficLimitStrategy"`
 	HwidDeviceLimit      int    `json:"hwidDeviceLimit"`
@@ -554,6 +569,7 @@ type PanelUser struct {
 	UUID            string
 	Username        string
 	TelegramID      int64
+	Email           string
 	ExpireAt        string
 	SubscriptionURL string
 	Tag             string
@@ -586,6 +602,7 @@ func toPanelUser(u *panelUser) *PanelUser {
 		Ref:             u.ref(),
 		Username:        u.Username,
 		TelegramID:      u.TelegramID,
+		Email:           u.Email,
 		ExpireAt:        u.ExpireAt,
 		SubscriptionURL: u.SubscriptionURL,
 		Tag:             u.Tag,
@@ -628,6 +645,9 @@ func newUserBody(telegramID int64, expire string) map[string]any {
 func ownedByBot(u *panelUser, telegramID int64) bool {
 	if u == nil || telegramID == 0 {
 		return false
+	}
+	if u.byEmail {
+		return true
 	}
 	return u.TelegramID == telegramID || u.Username == botUsername(telegramID)
 }
@@ -1784,7 +1804,11 @@ func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUs
 		// отрицательное значение — это HTTP 400, а не «никого не нашли», и
 		// поиск по нему обрывает всю выдачу. Такие аккаунты ищем по имени:
 		// маршрут by-username есть и до 3.0.0, и после.
-		return c.findByBotUsername(ctx, telegramID)
+		u, err := c.findByBotUsername(ctx, telegramID)
+		if err != nil || u != nil {
+			return u, err
+		}
+		return c.findByAccountEmail(ctx, telegramID)
 	}
 	if c.generation() == genV3 {
 		u, gone, err := c.findByTelegramStream(ctx, telegramID)

@@ -290,6 +290,10 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 	a.syncPanelAccount(ctx, tgID)
 	link, expireAt, ok, err := a.trialOnce(ctx, tgID)
 	if !ok {
+		if expireAt != "" {
+			lang := a.lang(tgID)
+			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.trial_found_sub", formatExpire(expireAt, lang)))}
+		}
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.trial_unavailable"))}
 	}
 	if err != nil {
