@@ -155,6 +155,8 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .field::placeholder{color:var(--muted-2)}
 
 .hint{color:var(--muted);font-size:13.5px}
+.toplink{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:2px 0 12px;color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
+.toplink:hover{color:var(--text)}
 .legal{font-size:14px;line-height:1.6;word-wrap:break-word;overflow-wrap:anywhere}
 .legal a{color:var(--acc)}
 .legal pre{white-space:pre-wrap}
@@ -859,7 +861,11 @@ function openPlan(code){
   haptic('tap');
   var p=planByCode(code);
   if(!p){boot();return;}
-  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
+  // Тарифов несколько — к их списку одной кнопкой сверху: «Назад» ведёт на
+  // главную, а на компьютере его нет вовсе.
+  var many=STATE.plans.length>1;
+  var h='<div class="stagger">'+(many?'<button class="toplink" onclick="openPlans()">← К другим тарифам</button>':'')+
+    '<div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
     '<div class="title">'+esc(planTitle(p))+'</div>'+
     (p.description?'<div class="hint" style="margin-top:4px">'+esc(p.description)+'</div>':'')+'</div>';
   if(p.addsub_name){
@@ -872,7 +878,7 @@ function openPlan(code){
   h+=durListHTML(p);
   h=deskSplit(hl,h);
   h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
-  view(h,boot);
+  view(h,many?openPlans:boot);
 }
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
 function monthsWord(n){return n+' '+plural(n,'месяц','месяца','месяцев');}
