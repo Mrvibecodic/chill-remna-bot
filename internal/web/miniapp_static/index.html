@@ -620,7 +620,7 @@ function render(me,menu,sub,plans){
     h+=devicesBlock(sub);
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
-    if(menu.can_renew&&STATE.plans.length)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
+    if(renewShown(menu))h+='<button class="btn sec" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
@@ -665,7 +665,7 @@ function renderHomeDesk(menu,sub){
       '<button class="btn" style="margin-top:14px" onclick="openConnect()">'+IC.download+'Подключить</button></div>';
     right+=devicesCard(sub);
     var left=passHTML(sub)+trafficCard(sub)+autoPayBlock();
-    if(menu.can_renew&&STATE.plans.length)left+='<div class="hint" style="margin:0 4px 16px">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
+    if(renewShown(menu))left+='<button class="btn sec" style="margin-bottom:16px" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
     h+='<div class="dgrid"><div class="c7">'+left+'</div><div class="c5">'+right+'</div></div>';
   }else{
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>'+
@@ -737,6 +737,15 @@ function planInfoDesk(p){
     h+='</div>';
   }
   return h;
+}
+// Продление ведёт на свой тариф, как кнопка «Продлить» в чате: витрина
+// «Базового» продала бы подписчику чужие условия.
+function renewShown(m){return !!((m.can_renew||m.own_plan)&&(STATE.plans.length||m.renew_gone));}
+function openRenew(){
+  var m=STATE.menu||{};
+  if(m.renew_gone){toast('Тариф, которым вы пользовались, больше недоступен. Выберите новый — действующая подписка не пострадает.','err');openPlans();return;}
+  if(m.own_plan&&planByCode(m.own_plan)){openPlan(m.own_plan,true);return;}
+  openPlans();
 }
 function openPlans(){
   haptic('tap');PAGE='plans';
@@ -865,7 +874,7 @@ function durListHTML(p){
   return h+'</div>';
 }
 // Экран тарифа: описание, опция доп-подписки и выбор срока.
-function openPlan(code){
+function openPlan(code,renew){
   PAGE='plans';
   haptic('tap');
   var p=planByCode(code);
@@ -877,6 +886,8 @@ function openPlan(code){
     '<div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
     '<div class="title">'+esc(planTitle(p))+'</div>'+
     (p.description?'<div class="hint" style="margin-top:4px">'+esc(p.description)+'</div>':'')+'</div>';
+  // Условия своего тарифа поменялись с прошлой покупки — сказать до оплаты.
+  if(renew&&p.own&&STATE.menu&&STATE.menu.renew_note)h+='<div class="card"><div class="hint">'+esc(STATE.menu.renew_note)+'</div></div>';
   if(p.addsub_name){
     h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
       (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
@@ -1017,7 +1028,8 @@ function payTabDrop(w){try{if(w&&!w.closed)w.close();}catch(e){}}
 async function pay(plan,months,method,el,shownPrice){
   haptic('tap');busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
-  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
+  // p2p_inapp: реквизиты перевода и чек принимаются прямо здесь, а не в чате.
+  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true});
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url);return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
