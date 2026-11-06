@@ -208,10 +208,57 @@ input[type=file].field{padding:12px;height:auto}
   body.web .plans-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px}
   body.web .narrow{max-width:520px;margin:0 auto}
 }
+/* кабинет на широком экране: меню слева, карточки в колонках */
+.side{display:none}
+.mainc{min-width:0}
+@media(min-width:960px){
+  body.desk:not(.noside) .shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:32px;max-width:1240px;margin:0 auto;padding:24px 32px 40px;align-items:start}
+  body.desk:not(.noside) .top{display:none}
+  body.desk:not(.noside) .wrap{max-width:none;padding:0}
+  body.desk:not(.noside) .side{display:flex;flex-direction:column;gap:2px;position:sticky;top:24px;min-height:calc(100vh - 64px);
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 10px 12px;box-shadow:var(--shadow)}
+  body.desk:not(.noside) .back:not(.keep){display:none}
+  .sbrand{display:flex;align-items:center;gap:10px;min-width:0;padding:4px 10px 16px;cursor:pointer}
+  .sbrand img{height:28px;max-width:170px;width:auto;object-fit:contain;display:block}
+  .sbrand .nm{font-weight:750;font-size:17px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .snav{display:flex;align-items:center;gap:11px;width:100%;padding:10px 12px;border:0;border-radius:12px;background:transparent;
+    color:var(--muted);font-size:14.5px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+  .snav svg{width:18px;height:18px}
+  .snav:hover{background:var(--soft);color:var(--text)}
+  .snav.on{background:var(--acc-soft);color:var(--acc-ink)}
+  .snav .bdg{margin-left:auto;font-size:13px;font-weight:650;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .snav.on .bdg{color:var(--acc-ink)}
+  .ssep{height:1px;background:var(--line);margin:10px 8px}
+  .sfoot{margin-top:auto;padding:12px 4px 0;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .sfoot .ava{width:36px;height:36px;font-size:14px}
+  .sfoot .who{flex:1;min-width:0}
+  .sfoot .who .t{font-weight:650;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sfoot .who .s{font-size:12px;color:var(--muted)}
+  .sfoot .ibtn{width:34px;height:34px}
+  .dnarrow{max-width:680px}
+  .dgrid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:0 20px;align-items:start}
+  .dgrid>.c7{grid-column:span 7;min-width:0}
+  .dgrid>.c5{grid-column:span 5;min-width:0}
+  .dgrid>.c12{grid-column:span 12;min-width:0}
+  .dsplit{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:start}
+  .dsplit>div{min-width:0}
+  .dsplit .plans-grid,.dsplit .cols{display:block}
+  body.web .plans-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0 16px}
+  .pmeta{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .pmeta span{font-size:12px;color:var(--muted);padding:3px 9px;border-radius:999px;background:var(--soft)}
+  .tbar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:14px}
+  .tbar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+  .tbar.hi i{background:var(--warn)}
+  .drow{padding:11px 0}
+  .drow+.drow{border-top:1px solid var(--line)}
+  .drow .t{font-weight:600;font-size:14.5px}
+  .drow .s{font-size:12.5px;color:var(--muted);margin-top:2px}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
+<div class="shell"><aside id="side" class="side"></aside><div class="mainc">
 <header class="top"><div class="in">
   <div class="brand" id="brand" onclick="goHome()"></div>
   <div class="tools">
@@ -220,6 +267,7 @@ input[type=file].field{padding:12px;height:auto}
   </div>
 </div></header>
 <main class="wrap"><div id="app"><div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div></div></main>
+</div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="modal" class="modal"><div class="box" role="dialog" aria-modal="true"><div class="msg"></div><div class="row2"><button class="btn sec" data-no></button><button class="btn" data-yes></button></div></div></div>
 <script>
@@ -269,6 +317,11 @@ var app=document.getElementById('app');
 var TOKEN=null;
 var STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:BRAND.lang||'ru'};
 var STACK=[]; // история экранов для «Назад»
+// Кабинет в браузере на широком экране: меню слева, экраны в колонках.
+// Узкий экран и мини-апп в Telegram остаются как были.
+var DESKMQ=null;try{DESKMQ=WEB&&window.matchMedia?window.matchMedia('(min-width:960px)'):null;}catch(e){}
+var DESK=false,SECT=null;
+function setDesk(){DESK=!!(DESKMQ&&DESKMQ.matches);try{document.body.classList.toggle('desk',DESK);}catch(e){}}
 var CUR=null; // текущий экран {name,arg}
 var POLL=null;
 
@@ -319,7 +372,7 @@ var L={ru:{
  bind_tg:'Привязать Telegram',bind_text:'После привязки в кабинет можно входить кнопкой Telegram, а бот в чате покажет эту же подписку. Ссылка подписки не изменится.',bind_ok:'Telegram привязан',bind_fail:'Не удалось привязать',
  pass_change:'Сменить пароль',pass_old:'Текущий пароль',pass_new:'Новый пароль (мин. 8)',pass_new2:'Новый пароль ещё раз',pass_note:'Все остальные входы в аккаунт будут завершены.',
  pass_fill:'Заполните все поля',pass_mismatch:'Пароли не совпадают',pass_short:'Пароль слишком короткий',pass_ok:'Пароль изменён',
- logout:'Выйти',login:'Вход',login_text:'Войдите через Telegram или по почте.',via_tg:'Через Telegram',via_email:'По почте',password:'Пароль',
+ logout:'Выйти',logout_hint:'Завершить вход в кабинет на этом устройстве. Подписка и баланс останутся.',login:'Вход',login_text:'Войдите через Telegram или по почте.',via_tg:'Через Telegram',via_email:'По почте',password:'Пароль',
  sign_in:'Войти',register:'Зарегистрироваться',forgot:'Забыли пароль?',reg_mail:'После регистрации на адрес придёт письмо. Пока адрес не подтверждён, оплата недоступна.',
  reg_nomail:'Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.',
  fill_login:'Заполните почту и пароль',login_fail:'Не удалось войти',
@@ -375,7 +428,7 @@ var L={ru:{
  bind_tg:'Link Telegram',bind_text:'After linking you can sign in with Telegram, and the bot chat shows the same subscription. The subscription link stays the same.',bind_ok:'Telegram linked',bind_fail:'Could not link',
  pass_change:'Change password',pass_old:'Current password',pass_new:'New password (min. 8)',pass_new2:'Repeat new password',pass_note:'All other sign-ins will be ended.',
  pass_fill:'Fill in all fields',pass_mismatch:'Passwords do not match',pass_short:'Password is too short',pass_ok:'Password changed',
- logout:'Sign out',login:'Sign in',login_text:'Sign in with Telegram or email.',via_tg:'With Telegram',via_email:'With email',password:'Password',
+ logout:'Sign out',logout_hint:'Sign out of the cabinet on this device. Your subscription and balance stay.',login:'Sign in',login_text:'Sign in with Telegram or email.',via_tg:'With Telegram',via_email:'With email',password:'Password',
  sign_in:'Sign in',register:'Sign up',forgot:'Forgot password?',reg_mail:'After signing up you get an email. Until the address is confirmed, payments are unavailable.',
  reg_nomail:'Sign-up without email confirmation. Password recovery is unavailable — keep your password.',
  fill_login:'Enter email and password',login_fail:'Sign-in failed',
@@ -497,7 +550,7 @@ function post(p,b){return api(p,{method:'POST',body:JSON.stringify(b||{})});}
 
 /* ---------- навигация ---------- */
 function setBack(on){try{if(tg&&tg.BackButton){if(on)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}}
-function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();app.innerHTML=html;app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
+function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();var sd=sideOn();if(sd&&!/\b(dgrid|dsplit|dwide)\b/.test(html))html='<div class="dnarrow">'+html+'</div>';app.innerHTML=html;renderSide(sd);app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
 var SCREENS={};
 function go(name,arg,opt){
   haptic();
@@ -506,9 +559,44 @@ function go(name,arg,opt){
   CUR={name:name,arg:arg};
   return SCREENS[name](arg);
 }
+setDesk();
+if(DESKMQ){var onDeskMQ=function(){var was=DESK;setDesk();if(was!==DESK&&CUR&&TOKEN&&STATE.me)rerender();};
+  try{if(DESKMQ.addEventListener)DESKMQ.addEventListener('change',onDeskMQ);else if(DESKMQ.addListener)DESKMQ.addListener(onDeskMQ);}catch(e){}}
 function goBack(){haptic();if(!STACK.length){goHome();return;}CUR=STACK.pop();SCREENS[CUR.name](CUR.arg);}
 function goHome(){if(WEB&&!TOKEN){renderLogin();return;}STACK=[];CUR={name:'home'};SCREENS.home();}
 function rerender(){if(CUR)SCREENS[CUR.name](CUR.arg);}
+function startGate(x){return x&&x.name==='legalgate'&&!x.arg;}
+function sideOn(){return !!(DESK&&TOKEN&&STATE.me&&CUR&&CUR.name!=='login'&&CUR.name!=='forgot'&&!startGate(CUR)&&!STACK.some(startGate));}
+// Раздел меню для открытого экрана; экран без своего раздела оставляет прежний.
+var SECTS={home:'home',plans:'plans',plan:'plans',checkout:'plans',wallet:'wallet',promo:'wallet',connect:'connect',devices:'devices',ref:'ref',account:'account',docs:'docs',doc:'docs',theme:'account'};
+function navTo(name){haptic();STACK=[];CUR=null;if(name==='plans'&&STATE.plans.length===1){go('plan',{code:STATE.plans[0].code});return;}go(name);}
+function renderSide(on){
+  var side=document.getElementById('side');if(!side)return;
+  document.body.classList.toggle('noside',!on);
+  if(!on){side.innerHTML='';return;}
+  if(CUR.name==='p2p')SECT=CUR.arg&&CUR.arg.topup?'wallet':'plans';else if(SECTS[CUR.name])SECT=SECTS[CUR.name];
+  var m=STATE.menu||{},s=STATE.sub||{};
+  function it(key,ic,label,fn,bdg){return '<button class="snav'+(SECT===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+esc(label)+'</span>'+(bdg?'<span class="bdg">'+esc(bdg)+'</span>':'')+'</button>';}
+  var h='<div class="sbrand" onclick="goHome()">'+brandHTML(false)+'</div>';
+  h+=it('home',IC.bolt,T('home'),'goHome()');
+  if(STATE.plans.length)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
+  h+=it('wallet',IC.wallet,T('wallet'),'navTo(\'wallet\')',rub(STATE.balanceK));
+  if(s.sub_url)h+=it('connect',IC.download,T('conn_title'),'navTo(\'connect\')');
+  if(s.active)h+=it('devices',IC.device,T('devices_title'),'navTo(\'devices\')',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'');
+  if(m.referral_on)h+=it('ref',IC.gift,T('ref'),'navTo(\'ref\')');
+  h+=it('account',IC.user,T('acct'),'navTo(\'account\')');
+  var ext='';
+  if(legalDocs().length&&m.legal_in_menu)ext+=it('docs',IC.doc,T('docs'),'navTo(\'docs\')');
+  if(m.support_url)ext+='<button class="snav" onclick="openSmart(\''+jsq(m.support_url)+'\')">'+IC.life+'<span>'+esc(T('support'))+'</span></button>';
+  if(m.group_url)ext+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>'+esc(T('group'))+'</span></button>';
+  if(ext)h+='<div class="ssep"></div>'+ext;
+  var who=STATE.me_email||STATE.me_name||T('acct');
+  h+='<div class="sfoot"><div class="ava">'+esc(String(who).trim().charAt(0).toUpperCase()||'?')+'</div><div class="who"><div class="t">'+esc(who)+'</div><div class="s">'+esc(STATE.me_email?T('email'):'Telegram')+'</div></div>'+
+    '<button class="ibtn" title="'+esc(T('theme'))+'" aria-label="'+esc(T('theme'))+'" onclick="cycleTheme()">'+IC.palette+'</button>'+
+    '<button class="ibtn" title="'+esc(T('logout'))+'" aria-label="'+esc(T('logout'))+'" onclick="logout()">'+IC.logout+'</button></div>';
+  side.innerHTML=h;
+}
+function dsplit(l,r){return DESK?'<div class="dsplit"><div>'+l+'</div><div>'+r+'</div></div>':l+r;}
 function backBtn(){return STACK.length?'<button class="back" onclick="goBack()">'+IC.left+esc(T('back'))+'</button>':'';}
 if(tg){try{tg.ready();tg.expand();}catch(e){}try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes();}catch(e){}
   try{tg.BackButton&&tg.BackButton.onClick(function(){goBack();});}catch(e){}
@@ -613,10 +701,53 @@ SCREENS.home=function(){
   var m=STATE.menu||{};
   if(m.legal_accept&&m.legal_gate_start&&legalDocs().length){legalGate();return;}
   var h=verifyBanner();
-  if(WEB)h+='<div class="cols"><div>'+subCard()+'</div><div>'+homeList()+'</div></div>';
+  if(DESK)h+=homeDesk();
+  else if(WEB)h+='<div class="cols"><div>'+subCard()+'</div><div>'+homeList()+'</div></div>';
   else h+=subCard()+homeList();
   view(h);
 };
+
+// Главная на широком экране: подписка слева, трафик и устройства справа,
+// тарифы карточками ниже. Остальное — в меню слева.
+function homeDesk(){
+  var s=STATE.sub||{},right='';
+  if(s.active)right=trafficCardM(s)+devicesCardM(s);
+  var h='<div class="dgrid">'+(right?'<div class="c7">'+subCard()+'</div><div class="c5">'+right+'</div>':'<div class="c12">'+subCard()+'</div>')+'</div>';
+  if(STATE.plans.length)h+='<div class="sect">'+esc(T('plans'))+'</div><div class="plans-grid">'+planCards()+'</div>';
+  return h;
+}
+function trafficCardM(s){
+  if(!s.traffic_ok)return '';
+  var u=Number(s.traffic_used)||0,l=Number(s.traffic_limit)||0,pc=l>0?Math.min(100,Math.round(u*100/l)):0;
+  return '<div class="card sub"><div class="st"><span class="lbl">'+esc(T('traffic'))+'</span><b style="font-variant-numeric:tabular-nums">'+esc(gb(u))+(l>0?' / '+esc(gb(l)):' · '+esc(T('unlimited')))+'</b></div>'+
+    (l>0?'<div class="tbar'+(pc>=90?' hi':'')+'"><i style="width:'+pc+'%"></i></div>':'')+'</div>';
+}
+function devicesCardM(s){
+  var h='<div class="card sub"><div class="st"><span class="lbl">'+esc(T('devices_title'))+'</span>'+(s.devices_ok?'<b style="font-variant-numeric:tabular-nums">'+esc(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used))+'</b>':'')+'</div>';
+  var l=s.devices||[];
+  if(l.length){h+='<div style="margin-top:6px">';l.forEach(function(d){h+='<div class="drow"><div class="t">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="s">'+esc(d.meta)+'</div>':'')+'</div>';});h+='</div>';}
+  return h+'<button class="btn danger" style="margin-top:12px" onclick="askReset(this)">'+esc(T('devices_reset'))+'</button></div>';
+}
+// Карточки тарифов: экран «Тарифы» и главная на широком экране.
+function planCards(){
+  var h='';
+  STATE.plans.forEach(function(p){
+    var d=(p.durations||[])[0],meta='';
+    if(DESK&&d){if(d.countries&&d.countries.length)meta+='<span>'+esc(T('countries'))+': '+d.countries.length+'</span>';if(d.servers>0)meta+='<span>'+esc(T('servers'))+': '+d.servers+'</span>';}
+    h+='<button class="plan" onclick="go(\'plan\',{code:\''+jsq(p.code)+'\'})"><div class="pt"><span class="pn">'+esc(planTitle(p))+'</span><span class="pp">'+esc(T('from'))+' '+esc(planMin(p))+'</span></div>'+
+      '<div class="pd">'+esc(p.description||(d?planSubT(d):''))+'</div>'+(meta?'<div class="pmeta">'+meta+'</div>':'')+(p.own?'<div style="margin-top:8px"><span class="badge acc">'+esc(T('your_plan'))+'</span></div>':'')+'</button>';
+  });
+  return h;
+}
+// Условия срока списком — экран оплаты на широком экране.
+function whatsList(p,d){
+  var h='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list" style="margin-top:0">';
+  h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
+  if(d.devices>0)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+d.devices+'</span></div>';
+  if(p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
+  if(d.servers>0)h+='<div class="kv"><span class="k">'+esc(T('servers'))+'</span><span class="v">'+d.servers+'</span></div>';
+  return h+'</div>';
+}
 
 /* ---------- тарифы ---------- */
 function openPlans(){
@@ -630,12 +761,8 @@ function openRenew(){
   openPlans();
 }
 SCREENS.plans=function(){
-  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('plans'))+'</div><div class="plans-grid">';
-  STATE.plans.forEach(function(p){
-    var d=(p.durations||[])[0];
-    h+='<button class="plan" onclick="go(\'plan\',{code:\''+jsq(p.code)+'\'})"><div class="pt"><span class="pn">'+esc(planTitle(p))+'</span><span class="pp">'+esc(T('from'))+' '+esc(planMin(p))+'</span></div>'+
-      '<div class="pd">'+esc(p.description||(d?planSubT(d):''))+'</div>'+(p.own?'<div style="margin-top:8px"><span class="badge acc">'+esc(T('your_plan'))+'</span></div>':'')+'</button>';
-  });
+  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('plans'))+'</div><div class="plans-grid dwide">';
+  h+=planCards();
   view(h+'</div>');
 };
 SCREENS.plan=function(a){
@@ -647,12 +774,14 @@ SCREENS.plan=function(a){
   a.months=sel;var d=durBy(p,sel);
   var h=backBtn()+'<div style="margin-top:8px"><div class="h1">'+esc(planTitle(p))+'</div>'+(p.description?'<div class="hint">'+esc(p.description)+'</div>':'')+'</div>';
   if(p.own&&a.renew&&STATE.menu.renew_note)h+='<div class="note">'+esc(STATE.menu.renew_note)+'</div>';
+  var hHead=h;h='';
   h+='<div class="sect">'+esc(T('period'))+'</div>';
   ds.forEach(function(x){
     var pm='';var v=num(x.price);if(x.months>1&&isFinite(v))pm=T('per_month',(Math.round(v/x.months*100)/100).toLocaleString(loc())+' '+(x.currency||''));
     if(x.discount)pm=pm?pm+' · '+x.discount:x.discount;
     h+='<button class="opt'+(x.months===sel?' on':'')+'" onclick="pickDur(\''+jsq(p.code)+'\','+x.months+')"><span class="rd"></span><span class="tx"><div class="t">'+esc(monthsW(x.months))+(x.best?' <span class="badge acc" style="margin-left:6px;padding:2px 8px">'+esc(T('best'))+'</span>':'')+'</div>'+(pm?'<div class="s">'+esc(pm)+'</div>':'')+'</span><span class="p">'+esc(price(x))+'</span></button>';
   });
+  var hPer=h;h='';
   h+='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list">';
   h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
   if(d.devices>0)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+d.devices+'</span></div>';
@@ -668,7 +797,9 @@ SCREENS.plan=function(a){
     d.countries.forEach(function(c){h+='<span class="chip">'+(c.code?'<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">':esc(c.flag||''))+esc(c.name||c.flag||'')+'</span>';});
     h+='</div>';
   }
+  var hWhat=h;h='';
   h+='<div style="margin-top:18px"><button class="btn" onclick="toCheckout(\''+jsq(p.code)+'\','+sel+')">'+esc(T('checkout'))+' '+esc(price(d))+'</button></div>';
+  h=DESK?dsplit(hHead+hWhat,hPer+h):hHead+hPer+hWhat+h;
   view(h);
 };
 function pickDur(code,m){haptic();CUR.arg.months=m;rerender();}
@@ -686,7 +817,8 @@ var M_IC={balance:'wallet',stars:'star',yookassa:'card',cryptobot:'coins',plateg
 SCREENS.checkout=function(a){
   var p=planBy(a.code),d=durBy(p,a.months);if(!p||!d){goHome();return;}
   var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(planTitle(p))+' · '+esc(monthsW(a.months))+'</span><div class="big">'+esc(price(d))+'</div></div>';
-  h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list">';
+  var hl=h+(DESK?whatsList(p,d):'');h='';
+  h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list"'+(DESK?' style="margin-top:0"':'')+'>';
   methods(p).forEach(function(m){
     var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
     h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
@@ -695,6 +827,7 @@ SCREENS.checkout=function(a){
   if(p.tribute&&p.tribute_terms&&p.tribute_terms.length&&methods(p).indexOf('tribute')>=0)h+='<div class="hint">'+esc(T('tribute_hint',p.tribute_terms.join(', ')))+'</div>';
   if(STATE.ap&&STATE.ap.available&&methods(p).indexOf('yookassa')>=0)h+='<div class="hint">'+esc(T('ap_hint',apWhen()))+'</div>';
   if(STATE.menu.legal_on_pay&&legalDocs().length)h+='<div class="hint">'+esc(T('legal_pay'))+' '+legalLinks()+'.</div>';
+  h=dsplit(hl,h);
   view(h);
 };
 /* Браузер пускает новую вкладку только прямо в обработчике нажатия: после
@@ -805,6 +938,7 @@ SCREENS.wallet=async function(a){
     if(o.max_kopecks>0)h+='<input id="tuAmt" class="field" style="margin-top:10px" inputmode="decimal" placeholder="'+esc(T('topup_custom')+', '+T('topup_max',rub(o.max_kopecks)))+'" value="'+(a.custom&&a.k?esc(String(a.k/100)):'')+'" oninput="tuCustom(this.value)">';
     h+='<div id="tuM">'+tuMethods(a)+'</div></div>';
   }
+  var hl=h;h='';
   if(w.rows&&w.rows.length){
     h+='<div class="sect">'+esc(T('forecast'))+'</div><div class="list" style="margin-top:0">';
     w.rows.forEach(function(r){h+='<div class="kv"><span class="k">'+esc(monthsW(r.months))+' · '+esc(r.price)+' '+esc(w.currency||'₽')+'</span><span class="v">'+(r.count>0?(r.count+'× ≈ '+esc(monthsW(r.total))):'—')+'</span></div>';});
@@ -813,6 +947,7 @@ SCREENS.wallet=async function(a){
     if(w.max_months>0)h+='<div class="hint">'+esc(T('forecast_max',monthsW(w.max_months)))+'</div>';
   }
   h+='<div class="list">'+item(IC.tag,T('promo'),T('promo_hint'),'','go(\'promo\')')+'</div>';
+  h=dsplit(hl,h);
   view(h);
 };
 function tuMethods(a){
@@ -924,6 +1059,7 @@ SCREENS.connect=async function(a){
   var c=a.c,ps=cnPlatforms(c),cur=null;ps.forEach(function(p){if(p.key===a.key)cur=p;});if(!cur)cur=ps[0]||null;
   var sub=c.sub_url||(STATE.sub&&STATE.sub.sub_url)||'';
   var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('conn_title'))+'</div><div class="hint">'+esc(T('conn_text'))+'</div>';
+  var hT=h;h='';
   if(ps.length>1){h+='<div class="seg">';ps.forEach(function(p){h+='<button class="'+(cur&&p.key===cur.key?'on':'')+'" onclick="cnPlat(\''+jsq(p.key)+'\')">'+esc(p.label)+'</button>';});h+='</div>';}
   var apps=(cur&&cur.apps)||[];
   if(!apps.length)h+='<div class="card empty">'+esc(T('conn_empty'))+'</div>';
@@ -937,7 +1073,9 @@ SCREENS.connect=async function(a){
     h+='</div></div>';
   });
   h+='</div>';
+  var hApps=h;h='';
   if(sub){h+='<div class="card"><div class="link" style="margin-top:0" onclick="copy(\''+jsq(sub)+'\')"><code>'+esc(sub)+'</code>'+IC.copy+'</div><div class="qr" id="qrw"><div id="qr"></div></div><div class="hint center">'+esc(T('conn_qr'))+'</div></div>';}
+  h=DESK?dsplit(hT+h,hApps):hT+hApps+h;
   view(h);
   if(sub)drawQR(sub);
 };
@@ -957,7 +1095,7 @@ function legalItems(){var h='<div class="list">';legalDocs().forEach(function(x,
 SCREENS.docs=function(){view(backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('docs'))+'</div>'+legalItems());};
 SCREENS.doc=function(i){
   var x=legalDocs()[i];if(!x){goBack();return;}
-  var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(x.title)+'</div><div class="card legal">'+(x.html||'')+'</div>';
+  var h=backBtn().replace('class="back"','class="back keep"')+'<div class="h1" style="margin-top:8px">'+esc(x.title)+'</div><div class="card legal">'+(x.html||'')+'</div>';
   if(x.url)h+='<button class="btn sec" style="margin-top:12px" onclick="openSmart(\''+jsq(x.url)+'\')">'+IC.link+esc(T('open_full'))+'</button>';
   view(h);
 };
@@ -1014,8 +1152,12 @@ SCREENS.account=async function(){
   h+='<div class="kv"><span class="k">Telegram</span><span class="v">'+esc(a.tg_linked?T('tg_linked'):T('tg_not'))+'</span></div></div>';
   if(a.email&&!a.email_verified&&a.mail_on)h+='<button class="btn sec" style="margin-top:12px" onclick="resend(this)">'+esc(T('resend'))+'</button>';
   if(!a.tg_linked)h+='<div class="sect">'+esc(T('bind_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="hint" style="margin-top:0">'+esc(T('bind_text'))+'</div><div class="hint">'+esc(T('bind_only'))+'</div><div class="tgw" id="tgbind"></div></div>';
+  var hl=h;h='';
   if(a.has_password)h+='<div class="sect">'+esc(T('pass_change'))+'</div><div class="card flat stack" style="margin-top:0"><input id="pw0" class="field" type="password" autocomplete="current-password" placeholder="'+esc(T('pass_old'))+'"><input id="pw1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="pw2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="changePass(this)">'+esc(T('save'))+'</button><div class="hint">'+esc(T('pass_note'))+'</div></div>';
-  h+='<button class="btn danger" style="margin-top:16px" onclick="logout()">'+IC.logout+esc(T('logout'))+'</button>';
+  if(DESK&&!a.has_password)h+='<div class="card"><div class="t" style="font-weight:650">'+esc(T('logout'))+'</div><div class="hint">'+esc(T('logout_hint'))+'</div>'+
+    '<button class="btn danger" style="margin-top:14px" onclick="logout()">'+IC.logout+esc(T('logout'))+'</button></div>';
+  else h+='<button class="btn danger" style="margin-top:16px" onclick="logout()">'+IC.logout+esc(T('logout'))+'</button>';
+  h=dsplit(hl,h);
   view(h);
   if(!a.tg_linked)mountTG('tgbind','onTGBind(user)');
 };
