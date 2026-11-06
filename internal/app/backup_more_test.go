@@ -231,7 +231,9 @@ func TestBackupBigFileCaption(t *testing.T) {
 	}
 	a, fm, st := bkTestApp(t)
 	ctx := context.Background()
-	for i := 0; i < 3; i++ {
+	// Случайные байты в base64 сжимаются примерно на четверть: 4×8 МБ текста
+	// дают файл около 24 МБ — больше порога, но меньше предела отправки.
+	for i := 0; i < 4; i++ {
 		junk := make([]byte, 6<<20)
 		_, _ = rand.Read(junk)
 		if err := st.AddPayLog(ctx, &model.PayLogEntry{ExtID: "big", Stage: "x", Detail: base64.StdEncoding.EncodeToString(junk)}); err != nil {
