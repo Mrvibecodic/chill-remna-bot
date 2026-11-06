@@ -408,8 +408,9 @@ type MiniDurationDTO struct {
 	Devices int `json:"devices"`
 	// Countries are the distinct countries available to the duration's squads.
 	Countries []MiniCountryDTO `json:"countries,omitempty"`
-	// Configs is the number of inbounds (configs) accessible.
-	Configs int `json:"configs,omitempty"`
+	// Servers — хосты панели, которые получит подписка срока (как строка
+	// «Серверов: N» в чате); 0 — не показывать.
+	Servers int `json:"servers,omitempty"`
 	// Best — сервер отмечает самый выгодный срок (лучшая цена за месяц);
 	// раньше фронт подсвечивал третью позицию из четырёх.
 	Best bool `json:"best,omitempty"`

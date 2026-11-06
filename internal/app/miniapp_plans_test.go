@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
 )
 
@@ -225,5 +227,45 @@ func TestMiniPlans_TrialLock(t *testing.T) {
 	a.mu.Unlock()
 	if dto := a.MiniPlans(ctx, u); len(dto.Plans) == 0 || dto.Notice != "" {
 		t.Fatalf("админ разрешил покупку — витрина открыта: %+v", dto)
+	}
+}
+
+// Витрина мини-аппа показывает число серверов срока, как чат; строка,
+// убранная в «Текстах бота», пропадает и здесь.
+func TestMiniPlans_Servers(t *testing.T) {
+	t.Cleanup(i18n.ResetOverrides)
+	ctx := context.Background()
+	a, fs := planApp(t)
+	vip := vipPlan(t, fs, model.PlanAvailAll)
+	a.infraCache = &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads:    []remnawave.SquadFull{{UUID: "sq-vip", InboundsCount: 2, InboundUUIDs: []string{"ib1"}}},
+		hosts: []remnawave.Host{
+			{Remark: "🇩🇪 Германия #1", InboundUUID: "ib1"},
+			{Remark: "🇩🇪 Германия #2", InboundUUID: "ib1"},
+			{Remark: "Резерв", InboundUUID: "ib1"},
+			{Remark: "🇳🇱 Нидерланды", InboundUUID: "ib1", Hidden: true},
+		},
+	}
+	servers := func() []int {
+		var out []int
+		for _, p := range a.MiniPlans(ctx, 555).Plans {
+			if p.Code != vip.Code {
+				continue
+			}
+			for _, d := range p.Durations {
+				out = append(out, d.Servers)
+			}
+		}
+		return out
+	}
+	if got := servers(); len(got) != 2 || got[0] != 3 || got[1] != 3 {
+		t.Fatalf("серверов по срокам %v, want [3 3]", got)
+	}
+	if rej := i18n.SetOverrides(map[string]map[string]string{"ru": {"buy.servers": ""}}); rej != nil {
+		t.Fatal(rej)
+	}
+	if got := servers(); len(got) != 2 || got[0] != 0 || got[1] != 0 {
+		t.Fatalf("убранная строка серверов: %v, want [0 0]", got)
 	}
 }

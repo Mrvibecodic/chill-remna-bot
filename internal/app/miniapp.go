@@ -244,15 +244,17 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
 	// подсвечивал третью из четырёх позиций).
 	bestIdx, bestRate := -1, int64(0)
+	// Строку серверов админ может убрать в «Текстах бота» — тогда её нет и здесь.
+	showServers := i18n.T(lang, "buy.servers", "1") != ""
 	for j := range p.Durations {
 		d := &p.Durations[j]
 		if d.Months <= 0 || d.Base == "" {
 			continue
 		}
-		// squadCountries ходит в панель (кэш) и сам берёт a.mu.
-		cs, configs := a.squadCountries(ctx, p.IntSquadsFor(d))
+		// squadGeo ходит в панель (кэш) и сам берёт a.mu.
+		g := a.squadGeo(ctx, p.IntSquadsFor(d))
 		var countries []web.MiniCountryDTO
-		for _, c := range cs {
+		for _, c := range g.countries {
 			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
 		}
 		pd.Durations = append(pd.Durations, web.MiniDurationDTO{
@@ -262,12 +264,14 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 			TrafficGB: p.TrafficGBFor(d),
 			Devices:   p.DeviceLimitFor(d),
 			Countries: countries,
-			Configs:   configs,
 			Discount:  discountLabel(lang, p, d),
 			// Зачёт остатка при смене тарифа — та же математика, что
 			// применит финализация (см. plans_switch.go).
 			SwitchDays: switchCredit(pc.oldSnap, pc.oldExpire, a.planSnapshotOf(p, d, d.Months)),
 		})
+		if showServers {
+			pd.Durations[len(pd.Durations)-1].Servers = g.hosts
+		}
 		if k, ok := rubToKopecks(d.Base); ok && k > 0 {
 			rate := k / int64(d.Months)
 			if bestIdx < 0 || rate < bestRate {
