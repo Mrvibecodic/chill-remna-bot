@@ -135,6 +135,9 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	dto.TrafficOK = true
 	dto.TrafficUsed = snap.TrafficUsed
 	dto.TrafficLimit = snap.TrafficLimit
+	if !snap.NextReset.IsZero() {
+		dto.TrafficResetTS = snap.NextReset.Unix()
+	}
 	dto.ExpireAt = formatExpire(expireAt, a.lang(tgID))
 	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()

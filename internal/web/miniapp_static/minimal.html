@@ -384,7 +384,7 @@ var L={ru:{
  restore:'Восстановление',restore_text:'Пришлём ссылку на смену пароля.',send:'Отправить',to_login:'К входу',restore_sent:'Если такой адрес есть, письмо отправлено',
  new_pass:'Новый пароль',new_pass_text:'Задайте новый пароль для входа.',save:'Сохранить',link_bad:'Ссылка недействительна',email_ok:'Адрес подтверждён',
  month1:'месяц',month2:'месяца',month5:'месяцев',day1:'день',day2:'дня',day5:'дней',
- strat_NO_RESET:'не сбрасывается',strat_DAY:'ежедневно',strat_WEEK:'еженедельно',strat_MONTH:'ежемесячно',strat_MONTH_ROLLING:'ежемесячно',
+ strat_NO_RESET:'не сбрасывается',strat_DAY:'каждый день',strat_WEEK:'каждый понедельник',strat_MONTH:'1-го числа каждого месяца',strat_MONTH_ROLLING:'каждый месяц в день подключения',
  renew_gone:'Тариф, которым вы пользовались, больше недоступен. Выберите новый — действующая подписка не пострадает.',
  plan_link_fail:'Тариф по этой ссылке недоступен',per_month:'%s / мес'
 },en:{
@@ -440,7 +440,7 @@ var L={ru:{
  restore:'Recovery',restore_text:'We will send a password reset link.',send:'Send',to_login:'Back to sign in',restore_sent:'If this address exists, an email was sent',
  new_pass:'New password',new_pass_text:'Set a new password.',save:'Save',link_bad:'The link is invalid',email_ok:'Address confirmed',
  month1:'month',month2:'months',month5:'months',day1:'day',day2:'days',day5:'days',
- strat_NO_RESET:'never',strat_DAY:'daily',strat_WEEK:'weekly',strat_MONTH:'monthly',strat_MONTH_ROLLING:'monthly',
+ strat_NO_RESET:'never',strat_DAY:'every day',strat_WEEK:'every Monday',strat_MONTH:'on the 1st of every month',strat_MONTH_ROLLING:'every month on the day you joined',
  renew_gone:'The plan you used is no longer available. Pick a new one — your current subscription is not affected.',
  plan_link_fail:'The plan from this link is unavailable',per_month:'%s / mo'
 }};
@@ -725,7 +725,8 @@ function trafficCardM(s){
   if(!s.traffic_ok)return '';
   var u=Number(s.traffic_used)||0,l=Number(s.traffic_limit)||0,pc=l>0?Math.min(100,Math.round(u*100/l)):0;
   return '<div class="card sub"><div class="st"><span class="lbl">'+esc(T('traffic'))+'</span><b style="font-variant-numeric:tabular-nums">'+esc(gb(u))+(l>0?' / '+esc(gb(l)):' · '+esc(T('unlimited')))+'</b></div>'+
-    (l>0?'<div class="tbar'+(pc>=90?' hi':'')+'"><i style="width:'+pc+'%"></i></div>':'')+'</div>';
+    (l>0?'<div class="tbar'+(pc>=90?' hi':'')+'"><i style="width:'+pc+'%"></i></div>':'')+
+    (s.traffic_reset_ts?'<div class="muted small" style="margin-top:8px">'+esc(T('reset'))+': '+esc(dateS(s.traffic_reset_ts))+'</div>':'')+'</div>';
 }
 function devicesCardM(s){
   var h='<div class="card sub"><div class="st"><span class="lbl">'+esc(T('devices_title'))+'</span>'+(s.devices_ok?'<b style="font-variant-numeric:tabular-nums">'+esc(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used))+'</b>':'')+'</div>';
@@ -749,7 +750,7 @@ function whatsList(p,d){
   var h='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list" style="margin-top:0">';
   h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+(d.devices>0?d.devices:esc(T('hwid_unl')))+'</span></div>';
-  if(p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
+  if(d.traffic_gb>0&&p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
   if(d.servers>0)h+='<div class="kv"><span class="k">'+esc(T('servers'))+'</span><span class="v">'+d.servers+'</span></div>';
   return h+'</div>';
 }
@@ -790,7 +791,7 @@ SCREENS.plan=function(a){
   h+='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list">';
   h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+(d.devices>0?d.devices:esc(T('hwid_unl')))+'</span></div>';
-  if(p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
+  if(d.traffic_gb>0&&p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
   if(d.servers>0)h+='<div class="kv"><span class="k">'+esc(T('servers'))+'</span><span class="v">'+d.servers+'</span></div>';
   if(p.addsub_name)h+='<div class="kv"><span class="k">'+esc(p.addsub_name)+'</span><span class="v">'+esc(T('included'))+'</span></div>';
   if(d.switch_days)h+='<div class="kv"><span class="k">'+esc(T('switch_credit'))+'</span><span class="v">'+(d.switch_days>0?'+':'')+d.switch_days+' '+esc(daysW(d.switch_days))+'</span></div>';

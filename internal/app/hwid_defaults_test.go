@@ -145,3 +145,32 @@ func TestWithHwidDefaultOff(t *testing.T) {
 		t.Fatalf("админке нужна пометка: %q", got)
 	}
 }
+
+// Строка сброса в карточке тарифа — по стратегии и только при лимите трафика.
+func TestPlanTermsReset(t *testing.T) {
+	gb := 30
+	p := &model.Plan{Strategy: "MONTH_ROLLING", Durations: []model.PlanDuration{{Months: 3, Base: "400", TrafficGB: &gb}}}
+	if got := planTermsText("ru", p, nil); !strings.Contains(got, "Сброс трафика: каждый месяц в день подключения") {
+		t.Fatalf("нет строки сброса: %q", got)
+	}
+	p.Strategy = "NO_RESET"
+	if got := planTermsText("ru", p, nil); strings.Contains(got, "Сброс") {
+		t.Fatalf("NO_RESET — строки сброса нет: %q", got)
+	}
+	p.Strategy, p.Durations[0].TrafficGB = "MONTH", nil
+	if got := planTermsText("ru", p, nil); strings.Contains(got, "Сброс") {
+		t.Fatalf("у безлимита сбрасывать нечего: %q", got)
+	}
+}
+
+// Экран подписки: трафик периода и дата сброса по Москве.
+func TestSubTrafficLine(t *testing.T) {
+	s := remnawave.SubSnapshot{TrafficUsed: 5 << 30, TrafficLimit: 30 << 30, NextReset: time.Date(2026, 12, 1, 0, 20, 0, 0, time.UTC)}
+	got := trafficLine("ru", s)
+	if !strings.Contains(got, "Трафик: <b>5 из 30 ГБ</b>") || !strings.Contains(got, "Сброс трафика: <b>01.12.2026</b>") {
+		t.Fatalf("got %q", got)
+	}
+	if got = trafficLine("ru", remnawave.SubSnapshot{TrafficUsed: 1 << 30}); strings.Contains(got, "Сброс") || !strings.Contains(got, "безлимит") {
+		t.Fatalf("безлимит: %q", got)
+	}
+}

@@ -350,6 +350,8 @@ type MiniSubDTO struct {
 	TrafficOK    bool  `json:"traffic_ok"`
 	TrafficUsed  int64 `json:"traffic_used"`
 	TrafficLimit int64 `json:"traffic_limit"`
+	// TrafficResetTS — когда панель обнулит трафик (unix); 0 — не обнулит.
+	TrafficResetTS int64 `json:"traffic_reset_ts,omitempty"`
 	// Devices — сами устройства, если владелец бота разрешил их показывать.
 	// Пусто — на экране остаётся только счётчик.
 	Devices []MiniDeviceDTO `json:"devices,omitempty"`

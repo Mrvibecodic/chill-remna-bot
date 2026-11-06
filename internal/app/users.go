@@ -1025,15 +1025,16 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	panel := a.panel
 	a.mu.Unlock()
 	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
-	var url, expireAt, status string
+	var snap remnawave.SubSnapshot
 	ok := false
 	var perr error
 	if panel != nil {
-		url, expireAt, status, ok, perr = panel.SubscriptionState(ctx, chatID)
+		snap, ok, perr = panel.SubscriptionSnapshot(ctx, chatID)
 		if ok {
-			url = a.rewriteSub(url)
+			snap.URL = a.rewriteSub(snap.URL)
 		}
 	}
+	url, expireAt, status := snap.URL, snap.ExpireAt, snap.Status
 	if perr != nil {
 		// Панель недоступна — это НЕ «подписки нет». Раньше платящему клиенту
 		// во время аварии показывали «у вас нет активных подписок, нажмите
@@ -1092,7 +1093,7 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + devLine + a.addSubLine(ctx, chatID)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + trafficLine(lang, snap) + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 
@@ -1133,6 +1134,25 @@ func formatGB(b int64) string {
 	gb := float64(b) / (1024 * 1024 * 1024)
 	s := strconv.FormatFloat(gb, 'f', 1, 64)
 	return strings.TrimSuffix(s, ".0")
+}
+
+// trafficLine — трафик периода и дата следующего сброса на экране подписки.
+func trafficLine(lang string, s remnawave.SubSnapshot) string {
+	var line string
+	if s.TrafficLimit > 0 {
+		line = i18n.T(lang, "sub.traffic", formatGB(s.TrafficUsed), formatGB(s.TrafficLimit))
+	} else {
+		line = i18n.T(lang, "sub.traffic_unlim", formatGB(s.TrafficUsed))
+	}
+	if !s.NextReset.IsZero() {
+		if r := i18n.T(lang, "sub.traffic_reset", s.NextReset.In(displayTZ).Format("02.01.2006")); r != "" {
+			line += "\n" + r
+		}
+	}
+	if line == "" {
+		return ""
+	}
+	return "\n\n" + line
 }
 
 // devicesLine renders a read-only "connected[/allowed]" devices line for the

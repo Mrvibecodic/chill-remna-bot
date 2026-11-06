@@ -677,7 +677,8 @@ function trafficCard(sub){
   var used=Number(sub.traffic_used)||0,lim=Number(sub.traffic_limit)||0;
   var pct=lim>0?Math.min(100,Math.round(used*100/lim)):0;
   return '<div class="card"><div class="tline"><span class="status">'+IC.bolt+'Трафик</span><b>'+(lim>0?gbText(used)+' из '+gbText(lim):gbText(used)+' · безлимит')+'</b></div>'+
-    (lim>0?'<div class="tbar'+(pct>=90?' hi':'')+'"><i style="width:'+pct+'%"></i></div>':'')+'</div>';
+    (lim>0?'<div class="tbar'+(pct>=90?' hi':'')+'"><i style="width:'+pct+'%"></i></div>':'')+
+    (sub.traffic_reset_ts?'<div class="hint" style="margin-top:8px">Сброс трафика: '+esc(shortDate(sub.traffic_reset_ts))+'</div>':'')+'</div>';
 }
 function devicesCard(sub){
   var dt=devicesText(sub),list=(sub&&sub.devices)||[];
@@ -713,7 +714,7 @@ function planInfoDesk(p){
   var h='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
-  if(p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
   h+='</div>';
   if(d.countries&&d.countries.length){
@@ -815,7 +816,7 @@ async function doResetDevices(el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
 }
 
-var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'ежедневно',WEEK:'еженедельно',MONTH:'ежемесячно',MONTH_ROLLING:'ежемесячно'};
+var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'каждый день',WEEK:'каждый понедельник',MONTH:'1-го числа каждого месяца',MONTH_ROLLING:'каждый месяц в день подключения'};
 // planTraffic/planDevices/planSub принимают СРОК тарифа (duration): лимиты
 // в v2-схеме живут на сроке, а не на тарифе.
 function planTraffic(d){return (d&&d.traffic_gb>0)?(d.traffic_gb+' ГБ'):'Безлимит';}
@@ -904,7 +905,7 @@ function buyPlan(code,months){
   h+='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
-  if(p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
   if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';

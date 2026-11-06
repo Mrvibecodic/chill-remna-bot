@@ -534,6 +534,8 @@ type panelUser struct {
 	// счётчик периода. Единственный ТОЧНЫЙ признак того, что период
 	// сменился: сравнивать сам счётчик бесполезно, он и так бывает нулём.
 	LastTrafficResetAt string `json:"lastTrafficResetAt"`
+	// CreatedAt — от этого дня панель отсчитывает сброс MONTH_ROLLING.
+	CreatedAt string `json:"createdAt"`
 }
 
 // hwidLimit — свой лимит устройств; 0 — своего нет или он снят.
@@ -1678,13 +1680,16 @@ func (c *Client) SubscriptionState(ctx context.Context, telegramID int64) (url, 
 }
 
 // SubSnapshot — подписка пользователя одним ответом панели: ссылка, срок,
-// статус и трафик текущего периода (TrafficLimit 0 — безлимит).
+// статус и трафик текущего периода (TrafficLimit 0 — безлимит). NextReset —
+// когда панель обнулит счётчик; нулевое — не обнулит (безлимит, NO_RESET,
+// срок кончится раньше) или неизвестно.
 type SubSnapshot struct {
 	URL          string
 	ExpireAt     string
 	Status       string
 	TrafficUsed  int64
 	TrafficLimit int64
+	NextReset    time.Time
 }
 
 // SubscriptionSnapshot — как SubscriptionState, но с трафиком; запрос к
@@ -1697,13 +1702,22 @@ func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (Su
 	if u == nil || u.SubscriptionURL == "" {
 		return SubSnapshot{}, false, nil
 	}
-	return SubSnapshot{
+	snap := SubSnapshot{
 		URL:          u.SubscriptionURL,
 		ExpireAt:     u.ExpireAt,
 		Status:       u.Status,
 		TrafficUsed:  u.usedBytes(),
 		TrafficLimit: u.TrafficLimitBytes,
-	}, true, nil
+	}
+	if u.TrafficLimitBytes > 0 {
+		created, _ := time.Parse(time.RFC3339, u.CreatedAt)
+		next := NextTrafficReset(u.TrafficLimitStrategy, created, time.Now())
+		if exp, err := time.Parse(time.RFC3339, u.ExpireAt); err == nil && next.After(exp) {
+			next = time.Time{}
+		}
+		snap.NextReset = next
+	}
+	return snap, true, nil
 }
 
 // DeviceInfo is a read-only snapshot of a user's HWID devices.

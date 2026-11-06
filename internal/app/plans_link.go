@@ -305,6 +305,18 @@ func planTermsText(lang string, p *model.Plan, dev func(d *model.PlanDuration) d
 		}
 		b.WriteString(i18n.T(lang, "buy.traffic", strings.Join(parts, " · ")))
 	}
+	// Когда обнуляется счётчик — только если трафик где-то ограничен: у
+	// безлимита сбрасывать нечего, а «на весь срок» уже сказано в строке.
+	anyLimit := false
+	for _, c := range conds {
+		anyLimit = anyLimit || c.traffic > 0
+	}
+	if when := resetWhen(lang, p.Strategy); anyLimit && when != "" {
+		if line := i18n.T(lang, "buy.reset", when); line != "" {
+			b.WriteString("\n")
+			b.WriteString(line)
+		}
+	}
 	if anyDevices {
 		b.WriteString("\n")
 		if sameDevices {
@@ -337,6 +349,22 @@ func trafficValue(lang, strategy string, gb int) string {
 		key = "buy.tr_week"
 	}
 	return i18n.T(lang, key, gb)
+}
+
+// resetWhen — когда панель обнуляет трафик по стратегии тарифа; "" — не
+// обнуляет. Незнакомую строку панель считает MONTH — как и trafficValue.
+func resetWhen(lang, strategy string) string {
+	switch strategy {
+	case "NO_RESET":
+		return ""
+	case "DAY":
+		return i18n.T(lang, "buy.reset_day")
+	case "WEEK":
+		return i18n.T(lang, "buy.reset_week")
+	case "MONTH_ROLLING":
+		return i18n.T(lang, "buy.reset_rolling")
+	}
+	return i18n.T(lang, "buy.reset_month")
 }
 
 // devicesValue — лимит устройств срока; ничего не известно — «по умолчанию».
