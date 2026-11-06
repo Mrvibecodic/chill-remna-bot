@@ -191,25 +191,11 @@ type MiniTopUpOptionsDTO struct {
 	MaxKopecks int64 `json:"max_kopecks,omitempty"`
 }
 
-// MiniWalletDTO — кошелёк: баланс и прогноз «на сколько хватит» по тарифу
-// покупателя (или по сетке, если своего тарифа нет) — тот же, что в чате.
+// MiniWalletDTO — кошелёк: баланс и доступно ли пополнение. Прогноз «на
+// сколько хватит» живёт только в чате.
 type MiniWalletDTO struct {
 	BalanceK int64 `json:"balance_kopecks"`
 	TopUpOn  bool  `json:"topup_on"`
-	// PlanName — тариф, по ценам которого считан прогноз ("" — по сетке).
-	PlanName  string               `json:"plan_name,omitempty"`
-	Rows      []MiniForecastRowDTO `json:"rows,omitempty"`
-	MaxMonths int                  `json:"max_months"`
-	Currency  string               `json:"currency"`
-}
-
-// MiniForecastRowDTO — один срок прогноза: сколько раз его можно оплатить
-// балансом и сколько это месяцев.
-type MiniForecastRowDTO struct {
-	Months int    `json:"months"`
-	Price  string `json:"price"`
-	Count  int    `json:"count"`
-	Total  int    `json:"total"`
 }
 
 // MiniPayCheckDTO — итог ручной перепроверки счетов.

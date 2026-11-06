@@ -190,30 +190,9 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 	return web.MiniPlansDTO{Plans: []web.MiniPlanDTO{pd}}
 }
 
-// MiniWallet — кошелёк: баланс и прогноз «на сколько хватит», как в чате.
+// MiniWallet — кошелёк: баланс и доступно ли пополнение.
 func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
-	dto := web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), Currency: curRUB}
-	dto.BalanceK = a.userBalance(ctx, tgID)
-	if !a.forecastShown() {
-		return dto
-	}
-	list, plan := a.forecastEntries(ctx, tgID)
-	if plan != nil {
-		dto.PlanName = strings.TrimSpace(plan.Icon + " " + plan.Name)
-	}
-	for _, e := range list {
-		k, ok := rubToKopecks(e.price)
-		if !ok || k <= 0 {
-			continue
-		}
-		count := int(dto.BalanceK / k)
-		row := web.MiniForecastRowDTO{Months: e.months, Price: e.price, Count: count, Total: count * e.months}
-		if row.Total > dto.MaxMonths {
-			dto.MaxMonths = row.Total
-		}
-		dto.Rows = append(dto.Rows, row)
-	}
-	return dto
+	return web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), BalanceK: a.userBalance(ctx, tgID)}
 }
 
 // MiniPayCheck — «Проверить оплату» из мини-аппа и кабинета: незакрытые счета

@@ -356,7 +356,6 @@ var L={ru:{
  p2p_sent:'Чек отправлен на проверку',p2p_sent_text:'Подписка обновится сразу после проверки администратором.',p2p_sent_topup:'Баланс пополнится сразу после проверки администратором.',p2p_cancel:'Отменить заявку',p2p_cancelled:'Заявка отменена',upload_fail:'Ошибка загрузки',
  wallet:'Кошелёк',balance:'Баланс',topup_amount:'Сумма пополнения',topup_custom:'Своя сумма',topup_max:'до %s',topup_method:'Способ пополнения',
  topup_bad:'Введите сумму',topup_big:'Максимум — %s',
- forecast:'На сколько хватит',forecast_plan:'По ценам тарифа %s',forecast_max:'Хватит максимум на %s',
  no_withdraw:'Баланс тратится только на подписку. Вывод средств невозможен.',
  promo:'Промокод',promo_ph:'Введите код',apply:'Применить',promo_hint:'Промокод добавит дни, трафик или деньги на баланс.',
  ref:'Пригласить друга',ref_you:'Вам',ref_friend:'Другу',ref_pct:'С каждой его оплаты',ref_first:'за первую оплату друга',ref_reg:'за регистрацию друга',
@@ -412,7 +411,6 @@ var L={ru:{
  p2p_sent:'Receipt sent for review',p2p_sent_text:'Your subscription updates right after an admin confirms it.',p2p_sent_topup:'Your balance is credited right after an admin confirms it.',p2p_cancel:'Cancel the request',p2p_cancelled:'Request cancelled',upload_fail:'Upload failed',
  wallet:'Wallet',balance:'Balance',topup_amount:'Top-up amount',topup_custom:'Custom amount',topup_max:'up to %s',topup_method:'Top-up method',
  topup_bad:'Enter an amount',topup_big:'Maximum is %s',
- forecast:'How long it lasts',forecast_plan:'At %s prices',forecast_max:'Lasts up to %s',
  no_withdraw:'Balance is spent on the subscription only. Withdrawals are not possible.',
  promo:'Promo code',promo_ph:'Enter code',apply:'Apply',promo_hint:'A promo code adds days, traffic or balance.',
  ref:'Invite a friend',ref_you:'You get',ref_friend:'Your friend gets',ref_pct:'From each of their payments',ref_first:'for the friend’s first payment',ref_reg:'for the friend’s sign-up',
@@ -954,13 +952,6 @@ SCREENS.wallet=async function(a){
     h+='<div id="tuM">'+tuMethods(a)+'</div></div>';
   }
   var hl=h;h='';
-  if(w.rows&&w.rows.length){
-    h+='<div class="sect">'+esc(T('forecast'))+'</div><div class="list" style="margin-top:0">';
-    w.rows.forEach(function(r){h+='<div class="kv"><span class="k">'+esc(monthsW(r.months))+' · '+esc(r.price)+' '+esc(w.currency||'₽')+'</span><span class="v">'+(r.count>0?(r.count+'× ≈ '+esc(monthsW(r.total))):'—')+'</span></div>';});
-    h+='</div>';
-    if(w.plan_name)h+='<div class="hint">'+esc(T('forecast_plan',w.plan_name))+'</div>';
-    if(w.max_months>0)h+='<div class="hint">'+esc(T('forecast_max',monthsW(w.max_months)))+'</div>';
-  }
   h+='<div class="list">'+item(IC.tag,T('promo'),T('promo_hint'),'','go(\'promo\')')+'</div>';
   h=dsplit(hl,h);
   view(h);

@@ -132,18 +132,14 @@ func TestMiniMenu_TrialInCabinet(t *testing.T) {
 }
 
 // Кошелёк: прогноз по сетке, если своего тарифа нет.
-func TestMiniWallet_Forecast(t *testing.T) {
+func TestMiniWallet_Balance(t *testing.T) {
 	ctx := context.Background()
 	a, fs := planApp(t)
 	const uid int64 = 1000000030
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddBalance(ctx, uid, 45000)
-	w := a.MiniWallet(ctx, uid)
-	if w.BalanceK != 45000 || len(w.Rows) != 3 {
+	if w := a.MiniWallet(ctx, uid); w.BalanceK != 45000 {
 		t.Fatalf("кошелёк: %+v", w)
-	}
-	if w.Rows[0].Months != 1 || w.Rows[0].Count != 3 || w.MaxMonths != 3 {
-		t.Fatalf("прогноз: %+v", w)
 	}
 }
 

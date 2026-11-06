@@ -139,8 +139,8 @@ func TestWallet_HeldAmount(t *testing.T) {
 	}
 }
 
-// Блок «На сколько хватит» админ прячет одной кнопкой — и в чате, и в
-// мини-аппе. По умолчанию (и в конфиге без настройки) блок показан.
+// Блок «На сколько хватит» (он только в чате) админ прячет одной кнопкой.
+// По умолчанию (и в конфиге без настройки) блок показан.
 func TestWallet_ForecastToggle(t *testing.T) {
 	a, fs := planApp(t)
 	msg := a.msg.(*fakeMsg)
@@ -158,9 +158,6 @@ func TestWallet_ForecastToggle(t *testing.T) {
 
 	if txt := balanceText(); !strings.Contains(txt, "На сколько хватит") {
 		t.Fatalf("по умолчанию блок должен быть показан:\n%s", txt)
-	}
-	if w := a.MiniWallet(ctx, uid); len(w.Rows) == 0 || w.MaxMonths == 0 {
-		t.Fatalf("мини-апп по умолчанию должен показывать прогноз: %+v", w)
 	}
 
 	// Не-админ настройку не трогает.
@@ -182,9 +179,6 @@ func TestWallet_ForecastToggle(t *testing.T) {
 	}
 	if !strings.Contains(txt, "Вывод средств невозможен") {
 		t.Fatalf("остальной кошелёк пропал:\n%s", txt)
-	}
-	if w := a.MiniWallet(ctx, uid); len(w.Rows) != 0 || w.MaxMonths != 0 || w.PlanName != "" || w.BalanceK != 99000 {
-		t.Fatalf("скрытый блок виден в мини-аппе: %+v", w)
 	}
 
 	a.handleCallback(ctx, cb(100, "wal:forecast"))
