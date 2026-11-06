@@ -249,3 +249,26 @@ func TestNormalizeDevices_TurnsOnAppOnce(t *testing.T) {
 		t.Fatal("нормализация включила приложение поверх выбора владельца")
 	}
 }
+
+// Трафик периода приходит тем же ответом панели, что и ссылка: и в плоских
+// полях (2.x), и во вложенном userTraffic (3.x).
+func TestMiniSubscription_Traffic(t *testing.T) {
+	for _, tc := range []struct{ name, user string }{
+		{"2.x", `"usedTrafficBytes":5368709120`},
+		{"3.x", `"userTraffic":{"usedTrafficBytes":5368709120}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/api/users/by-telegram-id/", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"response":[{"uuid":"u-1","telegramId":42,"status":"ACTIVE","subscriptionUrl":"https://s/ex","expireAt":"2030-01-02T03:04:05Z","trafficLimitBytes":107374182400,` + tc.user + `}]}`))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			dto := devicesApp(srv.URL, model.DevicesConfig{Init: true}).MiniSubscription(context.Background(), 42)
+			if !dto.Active || !dto.TrafficOK || dto.TrafficUsed != 5<<30 || dto.TrafficLimit != 100<<30 {
+				t.Fatalf("трафик: %+v", dto)
+			}
+		})
+	}
+}

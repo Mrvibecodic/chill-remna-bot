@@ -1662,14 +1662,37 @@ func (c *Client) SubscriptionFull(ctx context.Context, telegramID int64) (url, e
 // поддерживается аккуратно (sentinel-ошибки, routeGone, undecidedStatus) — и
 // схлопывалось в один false ровно здесь, на последнем шаге.
 func (c *Client) SubscriptionState(ctx context.Context, telegramID int64) (url, expireAt, status string, found bool, err error) {
+	s, found, err := c.SubscriptionSnapshot(ctx, telegramID)
+	return s.URL, s.ExpireAt, s.Status, found, err
+}
+
+// SubSnapshot — подписка пользователя одним ответом панели: ссылка, срок,
+// статус и трафик текущего периода (TrafficLimit 0 — безлимит).
+type SubSnapshot struct {
+	URL          string
+	ExpireAt     string
+	Status       string
+	TrafficUsed  int64
+	TrafficLimit int64
+}
+
+// SubscriptionSnapshot — как SubscriptionState, но с трафиком; запрос к
+// панели тот же.
+func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (SubSnapshot, bool, error) {
 	u, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return "", "", "", false, err
+		return SubSnapshot{}, false, err
 	}
 	if u == nil || u.SubscriptionURL == "" {
-		return "", "", "", false, nil
+		return SubSnapshot{}, false, nil
 	}
-	return u.SubscriptionURL, u.ExpireAt, u.Status, true, nil
+	return SubSnapshot{
+		URL:          u.SubscriptionURL,
+		ExpireAt:     u.ExpireAt,
+		Status:       u.Status,
+		TrafficUsed:  u.usedBytes(),
+		TrafficLimit: u.TrafficLimitBytes,
+	}, true, nil
 }
 
 // DeviceInfo is a read-only snapshot of a user's HWID devices.

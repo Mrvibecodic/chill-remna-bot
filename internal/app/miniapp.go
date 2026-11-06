@@ -124,13 +124,17 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	if panel == nil {
 		return dto
 	}
-	url, expireAt, status, ok := panel.SubscriptionFull(ctx, tgID)
+	snap, ok, _ := panel.SubscriptionSnapshot(ctx, tgID)
 	if !ok {
 		return dto
 	}
+	url, expireAt := snap.URL, snap.ExpireAt
 	dto.Active = true
-	dto.Status = status
+	dto.Status = snap.Status
 	dto.SubURL = a.rewriteSub(url)
+	dto.TrafficOK = true
+	dto.TrafficUsed = snap.TrafficUsed
+	dto.TrafficLimit = snap.TrafficLimit
 	dto.ExpireAt = formatExpire(expireAt, a.lang(tgID))
 	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()

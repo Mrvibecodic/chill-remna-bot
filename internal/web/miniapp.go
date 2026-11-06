@@ -345,6 +345,11 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+	// TrafficUsed/TrafficLimit — трафик текущего периода в байтах (лимит 0 —
+	// безлимит); TrafficOK — сервер их прислал.
+	TrafficOK    bool  `json:"traffic_ok"`
+	TrafficUsed  int64 `json:"traffic_used"`
+	TrafficLimit int64 `json:"traffic_limit"`
 	// Devices — сами устройства, если владелец бота разрешил их показывать.
 	// Пусто — на экране остаётся только счётчик.
 	Devices []MiniDeviceDTO `json:"devices,omitempty"`
