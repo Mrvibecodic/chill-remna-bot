@@ -136,6 +136,15 @@ func TestSessionEpochRevokesToken(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("пропуск нового поколения: %d", w.Code)
 	}
+
+	// Аккаунт удалён: пропуск не принимается, даже выписанный с тем же
+	// поколением в гонке с удалением.
+	f.epoch = -1
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodGet, "/api/cabinet/account", "", webToken(f, -7, -1), "203.0.113.23"))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("пропуск удалённого аккаунта: %d", w.Code)
+	}
 }
 
 // «Забыли пароль» отвечает одинаково всегда — иначе форма становится

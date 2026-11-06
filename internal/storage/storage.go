@@ -589,6 +589,14 @@ func (b *base) DeleteUser(ctx context.Context, telegramID int64) error {
 			_, _ = b.db.ExecContext(ctx, "DELETE FROM plan_access WHERE email != '' AND email = "+b.ph(1), model.NormalizeEmail(wu.Email))
 		}
 	}
+	// Аккаунт веб-кабинета уходит вместе с пользователем: иначе по прежним
+	// почте и паролю удалённый снова входит в кабинет.
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	_, _ = b.db.ExecContext(ctx, "DELETE FROM email_tokens WHERE tg_id = "+b.ph(1), telegramID)
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	if _, err := b.db.ExecContext(ctx, "DELETE FROM web_users WHERE tg_id = "+b.ph(1), telegramID); err != nil {
+		return fmt.Errorf("удаление аккаунта кабинета: %w", err)
+	}
 	_, err := b.db.ExecContext(ctx, "DELETE FROM users WHERE telegram_id = "+b.ph(1), telegramID)
 	return err
 }

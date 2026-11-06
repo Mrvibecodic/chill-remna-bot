@@ -801,7 +801,17 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	a.invalidateSubCache(uid)
 	_ = a.store.DeletePaymentsByUser(ctx, uid)
 	_ = a.store.DeleteP2PRequestsByUser(ctx, uid)
-	_ = a.store.DeleteUser(ctx, uid)
+	if err := a.store.DeleteUser(ctx, uid); err != nil {
+		a.log.Error("удаление пользователя", "tg_id", uid, "err", err)
+		a.notify(ctx, adminChat, "⚠️ "+err.Error())
+	}
+	// Поколение пропусков удалённого аккаунта перечитается из базы. Отметка о
+	// заявке в кабинет тоже уходит: одобрение стёрто вместе с пользователем, и
+	// при новом входе админу должна прийти новая заявка.
+	a.forgetEpoch(uid)
+	cabNotifyMu.Lock()
+	delete(cabNotified, uid)
+	cabNotifyMu.Unlock()
 }
 
 func payMethodLabel(method string) string {

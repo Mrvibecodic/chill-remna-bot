@@ -168,3 +168,101 @@ func TestCabinetP2PScreenshot_PDFAndImage(t *testing.T) {
 		})
 	}
 }
+
+// Удалённый из бота аккаунт по почте не входит в кабинет ни заново, ни по
+// выданному раньше пропуску.
+func TestCabinetDeletedUserCannotSignIn(t *testing.T) {
+	for _, mode := range []string{"usr:delbot:", "usr:delfull:"} {
+		t.Run(mode, func(t *testing.T) {
+			a, _, fs := newTestApp(t)
+			a.store = fs
+			a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+			a.botCfg.NormalizeCabinet()
+			a.botCfg.Cabinet.Enabled = true
+			ctx := context.Background()
+
+			id, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1")
+			if err != nil {
+				t.Fatalf("регистрация: %v", err)
+			}
+			if e := a.SessionEpoch(ctx, id); e != 0 {
+				t.Fatalf("поколение живого аккаунта %d, want 0", e)
+			}
+
+			a.handleCallback(ctx, cb(100, mode+itoa64(id)))
+
+			if _, err := a.CabinetEmailLogin(ctx, "gone@example.com", "password1"); err == nil {
+				t.Fatal("после удаления вход по почте должен быть закрыт")
+			}
+			if e := a.SessionEpoch(ctx, id); e >= 0 {
+				t.Fatalf("старый пропуск удалённого аккаунта не должен приниматься: поколение %d", e)
+			}
+			// Тот же адрес можно зарегистрировать заново — это новый аккаунт.
+			nid, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password2")
+			if err != nil || nid == id {
+				t.Fatalf("повторная регистрация: id=%d (старый %d) err=%v", nid, id, err)
+			}
+		})
+	}
+}
+
+// Удалили человека с неотвеченной заявкой в кабинет — при новом входе админу
+// приходит новая заявка, а не тишина до перезапуска бота.
+func TestCabinetDeletedUserRequestsAgain(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	a.botCfg.Cabinet.Approval = model.CabinetApprovalTG
+	ctx := context.Background()
+	const user = int64(1000000731)
+	// Отметка о заявке живёт в памяти процесса — чистим её до и после теста.
+	forget := func() {
+		cabNotifyMu.Lock()
+		delete(cabNotified, user)
+		cabNotifyMu.Unlock()
+	}
+	forget()
+	t.Cleanup(forget)
+
+	_ = fs.UpsertUser(ctx, user)
+	if err := a.CabinetGate(ctx, user, false); err == nil {
+		t.Fatal("вход через Telegram должен ждать одобрения")
+	}
+	a.handleCallback(ctx, cb(100, "usr:delbot:"+itoa64(user)))
+	_ = fs.UpsertUser(ctx, user)
+	if err := a.CabinetGate(ctx, user, false); err == nil {
+		t.Fatal("после удаления вход снова должен ждать одобрения")
+	}
+	if n := strings.Count(fm.joined(), "Запрос доступа в веб-кабинет"); n != 2 {
+		t.Fatalf("после удаления админу должна прийти новая заявка, всего заявок %d", n)
+	}
+}
+
+// Удаление посреди чтения поколения из базы: устаревшее значение не должно
+// остаться в памяти, иначе старый пропуск удалённого аккаунта жил бы до
+// перезапуска бота.
+func TestSessionEpochStaleReadNotCached(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	ctx := context.Background()
+
+	id, err := a.CabinetEmailRegister(ctx, "race@example.com", "password1")
+	if err != nil {
+		t.Fatalf("регистрация: %v", err)
+	}
+	a.forgetEpoch(id)
+	fs.afterWebUserRead = func() {
+		fs.afterWebUserRead = nil
+		a.handleCallback(ctx, cb(100, "usr:delbot:"+itoa64(id)))
+	}
+	_ = a.SessionEpoch(ctx, id) // застало аккаунт живым, удаление прошло посреди
+	if e := a.SessionEpoch(ctx, id); e != -1 {
+		t.Fatalf("после удаления поколение %d, want -1", e)
+	}
+}
+

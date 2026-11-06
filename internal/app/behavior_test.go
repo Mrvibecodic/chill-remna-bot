@@ -411,6 +411,9 @@ type fakeStore struct {
 	trialResets map[int64]int
 	promoUses   map[string]bool
 	webUsers    map[string]*model.WebUser
+	// afterWebUserRead — вызывается после чтения аккаунта кабинета: тесты гонок
+	// вклинивают сюда действие посреди чтения.
+	afterWebUserRead func()
 	mailTokens  map[string]*model.EmailToken
 	paylogs     []model.PayLogEntry
 	torrents    []model.TorrentReport
@@ -1165,6 +1168,11 @@ func (s *fakeStore) SetBlocked(_ context.Context, id int64, blocked bool) error 
 }
 func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
 	delete(s.users, id)
+	for k, u := range s.webUsers {
+		if u.TgID == id {
+			delete(s.webUsers, k)
+		}
+	}
 	return nil
 }
 
@@ -1296,13 +1304,18 @@ func (s *fakeStore) CreateWebUser(_ context.Context, u *model.WebUser) error {
 	return nil
 }
 func (s *fakeStore) GetWebUserByTgID(_ context.Context, tgID int64) (*model.WebUser, error) {
+	var out *model.WebUser
 	for _, u := range s.webUsers {
 		if u.TgID == tgID {
 			cp := *u
-			return &cp, nil
+			out = &cp
+			break
 		}
 	}
-	return nil, nil
+	if h := s.afterWebUserRead; h != nil {
+		h()
+	}
+	return out, nil
 }
 func (s *fakeStore) SetWebUserVerified(_ context.Context, tgID int64, at string) error {
 	if at == "" {

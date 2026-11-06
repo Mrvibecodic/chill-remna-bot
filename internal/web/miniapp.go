@@ -492,7 +492,9 @@ func (s *Server) miniAuth(r *http.Request) (id int64, web bool, ok bool) {
 	// Поколение пропусков аккаунта: смена пароля и привязка Telegram обязаны
 	// выбить прежние сессии немедленно. Общего поколения для этого мало — оно
 	// выбивает всех сразу, поэтому им и не пользуются.
-	if epoch != s.mini.SessionEpoch(r.Context(), id) {
+	// Отрицательное поколение — аккаунта больше нет: пропуск, выписанный в
+	// гонке с удалением, совпал бы с ним и жил бы весь срок.
+	if cur := s.mini.SessionEpoch(r.Context(), id); cur < 0 || epoch != cur {
 		return 0, false, false
 	}
 	return id, web, true

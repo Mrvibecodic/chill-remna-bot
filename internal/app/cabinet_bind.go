@@ -135,9 +135,7 @@ func (a *App) CabinetBindTelegram(ctx context.Context, tgID, newTgID int64) (int
 	}
 
 	// Кэши, ключом которых был прежний идентификатор.
-	a.epochMu.Lock()
-	delete(a.epochs, tgID)
-	a.epochMu.Unlock()
+	a.forgetEpoch(tgID)
 	cabNotifyMu.Lock()
 	delete(cabNotified, tgID)
 	delete(cabNotified, newTgID)
