@@ -357,7 +357,7 @@ var L={ru:{
  wallet:'Кошелёк',balance:'Баланс',topup_amount:'Сумма пополнения',topup_custom:'Своя сумма',topup_max:'до %s',topup_method:'Способ пополнения',
  topup_bad:'Введите сумму',topup_big:'Максимум — %s',
  no_withdraw:'Баланс тратится только на подписку. Вывод средств невозможен.',
- promo:'Промокод',promo_ph:'Введите код',apply:'Применить',promo_hint:'Промокод добавит дни, трафик или деньги на баланс.',
+ promo:'Промокод',promo_wait_mail:'Подтвердите почту — промокод применится после этого',promo_ph:'Введите код',apply:'Применить',promo_hint:'Промокод добавит дни, трафик или деньги на баланс.',
  ref:'Пригласить друга',ref_you:'Вам',ref_friend:'Другу',ref_pct:'С каждой его оплаты',ref_first:'за первую оплату друга',ref_reg:'за регистрацию друга',
  ref_count:'Приглашено',ref_earned:'Заработано',share:'Поделиться',ref_share_text:'Подключайся по моей ссылке — будет бонус 🎁',days_short:'дн.',
  devices_title:'Устройства',devices_reset:'Сбросить устройства',devices_ask:'Сбросить все устройства?\n\nОни отключатся, а ключи доступа обновятся. Чтобы снова подключиться, обновите подписку на каждом нужном устройстве.',
@@ -412,7 +412,7 @@ var L={ru:{
  wallet:'Wallet',balance:'Balance',topup_amount:'Top-up amount',topup_custom:'Custom amount',topup_max:'up to %s',topup_method:'Top-up method',
  topup_bad:'Enter an amount',topup_big:'Maximum is %s',
  no_withdraw:'Balance is spent on the subscription only. Withdrawals are not possible.',
- promo:'Promo code',promo_ph:'Enter code',apply:'Apply',promo_hint:'A promo code adds days, traffic or balance.',
+ promo:'Promo code',promo_wait_mail:'Confirm your email — the promo code will apply after that',promo_ph:'Enter code',apply:'Apply',promo_hint:'A promo code adds days, traffic or balance.',
  ref:'Invite a friend',ref_you:'You get',ref_friend:'Your friend gets',ref_pct:'From each of their payments',ref_first:'for the friend’s first payment',ref_reg:'for the friend’s sign-up',
  ref_count:'Invited',ref_earned:'Earned',share:'Share',ref_share_text:'Join with my link — you get a bonus 🎁',days_short:'d',
  devices_title:'Devices',devices_reset:'Reset devices',devices_ask:'Reset all devices?\n\nThey will be disconnected and access keys will change. To reconnect, update the subscription on each device you need.',
@@ -881,9 +881,10 @@ async function pay(code,months,method,el,shown){
 /* ---------- ожидание оплаты ---------- */
 function stopPoll(){if(POLL){clearInterval(POLL);POLL=null;}}
 SCREENS.wait=function(a){
-  // Снимок до оплаты: счёт, проведённый вебхуком, в проверку уже не попадёт,
-  // и об оплате тогда говорит сдвиг баланса или срока.
-  if(a&&a.b0===undefined){a.b0=STATE.balanceK||0;a.e0=(STATE.me&&STATE.me.sub_expire)||'';}
+  // Счёт, проведённый вебхуком, в проверку уже не попадёт: об оплате тогда
+  // говорит пополнение баланса на сумму счёта (a.k) или новый срок подписки.
+  // Снимок свежий — сохранённый на экране мог устареть.
+  if(a&&!a.snap){a.snap=true;api('/api/miniapp/me').then(function(m){a.b0=m.balance_kopecks||0;a.e0=m.sub_expire||'';a.ready=true;},function(){});}
   var h=(DESK?'<div class="dcenter">':'')+'<div class="card center" style="margin-top:18px">'+'<div class="spin"></div><div class="h2" style="margin-top:14px">'+esc(T('wait_title'))+'</div><div class="hint">'+esc(T('wait_text'))+'</div>'+
     '<div class="stack" style="margin-top:16px"><button class="btn" onclick="payCheck(this,true)">'+IC.refresh+esc(T('wait_check'))+'</button>'+
     (a&&a.url?'<button class="btn sec" onclick="openL(\''+jsq(a.url)+'\')">'+esc(T('wait_again'))+'</button>':'')+
@@ -895,7 +896,7 @@ async function payCheck(el,manual){
   if(el)busy(el,true);
   try{var r=await post('/api/miniapp/paycheck',{});
     var w=CUR&&CUR.name==='wait'?CUR.arg:null;
-    if(!r.paid&&w&&typeof r.balance_kopecks==='number'&&(r.balance_kopecks!==w.b0||(r.sub_expire||'')!==w.e0))r.paid=true;
+    if(!r.paid&&w&&w.ready&&typeof r.balance_kopecks==='number'&&(w.k>0?r.balance_kopecks-w.b0>=w.k:!!r.sub_expire&&r.sub_expire!==w.e0))r.paid=true;
     if(r.paid){stopPoll();guardOff();toast(T('paid_ok'),'ok');await refresh();goHome();return;}
     if(manual)toast(T('wait_none'));
   }catch(e){if(manual)toast(e.message||T('error'),'err');}
@@ -991,8 +992,8 @@ async function tuPay(m,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:a.k,method:m});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup});return;}
     if(r.redirect){toast(r.message||T('pay_fail'));return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url});return;}
-    if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url});return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url,k:a.k});return;}
+    if(r.ok&&r.pay_url){guardOn();if(openSmart(r.pay_url))return;go('wait',{url:r.pay_url,k:a.k});return;}
     toast(r.error||T('pay_fail'),'err');
   }catch(e){toast(e.message||T('error'),'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -1329,6 +1330,8 @@ async function refresh(){
 async function handleStart(p){
   if(!p)return false;
   if(p.indexOf('promo_')===0){
+    // До подтверждения почты промокод закрыт: ссылка ждёт подтверждения.
+    if(WEB&&STATE.acct&&STATE.acct.money_blocked){store('cab_start',p);if(!STATE.promoWait){STATE.promoWait=true;toast(T('promo_wait_mail'),'err');}return false;}
     // Сначала документы, если их нужно принять: промокод применится после.
     if(STATE.menu.legal_accept&&legalDocs().length){STATE.pendingPromo=p.slice(6);return false;}
     await promoApply(null,p.slice(6));return false;
@@ -1354,7 +1357,7 @@ async function boot(){
       if(sp)dropQuery();
       if(!TOKEN)TOKEN=load('cab_tok');
       if(!TOKEN){renderLogin();return;}
-      start=load('cab_start')||'';store('cab_start',null);
+      start=load('cab_start')||'';
     }else{
       if(!tg||!tg.initData){view('<div class="card empty">'+esc(T('open_tg'))+'</div>');return;}
       if(!TOKEN)await authenticate();
@@ -1362,6 +1365,9 @@ async function boot(){
     }
     if(!STATE.me)view('<div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div>');
     await refresh();
+    // Параметр ссылки снимается, только когда кабинет загрузился: с протухшим
+    // входом он дождётся нового.
+    if(WEB)store('cab_start',null);
     if(start&&await handleStart(start))return;
     goHome();
   }catch(e){

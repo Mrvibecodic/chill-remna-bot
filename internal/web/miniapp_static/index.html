@@ -1030,14 +1030,14 @@ async function pay(plan,months,method,el,shownPrice){
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   // p2p_inapp: реквизиты перевода и чек принимаются прямо здесь, а не в чате.
   try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true});
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url);return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,0);return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
         tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
-      }else{openPay(r.pay_url);openWait(r.pay_url);}
+      }else{openPay(r.pay_url);openWait(r.pay_url,0);}
       return;
     }
     if(r.redirect){toast(r.message||'Этот способ оплаты доступен в боте','ok');if(tg&&tg.close)setTimeout(function(){try{tg.close();}catch(e){}},2200);return;}
@@ -1051,7 +1051,8 @@ async function pay(plan,months,method,el,shownPrice){
 // с платёжкой) и уходит на главную, как только оплата прошла.
 var WAIT=null;
 function stopWait(){if(WAIT){clearInterval(WAIT.t);document.removeEventListener('visibilitychange',WAIT.v);WAIT=null;}}
-function openWait(url){
+// topupK — сумма пополнения в копейках; 0 — покупка подписки.
+function openWait(url,topupK){
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оплата</span>'+IC.wallet+'</div>'+
     '<div class="title">Ждём оплату</div><div class="hint" style="margin-top:6px">Завершите оплату на открывшейся странице. Как только платёж пройдёт, всё обновится само — эту страницу можно не закрывать.</div></div>';
   h+='<button class="btn" onclick="payCheck(this,true)">'+IC.reset+'Проверить оплату</button>';
@@ -1059,10 +1060,13 @@ function openWait(url){
   h=deskSplit(h,'');
   h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← На главную</button></div>';
   view(h,boot);
-  // Снимок до оплаты: счёт, проведённый вебхуком, в проверку уже не попадёт,
-  // и об оплате тогда говорит сдвиг баланса или срока.
-  var w={b0:STATE.balanceK||0,e0:STATE.me_subexp||'',n:0};
-  w.t=setInterval(function(){if(document.hidden)return;if(++w.n>30){stopWait();return;}payCheck(null,false);},6000);
+  // Счёт, проведённый вебхуком, в проверку уже не попадёт: об оплате тогда
+  // говорит пополнение баланса на сумму счёта или новый срок подписки.
+  // Снимок свежий — сохранённый на экране мог устареть.
+  var w={k:topupK||0,n:0,ready:false};
+  api('/api/miniapp/me').then(function(m){w.b0=m.balance_kopecks||0;w.e0=m.sub_expire||'';w.ready=true;},function(){});
+  // Через 3 минуты автопроверка стихает, кнопка «Проверить оплату» работает дальше.
+  w.t=setInterval(function(){if(document.hidden)return;if(++w.n>30){clearInterval(w.t);return;}payCheck(null,false);},6000);
   w.v=function(){if(!document.hidden)setTimeout(function(){if(WAIT===w)payCheck(null,false);},700);};
   document.addEventListener('visibilitychange',w.v);
   WAIT=w;
@@ -1072,7 +1076,7 @@ async function payCheck(el,manual){
   if(el)busy(el,true);
   try{var r=await post('/api/miniapp/paycheck',{});
     if(WAIT!==w)return;
-    var moved=typeof r.balance_kopecks==='number'&&(r.balance_kopecks!==w.b0||(r.sub_expire||'')!==w.e0);
+    var moved=w.ready&&typeof r.balance_kopecks==='number'&&(w.k>0?r.balance_kopecks-w.b0>=w.k:!!r.sub_expire&&r.sub_expire!==w.e0);
     if(r.paid||moved){stopWait();haptic('ok');toast('Оплата получена','ok');boot();return;}
     if(manual){haptic('err');toast(r.error||'Оплата пока не поступила. Если вы уже оплатили, подождите минуту.','err');}
   }catch(e){if(manual){haptic('err');toast('Ошибка: '+e.message,'err');}}
@@ -1241,8 +1245,8 @@ async function topupPay(kopecks,method,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.redirect){toast(r.message||'Запрос отправлен администратору','ok');return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url);return;}
-    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url);return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,kopecks);return;}
+    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url,kopecks);return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -1545,6 +1549,8 @@ function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 async function handleStart(p){
   if(p.indexOf('promo_')===0){
     var code=p.slice(6);
+    // До подтверждения почты промокод закрыт: ссылка ждёт подтверждения.
+    if(WEB&&STATE.acct&&STATE.acct.money_blocked){lsSet('cab_start',p);if(!STATE.promoWait){STATE.promoWait=true;toast('Подтвердите почту — промокод применится после этого','err');}return false;}
     if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalPromoGate(code);return true;}
     await promoApply(null,code);return true;
   }
@@ -1589,7 +1595,7 @@ async function boot(){
       if(sp)dropQuery();
       if(!TOKEN)TOKEN=getStoredToken();
       if(!TOKEN){renderLogin();return;}
-      start=lsGet('cab_start')||'';lsSet('cab_start',null);
+      start=lsGet('cab_start')||'';
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
     else if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
     skMain();
@@ -1606,6 +1612,9 @@ async function boot(){
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);
+    // Параметр ссылки снимается, только когда кабинет загрузился: с протухшим
+    // входом он дождётся нового.
+    if(WEB)lsSet('cab_start',null);
     // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
     // вызовется снова.
     if(start)STATE.pendingStart=start;
