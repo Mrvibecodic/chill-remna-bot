@@ -710,10 +710,12 @@ func (a *App) trackMoney(name string, f func(context.Context)) {
 	a.mu.Unlock()
 	a.moneyActive.Add(1)
 	go func() {
-		defer a.moneyActive.Add(-1)
+		// Отложенные вызовы идут в обратном порядке: счётчик гаснет раньше,
+		// чем отпускает ожидание, — кто дождался Drain, видит ноль.
 		if counted {
 			defer a.moneyWG.Done()
 		}
+		defer a.moneyActive.Add(-1)
 		defer func() {
 			if r := recover(); r != nil {
 				a.log.Error("паника в фоновой задаче", "task", name, "panic", r, "stack", string(debug.Stack()))
