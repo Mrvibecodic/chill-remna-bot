@@ -312,7 +312,7 @@
   {
    "name": "minimal_home",
    "src": "/screens/dark/minimal/minimal_home.webp",
-   "caption": "Главный экран: подписка, подключение и продление"
+   "caption": "Главный экран: подписка, подключение и продление. Логотип и цвет — свои"
   },
   {
    "name": "minimal_home_new",
@@ -337,7 +337,7 @@
   {
    "name": "minimal_wait",
    "src": "/screens/dark/minimal/minimal_wait.webp",
-   "caption": "Ожидание оплаты и «Проверить оплату»"
+   "caption": "Ожидание оплаты: проверяется само"
   },
   {
    "name": "minimal_p2p",
@@ -347,7 +347,7 @@
   {
    "name": "minimal_wallet",
    "src": "/screens/dark/minimal/minimal_wallet.webp",
-   "caption": "Кошелёк: своя сумма пополнения и прогноз"
+   "caption": "Кошелёк: пополнение на свою сумму"
   },
   {
    "name": "minimal_connect",
@@ -357,17 +357,12 @@
   {
    "name": "minimal_ref",
    "src": "/screens/dark/minimal/minimal_ref.webp",
-   "caption": "Пригласить друга"
+   "caption": "Пригласить друга: ссылки на бота и на сайт"
   },
   {
    "name": "minimal_devices",
    "src": "/screens/dark/minimal/minimal_devices.webp",
    "caption": "Подключённые устройства"
-  },
-  {
-   "name": "minimal_brand",
-   "src": "/screens/dark/minimal/minimal_brand.webp",
-   "caption": "Брендирование: логотип провайдера и фирменный цвет"
   },
   {
    "name": "minimal_cabinet_login",
@@ -394,14 +389,19 @@
    "caption": "Без подписки — доступен триал"
   },
   {
+   "name": "miniapp_plan",
+   "src": "/screens/miniapp/miniapp_plan.webp",
+   "caption": "Тариф: выбор срока"
+  },
+  {
    "name": "miniapp_checkout",
    "src": "/screens/miniapp/miniapp_checkout.webp",
    "caption": "Оплата тарифа: выбор способа"
   },
   {
-   "name": "miniapp_checkout_new",
-   "src": "/screens/miniapp/miniapp_checkout_new.webp",
-   "caption": "Оплата 1 месяца, новый пользователь"
+   "name": "miniapp_wait",
+   "src": "/screens/miniapp/miniapp_wait.webp",
+   "caption": "Ожидание оплаты: проверяется само"
   },
   {
    "name": "miniapp_p2p_card",
@@ -459,6 +459,12 @@
    "wide": true
   },
   {
+   "name": "cabinet_wait_desktop",
+   "src": "/screens/cabinet/cabinet_wait_desktop.webp",
+   "caption": "Ожидание оплаты",
+   "wide": true
+  },
+  {
    "name": "cabinet_connect_desktop",
    "src": "/screens/cabinet/cabinet_connect_desktop.webp",
    "caption": "Подключение приложений",
@@ -479,6 +485,12 @@
    "name": "cabinet_topup_desktop",
    "src": "/screens/cabinet/cabinet_topup_desktop.webp",
    "caption": "Пополнение баланса",
+   "wide": true
+  },
+  {
+   "name": "cabinet_account_desktop",
+   "src": "/screens/cabinet/cabinet_account_desktop.webp",
+   "caption": "Аккаунт и выход",
    "wide": true
   }
  ]
