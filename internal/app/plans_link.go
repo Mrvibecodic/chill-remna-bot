@@ -372,6 +372,9 @@ func devicesValue(lang string, v devShown) string {
 	switch {
 	case v.unlim:
 		return i18n.T(lang, "buy.dev_unlim")
+	case v.n == 1:
+		// «до 1» звучит странно: одно устройство — так и пишем.
+		return i18n.T(lang, "buy.dev_one")
 	case v.n > 0:
 		return i18n.T(lang, "buy.dev_n", v.n)
 	}

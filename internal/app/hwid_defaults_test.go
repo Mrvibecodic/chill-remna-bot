@@ -45,6 +45,10 @@ func TestPlanTermsPanelDefault(t *testing.T) {
 		t.Fatalf("при выключенном контроле лимит тарифа — неправда: %q", got)
 	}
 	p.DeviceLimit = 0
+	one := 1
+	if got := planTermsText("ru", &model.Plan{Durations: []model.PlanDuration{{Months: 1, Base: "150", DeviceLimit: &one}}}, nil); !strings.Contains(got, "Устройства: 1") || strings.Contains(got, "до 1") {
+		t.Fatalf("одно устройство — без «до»: %q", got)
+	}
 	// Панель не прочитана — как раньше: строки нет.
 	nodef := func(d *model.PlanDuration) devShown { return planDevShown(p, d, def, false) }
 	if got := planTermsText("ru", p, nodef); strings.Contains(got, "Устройства") {

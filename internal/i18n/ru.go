@@ -123,6 +123,7 @@ var ru = map[string]string{
 	"buy.reset_week":          "каждый понедельник",
 	"buy.reset_day":           "каждый день",
 	"buy.dev_n":               "до %d",
+	"buy.dev_one":             "1",
 	"buy.dev_default":         "по умолчанию",
 	"buy.dev_unlim":           "без ограничений",
 	"balance.btn_pay":         "💼 Оплатить с баланса (%s ₽)",

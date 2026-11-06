@@ -95,6 +95,8 @@ var editableList = []Editable{
 		Where: [2]string{"Карточка тарифа — лимит устройств «по умолчанию», если бот не смог прочитать его из панели", "Plan card — «default» device limit when the bot could not read it from the panel"}},
 	{Key: "buy.dev_unlim", Section: "buy", Kind: KindButton,
 		Where: [2]string{"Карточка тарифа — устройства не ограничены (контроль устройств в панели выключен)", "Plan card — devices not limited (device control is off in the panel)"}},
+	{Key: "buy.dev_one", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — лимит в одно устройство (вместо «до 1»)", "Plan card — a one-device limit (instead of «up to 1»)"}},
 	{Key: "buy.dev_n", Section: "buy", Kind: KindButton,
 		Where: [2]string{"Карточка тарифа — значение лимита устройств «до N»", "Plan card — device limit value «up to N»"},
 		Vars: []EditVar{
