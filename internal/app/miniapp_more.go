@@ -47,12 +47,15 @@ func (a *App) MiniStart(ctx context.Context, tgID int64, param string, cabinet b
 	if a.userBlocked(ctx, tgID) || a.MiniAccessDenied(ctx, tgID) {
 		return notice
 	}
+	// К пригласившему — до проверки кабинета вручную: тот же человек, пришедший
+	// по ссылке в чат, привязался бы сразу (чат одобрением кабинета не закрыт),
+	// а после одобрения строка уже есть и привязка невозможна.
+	a.bindReferrer(ctx, tgID, param)
 	if cabinet && a.cabinetNeedsApproval(false) {
 		if u, _ := a.store.GetUser(ctx, tgID); u == nil || !u.WebApproved {
 			return notice
 		}
 	}
-	a.bindReferrer(ctx, tgID, param)
 	// Синхронно, как /start в чате: иначе человек успел бы взять триал до
 	// того, как найдётся его аккаунт в панели.
 	a.syncPanelAccount(ctx, tgID)

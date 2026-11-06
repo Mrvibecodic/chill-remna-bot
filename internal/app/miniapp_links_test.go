@@ -174,7 +174,9 @@ func TestMiniPayCheck(t *testing.T) {
 	}
 }
 
-// Кабинет с одобрением новичков: до одобрения реферал не привязывается.
+// Кабинет с проверкой новичков вручную: к пригласившему привязывается сразу,
+// как в чате (иначе после одобрения привязка уже невозможна), а остальное —
+// поиск подписки и прочее — ждёт одобрения.
 func TestMiniStart_CabinetApproval(t *testing.T) {
 	ctx := context.Background()
 	a, fs := planApp(t)
@@ -185,7 +187,11 @@ func TestMiniStart_CabinetApproval(t *testing.T) {
 	const ref, fresh int64 = 1000000050, 1000000051
 	_ = fs.UpsertUser(ctx, ref)
 	a.MiniStart(ctx, fresh, "ref_1000000050", true)
-	if u, _ := fs.GetUser(ctx, fresh); u != nil && u.ReferredBy != 0 {
-		t.Fatal("реферал привязан до одобрения кабинета")
+	u, _ := fs.GetUser(ctx, fresh)
+	if u == nil || u.ReferredBy != ref {
+		t.Fatalf("реферал не привязан до одобрения: %+v", u)
+	}
+	if u.WebApproved {
+		t.Fatal("привязка не должна одобрять вход в кабинет")
 	}
 }
