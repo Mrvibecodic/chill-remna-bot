@@ -163,6 +163,15 @@ func TestMiniPayCheck(t *testing.T) {
 	if r := a.MiniPayCheck(ctx, 1000000041); r.Pending != 0 {
 		t.Fatalf("чужие счета посчитаны: %+v", r)
 	}
+	// Оплату, проведённую вебхуком, экран ожидания узнаёт по балансу и сроку.
+	_ = fs.AddBalance(ctx, uid, 700)
+	_ = fs.SetSubExpiry(ctx, uid, "2030-01-01T00:00:00Z", "paid")
+	if r := a.MiniPayCheck(ctx, uid); r.BalanceK != 700 || r.SubExpire != "2030-01-01T00:00:00Z" {
+		t.Fatalf("баланс и срок в проверке: %+v", r)
+	}
+	if m := a.MiniMe(ctx, uid); m.SubExpire != "2030-01-01T00:00:00Z" {
+		t.Fatalf("срок в профиле: %+v", m)
+	}
 }
 
 // Кабинет с одобрением новичков: до одобрения реферал не привязывается.

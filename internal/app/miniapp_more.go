@@ -247,5 +247,9 @@ func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO 
 	if left, err := st.ListUserPending(rctx, tgID, since, payCheckMax); err == nil {
 		dto.Pending = len(left)
 	}
+	if u, _ := st.GetUser(rctx, tgID); u != nil {
+		dto.BalanceK = u.Balance
+		dto.SubExpire = u.SubExpireAt
+	}
 	return dto
 }

@@ -397,6 +397,15 @@ try{if(WEB)document.body.classList.add('web');}catch(e){}
 function getStoredToken(){try{return WEB?localStorage.getItem('cab_tok'):null;}catch(e){return null;}}
 function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}catch(e){}}
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
+function lsGet(k){try{return WEB?localStorage.getItem(k):null;}catch(e){return null;}}
+function lsSet(k,v){try{if(!WEB)return;if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
+// Параметр ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
+// или ?start=. Работает как /start в чате.
+function startParams(){
+  var p={};try{var q=new URLSearchParams(location.search);['start','promo','plan','ref','inv'].forEach(function(k){var v=q.get(k);if(v)p[k]=v.slice(0,64);});}catch(e){}
+  if(p.promo)return 'promo_'+p.promo;if(p.plan)return 'plan_'+p.plan;if(p.ref)return 'ref_'+p.ref;if(p.inv)return 'inv_'+p.inv;
+  return p.start||'';
+}
 let STATE={balanceK:0,methods:[]};
 let backFn=null; // current back handler for TG BackButton
 // Кабинет в браузере на широком экране: меню слева и раскладка по колонкам.
@@ -431,6 +440,7 @@ function setBack(fn){
 }
 /* swap the #app content with a fresh fade-in */
 function view(html,back){
+  stopWait();
   setBack(back||null);
   app.innerHTML=html;
   app.style.animation='none'; void app.offsetWidth; app.style.animation='';
@@ -520,14 +530,9 @@ function openDeep(u){try{window.location.href=u;}catch(e){}}
 function isTgLink(u){return /^(https:\/\/t\.me\/|tg:\/\/)/i.test(String(u||''));}
 function openPay(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return true;}catch(e){}}openL(u);return false;}
 function openSmart(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
-function shareRef(link){haptic('tap');var u='https://t.me/share/url?url='+encodeURIComponent(link)+'&text='+encodeURIComponent('Подключайся к VPN по моей ссылке — будет бонус 🎁');if(tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
-function armReturnRefresh(){
-  var fired=false;
-  function fire(){if(fired)return;fired=true;document.removeEventListener('visibilitychange',onv);boot();}
-  function onv(){if(!document.hidden)setTimeout(fire,600);}
-  document.addEventListener('visibilitychange',onv);
-  setTimeout(function(){if(!fired)document.removeEventListener('visibilitychange',onv);},180000);
-}
+// Ссылку в бота делим через Telegram; ссылку на сайт — системным «Поделиться»,
+// а где его нет — копированием.
+function shareRef(link,tgLink){haptic('tap');if(tgLink===0){if(navigator.share){navigator.share({text:'Подключайся к VPN по моей ссылке — будет бонус 🎁',url:link}).catch(function(){});return;}copy(link);return;}var u='https://t.me/share/url?url='+encodeURIComponent(link)+'&text='+encodeURIComponent('Подключайся к VPN по моей ссылке — будет бонус 🎁');if(tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
 function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';el.style.pointerEvents=on?'none':'';}}
 // Ask before closing the mini-app while a payment is in flight, so a stray
 // swipe-down doesn't abandon it. Cleared in boot() once we're back to a stable
@@ -592,7 +597,10 @@ function passHTML(sub){
     return pass;
 }
 function render(me,menu,sub,plans){
-  STATE.plans=(plans&&plans.plans)||[];
+  // Тариф, открытый по ссылке, витрина не показывает — держим его до перезагрузки.
+  var fresh=(plans&&plans.plans)||[];
+  var extra=(STATE.plans||[]).filter(function(p){return p.link&&!fresh.some(function(q){return q.code===p.code;});});
+  STATE.plans=fresh.concat(extra);
   STATE.plansNotice=(plans&&plans.notice)||'';
   STATE.sub=sub||{};
   // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
@@ -1010,20 +1018,53 @@ async function pay(plan,months,method,el,shownPrice){
   haptic('tap');busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url);return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
         tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
-      }else{if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату во вкладке, затем вернитесь — обновим сами','ok');}}
+      }else{openPay(r.pay_url);openWait(r.pay_url);}
       return;
     }
     if(r.redirect){toast(r.message||'Этот способ оплаты доступен в боте','ok');if(tg&&tg.close)setTimeout(function(){try{tg.close();}catch(e){}},2200);return;}
     haptic('err');toast(r.error||'Не удалось оплатить','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{payTabDrop(tab);busy(el,false);}
+}
+
+/* ---- ожидание оплаты ---- */
+// Пока открыта страница оплаты, экран сам спрашивает сервер (тот сверяет счёт
+// с платёжкой) и уходит на главную, как только оплата прошла.
+var WAIT=null;
+function stopWait(){if(WAIT){clearInterval(WAIT.t);document.removeEventListener('visibilitychange',WAIT.v);WAIT=null;}}
+function openWait(url){
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оплата</span>'+IC.wallet+'</div>'+
+    '<div class="title">Ждём оплату</div><div class="hint" style="margin-top:6px">Завершите оплату на открывшейся странице. Как только платёж пройдёт, всё обновится само — эту страницу можно не закрывать.</div></div>';
+  h+='<button class="btn" onclick="payCheck(this,true)">'+IC.reset+'Проверить оплату</button>';
+  if(url)h+='<button class="btn sec" style="margin-top:10px" onclick="openPay(\''+jsq(url)+'\')">'+IC.wallet+'Открыть оплату ещё раз</button>';
+  h=deskSplit(h,'');
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← На главную</button></div>';
+  view(h,boot);
+  // Снимок до оплаты: счёт, проведённый вебхуком, в проверку уже не попадёт,
+  // и об оплате тогда говорит сдвиг баланса или срока.
+  var w={b0:STATE.balanceK||0,e0:STATE.me_subexp||'',n:0};
+  w.t=setInterval(function(){if(document.hidden)return;if(++w.n>30){stopWait();return;}payCheck(null,false);},6000);
+  w.v=function(){if(!document.hidden)setTimeout(function(){if(WAIT===w)payCheck(null,false);},700);};
+  document.addEventListener('visibilitychange',w.v);
+  WAIT=w;
+}
+async function payCheck(el,manual){
+  var w=WAIT;if(!w)return;
+  if(el)busy(el,true);
+  try{var r=await post('/api/miniapp/paycheck',{});
+    if(WAIT!==w)return;
+    var moved=typeof r.balance_kopecks==='number'&&(r.balance_kopecks!==w.b0||(r.sub_expire||'')!==w.e0);
+    if(r.paid||moved){stopWait();haptic('ok');toast('Оплата получена','ok');boot();return;}
+    if(manual){haptic('err');toast(r.error||'Оплата пока не поступила. Если вы уже оплатили, подождите минуту.','err');}
+  }catch(e){if(manual){haptic('err');toast('Ошибка: '+e.message,'err');}}
+  finally{if(el)busy(el,false);}
 }
 
 /* ---- "more": balance, promo, referral ---- */
@@ -1049,9 +1090,14 @@ async function openMore(){
     h+='</div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13.5px"><span style="color:var(--muted)">Приглашено</span><b>'+(ref.count||0)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Заработано</span><b>'+rub(ref.earned_kopecks||0)+' ₽</b></div>';
-    if(ref.link){h+='<div class="mono" style="margin-top:12px">'+esc(ref.link)+'</div>'+
-      '<button class="btn" style="margin-top:10px" onclick="shareRef(\''+jsq(ref.link)+'\')">'+IC.users+'Поделиться</button>'+
-      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
+    // Ссылки: в бота и на сайт кабинета; аккаунту без Telegram первой — на сайт.
+    var L=[];if(ref.link)L.push({u:ref.link,tg:1});if(ref.cabinet_link)L.push({u:ref.cabinet_link,tg:0});if(ref.cabinet_first)L.reverse();
+    if(L.length){var m=L[0];h+='<div class="mono" style="margin-top:12px">'+esc(m.u)+'</div>'+
+      '<button class="btn" style="margin-top:10px" onclick="shareRef(\''+jsq(m.u)+'\','+m.tg+')">'+IC.users+'Поделиться</button>'+
+      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
+    L.slice(1).forEach(function(m){h+='<div class="hint" style="margin-top:14px">'+(m.tg?'Ссылка на бота в Telegram':'Ссылка на сайт — для друзей без Telegram')+'</div>'+
+      '<div class="mono" style="margin-top:6px">'+esc(m.u)+'</div>'+
+      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+'Скопировать</button>';});
     h+='</div>';
   }
   if(legalDocs().length&&STATE.menu&&STATE.menu.legal_in_menu){
@@ -1064,8 +1110,8 @@ async function openMore(){
   h+='<button class="btn ghost back" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
-async function promoApply(el){
-  var inp=document.getElementById('promoIn'); var code=inp?inp.value.trim():'';
+async function promoApply(el,given){
+  var inp=document.getElementById('promoIn'); var code=given||(inp?inp.value.trim():'');
   if(!code)return;
   haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/promo',{code:code});
@@ -1141,17 +1187,29 @@ async function topupOpen(){
   if(!topupOn())return;
   haptic('tap');skSimple();setBack(openMore);
   try{var o=await api('/api/miniapp/topup/options');
-    if(!o.amounts||!o.amounts.length||!o.methods||!o.methods.length){toast('Пополнение недоступно','err');openMore();return;}
-    STATE.tuMethods=o.methods;
+    var hasAmt=(o.amounts&&o.amounts.length)||o.max_kopecks>0;
+    if(!hasAmt||!o.methods||!o.methods.length){toast('Пополнение недоступно','err');openMore();return;}
+    STATE.tuMethods=o.methods;STATE.tuMax=o.max_kopecks||0;
     var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
       '<div class="title">Выберите сумму</div>'+
       '<div class="coins"><svg viewBox="0 0 130 48" fill="none"><ellipse cx="45" cy="24" rx="19" ry="19" fill="rgba(91,140,255,.16)" stroke="#5b8cff" stroke-width="2"/><ellipse cx="65" cy="24" rx="19" ry="19" fill="rgba(157,123,255,.16)" stroke="#9d7bff" stroke-width="2"/><ellipse cx="85" cy="24" rx="19" ry="19" fill="rgba(52,211,153,.14)" stroke="#34d399" stroke-width="2"/><text x="85" y="30" text-anchor="middle" fill="#34d399" font-size="18" font-weight="700">₽</text></svg></div></div>';
     if(DESK)h+='<div class="paygrid">';
-    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
+    (o.amounts||[]).forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
     if(DESK)h+='</div>';
+    // Своя сумма — как в чате: не больше потолка, который задаёт сервер.
+    if(o.max_kopecks>0)h+='<div class="sec-title">'+IC.plus+'Своя сумма</div><div class="card">'+
+      '<input id="tuAmt" class="field" inputmode="decimal" placeholder="Сумма в рублях, до '+esc(rub(o.max_kopecks))+' ₽">'+
+      '<button class="btn" style="margin-top:10px" onclick="topupCustom()">'+IC.check+'Дальше</button></div>';
     h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
+}
+function topupCustom(){
+  var inp=document.getElementById('tuAmt');var v=inp?String(inp.value).replace(/\s/g,'').replace(',','.'):'';
+  var k=Math.round(parseFloat(v)*100);
+  if(!/^\d+(\.\d{1,2})?$/.test(v)||!(k>0)){haptic('err');toast('Введите сумму','err');return;}
+  if(STATE.tuMax>0&&k>STATE.tuMax){haptic('err');toast('Максимум — '+rub(STATE.tuMax)+' ₽','err');return;}
+  topupPick(k,rub(k)+' ₽');
 }
 var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)',ym:'💜 ЮMoney'};
 function topupPick(kopecks,label){
@@ -1171,8 +1229,8 @@ async function topupPay(kopecks,method,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.redirect){toast(r.message||'Запрос отправлен администратору','ok');return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
-    if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url);return;}
+    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url);return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -1454,34 +1512,74 @@ async function renderLogin(){
   view(h,null);
   if(cfg.bot_username){STATE.botUser=cfg.bot_username;mountTGWidget('tglogin','onTGAuth(user)');}
 }
-window.onTGAuth=function(user){renderLoginBusy();post('/api/cabinet/auth/telegram',user).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
+window.onTGAuth=function(user){renderLoginBusy();var body=Object.assign({},user);var st=lsGet('cab_start');if(st)body.start=st;post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
 function renderLoginBusy(){skSimple();}
 async function cabEmail(path,el){
   var email=cabVal('lemail'),pass=cabVal('lpass');
   if(!email||!pass){toast('Заполните email и пароль','err');return;}
   haptic('tap');busy(el,true);
-  try{var r=await post(path,{email:email,password:pass});if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
+  // Регистрация несёт параметр ссылки: по нему новичок привязывается к
+  // пригласившему (вход его не использует).
+  var body={email:email,password:pass};if(path.indexOf('/register')>0){var st=lsGet('cab_start');if(st)body.start=st;}
+  try{var r=await post(path,body);if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
   catch(e){toast(e.message||'Ошибка','err');}
   busy(el,false);
 }
 function cabLogin(el){cabEmail('/api/cabinet/auth/login',el);}
 function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 
+/* ---- вход по ссылке ---- */
+// promo_ и plan_ разбираются здесь; ref_ и inv_ — на сервере при входе.
+async function handleStart(p){
+  if(p.indexOf('promo_')===0){
+    var code=p.slice(6);
+    if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalPromoGate(code);return true;}
+    await promoApply(null,code);return true;
+  }
+  if(p.indexOf('plan_')===0){
+    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(p.slice(5)));
+      if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;
+        STATE.plans=(STATE.plans||[]).filter(function(x){return x.code!==lp.code;}).concat([lp]);
+        openPlan(lp.code);return true;}
+      toast(r.notice||'Тариф по этой ссылке недоступен','err');
+    }catch(e){toast('Ошибка: '+e.message,'err');}
+  }
+  return false;
+}
+function legalPromoGate(code){
+  PAGE='wallet';
+  STATE.legalBack=function(){legalPromoGate(code);};
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
+    '<div class="title">Перед промокодом</div>'+
+    '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз. Затем применим промокод.</div></div>';
+  h+=legalRows();
+  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){promoApply(null,\''+jsq(code)+'\');})">✅ Принимаю</button>';
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
+}
+
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
   payGuardOff();
   try{
+    var start='';
     if(WEB){
+      // Параметр ссылки хранится до входа: вход через Telegram и регистрация
+      // берут его оттуда.
+      var sp=startParams();if(sp)lsSet('cab_start',sp);
       // Ссылки из писем разбираются до всего остального: человек мог прийти по
       // ним, ещё не будучи залогиненным, и до кабинета ему тогда не добраться.
       var vTok=linkParam('verify');
       if(vTok)await runVerifyLink(vTok);
       var rTok=linkParam('reset');
       if(rTok){dropQuery();openReset(rTok);return;}
+      if(sp)dropQuery();
       if(!TOKEN)TOKEN=getStoredToken();
       if(!TOKEN){renderLogin();return;}
+      start=lsGet('cab_start')||'';lsSet('cab_start',null);
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
+    else if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
     skMain();
     if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
@@ -1492,10 +1590,16 @@ async function boot(){
     // закрыта, и человек обязан увидеть почему — иначе кнопка просто «не
     // работает».
     if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
-    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||'';
+    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);
+    // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
+    // вызовется снова.
+    if(start)STATE.pendingStart=start;
+    if(STATE.pendingStart&&!(menu.legal_accept&&menu.legal_gate_start&&legalDocs().length)){
+      var ps=STATE.pendingStart;STATE.pendingStart='';await handleStart(ps);
+    }
   }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }
 boot();

@@ -207,6 +207,11 @@ type MiniPayCheckDTO struct {
 	// Pending — сколько счетов всё ещё ждут оплаты.
 	Pending int    `json:"pending"`
 	Error   string `json:"error,omitempty"`
+	// BalanceK/SubExpire — баланс и срок после проверки. Счёт, оплату которого
+	// уже провёл вебхук, в проверку не попадает (он закрыт), поэтому экран
+	// ожидания узнаёт об оплате и по сдвигу баланса или срока.
+	BalanceK  int64  `json:"balance_kopecks"`
+	SubExpire string `json:"sub_expire,omitempty"`
 }
 
 // MiniActionDTO is the result of an action (trial/checkout): on success it
@@ -256,6 +261,9 @@ type MiniMeDTO struct {
 	BalanceK int64  `json:"balance_kopecks"`
 	Name     string `json:"name,omitempty"`
 	Email    string `json:"email,omitempty"`
+	// SubExpire — срок подписки по записи бота (RFC3339, "" — нет): экран
+	// ожидания оплаты сравнивает его с тем, что вернёт проверка.
+	SubExpire string `json:"sub_expire,omitempty"`
 }
 
 // CabinetAccountDTO — экран «Аккаунт» веб-кабинета: чем человек входит, что
