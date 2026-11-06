@@ -33,7 +33,8 @@ description: Какие скоупы API-токена Remnawave нужны бо�
   "node-plugins:update",
   "node-plugins:executor",
   "subscription-page-configs:list",
-  "subscriptions:subpage-config"
+  "subscriptions:subpage-config",
+  "subscription-settings:get"
 ]
 ```
 
@@ -67,7 +68,8 @@ description: Какие скоупы API-токена Remnawave нужны бо�
 
 | Функция | Скоупы | Что будет без них |
 |---|---|---|
-| Страны и число конфигов в карточке тарифа | `hosts:list` | строки со странами не будет, продажа не пострадает |
+| Страны и число серверов в карточке тарифа | `hosts:list` | строк со странами и серверами не будет, продажа не пострадает |
+| Лимит устройств по умолчанию панели в тарифе и в подписке | `subscription-settings:get` | у тарифов без своего лимита строки устройств не будет, в подписке — только число подключённых |
 | «Мои устройства»: список и сброс | `hwid-user-devices:list-by-user`, `hwid-user-devices:delete-all` | список пуст, сброс отвечает ошибкой |
 | Торрент-блокер: «Снять блокировку IP» и «В исключения» | `node-plugins:list`, `node-plugins:update`, `node-plugins:executor` | кнопки отвечают `403` |
 | Мини-апп «Подключение»: приложения из настроек страницы подписки | `subscription-page-configs:list`, `subscriptions:subpage-config` | бот покажет свой встроенный список приложений |
@@ -86,7 +88,8 @@ description: Какие скоупы API-токена Remnawave нужны бо�
   "hwid-user-devices:*",
   "node-plugins:*",
   "subscription-page-configs:list",
-  "subscriptions:subpage-config"
+  "subscriptions:subpage-config",
+  "subscription-settings:get"
 ]
 ```
 

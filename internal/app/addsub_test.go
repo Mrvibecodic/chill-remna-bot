@@ -33,6 +33,7 @@ func TestAddSubTargets(t *testing.T) {
 		{Username: "tg_3_addsub", TelegramID: 0, Tag: remnawave.BotTagAdd}, // сама доп-подписка
 		{Username: "nobody", TelegramID: 0},                                // без telegram id
 		{Username: "alien", TelegramID: 5, Tag: "OTHER_BOT"},               // чужая система
+		{Username: "junk", TelegramID: -7, Tag: remnawave.BotTag},          // отрицательный telegramId — мусор
 	}
 	got := addSubTargets(in)
 	if len(got) != 2 || got[0].Username != "tg_1" || got[1].Username != "vasya" {

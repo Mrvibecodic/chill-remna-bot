@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	nav := paginationRow("usr:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
 	if len(nav) > 0 {
@@ -305,7 +306,7 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	var rows [][]models.InlineKeyboardButton
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, userLabel(&u), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
@@ -482,12 +483,15 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.delete"), "usr:del:"+id)},
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id)},
+		[]models.InlineKeyboardButton{
+			btn(i18n.T(lang, "btn.link_panel"), "usr:link:"+id),
+			btn(i18n.T(lang, "btn.unlink_panel"), "usr:unlink:"+id),
+		},
 		// «Назад» из карточки возвращает в выдачу поиска, если админ пришёл
 		// оттуда: иначе найденный человек стоил бы нового поиска.
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), backToUserList(a.getUI(chatID))), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
-	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", userLabel(u), created, p2p, status, subBlock)+torLine, rows)
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", a.userLabelFor(ctx, u), created, p2p, status, subBlock)+torLine, rows)
 }
 
 func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExists, subBlocked bool) {
@@ -625,7 +629,8 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.toggleUserPlanAccess(ctx, chatID, uid, code)
 	case "del":
 		lang := a.lang(chatID)
-		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", arg), [][]models.InlineKeyboardButton{
+		delUID, _ := strconv.ParseInt(arg, 10, 64)
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.del_ask", a.userLabelByID(ctx, delUID)), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "btn.del_with_sub"), "usr:delfull:"+arg)},
 			{btn(i18n.T(lang, "btn.del_bot_only"), "usr:delbot:"+arg)},
 			{btn(i18n.T(lang, "btn.back"), "usr:view:"+arg)},
@@ -638,7 +643,19 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		ui := a.getUI(chatID)
 		ui.linkUID = uid
 		ui.adminInput = "link_panel"
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "user.link_ask", uid), "usr:view:"+arg)
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "user.link_ask", a.userLabelByID(ctx, uid)), "usr:view:"+arg)
+	case "unlink":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.askUnlinkPanel(ctx, chatID, uid)
+	case "unlinkok":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.adminUnlinkPanel(ctx, chatID, uid)
 	case "delfull":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		a.adminDeleteUser(ctx, chatID, uid, true)
@@ -784,7 +801,17 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	a.invalidateSubCache(uid)
 	_ = a.store.DeletePaymentsByUser(ctx, uid)
 	_ = a.store.DeleteP2PRequestsByUser(ctx, uid)
-	_ = a.store.DeleteUser(ctx, uid)
+	if err := a.store.DeleteUser(ctx, uid); err != nil {
+		a.log.Error("удаление пользователя", "tg_id", uid, "err", err)
+		a.notify(ctx, adminChat, "⚠️ "+err.Error())
+	}
+	// Поколение пропусков удалённого аккаунта перечитается из базы. Отметка о
+	// заявке в кабинет тоже уходит: одобрение стёрто вместе с пользователем, и
+	// при новом входе админу должна прийти новая заявка.
+	a.forgetEpoch(uid)
+	cabNotifyMu.Lock()
+	delete(cabNotified, uid)
+	cabNotifyMu.Unlock()
 }
 
 func payMethodLabel(method string) string {
@@ -998,15 +1025,16 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	panel := a.panel
 	a.mu.Unlock()
 	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
-	var url, expireAt, status string
+	var snap remnawave.SubSnapshot
 	ok := false
 	var perr error
 	if panel != nil {
-		url, expireAt, status, ok, perr = panel.SubscriptionState(ctx, chatID)
+		snap, ok, perr = panel.SubscriptionSnapshot(ctx, chatID)
 		if ok {
-			url = a.rewriteSub(url)
+			snap.URL = a.rewriteSub(snap.URL)
 		}
 	}
+	url, expireAt, status := snap.URL, snap.ExpireAt, snap.Status
 	if perr != nil {
 		// Панель недоступна — это НЕ «подписки нет». Раньше платящему клиенту
 		// во время аварии показывали «у вас нет активных подписок, нажмите
@@ -1065,7 +1093,7 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + devLine + a.addSubLine(ctx, chatID)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + trafficLine(lang, snap) + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 
@@ -1108,6 +1136,25 @@ func formatGB(b int64) string {
 	return strings.TrimSuffix(s, ".0")
 }
 
+// trafficLine — трафик периода и дата следующего сброса на экране подписки.
+func trafficLine(lang string, s remnawave.SubSnapshot) string {
+	var line string
+	if s.TrafficLimit > 0 {
+		line = i18n.T(lang, "sub.traffic", formatGB(s.TrafficUsed), formatGB(s.TrafficLimit))
+	} else {
+		line = i18n.T(lang, "sub.traffic_unlim", formatGB(s.TrafficUsed))
+	}
+	if !s.NextReset.IsZero() {
+		if r := i18n.T(lang, "sub.traffic_reset", s.NextReset.In(displayTZ).Format("02.01.2006")); r != "" {
+			line += "\n" + r
+		}
+	}
+	if line == "" {
+		return ""
+	}
+	return "\n\n" + line
+}
+
 // devicesLine renders a read-only "connected[/allowed]" devices line for the
 // "My subscription" screen. When the user has no explicit device limit
 // (unlimited / limit disabled) it shows ONLY the connected count. Returns ""
@@ -1125,6 +1172,7 @@ func (a *App) devicesLine(ctx context.Context, chatID int64, panel *remnawave.Cl
 	if !ok {
 		return "", false
 	}
+	info = a.withHwidDefault(ctx, info)
 	lang := a.lang(chatID)
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
@@ -1153,4 +1201,32 @@ func subDeadKey(status, expireAt string) string {
 		return "subs.expired"
 	}
 	return ""
+}
+
+// askUnlinkPanel показывает, какая учётка отвяжется, и просит подтвердить.
+func (a *App) askUnlinkPanel(ctx context.Context, chatID, uid int64) {
+	lang := a.lang(chatID)
+	id := strconv.FormatInt(uid, 10)
+	panel := a.panelClient()
+	if panel == nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "user.unlink_fail", i18n.T(lang, "squads.no_panel")))
+		return
+	}
+	pu, reason, err := a.adminUnlinkTarget(ctx, panel, uid)
+	if err != nil {
+		a.sendHome(ctx, chatID, i18n.T(lang, "user.unlink_fail", html.EscapeString(err.Error())))
+		return
+	}
+	if reason != "" {
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, reason), [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "btn.back"), "usr:view:"+id)},
+		})
+		return
+	}
+	ui := a.getUI(chatID)
+	ui.unlinkUID, ui.unlinkRef = uid, pu.Ref.Key()
+	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.unlink_ask", escapeName(pu.Username), a.userLabelByID(ctx, uid)), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.unlink_confirm"), "usr:unlinkok:"+id)},
+		{btn(i18n.T(lang, "btn.back"), "usr:view:"+id)},
+	})
 }

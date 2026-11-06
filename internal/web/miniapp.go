@@ -63,7 +63,9 @@ type MiniProvider interface {
 	MiniWallet(ctx context.Context, tgID int64) MiniWalletDTO
 	// MiniPayCheck перепроверяет у платёжек незакрытые счета человека — то же,
 	// что кнопка «Проверить оплату» в чате.
-	MiniPayCheck(ctx context.Context, tgID int64) MiniPayCheckDTO
+	// since — когда выставлен счёт, которого ждёт экран (unix; 0 — не знаем):
+	// оплата после него засчитывается, даже если счёт уже закрыл вебхук.
+	MiniPayCheck(ctx context.Context, tgID, since int64) MiniPayCheckDTO
 	// MiniStart разбирает start-параметр входа (inv_, ref_) и привязывает
 	// аккаунт панели новичку — как /start в чате. Возвращает текст для
 	// человека (пусто — сказать нечего).
@@ -110,7 +112,9 @@ type MiniProvider interface {
 	CabinetFavicon() string
 	CabinetAntiFP() bool
 	CabinetEnsureUser(ctx context.Context, tgID int64)
-	CabinetEmailRegister(ctx context.Context, email, password string) (int64, error)
+	// CabinetEmailRegister заводит аккаунт по почте; start — параметр ссылки,
+	// по которой открыли кабинет (ref_ привязывает к пригласившему).
+	CabinetEmailRegister(ctx context.Context, email, password, start string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
 	CabinetGate(ctx context.Context, tgID int64, isEmail bool) error
 	// CabinetAccount — состояние аккаунта для экрана «Аккаунт».
@@ -164,6 +168,11 @@ type MiniReferralDTO struct {
 	InviteeKind   string `json:"invitee_kind,omitempty"`
 	InviteeValue  int    `json:"invitee_value"`
 	Percent       int    `json:"percent"`
+	// CabinetLink — та же ссылка, но на сайт кабинета (для тех, кто без
+	// Telegram); пусто, когда кабинет выключен.
+	CabinetLink string `json:"cabinet_link,omitempty"`
+	// CabinetFirst — у аккаунта нет Telegram: ссылку на кабинет показать первой.
+	CabinetFirst bool `json:"cabinet_first,omitempty"`
 }
 
 type MiniPromoDTO struct {
@@ -184,25 +193,11 @@ type MiniTopUpOptionsDTO struct {
 	MaxKopecks int64 `json:"max_kopecks,omitempty"`
 }
 
-// MiniWalletDTO — кошелёк: баланс и прогноз «на сколько хватит» по тарифу
-// покупателя (или по сетке, если своего тарифа нет) — тот же, что в чате.
+// MiniWalletDTO — кошелёк: баланс и доступно ли пополнение. Прогноз «на
+// сколько хватит» живёт только в чате.
 type MiniWalletDTO struct {
 	BalanceK int64 `json:"balance_kopecks"`
 	TopUpOn  bool  `json:"topup_on"`
-	// PlanName — тариф, по ценам которого считан прогноз ("" — по сетке).
-	PlanName  string               `json:"plan_name,omitempty"`
-	Rows      []MiniForecastRowDTO `json:"rows,omitempty"`
-	MaxMonths int                  `json:"max_months"`
-	Currency  string               `json:"currency"`
-}
-
-// MiniForecastRowDTO — один срок прогноза: сколько раз его можно оплатить
-// балансом и сколько это месяцев.
-type MiniForecastRowDTO struct {
-	Months int    `json:"months"`
-	Price  string `json:"price"`
-	Count  int    `json:"count"`
-	Total  int    `json:"total"`
 }
 
 // MiniPayCheckDTO — итог ручной перепроверки счетов.
@@ -241,6 +236,9 @@ type MiniActionDTO struct {
 	P2PReqID  int64  `json:"p2p_req_id,omitempty,string"`
 	// P2PTopUp — заявка на пополнение баланса, а не на покупку.
 	P2PTopUp bool `json:"p2p_topup,omitempty"`
+	// IssuedAt — когда выставлен счёт по PayURL (unix, время сервера): экран
+	// ожидания спрашивает, была ли оплата после этого момента.
+	IssuedAt int64 `json:"issued_at,omitempty"`
 }
 
 // MiniAutoPayDTO describes automatic renewal for the current user: whether the
@@ -345,6 +343,13 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+	// TrafficUsed/TrafficLimit — трафик текущего периода в байтах (лимит 0 —
+	// безлимит); TrafficOK — сервер их прислал.
+	TrafficOK    bool  `json:"traffic_ok"`
+	TrafficUsed  int64 `json:"traffic_used"`
+	TrafficLimit int64 `json:"traffic_limit"`
+	// TrafficResetTS — когда панель обнулит трафик (unix); 0 — не обнулит.
+	TrafficResetTS int64 `json:"traffic_reset_ts,omitempty"`
 	// Devices — сами устройства, если владелец бота разрешил их показывать.
 	// Пусто — на экране остаётся только счётчик.
 	Devices []MiniDeviceDTO `json:"devices,omitempty"`
@@ -403,13 +408,16 @@ type MiniDurationDTO struct {
 	Currency string `json:"currency"`
 	// TrafficGB is the duration's traffic allowance in GB; 0 means unlimited.
 	TrafficGB int `json:"traffic_gb"`
-	// Devices is the HWID device limit; 0 means no explicit limit (panel
-	// default).
-	Devices int `json:"devices"`
+	// Devices — лимит устройств срока: свой у тарифа, а без него — по
+	// умолчанию панели; 0 — показать нечего. DevicesUnlim — панель устройства
+	// не ограничивает (контроль устройств выключен).
+	Devices      int  `json:"devices"`
+	DevicesUnlim bool `json:"devices_unlim,omitempty"`
 	// Countries are the distinct countries available to the duration's squads.
 	Countries []MiniCountryDTO `json:"countries,omitempty"`
-	// Configs is the number of inbounds (configs) accessible.
-	Configs int `json:"configs,omitempty"`
+	// Servers — хосты панели, которые получит подписка срока (как строка
+	// «Серверов: N» в чате); 0 — не показывать.
+	Servers int `json:"servers,omitempty"`
 	// Best — сервер отмечает самый выгодный срок (лучшая цена за месяц);
 	// раньше фронт подсвечивал третью позицию из четырёх.
 	Best bool `json:"best,omitempty"`
@@ -492,7 +500,9 @@ func (s *Server) miniAuth(r *http.Request) (id int64, web bool, ok bool) {
 	// Поколение пропусков аккаунта: смена пароля и привязка Telegram обязаны
 	// выбить прежние сессии немедленно. Общего поколения для этого мало — оно
 	// выбивает всех сразу, поэтому им и не пользуются.
-	if epoch != s.mini.SessionEpoch(r.Context(), id) {
+	// Отрицательное поколение — аккаунта больше нет: пропуск, выписанный в
+	// гонке с удалением, совпал бы с ним и жил бы весь срок.
+	if cur := s.mini.SessionEpoch(r.Context(), id); cur < 0 || epoch != cur {
 		return 0, false, false
 	}
 	return id, web, true
@@ -724,7 +734,12 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp))
+	issued := time.Now().Unix()
+	res := s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp)
+	if res.PayURL != "" {
+		res.IssuedAt = issued
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.
@@ -823,7 +838,12 @@ func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web))
+	issued := time.Now().Unix()
+	res := s.mini.MiniTopUp(ctx, id, req.Kopecks, req.Method, web)
+	if res.PayURL != "" {
+		res.IssuedAt = issued
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleMiniP2PCancel(w http.ResponseWriter, r *http.Request) {
@@ -907,7 +927,14 @@ func (s *Server) handleMiniPayCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Тело необязательное: старый фронт из кэша шлёт пустой объект.
+	var req struct {
+		Since int64 `json:"since"`
+	}
+	if body, err := readAllLimited(r, 1024); err == nil && len(body) > 0 {
+		_ = json.Unmarshal(body, &req)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniPayCheck(ctx, id))
+	writeJSON(w, http.StatusOK, s.mini.MiniPayCheck(ctx, id, req.Since))
 }

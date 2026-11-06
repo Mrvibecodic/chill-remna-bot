@@ -286,7 +286,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	// сообщение, то есть карточка, из которой уже не выбраться.
 	body := i18n.T(lang, "plans.card",
 		planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc),
-		html.EscapeString(a.planLimitsLine(lang, p)), html.EscapeString(planDurationsLine(lang, p)))
+		html.EscapeString(a.planLimitsLine(ctx, lang, p)), html.EscapeString(planDurationsLine(lang, p)))
 	// Выключенный тариф или тариф без цены ни одного срока витрина не
 	// показывает — говорим об этом прямо, иначе он выглядел бы продающимся.
 	if !p.Enabled || !planSellsAnything(p) {
@@ -314,14 +314,16 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 }
 
 // planLimitsLine — лимиты тарифа одной строкой.
-func (a *App) planLimitsLine(lang string, p *model.Plan) string {
+func (a *App) planLimitsLine(ctx context.Context, lang string, p *model.Plan) string {
 	traffic := i18n.T(lang, "trial.unlimited")
 	if p.TrafficGB > 0 {
 		traffic = strconv.Itoa(p.TrafficGB) + " GB"
 	}
-	devices := i18n.T(lang, "pricing.hwid_default")
+	var devices string
 	if p.DeviceLimit > 0 {
-		devices = strconv.Itoa(p.DeviceLimit)
+		devices = a.hwidOwnLabel(ctx, lang, p.DeviceLimit, p.ExtSquad)
+	} else {
+		devices = a.hwidDefaultLabel(ctx, lang, p.ExtSquad)
 	}
 	squads := strconv.Itoa(len(p.IntSquads))
 	if p.ExtSquad != "" {

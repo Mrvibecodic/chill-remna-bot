@@ -37,7 +37,7 @@ func TestCabinetMoneyBlockedUntilVerified(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
 
-	id, err := a.CabinetEmailRegister(ctx, "new@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "new@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestCabinetMoneyOpenWhenMailOff(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
 	a.botCfg.Mail.Enabled = false
-	id, err := a.CabinetEmailRegister(ctx, "nomail@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "nomail@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestCabinetMoneyOpenForTelegram(t *testing.T) {
 func TestVerifyLinkIsSingleUse(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "one@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "one@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestVerifyLinkIsSingleUse(t *testing.T) {
 func TestNewLinkRevokesPrevious(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "two@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "two@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestNewLinkRevokesPrevious(t *testing.T) {
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "pw@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "pw@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 func TestResetPasswordVerifiesEmail(t *testing.T) {
 	a, fs := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "lost@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "lost@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestForgotPasswordDoesNotRevealAccounts(t *testing.T) {
 	// существования аккаунта: возвращаемого значения у него нет вовсе.
 	a.CabinetForgotPassword(ctx, "nobody@example.com")
 	a.CabinetForgotPassword(ctx, "мусор")
-	if _, err := a.CabinetEmailRegister(ctx, "known@example.com", "password1"); err != nil {
+	if _, err := a.CabinetEmailRegister(ctx, "known@example.com", "password1", ""); err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
 	a.waitMail()
@@ -237,7 +237,7 @@ func TestRegisterRejectsUnsendableAddress(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
 	for _, bad := range []string{"нет-собаки", "a@b", "a@@example.com", "a b@example.com", "a@example.com\r\nBcc: other@example.com"} {
-		if _, err := a.CabinetEmailRegister(ctx, bad, "password1"); err == nil {
+		if _, err := a.CabinetEmailRegister(ctx, bad, "password1", ""); err == nil {
 			t.Fatalf("адрес %q обязан быть отвергнут", bad)
 		}
 	}
@@ -247,7 +247,7 @@ func TestRegisterRejectsUnsendableAddress(t *testing.T) {
 func TestMailQuotaBlocksRapidResend(t *testing.T) {
 	a, _ := cabinetApp(t)
 	ctx := context.Background()
-	id, err := a.CabinetEmailRegister(ctx, "quota@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "quota@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestVerifyMailNeedsPublicURL(t *testing.T) {
 	// регистрации сама израсходует порог, и проверка упрётся в него, а не в
 	// отсутствие адреса.
 	a.botCfg.Mail.Enabled = false
-	id, err := a.CabinetEmailRegister(ctx, "nourl@example.com", "password1")
+	id, err := a.CabinetEmailRegister(ctx, "nourl@example.com", "password1", "")
 	if err != nil {
 		t.Fatalf("регистрация: %v", err)
 	}

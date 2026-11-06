@@ -155,6 +155,8 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .field::placeholder{color:var(--muted-2)}
 
 .hint{color:var(--muted);font-size:13.5px}
+.toplink{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:2px 0 12px;color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
+.toplink:hover{color:var(--text)}
 .legal{font-size:14px;line-height:1.6;word-wrap:break-word;overflow-wrap:anywhere}
 .legal a{color:var(--acc)}
 .legal pre{white-space:pre-wrap}
@@ -269,11 +271,83 @@ body.web .authwrap{max-width:480px;margin:0 auto}
   body.web .btnrow>.btn{margin-top:0}
   body.web .sec-title{margin-top:26px}
 }
+/* ---- кабинет на широком экране: меню слева, панель из карточек ---- */
+.side{display:none}
+.mainc{min-width:0}
+@media(min-width:960px){
+  body.desk .wrap{max-width:1240px;display:grid;grid-template-columns:236px minmax(0,1fr);gap:32px;align-items:start;padding:28px 32px 48px}
+  body.desk.noside .wrap{display:block;max-width:960px}
+  body.desk.noside .side{display:none}
+  body.desk .side{display:flex;flex-direction:column;gap:4px;position:sticky;top:28px;min-height:calc(100vh - 76px);
+    background:var(--surface);border:1px solid var(--stroke);border-radius:var(--radius);padding:18px 12px 14px;
+    backdrop-filter:blur(18px) saturate(140%);box-shadow:0 8px 30px rgba(0,0,0,.28)}
+  body.desk .head{margin:6px 2px 22px;min-height:36px}
+  body.desk .head h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+  body.desk #balchip{display:none !important}
+  body.desk:not(.noside) .btn.back,body.desk:not(.noside) .deskhide{display:none}
+  body.desk .card{margin-bottom:16px}
+  body.desk .sec-title{margin:10px 4px 12px}
+  body.desk .split .cols{grid-template-columns:minmax(0,1fr)}
+  .sbrand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:-.2px;padding:2px 10px 18px}
+  .sbrand .lg{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff}
+  .sbrand .lg svg{width:17px;height:17px}
+  .snav{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:0;border-radius:12px;background:transparent;
+    color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+  .snav:hover{background:var(--surface-2);color:var(--text)}
+  .snav.on{color:var(--text);background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 24%,transparent),color-mix(in srgb,var(--accent-2) 14%,transparent))}
+  .snav.on svg{color:var(--accent)}
+  .snav .bdg{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ssep{height:1px;background:var(--stroke);margin:10px 8px}
+  .sfoot{margin-top:auto;padding:14px 4px 0;border-top:1px solid var(--stroke);display:flex;align-items:center;gap:10px}
+  .sfoot .uava{width:36px;height:36px;font-size:15px}
+  .sfoot .uname{font-size:14px}
+  .sout{flex:none;width:34px;height:34px;border-radius:10px;border:1px solid var(--stroke);background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .sout:hover{color:var(--text);background:var(--surface-2)}
+  .sout svg{width:16px;height:16px}
+  .dgrid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:0 20px;align-items:start}
+  .dgrid>.c7{grid-column:span 7;min-width:0}
+  .dgrid>.c5{grid-column:span 5;min-width:0}
+  .split{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:start}
+  .split>div{min-width:0}
+  .narrow{max-width:640px}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-bottom:16px}
+  .pcard{position:relative;display:flex;flex-direction:column;gap:6px;min-height:150px;padding:18px;border-radius:18px;cursor:pointer;
+    background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(12px);transition:border-color .2s,background .2s}
+  .pcard:hover{border-color:var(--stroke-strong);background:var(--surface-2)}
+  .pcard .pn{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:17px;font-weight:800}
+  .pcard .ps{font-size:13px;color:var(--muted);flex:1}
+  .pcard .pf{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}
+  .pcard .pf span{padding:3px 9px;border-radius:999px;border:1px solid var(--stroke)}
+  .pcard .pp{font-size:20px;font-weight:800;letter-spacing:-.3px;font-variant-numeric:tabular-nums;margin-top:6px}
+  .pcard.own{border-color:transparent;background:linear-gradient(var(--bg-2),var(--bg-2)) padding-box,linear-gradient(120deg,var(--accent),var(--accent-2)) border-box}
+  .paygrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+  .paygrid .btn{margin-top:0;min-height:56px}
+  .paygrid .pcell .hint{margin:8px 2px 0 !important}
+  .tline{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tline b{font-variant-numeric:tabular-nums}
+  .tbar{height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:12px}
+  .tbar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+  .tbar.hi i{background:linear-gradient(90deg,var(--warn),var(--bad))}
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .duo .btn{margin-top:0}
+  .dcard .feat{margin:12px 0 0}
+  .dhead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .dhead b{font-size:15px;font-variant-numeric:tabular-nums}
+  .lab2{font-size:12px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px}
+  .lrow{display:flex;gap:8px;align-items:stretch}
+  .lrow .mono{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;word-break:normal}
+  .icbtn{flex:none;width:44px;border-radius:12px;border:1px solid var(--stroke);background:var(--surface-2);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .icbtn:hover{border-color:var(--stroke-strong)}
+  .acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+  .acts .btn{width:auto;margin-top:0;padding:13px 22px}
+}
 </style>
 </head>
 <body>
 <div class="bg"></div>
 <div class="wrap">
+  <aside id="side" class="side"></aside>
+  <div class="mainc">
   <div class="head">
     <h1>Личный кабинет</h1>
     <span id="balchip" class="chip" style="display:none" onclick="openMore()"></span>
@@ -283,6 +357,7 @@ body.web .authwrap{max-width:480px;margin:0 auto}
     <div class="sk sk-row"></div>
     <div class="sk sk-row"></div>
     <div class="sk sk-row"></div>
+  </div>
   </div>
 </div>
 <div id="toast" class="toast"></div>
@@ -306,6 +381,7 @@ const IC={
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
   tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><path d="M7 7h.01"/></svg>',
+  reset:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
   globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
   download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>',
   plane:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 13.5 2 9l2-1 6 1 5-5c1-1 3-1.6 3.6-1 .6.6 0 2.6-1 3.6l-5 5 1 6-1 2-4.5-8.5Z"/></svg>',
@@ -321,8 +397,42 @@ try{if(WEB)document.body.classList.add('web');}catch(e){}
 function getStoredToken(){try{return WEB?localStorage.getItem('cab_tok'):null;}catch(e){return null;}}
 function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}catch(e){}}
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
+function lsGet(k){try{return WEB?localStorage.getItem(k):null;}catch(e){return null;}}
+function lsSet(k,v){try{if(!WEB)return;if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
+// Параметры ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
+// или ?start=. Работают как /start в чате, их можно сочетать. Хранятся одной
+// строкой через перевод строки.
+function startParams(){
+  var out=[];
+  try{var q=new URLSearchParams(location.search);
+    ['ref','inv','promo','plan'].forEach(function(k){var v=q.get(k);if(v)out.push(k+'_'+v);});
+    var s=q.get('start');if(s)out.push(s);
+  }catch(e){}
+  // Разделитель — перевод строки: в коде промокода бывает что угодно, кроме
+  // пробельных символов.
+  return out.map(function(t){return t.replace(/\s/g,'').slice(0,64);}).filter(Boolean).join('\n');
+}
+// На сервер при входе уходит одно: приглашение в закрытый бот или
+// пригласивший друг.
+function serverStart(s){
+  var t=String(s||'').split('\n');
+  return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
+}
 let STATE={balanceK:0,methods:[]};
 let backFn=null; // current back handler for TG BackButton
+// Кабинет в браузере на широком экране: меню слева и раскладка по колонкам.
+// Узкий экран и мини-апп в Telegram остаются как были.
+var DESKMQ=null;try{DESKMQ=WEB&&window.matchMedia?window.matchMedia('(min-width:960px)'):null;}catch(e){}
+var DESK=false;
+function setDesk(){DESK=!!(DESKMQ&&DESKMQ.matches);try{document.body.classList.toggle('desk',DESK);}catch(e){}}
+setDesk();
+if(DESKMQ){var onDeskMQ=function(){var was=DESK;setDesk();if(was===DESK||!TOKEN||!STATE.menu)return;
+  var re={plans:openPlans,wallet:openMore,connect:openConnect,account:openAccount}[PAGE];if(re)re();else boot();};
+  try{if(DESKMQ.addEventListener)DESKMQ.addEventListener('change',onDeskMQ);else if(DESKMQ.addListener)DESKMQ.addListener(onDeskMQ);}catch(e){}}
+// PAGE — раздел меню, к которому относится открытый экран; null — меню нет
+// (вход, восстановление пароля, согласие с документами на входе).
+var PAGE=null;
+var PAGE_TITLES={home:'Главная',plans:'Тарифы',wallet:'Кошелёк',connect:'Подключение',account:'Аккаунт'};
 
 /* ---- TG init + premium chrome ---- */
 if(tg){
@@ -342,9 +452,44 @@ function setBack(fn){
 }
 /* swap the #app content with a fresh fade-in */
 function view(html,back){
+  stopWait();
   setBack(back||null);
   app.innerHTML=html;
   app.style.animation='none'; void app.offsetWidth; app.style.animation='';
+  renderSide();
+}
+function renderSide(){
+  var side=document.getElementById('side'),h1=document.querySelector('.head h1');
+  if(!side)return;
+  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.textContent='Личный кабинет';return;}
+  document.body.classList.remove('noside');
+  if(h1)h1.textContent=PAGE_TITLES[PAGE]||'Личный кабинет';
+  var m=STATE.menu||{},sub=STATE.sub||{};
+  function item(key,ic,label,fn,bdg){return '<button class="snav'+(PAGE===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+label+'</span>'+(bdg?'<span class="bdg">'+bdg+'</span>':'')+'</button>';}
+  var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+  h+=item('home',IC.layers,'Главная','boot()');
+  if((STATE.plans&&STATE.plans.length)||STATE.plansNotice)h+=item('plans',IC.tag,'Тарифы','openPlans()');
+  h+=item('wallet',IC.wallet,'Кошелёк','openMore()',esc(rub(STATE.balanceK))+' ₽');
+  if(sub.sub_url)h+=item('connect',IC.download,'Подключение','openConnect()');
+  h+=item('account',IC.users,'Аккаунт','openAccount()');
+  if(m.support_url||m.group_url){
+    h+='<div class="ssep"></div>';
+    if(m.support_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.support_url)+'\')">'+IC.life+'<span>Поддержка</span></button>';
+    if(m.group_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>Наша группа</span></button>';
+  }
+  var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
+  h+='<div class="sfoot"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
+    '<button class="sout" title="Выйти" aria-label="Выйти" onclick="cabLogout()">'+IC.login+'</button></div>';
+  side.innerHTML=h;
+}
+// deskSplit — на широком экране две колонки, на узком — подряд, как было.
+// Правой колонки нет — левая не растягивается на всю ширину.
+function deskSplit(left,right){
+  var st='<div class="stagger">';
+  if(!DESK)return left+right;
+  var body=left.indexOf(st)===0?left.slice(st.length):left;
+  if(!right)return st+'<div class="narrow">'+body+'</div>';
+  return st+'<div class="split"><div>'+body+'</div><div>'+right+'</div></div>';
 }
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -397,14 +542,9 @@ function openDeep(u){try{window.location.href=u;}catch(e){}}
 function isTgLink(u){return /^(https:\/\/t\.me\/|tg:\/\/)/i.test(String(u||''));}
 function openPay(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return true;}catch(e){}}openL(u);return false;}
 function openSmart(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
-function shareRef(link){haptic('tap');var u='https://t.me/share/url?url='+encodeURIComponent(link)+'&text='+encodeURIComponent('Подключайся к VPN по моей ссылке — будет бонус 🎁');if(tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
-function armReturnRefresh(){
-  var fired=false;
-  function fire(){if(fired)return;fired=true;document.removeEventListener('visibilitychange',onv);boot();}
-  function onv(){if(!document.hidden)setTimeout(fire,600);}
-  document.addEventListener('visibilitychange',onv);
-  setTimeout(function(){if(!fired)document.removeEventListener('visibilitychange',onv);},180000);
-}
+// Ссылку в бота делим через Telegram; ссылку на сайт — системным «Поделиться»,
+// а где его нет — копированием.
+function shareRef(link,tgLink){haptic('tap');if(tgLink===0){if(navigator.share){navigator.share({text:'Подключайся к VPN по моей ссылке — будет бонус 🎁',url:link}).catch(function(){});return;}copy(link);return;}var u='https://t.me/share/url?url='+encodeURIComponent(link)+'&text='+encodeURIComponent('Подключайся к VPN по моей ссылке — будет бонус 🎁');if(tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return;}catch(e){}}openL(u);}
 function busy(el,on){if(el){el.disabled=on;el.style.opacity=on?'0.6':'';el.style.pointerEvents=on?'none':'';}}
 // Ask before closing the mini-app while a payment is in flight, so a stray
 // swipe-down doesn't abandon it. Cleared in boot() once we're back to a stable
@@ -452,16 +592,7 @@ function skMain(){
 function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px"></div><div class="sk sk-row"></div><div class="sk sk-row"></div>';}
 
 /* ---- main screen ---- */
-function render(me,menu,sub,plans){
-  STATE.plans=(plans&&plans.plans)||[];
-  STATE.plansNotice=(plans&&plans.notice)||'';
-  // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
-  if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
-  var ub='';
-  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
-  let h='<div class="stagger">';
-  h+=verifyBanner();
-  if(sub.active){
+function passHTML(sub){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
@@ -475,6 +606,25 @@ function render(me,menu,sub,plans){
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
         (atext!==null?'<div class="c"><div class="k">'+esc((sub.addsub_name||'Доп-сервер').toUpperCase())+'</div><div class="v">'+esc(atext)+'</div></div>':'')+
       '</div></div>';
+    return pass;
+}
+function render(me,menu,sub,plans){
+  // Тариф, открытый по ссылке, витрина не показывает — держим его до перезагрузки.
+  var fresh=(plans&&plans.plans)||[];
+  var extra=(STATE.plans||[]).filter(function(p){return p.link&&!fresh.some(function(q){return q.code===p.code;});});
+  STATE.plans=fresh.concat(extra);
+  STATE.plansNotice=(plans&&plans.notice)||'';
+  STATE.sub=sub||{};
+  // Согласие на входе: тот же гейт, что в чате — до «Принимаю» экран один.
+  if(menu&&menu.legal_accept&&menu.legal_gate_start&&legalDocs().length){legalStartGate();return;}
+  PAGE='home';
+  if(DESK){renderHomeDesk(menu,sub);return;}
+  var ub='';
+  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
+  let h='<div class="stagger">';
+  h+=verifyBanner();
+  if(sub.active){
+    var pass=passHTML(sub);
     h+='<div class="acctgrp">'+ub+pass+'</div>';
     if(sub.sub_url)h+='<div class="card"><div class="linkbox" style="margin-top:0"><div class="lab">Ссылка подписки</div><div class="mono">'+esc(sub.sub_url)+'</div></div></div>';
     if(sub.sub_url){h+='<div class="btnrow"><button class="btn" onclick="openConnect()">'+IC.download+'Подключить</button>'+
@@ -482,12 +632,12 @@ function render(me,menu,sub,plans){
     h+=devicesBlock(sub);
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
-    if(menu.can_renew&&STATE.plans.length)h+='<div class="hint center">Для продления выберите '+(STATE.plans.length>1?'тариф':'период')+' ниже</div>';
+    if(renewShown(menu))h+='<button class="btn sec" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
     h+='<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div></div>';
-    if(menu.trial_available&&!WEB)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
+    if(menu.trial_available)h+='<button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button>';
     // Автопродление могло остаться включённым с прошлой подписки — дать выключить.
     if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
   }
@@ -514,6 +664,109 @@ function render(me,menu,sub,plans){
   h+='<div class="btnrow">'+acts+'</div>';
   h+='</div>';
   view(h,null);
+}
+
+// Главная на широком экране: слева подписка, трафик и устройства, справа
+// ссылка подписки и автопродление, ниже тарифы карточками.
+function renderHomeDesk(menu,sub){
+  var h='<div class="stagger">'+verifyBanner();
+  if(sub.active){
+    var right='';
+    if(sub.sub_url)right+='<div class="card"><div class="lab2">Ссылка подписки</div><div class="lrow"><div class="mono">'+esc(sub.sub_url)+'</div>'+
+      '<button class="icbtn" title="Скопировать" aria-label="Скопировать ссылку" onclick="copy(\''+jsq(sub.sub_url)+'\')">'+IC.copy+'</button></div>'+
+      '<button class="btn" style="margin-top:14px" onclick="openConnect()">'+IC.download+'Подключить</button></div>';
+    right+=devicesCard(sub);
+    var left=passHTML(sub)+trafficCard(sub)+autoPayBlock();
+    if(renewShown(menu))left+='<button class="btn sec" style="margin-bottom:16px" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
+    h+='<div class="dgrid"><div class="c7">'+left+'</div><div class="c5">'+right+'</div></div>';
+  }else{
+    h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>'+
+      '<div class="title">Выберите тариф</div><div class="hint" style="margin-top:4px">Подключитесь за минуту и получите доступ ко всем серверам.</div>'+
+      (menu.trial_available?'<div class="acts"><button class="btn" onclick="doTrial(this)">'+IC.gift+'Попробовать бесплатно</button></div>':'')+'</div>';
+    if(STATE.ap&&(STATE.ap.on||STATE.ap.can_enable))h+=autoPayBlock();
+  }
+  if(STATE.plans.length===1){
+    h+='<div class="sec-title">'+IC.tag+esc(planTitle(STATE.plans[0]))+'</div>'+durListHTML(STATE.plans[0]);
+  }else if(STATE.plans.length){
+    h+='<div class="sec-title">'+IC.tag+'Тарифы</div>'+plansGridHTML();
+  }else if(STATE.plansNotice){
+    h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice)+'</div></div>';
+  }
+  h+='</div>';
+  view(h,null);
+}
+function trafficCard(sub){
+  if(!sub.traffic_ok)return '';
+  var used=Number(sub.traffic_used)||0,lim=Number(sub.traffic_limit)||0;
+  var pct=lim>0?Math.min(100,Math.round(used*100/lim)):0;
+  return '<div class="card"><div class="tline"><span class="status">'+IC.bolt+'Трафик</span><b>'+(lim>0?gbText(used)+' из '+gbText(lim):gbText(used)+' · безлимит')+'</b></div>'+
+    (lim>0?'<div class="tbar'+(pct>=90?' hi':'')+'"><i style="width:'+pct+'%"></i></div>':'')+
+    (sub.traffic_reset_ts?'<div class="hint" style="margin-top:8px">Сброс трафика: '+esc(shortDate(sub.traffic_reset_ts))+'</div>':'')+'</div>';
+}
+function devicesCard(sub){
+  var dt=devicesText(sub),list=(sub&&sub.devices)||[];
+  var h='<div class="card dcard"><div class="dhead"><span class="status">'+IC.device+'Устройства</span>'+(dt!==null?'<b>'+esc(dt)+'</b>':'')+'</div>';
+  if(list.length){
+    h+='<div class="feat">';
+    list.forEach(function(d){h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'</div>';});
+    h+='</div>';
+  }
+  return h+'<button class="btn sec" style="margin-top:14px" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button></div>';
+}
+// Тарифы карточками — главная и раздел «Тарифы» на широком экране.
+function plansGridHTML(){
+  var h='<div class="pgrid">';
+  STATE.plans.forEach(function(p){
+    var d=(p.durations||[])[0]||{},f=[];
+    if(d.countries&&d.countries.length)f.push('🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран'));
+    if(d.servers>0)f.push('🖥 Серверов: '+d.servers);
+    h+='<div class="pcard'+(p.own?' own':'')+'" onclick="openPlan(\''+jsq(p.code)+'\')">'+
+      '<div class="pn">'+esc(planTitle(p))+(p.own?'<span class="fbadge">Ваш тариф</span>':'')+'</div>'+
+      '<div class="ps">'+esc(planCardSub(p))+'</div>'+
+      (f.length?'<div class="pf">'+f.map(function(x){return '<span>'+esc(x)+'</span>';}).join('')+'</div>':'')+
+      '<div class="pp">от '+esc(planMinLabel(p))+'</div></div>';
+  });
+  return h+'</div>';
+}
+// Условия тарифа рядом со сроками: на широком экране экран тарифа не пустой.
+// Берётся срок, который витрина выбирает по умолчанию.
+function planInfoDesk(p){
+  var ds=p.durations||[],d=null;
+  for(var i=0;i<ds.length;i++)if(ds[i].preferred){d=ds[i];break;}
+  d=d||ds[0];if(!d)return '';
+  var h='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
+  h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.reset+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
+  if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
+  h+='</div>';
+  if(d.countries&&d.countries.length){
+    h+='<div class="sec-title">'+IC.globe+'Доступные страны</div><div class="chips">';
+    d.countries.forEach(function(c){
+      var fl=c.code?('<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">'):(c.flag?esc(c.flag)+' ':'');
+      h+='<span class="chip2">'+fl+esc(c.name||c.flag||'')+'</span>';
+    });
+    h+='</div>';
+  }
+  return h;
+}
+// Продление ведёт на свой тариф, как кнопка «Продлить» в чате: витрина
+// «Базового» продала бы подписчику чужие условия.
+function renewShown(m){return !!((m.can_renew||m.own_plan)&&(STATE.plans.length||m.renew_gone));}
+function openRenew(){
+  var m=STATE.menu||{};
+  if(m.renew_gone){toast('Тариф, которым вы пользовались, больше недоступен. Выберите новый — действующая подписка не пострадает.','err');openPlans();return;}
+  if(m.own_plan&&planByCode(m.own_plan)){openPlan(m.own_plan,true);return;}
+  openPlans();
+}
+function openPlans(){
+  haptic('tap');PAGE='plans';
+  if(STATE.plans.length===1){openPlan(STATE.plans[0].code);return;}
+  var h='<div class="stagger">';
+  if(STATE.plans.length)h+=plansGridHTML();
+  else h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice||'Тарифов пока нет')+'</div></div>';
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
 }
 
 /* ---- автопродление (сохранённая карта ЮKassa) ---- */
@@ -595,11 +848,11 @@ async function doResetDevices(el){
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
 }
 
-var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'ежедневно',WEEK:'еженедельно',MONTH:'ежемесячно',MONTH_ROLLING:'ежемесячно'};
+var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'каждый день',WEEK:'каждый понедельник',MONTH:'1-го числа каждого месяца',MONTH_ROLLING:'каждый месяц в день подключения'};
 // planTraffic/planDevices/planSub принимают СРОК тарифа (duration): лимиты
 // в v2-схеме живут на сроке, а не на тарифе.
 function planTraffic(d){return (d&&d.traffic_gb>0)?(d.traffic_gb+' ГБ'):'Безлимит';}
-function planDevices(d){return (d&&d.devices>0)?(d.devices+' устр.'):'';}
+function planDevices(d){return !d?'':d.devices>0?(d.devices+' устр.'):d.devices_unlim?'без лимита устройств':'';}
 function planSub(d){var x=planDevices(d);return planTraffic(d)+' трафик'+(x?(' · '+x):'');}
 function planByCode(c){return (STATE.plans||[]).filter(function(p){return p.code===c;})[0]||null;}
 function durByMonths(p,m){return ((p&&p.durations)||[]).filter(function(d){return d.months==m;})[0]||null;}
@@ -617,9 +870,9 @@ function planMinLabel(p){
   (p.durations||[]).forEach(function(d){
     var v=parseFloat(String(d.price).replace(/[\s ]/g,'').replace(',','.'));
     if(!isFinite(v))return;
-    if(!best||v<best.v)best={v:v,lab:d.price+' '+(d.currency||'')};
+    if(!best||v<best.v)best={v:v,lab:(d.price+' '+(d.currency||'')).trim()+(d.months>1?'/'+d.months+' мес':d.months===1?'/мес':'')};
   });
-  return best?best.lab.trim():'';
+  return best?best.lab:'';
 }
 // Список сроков тарифа («выгодный» приходит с сервера — цена за месяц).
 function durListHTML(p){
@@ -627,32 +880,44 @@ function durListHTML(p){
   (p.durations||[]).forEach(function(d){
     var lab=esc(d.price)+' '+esc(d.currency||'');
     h+='<div class="plan'+(d.best?' best':'')+'" onclick="buyPlan(\''+jsq(p.code)+'\','+d.months+')">'+
-      '<div class="pl"><span class="pm">'+monthsWord(d.months)+'</span><span class="ps">'+esc(planSub(d))+(d.countries&&d.countries.length?(' · 🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран')):'')+'</span></div>'+
+      '<div class="pl"><span class="pm">'+monthsWord(d.months)+'</span><span class="ps">'+esc(planSub(d))+(d.countries&&d.countries.length?(' · 🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран')):'')+(d.servers>0?(' · 🖥 Серверов: '+d.servers):'')+'</span></div>'+
       '<span class="price">'+lab+(d.discount?'<span class="disc">'+esc(d.discount)+'</span>':'')+'</span></div>';
   });
   return h+'</div>';
 }
 // Экран тарифа: описание, опция доп-подписки и выбор срока.
-function openPlan(code){
+function openPlan(code,renew){
+  PAGE='plans';
   haptic('tap');
   var p=planByCode(code);
   if(!p){boot();return;}
-  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
+  // Тарифов несколько — к их списку одной кнопкой сверху: «Назад» ведёт на
+  // главную, а на компьютере его нет вовсе.
+  var many=STATE.plans.length>1;
+  var h='<div class="stagger">'+(many?'<button class="toplink" onclick="openPlans()">← К другим тарифам</button>':'')+
+    '<div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Тариф</span>'+IC.bolt+'</div>'+
     '<div class="title">'+esc(planTitle(p))+'</div>'+
     (p.description?'<div class="hint" style="margin-top:4px">'+esc(p.description)+'</div>':'')+'</div>';
+  // Условия своего тарифа поменялись с прошлой покупки — сказать до оплаты.
+  if(renew&&p.own&&STATE.menu&&STATE.menu.renew_note)h+='<div class="card"><div class="hint">'+esc(STATE.menu.renew_note)+'</div></div>';
   if(p.addsub_name){
     h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
       (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
   }
+  if(DESK)h+=planInfoDesk(p);
+  var hl=h;h='';
   h+='<div class="sec-title">'+IC.tag+'Срок подписки</div>';
   h+=durListHTML(p);
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
-  view(h,boot);
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,many?openPlans:boot);
 }
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
 function monthsWord(n){return n+' '+plural(n,'месяц','месяца','месяцев');}
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
-function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
+// Даты — по Москве, как в боте: по часам браузера у клиента западнее
+// Москвы сброс в 03:20 МСК выходил вчерашним числом.
+function shortDate(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
 // Названия и описания способов приходят с сервера (правятся в боте, «Тексты
 // бота»); встроенные ниже — запасные для старого сервера.
@@ -661,6 +926,7 @@ function payLabel(m,fb){var L=(STATE.menu&&STATE.menu.pay_labels)||{};return L[m
 function payNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]?'<div class="hint" style="margin:-4px 2px 12px;white-space:pre-line;overflow-wrap:anywhere">'+esc(N[m])+'</div>':'';}
 var METHOD_LABELS={balance:'👛 С баланса',stars:'⭐ Telegram Stars',yookassa:'💳 Банковская карта',cryptobot:'🪙 Криптовалюта',platega:'💳 Platega',heleket:'🪙 Криптовалюта (Heleket)',tribute:'💳 Tribute',yoomoney:'💜 ЮMoney',p2p:'💸 Перевод на карту (P2P)'};
 function buyPlan(code,months){
+  PAGE='plans';
   haptic('tap');
   var p=planByCode(code),d=durByMonths(p,months);
   if(!p||!d){boot();return;}
@@ -678,10 +944,10 @@ function buyPlan(code,months){
     '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+monthsWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
   h+='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
-  if(d.devices>0)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+d.devices+'</b></div>';
-  if(p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.tag+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.reset+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
-  if(d.configs>0)h+='<div class="frow"><span class="l">'+IC.layers+'Конфигов</span><b>'+d.configs+'</b></div>';
+  if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
   if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
   // Смена тарифа: сервер прислал зачёт остатка — показываем сдвиг срока до оплаты.
   if(d.switch_days)h+='<div class="frow"><span class="l">💱 Зачёт остатка</span><b>'+(d.switch_days>0?'+':'')+d.switch_days+' '+plural(Math.abs(d.switch_days),'день','дня','дней')+'</b></div>';
@@ -696,9 +962,12 @@ function buyPlan(code,months){
     });
     h+='</div>';
   }
+  var hl=h;h='';
   h+='<div class="sec-title">Способ оплаты</div>';
   var apOn=STATE.ap&&STATE.ap.available;
+  if(DESK)h+='<div class="paygrid">';
   methods.forEach(function(m){
+    if(DESK)h+='<div class="pcell">';
     // Цена уходит на сервер ровно та, что нарисована выше в bigprice: список
     // тарифов кэшируется до перезагрузки, и сервер обязан отличить показанную
     // цену от сегодняшней, а не списать молча другую сумму.
@@ -709,27 +978,33 @@ function buyPlan(code,months){
     if(m==='yookassa'&&apOn){
       h+='<div class="hint">После оплаты картой предложим включить автопродление ('+esc(autoPayWhen())+'). Включается только с вашего согласия, отключается одной кнопкой на главном экране.</div>';
     }
+    if(DESK)h+='</div>';
   });
+  if(DESK)h+='</div>';
   if(STATE.menu&&STATE.menu.legal_on_pay&&legalDocs().length){
     STATE.legalBack=function(){buyPlan(code,months);};
     h+='<div class="hint" style="margin-top:12px">Оплачивая, вы принимаете '+legalLinks()+'.</div>';
   }
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 function renderP2PCard(card,amount,reqID,topup){
+  PAGE=topup?'wallet':'plans';
   haptic('tap');setBack(boot);
   // id заявки больше 2^53 — держим строкой, через Number() он округляется.
   var rid=String(reqID==null?'':reqID).replace(/\D/g,'');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.bolt+(topup?' Пополнение переводом':' Оплата переводом')+'</span>'+IC.wallet+'</div>'+
-    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Админ проверит вручную.</div></div>';
+    '<div class="title">'+esc(amount||'')+'</div><div class="hint" style="margin-top:4px">Переведите сумму на карту, затем загрузите подтверждение — скриншот или PDF-чек. Администратор проверит платёж вручную.</div></div>';
   h+='<div class="sec-title">'+IC.copy+'Карта для перевода</div><div class="card"><div class="mono">'+esc(card)+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="copy(\''+jsq(card)+'\')">'+IC.copy+'Скопировать карту</button></div>';
+  var hl=h;h='';
   h+='<div class="sec-title">'+IC.check+'Подтверждение оплаты</div><div class="card">'+
     '<input id="p2pfile" type="file" accept="image/*,application/pdf,.pdf" class="field" style="padding:10px">'+
     '<button class="btn" style="margin-top:10px" onclick="p2pUpload(\''+rid+'\',this)">'+IC.check+'Отправить подтверждение</button></div>';
   h+='<button class="btn ghost" style="margin-top:16px" onclick="p2pCancel(\''+rid+'\',this)">Отменить заявку</button>';
-  h+='<button class="btn ghost" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:8px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
 async function p2pUpload(reqID,el){
@@ -765,15 +1040,16 @@ function payTabDrop(w){try{if(w&&!w.closed)w.close();}catch(e){}}
 async function pay(plan,months,method,el,shownPrice){
   haptic('tap');busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
-  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||''});
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
+  // p2p_inapp: реквизиты перевода и чек принимаются прямо здесь, а не в чате.
+  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true});
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,r.issued_at);return;}
     if(r.ok&&r.sub_url){haptic('ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
       if(r.invoice&&tg&&tg.openInvoice){
         tg.openInvoice(r.pay_url,function(st){payGuardOff();if(st==='paid')boot();});
-      }else{if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату во вкладке, затем вернитесь — обновим сами','ok');}}
+      }else{openPay(r.pay_url);openWait(r.pay_url,r.issued_at);}
       return;
     }
     if(r.redirect){toast(r.message||'Этот способ оплаты доступен в боте','ok');if(tg&&tg.close)setTimeout(function(){try{tg.close();}catch(e){}},2200);return;}
@@ -782,8 +1058,42 @@ async function pay(plan,months,method,el,shownPrice){
   finally{payTabDrop(tab);busy(el,false);}
 }
 
+/* ---- ожидание оплаты ---- */
+// Пока открыта страница оплаты, экран сам спрашивает сервер (тот сверяет счёт
+// с платёжкой) и уходит на главную, как только оплата прошла.
+var WAIT=null;
+function stopWait(){if(WAIT){clearInterval(WAIT.t);document.removeEventListener('visibilitychange',WAIT.v);WAIT=null;}}
+// issuedAt — когда сервер выставил счёт (unix): проверка спрашивает, была ли
+// оплата после него, — так видна и оплата, которую уже провёл вебхук.
+function openWait(url,issuedAt){
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оплата</span>'+IC.wallet+'</div>'+
+    '<div class="title">Ждём оплату</div><div class="hint" style="margin-top:6px">Завершите оплату на открывшейся странице. Как только платёж пройдёт, всё обновится само — эту страницу можно не закрывать.</div></div>';
+  h+='<button class="btn" onclick="payCheck(this,true)">'+IC.reset+'Проверить оплату</button>';
+  if(url)h+='<button class="btn sec" style="margin-top:10px" onclick="openPay(\''+jsq(url)+'\')">'+IC.wallet+'Открыть оплату ещё раз</button>';
+  h=deskSplit(h,'');
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← На главную</button></div>';
+  view(h,boot);
+  var w={since:issuedAt||0,n:0};
+  // Через 3 минуты автопроверка стихает, кнопка «Проверить оплату» работает дальше.
+  w.t=setInterval(function(){if(document.hidden)return;if(++w.n>30){clearInterval(w.t);return;}payCheck(null,false);},6000);
+  w.v=function(){if(!document.hidden)setTimeout(function(){if(WAIT===w)payCheck(null,false);},700);};
+  document.addEventListener('visibilitychange',w.v);
+  WAIT=w;
+}
+async function payCheck(el,manual){
+  var w=WAIT;if(!w)return;
+  if(el)busy(el,true);
+  try{var r=await post('/api/miniapp/paycheck',{since:w.since});
+    if(WAIT!==w)return;
+    if(r.paid){stopWait();haptic('ok');toast('Оплата получена','ok');boot();return;}
+    if(manual){haptic('err');toast(r.error||'Оплата пока не поступила. Если вы уже оплатили, подождите минуту.','err');}
+  }catch(e){if(manual){haptic('err');toast('Ошибка: '+e.message,'err');}}
+  finally{if(el)busy(el,false);}
+}
+
 /* ---- "more": balance, promo, referral ---- */
 async function openMore(){
+  PAGE='wallet';
   haptic('tap');skSimple();setBack(boot);
   var ref={enabled:false};
   try{ref=await api('/api/miniapp/referral');}catch(e){}
@@ -793,6 +1103,7 @@ async function openMore(){
     '<div class="hint" style="margin-top:12px">Баланс тратится только на подписку. Вывод средств невозможен.</div></div>';
   h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
     '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
+  var hl=h;h='';
   if(ref&&ref.enabled){
     var bonus=(ref.bonus_kind==='days')?(ref.bonus_value+' дн.'):(ref.bonus_value+' ₽');
     h+='<div class="sec-title">'+IC.gift+'Пригласить друга</div><div class="card">';
@@ -803,26 +1114,33 @@ async function openMore(){
     h+='</div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13.5px"><span style="color:var(--muted)">Приглашено</span><b>'+(ref.count||0)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Заработано</span><b>'+rub(ref.earned_kopecks||0)+' ₽</b></div>';
-    if(ref.link){h+='<div class="mono" style="margin-top:12px">'+esc(ref.link)+'</div>'+
-      '<button class="btn" style="margin-top:10px" onclick="shareRef(\''+jsq(ref.link)+'\')">'+IC.users+'Поделиться</button>'+
-      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(ref.link)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
+    // Ссылки: в бота и на сайт кабинета; аккаунту без Telegram первой — на сайт.
+    var L=[];if(ref.link)L.push({u:ref.link,tg:1});if(ref.cabinet_link)L.push({u:ref.cabinet_link,tg:0});if(ref.cabinet_first)L.reverse();
+    if(L.length){var m=L[0];h+='<div class="mono" style="margin-top:12px">'+esc(m.u)+'</div>'+
+      '<button class="btn" style="margin-top:10px" onclick="shareRef(\''+jsq(m.u)+'\','+m.tg+')">'+IC.users+'Поделиться</button>'+
+      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+'Скопировать ссылку</button>';}
+    L.slice(1).forEach(function(m){h+='<div class="hint" style="margin-top:14px">'+(m.tg?'Ссылка на бота в Telegram':'Ссылка на сайт — для друзей без Telegram')+'</div>'+
+      '<div class="mono" style="margin-top:6px">'+esc(m.u)+'</div>'+
+      '<button class="btn sec" style="margin-top:8px" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+'Скопировать</button>';});
     h+='</div>';
   }
   if(legalDocs().length&&STATE.menu&&STATE.menu.legal_in_menu){
     STATE.legalBack=openMore;
     h+='<div class="sec-title">📜 Документы</div>'+legalRows();
   }
-  if(WEB)h+='<button class="btn sec" style="margin-top:16px" onclick="openAccount()">'+IC.users+'Аккаунт</button>';
-  if(WEB)h+='<button class="btn sec" style="margin-top:10px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
-  h+='<button class="btn ghost" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  if(WEB)h+='<button class="btn sec deskhide" style="margin-top:16px" onclick="openAccount()">'+IC.users+'Аккаунт</button>';
+  if(WEB)h+='<button class="btn sec deskhide" style="margin-top:10px" onclick="cabLogout()">'+IC.help+'Выйти</button>';
+  h+='<button class="btn ghost back" style="margin-top:'+(WEB?'10px':'16px')+'" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
-async function promoApply(el){
-  var inp=document.getElementById('promoIn'); var code=inp?inp.value.trim():'';
+// stay — не уходить на главную после применения (ссылка ведёт дальше, к тарифу).
+async function promoApply(el,given,stay){
+  var inp=document.getElementById('promoIn'); var code=given||(inp?inp.value.trim():'');
   if(!code)return;
   haptic('tap');busy(el,true);
   try{var r=await post('/api/miniapp/promo',{code:code});
-    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');boot();return;}
+    if(r.ok){haptic('ok');toast(r.message||'Готово','ok');if(!stay)boot();return;}
     haptic('err');toast(r.message||'Не удалось','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{busy(el,false);}
@@ -864,6 +1182,7 @@ async function legalAccept(el,then){
   finally{busy(el,false);}
 }
 function legalStartGate(){
+  PAGE=null;
   STATE.legalBack=legalStartGate;
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
     '<div class="title">Документы сервиса</div>'+
@@ -875,39 +1194,58 @@ function legalStartGate(){
   view(h,null);
 }
 function legalGate(code,months){
+  PAGE='plans';
   STATE.legalBack=function(){buyPlan(code,months);};
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
     '<div class="title">Перед оплатой</div>'+
     '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз.</div></div>';
   h+=legalRows();
   h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){buyPlan(\''+jsq(code)+'\','+months+');})">✅ Принимаю</button>';
-  h+='<button class="btn ghost" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
 }
 
 /* ---- top-up ---- */
 function topupOn(){return !(STATE.menu&&STATE.menu.topup_on===false);}
 async function topupOpen(){
+  PAGE='wallet';
   if(!topupOn())return;
   haptic('tap');skSimple();setBack(openMore);
   try{var o=await api('/api/miniapp/topup/options');
-    if(!o.amounts||!o.amounts.length||!o.methods||!o.methods.length){toast('Пополнение недоступно','err');openMore();return;}
-    STATE.tuMethods=o.methods;
+    var hasAmt=(o.amounts&&o.amounts.length)||o.max_kopecks>0;
+    if(!hasAmt||!o.methods||!o.methods.length){toast('Пополнение недоступно','err');openMore();return;}
+    STATE.tuMethods=o.methods;STATE.tuMax=o.max_kopecks||0;
     var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
       '<div class="title">Выберите сумму</div>'+
       '<div class="coins"><svg viewBox="0 0 130 48" fill="none"><ellipse cx="45" cy="24" rx="19" ry="19" fill="rgba(91,140,255,.16)" stroke="#5b8cff" stroke-width="2"/><ellipse cx="65" cy="24" rx="19" ry="19" fill="rgba(157,123,255,.16)" stroke="#9d7bff" stroke-width="2"/><ellipse cx="85" cy="24" rx="19" ry="19" fill="rgba(52,211,153,.14)" stroke="#34d399" stroke-width="2"/><text x="85" y="30" text-anchor="middle" fill="#34d399" font-size="18" font-weight="700">₽</text></svg></div></div>';
-    o.amounts.forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
-    h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
+    if(DESK)h+='<div class="paygrid">';
+    (o.amounts||[]).forEach(function(a){h+='<button class="btn sec" onclick="topupPick('+a.kopecks+',\''+jsq(a.label)+'\')">'+esc(a.label)+'</button>';});
+    if(DESK)h+='</div>';
+    // Своя сумма — как в чате: не больше потолка, который задаёт сервер.
+    if(o.max_kopecks>0)h+='<div class="sec-title">'+IC.plus+'Своя сумма</div><div class="card">'+
+      '<input id="tuAmt" class="field" inputmode="decimal" placeholder="Сумма в рублях, до '+esc(rub(o.max_kopecks))+' ₽">'+
+      '<button class="btn" style="margin-top:10px" onclick="topupCustom()">'+IC.check+'Дальше</button></div>';
+    h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
     view(h,openMore);
   }catch(e){toast('Ошибка: '+e.message,'err');openMore();}
 }
+function topupCustom(){
+  var inp=document.getElementById('tuAmt');var v=inp?String(inp.value).replace(/\s/g,'').replace(',','.'):'';
+  var k=Math.round(parseFloat(v)*100);
+  if(!/^\d+(\.\d{1,2})?$/.test(v)||!(k>0)){haptic('err');toast('Введите сумму','err');return;}
+  if(STATE.tuMax>0&&k>STATE.tuMax){haptic('err');toast('Максимум — '+rub(STATE.tuMax)+' ₽','err');return;}
+  topupPick(k,rub(k)+' ₽');
+}
 var METHOD_LABELS2={p2p:'💸 Перевод на карту',yk:'💳 Банковская карта',cb:'🪙 Криптовалюта',pl:'💳 Platega',hl:'🪙 Криптовалюта (Heleket)',ym:'💜 ЮMoney'};
 function topupPick(kopecks,label){
+  PAGE='wallet';
   haptic('tap');
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Пополнение</span></div>'+
     '<div class="title">'+esc(label)+'</div><div class="until">Способ пополнения</div></div>';
-  (STATE.tuMethods||[]).forEach(function(m){h+='<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+payLabel(m,METHOD_LABELS2[m]||m)+'</button>'+payNote(m);});
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
+  if(DESK)h+='<div class="paygrid">';
+  (STATE.tuMethods||[]).forEach(function(m){h+=(DESK?'<div class="pcell">':'')+'<button class="btn sec" onclick="topupPay('+kopecks+',\''+m+'\',this)">'+payLabel(m,METHOD_LABELS2[m]||m)+'</button>'+payNote(m)+(DESK?'</div>':'');});
+  if(DESK)h+='</div>';
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="topupOpen()">← Назад</button></div>';
   view(h,topupOpen);
 }
 async function topupPay(kopecks,method,el){
@@ -916,8 +1254,8 @@ async function topupPay(kopecks,method,el){
   try{var r=await post('/api/miniapp/topup',{kopecks:kopecks,method:method});
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.redirect){toast(r.message||'Запрос отправлен администратору','ok');return;}
-    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;armReturnRefresh();toast('Оплата открыта во вкладке, затем вернитесь — обновим сами','ok');return;}
-    if(r.ok&&r.pay_url){payGuardOn();if(!openPay(r.pay_url)){armReturnRefresh();toast('Откройте оплату, затем вернитесь — обновим сами','ok');}return;}
+    if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,r.issued_at);return;}
+    if(r.ok&&r.pay_url){payGuardOn();openPay(r.pay_url);openWait(r.pay_url,r.issued_at);return;}
     haptic('err');toast(r.error||'Не удалось создать пополнение','err');
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
   finally{payTabDrop(tab);busy(el,false);}
@@ -950,6 +1288,7 @@ function connectList(){var p=curPlatform();return (p&&p.apps)||[];}
 // это кросс-доменный запрос к странице подписки без CORS. Пустой ответ
 // сервера уже обработан внятно: «скопируйте ссылку и добавьте вручную».
 async function openConnect(){
+  PAGE='connect';
   haptic('tap');skSimple();setBack(boot);
   try{
     var d=await api('/api/miniapp/connect');CONNECT=d;
@@ -976,6 +1315,10 @@ function renderConnect(){
   if(d.sub_url)h+='<div id="qrwrap" style="display:flex;flex-direction:column;align-items:center;margin-top:16px"><div id="qrbox" class="qrbox"></div>'+
     '<div class="hint center" style="margin-top:8px">Наведите камеру другого устройства, чтобы перенести подписку</div></div>';
   h+='</div>';
+  // На компьютере ссылку часто вставляют в программу вручную — кнопка нужна и
+  // при списке приложений.
+  if(DESK&&d.sub_url&&connectList().length)h+='<button class="btn sec" style="margin-top:0" onclick="copy(\''+jsq(d.sub_url)+'\')">'+IC.copy+'Скопировать ссылку</button>';
+  var hl=h;h='';
   var ps=cnPlatforms();
   if(ps.length>1){
     h+='<div class="seg">';
@@ -999,7 +1342,8 @@ function renderConnect(){
     h+='</div>';
   });
   if(grid)h+='</div>';
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
   drawQR(d.sub_url);
 }
@@ -1020,10 +1364,16 @@ async function resendVerify(el){
   busy(el,false);
 }
 async function openAccount(){
+  PAGE='account';
   var a=STATE.acct||{};
   try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
   var h='<div class="stagger">';
-  h+='<div class="sec-title">'+IC.users+'Аккаунт</div><div class="card">';
+  if(DESK){
+    var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
+    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" style="width:52px;height:52px;font-size:22px">'+esc(ini)+'</div>'+
+      '<div class="uinfo"><div class="uname" style="font-size:17px">'+esc(who)+'</div><div class="usub">'+(a.email?'Вход по почте':'Вход через Telegram')+'</div></div></div></div>';
+  }
+  h+='<div class="sec-title'+(DESK?' deskhide':'')+'">'+IC.users+'Аккаунт</div><div class="card">';
   if(a.email){
     h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b style="min-width:0;text-align:right">'+esc(a.email)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Адрес</span><b style="color:'+(a.email_verified?'var(--good)':'var(--bad)')+'">'+(a.email_verified?'подтверждён':'не подтверждён')+'</b></div>';
@@ -1040,6 +1390,7 @@ async function openAccount(){
       '<div class="hint" style="margin-top:6px">Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.</div>'+
       '<div class="tgwrap" style="margin-top:12px"><div id="tgbind"></div></div></div>';
   }
+  var hl=h;h='';
   if(a.has_password){
     h+='<div class="sec-title">'+IC.tag+'Сменить пароль</div><div class="card">'+
       '<input id="pwOld" class="field" type="password" placeholder="Текущий пароль" autocomplete="current-password">'+
@@ -1048,7 +1399,10 @@ async function openAccount(){
       '<button class="btn" style="margin-top:10px" onclick="changePass(this)">'+IC.check+'Сменить пароль</button>'+
       '<div class="hint" style="margin-top:8px;font-size:12px">Все остальные входы в этот аккаунт будут завершены.</div></div>';
   }
-  h+='<button class="btn ghost" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
+  if(DESK&&!h)h='<div class="card"><b>Выход</b><div class="hint" style="margin-top:6px">Завершить вход в кабинет на этом устройстве. Подписка и баланс останутся, войти снова можно через Telegram.</div>'+
+    '<button class="btn sec" style="margin-top:14px" onclick="cabLogout()">'+IC.login+'Выйти</button></div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
   view(h,openMore);
   if(!a.tg_linked)mountTGWidget('tgbind','onTGBind(user)');
 }
@@ -1107,6 +1461,7 @@ async function runVerifyLink(tok){
   STATE.acct=null;
 }
 function openReset(tok){
+  PAGE=null;
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Новый пароль</span></div>'+
@@ -1132,6 +1487,7 @@ async function doReset(el,tok){
   busy(el,false);
 }
 function openForgot(){
+  PAGE=null;
   setBack(null);
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Восстановление</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Пришлём ссылку на смену пароля.</div></div>'+
@@ -1156,6 +1512,7 @@ async function doForgot(el){
 function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
+  PAGE=null;
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   var known=STATE.botUser;
@@ -1180,34 +1537,80 @@ async function renderLogin(){
   view(h,null);
   if(cfg.bot_username){STATE.botUser=cfg.bot_username;mountTGWidget('tglogin','onTGAuth(user)');}
 }
-window.onTGAuth=function(user){renderLoginBusy();post('/api/cabinet/auth/telegram',user).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
+window.onTGAuth=function(user){renderLoginBusy();var body=Object.assign({},user);var st=serverStart(lsGet('cab_start'));if(st)body.start=st;post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
 function renderLoginBusy(){skSimple();}
 async function cabEmail(path,el){
   var email=cabVal('lemail'),pass=cabVal('lpass');
   if(!email||!pass){toast('Заполните email и пароль','err');return;}
   haptic('tap');busy(el,true);
-  try{var r=await post(path,{email:email,password:pass});if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
+  // Регистрация несёт параметр ссылки: по нему новичок привязывается к
+  // пригласившему (вход его не использует).
+  var body={email:email,password:pass};if(path.indexOf('/register')>0){var st=serverStart(lsGet('cab_start'));if(st)body.start=st;}
+  try{var r=await post(path,body);if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();return;}toast('Не удалось','err');}
   catch(e){toast(e.message||'Ошибка','err');}
   busy(el,false);
 }
 function cabLogin(el){cabEmail('/api/cabinet/auth/login',el);}
 function cabRegister(el){cabEmail('/api/cabinet/auth/register',el);}
 
+/* ---- вход по ссылке ---- */
+// promo_ и plan_ разбираются здесь; ref_ и inv_ — на сервере при входе.
+async function handleStart(s){
+  var t=String(s||'').split('\n');
+  var promo=t.filter(function(x){return x.indexOf('promo_')===0;})[0];
+  var plan=t.filter(function(x){return x.indexOf('plan_')===0;})[0];
+  if(promo){
+    var code=promo.slice(6);
+    // До подтверждения почты промокод закрыт: ссылка ждёт подтверждения.
+    if(WEB&&STATE.acct&&STATE.acct.money_blocked){lsSet('cab_start',promo);if(!STATE.promoWait){STATE.promoWait=true;toast('Подтвердите почту — промокод применится после этого','err');}}
+    else if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalPromoGate(code);return true;}
+    else if(!plan){await promoApply(null,code);return true;}
+    else await promoApply(null,code,true);
+  }
+  if(plan){
+    try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(plan.slice(5)));
+      if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;
+        STATE.plans=(STATE.plans||[]).filter(function(x){return x.code!==lp.code;}).concat([lp]);
+        openPlan(lp.code);return true;}
+      toast(r.notice||'Тариф по этой ссылке недоступен','err');
+    }catch(e){toast('Ошибка: '+e.message,'err');}
+  }
+  return false;
+}
+function legalPromoGate(code){
+  PAGE='wallet';
+  STATE.legalBack=function(){legalPromoGate(code);};
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
+    '<div class="title">Перед промокодом</div>'+
+    '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз. Затем применим промокод.</div></div>';
+  h+=legalRows();
+  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){promoApply(null,\''+jsq(code)+'\');})">✅ Принимаю</button>';
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
+}
+
 /* ---- boot ---- */
 async function boot(){
   setBack(null);
   payGuardOff();
   try{
+    var start='';
     if(WEB){
+      // Параметр ссылки хранится до входа: вход через Telegram и регистрация
+      // берут его оттуда.
+      var sp=startParams();if(sp)lsSet('cab_start',sp);
       // Ссылки из писем разбираются до всего остального: человек мог прийти по
       // ним, ещё не будучи залогиненным, и до кабинета ему тогда не добраться.
       var vTok=linkParam('verify');
       if(vTok)await runVerifyLink(vTok);
       var rTok=linkParam('reset');
       if(rTok){dropQuery();openReset(rTok);return;}
+      if(sp)dropQuery();
       if(!TOKEN)TOKEN=getStoredToken();
       if(!TOKEN){renderLogin();return;}
+      start=lsGet('cab_start')||'';
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
+    else if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
     skMain();
     if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
@@ -1218,10 +1621,21 @@ async function boot(){
     // закрыта, и человек обязан увидеть почему — иначе кнопка просто «не
     // работает».
     if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
-    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||'';
+    STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     render(me,menu,sub,plans);
+    // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
+    // вызовется снова. В кабинете она до тех пор лежит в localStorage и
+    // переживает перезагрузку; снимается, только когда кабинет загрузился
+    // (с протухшим входом дождётся нового).
+    var gate=!!(menu.legal_accept&&menu.legal_gate_start&&legalDocs().length);
+    if(!WEB&&start)STATE.pendingStart=start;
+    if(!gate){
+      if(WEB)lsSet('cab_start',null);
+      var ps=WEB?start:STATE.pendingStart;STATE.pendingStart='';
+      if(ps)await handleStart(ps);
+    }
   }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }
 boot();

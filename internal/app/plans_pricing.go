@@ -85,9 +85,11 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 	if cur == "" {
 		cur = i18n.T(lang, "admin.none")
 	}
-	devlim := i18n.T(lang, "pricing.hwid_default")
+	var devlim string
 	if p.DeviceLimit > 0 {
-		devlim = strconv.Itoa(p.DeviceLimit)
+		devlim = a.hwidOwnLabel(ctx, lang, p.DeviceLimit, p.ExtSquad)
+	} else {
+		devlim = a.hwidDefaultLabel(ctx, lang, p.ExtSquad)
 	}
 	squads := strconv.Itoa(len(p.IntSquads))
 	if p.ExtSquad != "" {

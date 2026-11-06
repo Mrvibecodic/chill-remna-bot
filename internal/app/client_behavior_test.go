@@ -392,7 +392,7 @@ func TestReferral_LinkModePaysInviteeAnyway(t *testing.T) {
 	_ = fs.UpsertUser(ctx, invitee)
 	_ = fs.SetReferredBy(ctx, invitee, inviter)
 
-	a.payReferralBonus(ctx, invitee)
+	a.payReferralBonus(ctx, invitee, false)
 	u, _ := fs.GetUser(ctx, invitee)
 	if u == nil || u.Balance != 3000 {
 		t.Fatalf("приветственный бонус потерян: %+v", u)

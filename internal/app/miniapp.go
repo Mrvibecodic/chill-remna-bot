@@ -124,18 +124,26 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	if panel == nil {
 		return dto
 	}
-	url, expireAt, status, ok := panel.SubscriptionFull(ctx, tgID)
+	snap, ok, _ := panel.SubscriptionSnapshot(ctx, tgID)
 	if !ok {
 		return dto
 	}
+	url, expireAt := snap.URL, snap.ExpireAt
 	dto.Active = true
-	dto.Status = status
+	dto.Status = snap.Status
 	dto.SubURL = a.rewriteSub(url)
+	dto.TrafficOK = true
+	dto.TrafficUsed = snap.TrafficUsed
+	dto.TrafficLimit = snap.TrafficLimit
+	if !snap.NextReset.IsZero() {
+		dto.TrafficResetTS = snap.NextReset.Unix()
+	}
 	dto.ExpireAt = formatExpire(expireAt, a.lang(tgID))
 	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()
 	}
 	if info, dok := panel.DevicesByTelegramID(ctx, tgID); dok {
+		info = a.withHwidDefault(ctx, info)
 		dto.DevicesOK = true
 		dto.DevicesUsed = info.Used
 		dto.DeviceLimit = info.Limit
@@ -203,6 +211,9 @@ type miniPlanCtxT struct {
 	oldSnap     *model.PlanSnapshot
 	oldExpire   string
 	own         string
+	// hwid — лимит устройств по умолчанию из панели, для сроков без своего.
+	hwid   remnawave.HwidDefaults
+	hwidOK bool
 }
 
 func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
@@ -215,6 +226,7 @@ func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
 		}
 	}
 	pc.own = planCodeOf(pc.oldSnap)
+	pc.hwid, pc.hwidOK = a.hwidDefaults(ctx)
 	return pc
 }
 
@@ -244,30 +256,36 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко
 	// подсвечивал третью из четырёх позиций).
 	bestIdx, bestRate := -1, int64(0)
+	// Строку серверов админ может убрать в «Текстах бота» — тогда её нет и здесь.
+	showServers := i18n.T(lang, "buy.servers", "1") != ""
 	for j := range p.Durations {
 		d := &p.Durations[j]
 		if d.Months <= 0 || d.Base == "" {
 			continue
 		}
-		// squadCountries ходит в панель (кэш) и сам берёт a.mu.
-		cs, configs := a.squadCountries(ctx, p.IntSquadsFor(d))
+		// squadGeo ходит в панель (кэш) и сам берёт a.mu.
+		g := a.squadGeo(ctx, p.IntSquadsFor(d))
+		dv := planDevShown(p, d, pc.hwid, pc.hwidOK)
 		var countries []web.MiniCountryDTO
-		for _, c := range cs {
+		for _, c := range g.countries {
 			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
 		}
 		pd.Durations = append(pd.Durations, web.MiniDurationDTO{
-			Months:    d.Months,
-			Price:     d.Base,
-			Currency:  cur,
-			TrafficGB: p.TrafficGBFor(d),
-			Devices:   p.DeviceLimitFor(d),
-			Countries: countries,
-			Configs:   configs,
-			Discount:  discountLabel(lang, p, d),
+			Months:       d.Months,
+			Price:        d.Base,
+			Currency:     cur,
+			TrafficGB:    p.TrafficGBFor(d),
+			Devices:      dv.n,
+			DevicesUnlim: dv.unlim,
+			Countries:    countries,
+			Discount:     discountLabel(lang, p, d),
 			// Зачёт остатка при смене тарифа — та же математика, что
 			// применит финализация (см. plans_switch.go).
 			SwitchDays: switchCredit(pc.oldSnap, pc.oldExpire, a.planSnapshotOf(p, d, d.Months)),
 		})
+		if showServers {
+			pd.Durations[len(pd.Durations)-1].Servers = g.hosts
+		}
 		if k, ok := rubToKopecks(d.Base); ok && k > 0 {
 			rate := k / int64(d.Months)
 			if bestIdx < 0 || rate < bestRate {
@@ -290,6 +308,10 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 	a.syncPanelAccount(ctx, tgID)
 	link, expireAt, ok, err := a.trialOnce(ctx, tgID)
 	if !ok {
+		if expireAt != "" {
+			lang := a.lang(tgID)
+			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.trial_found_sub", formatExpire(expireAt, lang)))}
+		}
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.trial_unavailable"))}
 	}
 	if err != nil {

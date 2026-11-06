@@ -92,7 +92,11 @@ var editableList = []Editable{
 			{Name: "payment_currency", Ru: "валюта_оплаты", Desc: [2]string{"валюта, в которой настроена оплата (сетка цен): «₽» или код валюты", "currency the payments are set up in (price grid): «₽» or a currency code"}, Example: [2]string{"₽", "₽"}},
 		}},
 	{Key: "buy.dev_default", Section: "buy", Kind: KindButton,
-		Where: [2]string{"Карточка тарифа — лимит устройств «по умолчанию» (задан в панели)", "Plan card — «default» device limit (set in the panel)"}},
+		Where: [2]string{"Карточка тарифа — лимит устройств «по умолчанию», если бот не смог прочитать его из панели", "Plan card — «default» device limit when the bot could not read it from the panel"}},
+	{Key: "buy.dev_unlim", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — устройства не ограничены (контроль устройств в панели выключен)", "Plan card — devices not limited (device control is off in the panel)"}},
+	{Key: "buy.dev_one", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — лимит в одно устройство (вместо «до 1»)", "Plan card — a one-device limit (instead of «up to 1»)"}},
 	{Key: "buy.dev_n", Section: "buy", Kind: KindButton,
 		Where: [2]string{"Карточка тарифа — значение лимита устройств «до N»", "Plan card — device limit value «up to N»"},
 		Vars: []EditVar{
@@ -111,7 +115,7 @@ var editableList = []Editable{
 	{Key: "buy.from_price", Section: "buy", Kind: KindButton, Hideable: true,
 		Where: [2]string{"Кнопка тарифа в витрине — приписка «от N ₽»", "Plan button in the storefront — «from N ₽» suffix"},
 		Vars: []EditVar{
-			{Name: "price", Ru: "цена", Desc: [2]string{"минимальная цена тарифа среди его сроков, с валютой", "the plan's lowest price across its terms, with currency"}, Example: [2]string{"290 ₽", "290 ₽"}},
+			{Name: "price", Ru: "цена", Desc: [2]string{"минимальная цена тарифа среди его сроков, с валютой и сроком", "the plan's lowest price across its terms, with currency and term"}, Example: [2]string{"290 ₽/мес", "290 ₽/mo"}},
 		}},
 	{Key: "buy.just_bought", Section: "buy", Kind: KindPlain,
 		Where: [2]string{"Мини-апп/ЛК: ошибка при повторном нажатии сразу после покупки", "Mini-app/cabinet: error on a repeat tap right after a purchase"}},
@@ -173,6 +177,19 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "gb", Ru: "гб", Desc: [2]string{"лимит трафика в гигабайтах (число, 1 и больше)", "traffic limit in gigabytes (number, 1 or more)"}, Example: [2]string{"50", "50"}},
 		}},
+	{Key: "buy.reset", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа — строка «Сброс трафика» (только у тарифа с лимитом трафика)", "Plan card — «Traffic reset» line (only for plans with a traffic limit)"},
+		Vars: []EditVar{
+			{Name: "when", Ru: "когда", Desc: [2]string{"когда панель обнуляет трафик по стратегии тарифа — один из текстов «buy.reset_*»", "when the panel resets traffic by the plan strategy — one of the «buy.reset_*» texts"}, Example: [2]string{"1-го числа каждого месяца", "on the 1st of every month"}},
+		}},
+	{Key: "buy.reset_month", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — сброс MONTH", "Plan card — MONTH reset"}},
+	{Key: "buy.reset_rolling", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — сброс MONTH_ROLLING (день месяца, когда создан аккаунт в панели)", "Plan card — MONTH_ROLLING reset (the day of month the panel account was created)"}},
+	{Key: "buy.reset_week", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — сброс WEEK", "Plan card — WEEK reset"}},
+	{Key: "buy.reset_day", Section: "buy", Kind: KindButton,
+		Where: [2]string{"Карточка тарифа — сброс DAY", "Plan card — DAY reset"}},
 	{Key: "buy.traffic", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Карточка тарифа — строка «Трафик»", "Plan card — «Traffic» line"},
 		Vars: []EditVar{
@@ -675,6 +692,22 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "addsub", Ru: "доп_подписка", Desc: [2]string{"название доп-подписки из настроек тарифа или общих; если не задано — текст «addsub.default_name»", "add-on subscription name from plan or global settings; if not set — the «addsub.default_name» text"}, Example: [2]string{"Доп-сервер", "Add-on server"}},
 		}},
+	{Key: "sub.traffic", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Экран «Мои подписки» — трафик периода при лимите", "«My subscriptions» screen — period traffic with a limit"},
+		Vars: []EditVar{
+			{Name: "gb_used", Ru: "израсходовано_гб", Desc: [2]string{"израсходовано за период, ГБ, до 1 знака после точки", "used this period, GB, up to 1 decimal"}, Example: [2]string{"12.5", "12.5"}},
+			{Name: "gb_limit", Ru: "лимит_гб", Desc: [2]string{"лимит трафика, ГБ", "traffic limit, GB"}, Example: [2]string{"50", "50"}},
+		}},
+	{Key: "sub.traffic_unlim", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Экран «Мои подписки» — трафик без лимита", "«My subscriptions» screen — traffic without a limit"},
+		Vars: []EditVar{
+			{Name: "gb_used", Ru: "израсходовано_гб", Desc: [2]string{"израсходовано за период, ГБ, до 1 знака после точки", "used this period, GB, up to 1 decimal"}, Example: [2]string{"12.5", "12.5"}},
+		}},
+	{Key: "sub.traffic_reset", Section: "sub", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Экран «Мои подписки» — дата следующего сброса трафика", "«My subscriptions» screen — next traffic reset date"},
+		Vars: []EditVar{
+			{Name: "date", Ru: "дата", Desc: [2]string{"дата сброса по Москве, ДД.ММ.ГГГГ", "reset date in Moscow time, DD.MM.YYYY"}, Example: [2]string{"01.12.2026", "01.12.2026"}},
+		}},
 	{Key: "sub.devices", Section: "sub", Kind: KindHTML,
 		Where: [2]string{"Экран «Мои подписки» — строка с числом подключённых устройств", "«My subscriptions» screen — line with the number of connected devices"},
 		Vars: []EditVar{
@@ -876,6 +909,11 @@ var editableList = []Editable{
 		Where: [2]string{"Экран «Реферальная программа» — строка о проценте с оплат приглашённых", "«Referral program» screen — line about the percent of invitees' payments"},
 		Vars: []EditVar{
 			{Name: "percent", Ru: "процент", Desc: [2]string{"процент от каждой оплаты приглашённого — целое число; знак % уже в тексте", "percent of each invitee payment — integer; the % sign is already in the text"}, Example: [2]string{"10", "10"}},
+		}},
+	{Key: "ref.cabinet_link", Section: "ref", Kind: KindHTML,
+		Where: [2]string{"Экран «Реферальная программа» — вторая ссылка, на сайт кабинета (когда кабинет включён)", "«Referral program» screen — second link, to the web cabinet (when the cabinet is on)"},
+		Vars: []EditVar{
+			{Name: "site_link", Ru: "ссылка_сайт", Desc: [2]string{"личная ссылка на сайт кабинета для друзей без Telegram", "personal link to the web cabinet for friends without Telegram"}, Example: [2]string{"https://example.com/cabinet/?ref=1000000001", "https://example.com/cabinet/?ref=1000000001"}},
 		}},
 	{Key: "ref.bonus_balance", Section: "ref", Kind: KindHTML,
 		Where: [2]string{"Уведомление пригласившему: начислен бонус на баланс за друга", "Notice to the referrer: balance bonus credited for a friend"},

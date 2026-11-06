@@ -124,11 +124,21 @@ func TestPlanAccessGoneWithUser(t *testing.T) {
 		if err := st.GrantPlanAccess(ctx, "vip", 0, "web@example.com"); err != nil {
 			t.Fatal(err)
 		}
+		if err := st.PutEmailToken(ctx, &model.EmailToken{Hash: "gone-reset", TgID: -77, Purpose: model.EmailPurposeReset,
+			Email: "web@example.com", ExpiresAt: "2099-01-01T00:00:00Z"}); err != nil {
+			t.Fatal(err)
+		}
 		if err := st.DeleteUser(ctx, -77); err != nil {
 			t.Fatal(err)
 		}
 		if ok, _ := st.HasPlanAccess(ctx, "vip", -77, "web@example.com"); ok {
 			t.Fatal("допуск по почте пережил удаление e-mail-аккаунта")
+		}
+		if wu, _ := st.GetWebUserByEmail(ctx, "web@example.com"); wu != nil {
+			t.Fatal("аккаунт кабинета пережил удаление пользователя")
+		}
+		if n, err := st.CountEmailTokensSince(ctx, -77, model.EmailPurposeReset, ""); err != nil || n != 0 {
+			t.Fatalf("ссылки из писем пережили удаление пользователя: %d %v", n, err)
 		}
 	})
 }

@@ -53,7 +53,7 @@ func TestPlanTermsText(t *testing.T) {
 			{Months: 12, Base: "1400", TrafficGB: &gb},
 		},
 	}
-	got := planTermsText("ru", p)
+	got := planTermsText("ru", p, nil)
 	if !strings.Contains(got, "1 мес — безлимит") || !strings.Contains(got, "12 мес — 100 ГБ в месяц") {
 		t.Fatalf("нет разбивки трафика по срокам: %q", got)
 	}
@@ -63,13 +63,13 @@ func TestPlanTermsText(t *testing.T) {
 
 	p.Strategy = "NO_RESET"
 	p.Durations[0].TrafficGB = &gb
-	if got = planTermsText("ru", p); !strings.Contains(got, "Трафик: 100 ГБ на весь срок") {
+	if got = planTermsText("ru", p, nil); !strings.Contains(got, "Трафик: 100 ГБ на весь срок") {
 		t.Fatalf("одинаковый трафик должен быть одной строкой со стратегией: %q", got)
 	}
 
 	// Сроки без своих лимитов устройств: дефолт панели, числа нет — строки нет.
 	none := &model.Plan{Durations: []model.PlanDuration{{Months: 1, Base: "150"}}}
-	if got = planTermsText("ru", none); strings.Contains(got, "Устройства") {
+	if got = planTermsText("ru", none, nil); strings.Contains(got, "Устройства") {
 		t.Fatalf("без лимита устройств строки быть не должно: %q", got)
 	}
 	if !strings.Contains(got, "Трафик: безлимит") {
@@ -77,7 +77,7 @@ func TestPlanTermsText(t *testing.T) {
 	}
 
 	// Непродаваемых сроков нет — блока нет.
-	if got = planTermsText("ru", &model.Plan{}); got != "" {
+	if got = planTermsText("ru", &model.Plan{}, nil); got != "" {
 		t.Fatalf("пустой тариф не должен давать условий: %q", got)
 	}
 }

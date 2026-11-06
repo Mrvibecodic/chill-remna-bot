@@ -47,12 +47,18 @@ func (a *App) MiniStart(ctx context.Context, tgID int64, param string, cabinet b
 	if a.userBlocked(ctx, tgID) || a.MiniAccessDenied(ctx, tgID) {
 		return notice
 	}
+	// К пригласившему — до проверки кабинета вручную: после одобрения строка
+	// уже есть и привязка невозможна. Но бонусы такого новичка ждут его первой
+	// оплаты: одобрения ещё не было, а отказ бонус не вернёт.
+	pending := false
 	if cabinet && a.cabinetNeedsApproval(false) {
-		if u, _ := a.store.GetUser(ctx, tgID); u == nil || !u.WebApproved {
-			return notice
-		}
+		u, _ := a.store.GetUser(ctx, tgID)
+		pending = u == nil || !u.WebApproved
 	}
-	a.bindReferrer(ctx, tgID, param)
+	a.bindReferrer(ctx, tgID, param, pending)
+	if pending {
+		return notice
+	}
 	// Синхронно, как /start в чате: иначе человек успел бы взять триал до
 	// того, как найдётся его аккаунт в панели.
 	a.syncPanelAccount(ctx, tgID)
@@ -190,36 +196,15 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 	return web.MiniPlansDTO{Plans: []web.MiniPlanDTO{pd}}
 }
 
-// MiniWallet — кошелёк: баланс и прогноз «на сколько хватит», как в чате.
+// MiniWallet — кошелёк: баланс и доступно ли пополнение.
 func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
-	dto := web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), Currency: curRUB}
-	dto.BalanceK = a.userBalance(ctx, tgID)
-	if !a.forecastShown() {
-		return dto
-	}
-	list, plan := a.forecastEntries(ctx, tgID)
-	if plan != nil {
-		dto.PlanName = strings.TrimSpace(plan.Icon + " " + plan.Name)
-	}
-	for _, e := range list {
-		k, ok := rubToKopecks(e.price)
-		if !ok || k <= 0 {
-			continue
-		}
-		count := int(dto.BalanceK / k)
-		row := web.MiniForecastRowDTO{Months: e.months, Price: e.price, Count: count, Total: count * e.months}
-		if row.Total > dto.MaxMonths {
-			dto.MaxMonths = row.Total
-		}
-		dto.Rows = append(dto.Rows, row)
-	}
-	return dto
+	return web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), BalanceK: a.userBalance(ctx, tgID)}
 }
 
 // MiniPayCheck — «Проверить оплату» из мини-аппа и кабинета: незакрытые счета
 // человека перепроверяются у платёжек тем же ядром, что и фоновая сверка, и
 // оплаченные добиваются. Не чаще раза в несколько секунд на человека.
-func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO {
+func (a *App) MiniPayCheck(ctx context.Context, tgID, sinceUnix int64) web.MiniPayCheckDTO {
 	st := a.store
 	if st == nil {
 		return web.MiniPayCheckDTO{Error: "хранилище недоступно"}
@@ -267,6 +252,22 @@ func (a *App) MiniPayCheck(ctx context.Context, tgID int64) web.MiniPayCheckDTO 
 	}
 	if left, err := st.ListUserPending(rctx, tgID, since, payCheckMax); err == nil {
 		dto.Pending = len(left)
+	}
+	// Счёт, оплату которого уже провёл вебхук, закрыт и выше не виден: об
+	// оплате говорит запись платежа после выставления счёта. Метку времени
+	// прислал клиент — держим её в пределах суток назад.
+	if sinceUnix > 0 && !dto.Paid {
+		s := time.Unix(sinceUnix, 0)
+		if floor := now.Add(-reconcileGiveUp); s.Before(floor) {
+			s = floor
+		}
+		if s.After(now) {
+			s = now
+		}
+		// Запас на округление до секунды в created_at.
+		if ok, _ := st.HasPaidPaymentSince(rctx, tgID, s.Add(-2*time.Second).UTC().Format(time.RFC3339)); ok {
+			dto.Paid = true
+		}
 	}
 	return dto
 }

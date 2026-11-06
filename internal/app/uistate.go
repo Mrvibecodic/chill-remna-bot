@@ -16,6 +16,9 @@ type uiState struct {
 	adminInput  string
 	priceMonths int
 	linkUID     int64
+	// unlinkUID/unlinkRef — какую учётку админ подтверждает отвязать.
+	unlinkUID int64
+	unlinkRef string
 
 	// panelPending — адрес или токен панели, не прошедшие проверку связи.
 	panelPending *panelPending

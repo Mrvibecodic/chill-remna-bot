@@ -267,7 +267,7 @@ func TestMiniPayCheckSendsReview(t *testing.T) {
 	a.bkState.Guard = &model.RestoreGuard{At: at.Format(time.RFC3339), Synced: true}
 	_ = st.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "pay_mini", TelegramID: 555, Months: 1,
 		CreatedAt: at.Add(-time.Hour).Format(time.RFC3339)})
-	a.MiniPayCheck(ctx, 555)
+	a.MiniPayCheck(ctx, 555, 0)
 	if !strings.Contains(fm.joined(), "pay_mini") {
 		t.Fatal("список на проверку из мини-аппа не отправлен")
 	}

@@ -169,7 +169,7 @@ func addSubTargets(users []remnawave.PanelUser) []remnawave.PanelUser {
 	out := make([]remnawave.PanelUser, 0, len(users))
 	for i := range users {
 		u := users[i]
-		if u.TelegramID == 0 || u.Tag == remnawave.BotTagAdd {
+		if u.TelegramID <= 0 || u.Tag == remnawave.BotTagAdd {
 			continue
 		}
 		if u.Tag != "" && u.Tag != remnawave.BotTag {

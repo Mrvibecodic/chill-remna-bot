@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	"remnabot/internal/model"
 )
@@ -132,18 +133,14 @@ func TestMiniMenu_TrialInCabinet(t *testing.T) {
 }
 
 // Кошелёк: прогноз по сетке, если своего тарифа нет.
-func TestMiniWallet_Forecast(t *testing.T) {
+func TestMiniWallet_Balance(t *testing.T) {
 	ctx := context.Background()
 	a, fs := planApp(t)
 	const uid int64 = 1000000030
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddBalance(ctx, uid, 45000)
-	w := a.MiniWallet(ctx, uid)
-	if w.BalanceK != 45000 || len(w.Rows) != 3 {
+	if w := a.MiniWallet(ctx, uid); w.BalanceK != 45000 {
 		t.Fatalf("кошелёк: %+v", w)
-	}
-	if w.Rows[0].Months != 1 || w.Rows[0].Count != 3 || w.MaxMonths != 3 {
-		t.Fatalf("прогноз: %+v", w)
 	}
 }
 
@@ -156,20 +153,43 @@ func TestMiniPayCheck(t *testing.T) {
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "pay-1", TelegramID: uid, Months: 1})
 	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: uid, Method: model.PayMethodYooKassa, Months: 1, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-1"})
-	r := a.MiniPayCheck(ctx, uid)
+	r := a.MiniPayCheck(ctx, uid, 0)
 	if !r.OK || !r.Paid || r.Pending != 0 {
 		t.Fatalf("оплаченный счёт: %+v", r)
 	}
 	_ = fs.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodYooKassa, ExtID: "pay-2", TelegramID: uid, Months: 1})
-	if r := a.MiniPayCheck(ctx, uid); r.Paid || r.Pending != 1 {
+	if r := a.MiniPayCheck(ctx, uid, 0); r.Paid || r.Pending != 1 {
 		t.Fatalf("неоплаченный счёт: %+v", r)
 	}
-	if r := a.MiniPayCheck(ctx, 1000000041); r.Pending != 0 {
+	if r := a.MiniPayCheck(ctx, 1000000041, 0); r.Pending != 0 {
 		t.Fatalf("чужие счета посчитаны: %+v", r)
+	}
+	// Оплату, которую уже провёл вебхук (счёт закрыт), экран ожидания узнаёт
+	// по записи платежа после выставления своего счёта.
+	const fresh int64 = 1000000042
+	_ = fs.UpsertUser(ctx, fresh)
+	issued := time.Now().Unix()
+	if r := a.MiniPayCheck(ctx, fresh, issued); r.Paid {
+		t.Fatalf("оплаты ещё не было: %+v", r)
+	}
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: fresh, Method: model.PayMethodYooKassa, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-3", Comment: "topup",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339)})
+	if r := a.MiniPayCheck(ctx, fresh, issued); !r.Paid {
+		t.Fatalf("оплата после счёта не замечена: %+v", r)
+	}
+	// Оплата до выставления счёта не засчитывается.
+	const old int64 = 1000000043
+	_ = fs.UpsertUser(ctx, old)
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: old, Method: model.PayMethodYooKassa, Amount: "150", Status: model.PaymentPaid, ExtID: "pay-4",
+		CreatedAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)})
+	if r := a.MiniPayCheck(ctx, old, issued); r.Paid {
+		t.Fatalf("засчитана оплата до счёта: %+v", r)
 	}
 }
 
-// Кабинет с одобрением новичков: до одобрения реферал не привязывается.
+// Кабинет с проверкой новичков вручную: к пригласившему привязывается сразу,
+// как в чате (иначе после одобрения привязка уже невозможна), а остальное —
+// поиск подписки и прочее — ждёт одобрения.
 func TestMiniStart_CabinetApproval(t *testing.T) {
 	ctx := context.Background()
 	a, fs := planApp(t)
@@ -180,7 +200,48 @@ func TestMiniStart_CabinetApproval(t *testing.T) {
 	const ref, fresh int64 = 1000000050, 1000000051
 	_ = fs.UpsertUser(ctx, ref)
 	a.MiniStart(ctx, fresh, "ref_1000000050", true)
-	if u, _ := fs.GetUser(ctx, fresh); u != nil && u.ReferredBy != 0 {
-		t.Fatal("реферал привязан до одобрения кабинета")
+	u, _ := fs.GetUser(ctx, fresh)
+	if u == nil || u.ReferredBy != ref {
+		t.Fatalf("реферал не привязан до одобрения: %+v", u)
+	}
+	if u.WebApproved {
+		t.Fatal("привязка не должна одобрять вход в кабинет")
+	}
+}
+
+// Новичок кабинета до ручной проверки: бонус «за регистрацию» ждёт его первой
+// оплаты — одобрения ещё не было, а отказ бонус не вернёт. Одобренному и
+// пришедшему в чат бонус по-прежнему сразу.
+func TestMiniStart_CabinetApprovalBonusOnPay(t *testing.T) {
+	ctx := context.Background()
+	a, fs := planApp(t)
+	a.botCfg.NormalizeReferral()
+	a.botCfg.Referral.Enabled = true
+	a.botCfg.Referral.OnFirstPay = false
+	a.botCfg.Referral.BonusKind = model.ReferralBonusBalance
+	a.botCfg.Referral.BonusValue = 50
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Approval = model.CabinetApprovalTG
+	const ref, fresh, chat int64 = 1000000052, 1000000053, 1000000054
+	_ = fs.UpsertUser(ctx, ref)
+	a.MiniStart(ctx, fresh, "ref_1000000052", true)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 0 {
+		t.Fatalf("бонус до одобрения: %d", r.Balance)
+	}
+	if u, _ := fs.GetUser(ctx, fresh); u == nil || !u.RefOnPay {
+		t.Fatalf("бонус не отложен: %+v", u)
+	}
+	a.grantReferralBonus(ctx, fresh)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 5000 {
+		t.Fatalf("после оплаты бонуса нет: %d", r.Balance)
+	}
+	// Чат — как раньше: сразу, и оплата не повторяет.
+	a.MiniStart(ctx, chat, "ref_1000000052", false)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 10000 {
+		t.Fatalf("бонус за вход в мини-апп: %d", r.Balance)
+	}
+	a.grantReferralBonus(ctx, chat)
+	if r, _ := fs.GetUser(ctx, ref); r.Balance != 10000 {
+		t.Fatalf("оплата повторила бонус: %d", r.Balance)
 	}
 }

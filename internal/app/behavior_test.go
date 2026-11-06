@@ -411,9 +411,12 @@ type fakeStore struct {
 	trialResets map[int64]int
 	promoUses   map[string]bool
 	webUsers    map[string]*model.WebUser
-	mailTokens  map[string]*model.EmailToken
-	paylogs     []model.PayLogEntry
-	torrents    []model.TorrentReport
+	// afterWebUserRead — вызывается после чтения аккаунта кабинета: тесты гонок
+	// вклинивают сюда действие посреди чтения.
+	afterWebUserRead func()
+	mailTokens       map[string]*model.EmailToken
+	paylogs          []model.PayLogEntry
+	torrents         []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
 	failMark int
 	strikes  map[int64]string
@@ -1165,6 +1168,11 @@ func (s *fakeStore) SetBlocked(_ context.Context, id int64, blocked bool) error 
 }
 func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
 	delete(s.users, id)
+	for k, u := range s.webUsers {
+		if u.TgID == id {
+			delete(s.webUsers, k)
+		}
+	}
 	return nil
 }
 
@@ -1271,6 +1279,20 @@ func (s *fakeStore) SetReferredBy(_ context.Context, id, ref int64) error {
 	}
 	return nil
 }
+func (s *fakeStore) SetRefOnPay(_ context.Context, id int64) error {
+	if s.users != nil && s.users[id] != nil {
+		s.users[id].RefOnPay = true
+	}
+	return nil
+}
+func (s *fakeStore) HasPaidPaymentSince(_ context.Context, id int64, since string) (bool, error) {
+	for _, p := range s.pays {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (s *fakeStore) SetRefBonusPaid(_ context.Context, id int64) error {
 	if s.users != nil && s.users[id] != nil {
 		s.users[id].RefBonusPaid = true
@@ -1295,14 +1317,27 @@ func (s *fakeStore) CreateWebUser(_ context.Context, u *model.WebUser) error {
 	s.webUsers[u.Email] = &cp
 	return nil
 }
+func (s *fakeStore) WebUserByPrevID(_ context.Context, prev int64) (int64, error) {
+	for _, u := range s.webUsers {
+		if prev != 0 && u.PrevTgID == prev {
+			return u.TgID, nil
+		}
+	}
+	return 0, nil
+}
 func (s *fakeStore) GetWebUserByTgID(_ context.Context, tgID int64) (*model.WebUser, error) {
+	var out *model.WebUser
 	for _, u := range s.webUsers {
 		if u.TgID == tgID {
 			cp := *u
-			return &cp, nil
+			out = &cp
+			break
 		}
 	}
-	return nil, nil
+	if h := s.afterWebUserRead; h != nil {
+		h()
+	}
+	return out, nil
 }
 func (s *fakeStore) SetWebUserVerified(_ context.Context, tgID int64, at string) error {
 	if at == "" {
@@ -1434,6 +1469,12 @@ func (s *fakeStore) MoveAccount(_ context.Context, from, to int64) error {
 	for _, u := range s.webUsers {
 		if u.TgID == from {
 			u.TgID = to
+			u.PrevTgID = from
+		}
+	}
+	for _, u := range s.users {
+		if u.ReferredBy == from {
+			u.ReferredBy = to
 		}
 	}
 	for _, p := range s.pays {

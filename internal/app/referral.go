@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,19 @@ func (a *App) referralLink(ctx context.Context, chatID int64) string {
 	return fmt.Sprintf("https://t.me/%s?start=ref_%d", u, chatID)
 }
 
+// cabinetReferralLink — личная ссылка на сайт кабинета: по ней приходят те,
+// у кого нет Telegram. Пусто, когда кабинет выключен или у бота нет адреса.
+func (a *App) cabinetReferralLink(chatID int64) string {
+	if !a.CabinetEnabled() {
+		return ""
+	}
+	u := a.cabinetURL()
+	if u == "" {
+		return ""
+	}
+	return u + "?ref=" + strconv.FormatInt(chatID, 10)
+}
+
 func (a *App) referralCfg() model.ReferralConfig {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -52,7 +66,10 @@ func (a *App) referralCfg() model.ReferralConfig {
 	return a.botCfg.Referral
 }
 
-func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string) {
+// bindReferrer привязывает новичка к пригласившему по ссылке ref_<id>.
+// onPay — разовые бонусы ждут первой оплаты новичка даже в режиме «за
+// регистрацию» (аккаунт по почте, вход в кабинет до ручной проверки).
+func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string, onPay bool) {
 	if a.store == nil || !a.referralCfg().Enabled {
 		return
 	}
@@ -67,27 +84,54 @@ func (a *App) bindReferrer(ctx context.Context, chatID int64, payload string) {
 	if u, _ := a.store.GetUser(ctx, chatID); u != nil {
 		return
 	}
-	if rr, _ := a.store.GetUser(ctx, ref); rr == nil {
+	rr, _ := a.store.GetUser(ctx, ref)
+	if rr == nil && ref < 0 {
+		// Ссылка разослана аккаунтом кабинета до привязки Telegram: номер с
+		// тех пор сменился, человек находится по прежнему.
+		if id, _ := a.store.WebUserByPrevID(ctx, ref); id != 0 && id != chatID {
+			ref = id
+			rr, _ = a.store.GetUser(ctx, ref)
+		}
+	}
+	if rr == nil {
 		return
 	}
 	_ = a.store.UpsertUser(ctx, chatID)
 	if err := a.store.SetReferredBy(ctx, chatID, ref); err != nil {
 		return
 	}
-	if !a.referralCfg().OnFirstPay {
-		a.payReferralBonus(ctx, chatID)
+	// Отметка ставится в любом режиме: переключат на «за регистрацию» —
+	// отложенный бонус всё равно дождётся оплаты, а не пропадёт.
+	if onPay {
+		if err := a.store.SetRefOnPay(ctx, chatID); err != nil {
+			a.log.Warn("реферальный бонус не отложен до оплаты", "err", err, "invitee", chatID)
+		}
+		return
 	}
+	if a.referralCfg().OnFirstPay {
+		return
+	}
+	a.payReferralBonus(ctx, chatID, false)
 }
 
 func (a *App) grantReferralBonus(ctx context.Context, telegramID int64) {
 	cfg := a.referralCfg()
-	if !cfg.Enabled || !cfg.OnFirstPay {
+	if !cfg.Enabled || a.store == nil {
 		return
 	}
-	a.payReferralBonus(ctx, telegramID)
+	// В режиме «бонус за регистрацию» платим здесь только отложенным при
+	// привязке (см. bindReferrer).
+	if !cfg.OnFirstPay {
+		if u, _ := a.store.GetUser(ctx, telegramID); u == nil || !u.RefOnPay {
+			return
+		}
+	}
+	a.payReferralBonus(ctx, telegramID, true)
 }
 
-func (a *App) payReferralBonus(ctx context.Context, telegramID int64) {
+// payReferralBonus платит разовые бонусы приглашения. atPay — заход из оплаты:
+// при неудаче следующая покупка повторит; заход при привязке единственный.
+func (a *App) payReferralBonus(ctx context.Context, telegramID int64, atPay bool) {
 	if a.store == nil {
 		return
 	}
@@ -117,12 +161,11 @@ func (a *App) payReferralBonus(ctx context.Context, telegramID int64) {
 	// платим тоже — иначе следующая покупка начислила бы ему второй раз (и
 	// третий, и четвёртый: отметка так и не ставится).
 	//
-	// Но повтор бывает не всегда. В режиме «бонус по ссылке» (OnFirstPay=false)
-	// сюда заходят ровно один раз — из bindReferrer при первом /start, и
-	// второго захода не будет никогда. Откладывать там значит потерять
-	// приветственный бонус насовсем, поэтому в этом режиме платим и метим
-	// несмотря на неудачу у пригласившего.
-	retryLater := cfg.OnFirstPay
+	// Но повтор бывает не всегда. При привязке (bindReferrer, режим «бонус
+	// по ссылке») сюда заходят ровно один раз, и второго захода не будет
+	// никогда. Откладывать там значит потерять приветственный бонус насовсем,
+	// поэтому там платим и метим несмотря на неудачу у пригласившего.
+	retryLater := atPay
 	granted := true
 	if cfg.BonusValue > 0 {
 		switch cfg.BonusKind {
@@ -298,6 +341,9 @@ func (a *App) showReferral(ctx context.Context, chatID int64) {
 		extra += "\n" + i18n.T(lang, "ref.also_percent", cfg.Percent)
 	}
 	text := i18n.T(lang, "ref.user", bonus, when, extra, count, kopecksToRub(earned), link)
+	if cl := a.cabinetReferralLink(chatID); cl != "" {
+		text += i18n.T(lang, "ref.cabinet_link", html.EscapeString(cl))
+	}
 	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, [][]models.InlineKeyboardButton{backHomeRow(lang)})
 }
 

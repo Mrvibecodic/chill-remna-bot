@@ -61,14 +61,18 @@ func displayName(lang, first, username string) string {
 	return i18n.T(lang, "menu.friend")
 }
 
-func userLabel(u *model.User) string {
+func userLabel(u *model.User) string { return userLabelWith(u, escapeName) }
+
+// userLabelWith — подпись с нужной обработкой имени: для текста сообщения
+// экранирование, для подписи кнопки — как есть (Telegram показал бы &amp;).
+func userLabelWith(u *model.User, name func(string) string) string {
 	id := strconv.FormatInt(u.TelegramID, 10)
 	nick := ""
 	switch {
 	case u.Username != "":
-		nick = "@" + escapeName(u.Username)
+		nick = "@" + name(u.Username)
 	case u.FirstName != "":
-		nick = escapeName(u.FirstName)
+		nick = name(u.FirstName)
 	}
 	if nick == "" {
 		return id
@@ -80,23 +84,63 @@ func (a *App) userLabelByID(ctx context.Context, id int64) string {
 	if a.store != nil {
 		// Карточка читается ОДИН раз: подпись рисуется в списках пользователей
 		// построчно, и второе чтение на строку удваивало бы запросы к базе.
-		u, _ := a.store.GetUser(ctx, id)
-		// У аккаунта кабинета нет ни имени, ни @username — подписываем почтой.
-		// Проверяется не знак идентификатора, а наличие имени: после привязки
-		// Telegram аккаунт положительный, и подписывать его почтой вместо имени
-		// уже неправильно.
-		if u == nil || (u.Username == "" && u.FirstName == "") {
-			if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
-				// Эскейп обязателен: e-mail — свободный ввод при регистрации в
-				// кабинете и попадает в сообщения с ParseModeHTML.
-				return "📧 " + escapeName(wu.Email)
-			}
+		if u, _ := a.store.GetUser(ctx, id); u != nil {
+			return a.userLabelFor(ctx, u)
 		}
-		if u != nil {
-			return userLabel(u)
+		if l := a.emailLabel(ctx, id); l != "" {
+			return l
 		}
 	}
 	return strconv.FormatInt(id, 10)
+}
+
+// userLabelFor — подпись пользователя. У аккаунта кабинета нет ни имени, ни
+// @username — подписываем почтой. Проверяется не знак идентификатора, а наличие
+// имени: после привязки Telegram аккаунт положительный, и подписывать его
+// почтой вместо имени уже неправильно.
+func (a *App) userLabelFor(ctx context.Context, u *model.User) string {
+	if u.Username == "" && u.FirstName == "" {
+		if l := a.emailLabel(ctx, u.TelegramID); l != "" {
+			return l
+		}
+	}
+	return userLabel(u)
+}
+
+func (a *App) emailLabel(ctx context.Context, id int64) string {
+	return a.emailLabelWith(ctx, id, escapeName)
+}
+
+func (a *App) emailLabelWith(ctx context.Context, id int64, name func(string) string) string {
+	if a.store == nil {
+		return ""
+	}
+	if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
+		// Эскейп обязателен: e-mail — свободный ввод при регистрации в
+		// кабинете и попадает в сообщения с ParseModeHTML.
+		return "📧 " + name(wu.Email)
+	}
+	return ""
+}
+
+// userButtonLabel — подпись пользователя для кнопки: без HTML-экранирования.
+func (a *App) userButtonLabel(ctx context.Context, u *model.User) string {
+	if u.Username == "" && u.FirstName == "" {
+		if l := a.emailLabelWith(ctx, u.TelegramID, plainName); l != "" {
+			return l
+		}
+	}
+	return userLabelWith(u, plainName)
+}
+
+// plainName — имя для подписи кнопки: та же обрезка, что у escapeName, без
+// экранирования.
+func plainName(s string) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > nameMaxLen {
+		s = string(r[:nameMaxLen]) + "…"
+	}
+	return s
 }
 
 const subCacheTTL = 30
@@ -356,7 +400,7 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 	internalCSV, externalName := a.squadDisplay(ctx)
 	title := i18n.T(lang, "subsetup.title",
 		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn), mark(ymOn),
-		a.formatTrafficLimits(), a.formatDeviceLimits(lang), strat,
+		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat,
 		internalCSV, externalName,
 	)
 	if addsubOn {
@@ -810,9 +854,14 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 			a.getUI(chatID).adminInput = "cab_path"
 			a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.ask_path"), "menu:cabinet")
 		}
-	case "cabapprove":
+	case "cabapptg", "cabappem":
 		if isAdmin {
-			a.cycleCabinetApproval(ctx, chatID)
+			a.toggleCabinetApproval(ctx, chatID, val == "cabappem")
+		}
+	case "cabapprove":
+		// Кнопка из старых сообщений: режим не меняет, показывает экран.
+		if isAdmin {
+			a.showCabinetAdmin(ctx, chatID)
 		}
 	case "cabtitle":
 		if isAdmin {

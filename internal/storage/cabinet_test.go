@@ -165,6 +165,14 @@ func TestMoveAccount(t *testing.T) {
 		if err := st.UpsertUser(ctx, to); err != nil {
 			t.Fatal(err)
 		}
+		// Приглашённый этим аккаунтом обязан остаться за ним и после переезда.
+		const invitee = int64(42)
+		if err := st.UpsertUser(ctx, invitee); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetReferredBy(ctx, invitee, from); err != nil {
+			t.Fatal(err)
+		}
 
 		if err := st.MoveAccount(ctx, from, to); err != nil {
 			t.Fatalf("перенос: %v", err)
@@ -182,6 +190,33 @@ func TestMoveAccount(t *testing.T) {
 		}
 		if ok, err := st.HasPaidPayment(ctx, to); err != nil || !ok {
 			t.Fatalf("платежи не переехали: ok=%v err=%v", ok, err)
+		}
+		if iu, _ := st.GetUser(ctx, invitee); iu == nil || iu.ReferredBy != to {
+			t.Fatalf("приглашённый не переехал: %+v", iu)
+		}
+		if n, err := st.CountReferrals(ctx, to); err != nil || n != 1 {
+			t.Fatalf("счётчик приглашённых: n=%d err=%v", n, err)
+		}
+		// Старые ссылки несут прежний номер — по нему находится новый.
+		if id, err := st.WebUserByPrevID(ctx, from); err != nil || id != to {
+			t.Fatalf("прежний номер: id=%d err=%v", id, err)
+		}
+		if id, err := st.WebUserByPrevID(ctx, -999); err != nil || id != 0 {
+			t.Fatalf("незнакомый прежний номер: id=%d err=%v", id, err)
+		}
+		// Прежний номер переживает переезд базы.
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prev int64
+		for _, wu := range snap.WebUsers {
+			if wu.TgID == to {
+				prev = wu.PrevTgID
+			}
+		}
+		if prev != from {
+			t.Fatalf("в снимке нет прежнего номера: %d", prev)
 		}
 	})
 }
@@ -241,6 +276,47 @@ func TestSnapshotCarriesWebUsers(t *testing.T) {
 		}
 		if found == nil || found.PassHash != "hash" || found.VerifiedAt == "" {
 			t.Fatalf("аккаунт кабинета не попал в снимок: %+v", found)
+		}
+	})
+}
+
+// Отложенный бонус приглашения хранится и переживает переезд базы; оплата
+// после выставления счёта находится по времени записи.
+func TestRefOnPayAndPaidSince(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const id = int64(61)
+		if err := st.UpsertUser(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetRefOnPay(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := st.GetUser(ctx, id); u == nil || !u.RefOnPay {
+			t.Fatalf("отметка не сохранилась: %+v", u)
+		}
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, u := range snap.Users {
+			if u.TelegramID == id {
+				found = u.RefOnPay
+			}
+		}
+		if !found {
+			t.Fatal("отметки нет в снимке")
+		}
+		if err := st.AddPayment(ctx, &model.Payment{TelegramID: id, Method: "yk", Amount: "100", Status: model.PaymentPaid,
+			CreatedAt: "2030-01-01T10:00:00Z"}); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := st.HasPaidPaymentSince(ctx, id, "2030-01-01T09:59:58Z"); err != nil || !ok {
+			t.Fatalf("оплата после счёта: ok=%v err=%v", ok, err)
+		}
+		if ok, err := st.HasPaidPaymentSince(ctx, id, "2030-01-01T10:00:01Z"); err != nil || ok {
+			t.Fatalf("оплата до счёта засчитана: ok=%v err=%v", ok, err)
 		}
 	})
 }

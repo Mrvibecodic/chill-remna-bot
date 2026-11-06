@@ -263,6 +263,9 @@ type App struct {
 	infraMu    sync.Mutex
 	infraCache *infraCacheEntry
 
+	// hwidDef — лимит устройств по умолчанию из панели (hwid_defaults.go).
+	hwidDef hwidDefCache
+
 	connectMu    sync.Mutex
 	connectCache *connectCacheEntry
 	// connectFail — когда в последний раз не вышло достать конфиг приложений,
@@ -287,10 +290,12 @@ type App struct {
 	// epochMu/epochs — поколение пропусков по аккаунтам. Проверяется на каждом
 	// запросе к API кабинета и мини-аппа, поэтому держится в памяти: иначе
 	// каждая загрузка страницы добавляла бы полдюжины лишних чтений базы.
-	// Значение меняется только отсюда же (смена пароля, привязка Telegram), и
-	// запись в карту идёт сразу за записью в базу — расхождения быть не может.
-	epochMu sync.RWMutex
-	epochs  map[int64]int
+	// Значение меняется только отсюда же (смена пароля, привязка Telegram,
+	// удаление). epochGen растёт при каждой такой смене: чтение из базы,
+	// начатое до неё, своё уже устаревшее значение в карту не кладёт.
+	epochMu  sync.RWMutex
+	epochs   map[int64]int
+	epochGen uint64
 
 	// mailWG считает письма, отправляемые в фоне. Нужен остановке (успеть
 	// договорить с почтовым сервером) и тестам, которым иначе не за что
@@ -516,7 +521,24 @@ func (a *App) foldLegacyP2PSquad(ctx context.Context) {
 // работает при любом типе установки — в том числе там, где мастер про ключ не
 // спрашивает (eGames, локальная панель за общим Caddy).
 func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
-	return remnawave.New(a.panelWithEnv(pc))
+	c := remnawave.New(a.panelWithEnv(pc))
+	c.SetEmailResolver(a.panelEmailFor)
+	return c
+}
+
+// panelEmailFor — почта, по которой аккаунт кабинета ищет свою учётку в панели.
+// Только подтверждённая: иначе зарегистрировавшийся на чужой адрес получил бы
+// чужую подписку. a.mu не берётся: поиск в панели бывает и под ним.
+func (a *App) panelEmailFor(ctx context.Context, tgID int64) string {
+	st := a.store
+	if tgID >= 0 || st == nil {
+		return ""
+	}
+	wu, err := st.GetWebUserByTgID(ctx, tgID)
+	if err != nil || wu == nil || wu.VerifiedAt == "" {
+		return ""
+	}
+	return model.NormalizeEmail(wu.Email)
 }
 
 // panelWithEnv накладывает CADDY_AUTH_API_TOKEN на конфиг панели.
@@ -691,10 +713,12 @@ func (a *App) trackMoney(name string, f func(context.Context)) {
 	a.mu.Unlock()
 	a.moneyActive.Add(1)
 	go func() {
-		defer a.moneyActive.Add(-1)
+		// Отложенные вызовы идут в обратном порядке: счётчик гаснет раньше,
+		// чем отпускает ожидание, — кто дождался Drain, видит ноль.
 		if counted {
 			defer a.moneyWG.Done()
 		}
+		defer a.moneyActive.Add(-1)
 		defer func() {
 			if r := recover(); r != nil {
 				a.log.Error("паника в фоновой задаче", "task", name, "panic", r, "stack", string(debug.Stack()))
@@ -920,7 +944,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		}
 		if _, payload, ok := strings.Cut(text, " "); ok {
 			payload = strings.TrimSpace(payload)
-			a.bindReferrer(ctx, chatID, payload)
+			a.bindReferrer(ctx, chatID, payload, false)
 			if code, isPromo := strings.CutPrefix(payload, "promo_"); isPromo && code != "" {
 				if a.store != nil {
 					_ = a.store.UpsertUser(ctx, chatID)

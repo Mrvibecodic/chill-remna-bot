@@ -384,6 +384,10 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 	}
 	link, expireAt, ok, err := a.trialOnce(ctx, chatID)
 	if !ok {
+		if expireAt != "" {
+			a.sendHome(ctx, chatID, i18n.T(lang, "sync.linked", formatExpire(expireAt, lang)))
+			return
+		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "trial.not_available"))
 		return
 	}
@@ -399,7 +403,8 @@ func (a *App) activateTrial(ctx context.Context, chatID int64) {
 // Порознь они не работают: чат и веб-поверхности живут в разных горутинах, и
 // два одновременных запроса успевали пройти проверку оба — триал выдавался
 // дважды, а дни складывались. Замок тот же, что сериализует выдачу подписки по
-// пользователю. ok=false — триал недоступен (выдачи не было).
+// пользователю. ok=false — триал недоступен (выдачи не было); expireAt тогда
+// непуст, если вместо триала нашлась и привязалась живая учётка в панели.
 func (a *App) trialOnce(ctx context.Context, chatID int64) (link, expireAt string, ok bool, err error) {
 	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(chatID, 10))]
 	lk.Lock()
@@ -407,8 +412,35 @@ func (a *App) trialOnce(ctx context.Context, chatID int64) (link, expireAt strin
 	if !a.trialAvailable(ctx, chatID) {
 		return "", "", false, nil
 	}
+	if foreign, ferr := a.liveForeignAccount(ctx, chatID); ferr != nil {
+		return "", "", true, ferr
+	} else if foreign != "" {
+		return "", foreign, false, nil
+	}
 	link, expireAt, err = a.trialProvision(ctx, chatID)
 	return link, expireAt, true, err
+}
+
+// liveForeignAccount — в панели у человека уже есть живая подписка, которую
+// завёл не бот. Триал лёг бы на неё и заменил платные лимиты и сквады
+// триальными, поэтому вместо триала учётка привязывается. При ошибке панели
+// триал не выдаётся: выдать его вслепую нельзя. Вызывать под finalizeUserLk.
+// Возвращает срок найденной учётки ("" — такой нет).
+func (a *App) liveForeignAccount(ctx context.Context, chatID int64) (string, error) {
+	panel := a.panelClient()
+	if panel == nil {
+		return "", nil
+	}
+	pu, err := panel.FindByTelegramID(ctx, chatID)
+	if err != nil {
+		return "", err
+	}
+	if pu == nil || remnawave.IsBotUsername(pu.Username, chatID) || !panelSubAlive(pu.ExpireAt) {
+		return "", nil
+	}
+	a.markPanelLinked(ctx, chatID, pu.ExpireAt)
+	a.log.Info("триал: найдена живая учётка в панели, триал не выдан", "tg_id", chatID, "panel_user", pu.Username)
+	return pu.ExpireAt, nil
 }
 
 // trialProvision performs the panel-side trial provisioning and bookkeeping

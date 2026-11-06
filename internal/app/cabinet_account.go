@@ -82,6 +82,7 @@ func (a *App) CabinetMoneyBlocked(ctx context.Context, tgID int64) bool {
 func (a *App) SessionEpoch(ctx context.Context, tgID int64) int {
 	a.epochMu.RLock()
 	v, ok := a.epochs[tgID]
+	gen := a.epochGen
 	a.epochMu.RUnlock()
 	if ok {
 		return v
@@ -96,12 +97,45 @@ func (a *App) SessionEpoch(ctx context.Context, tgID int64) int {
 		a.log.Warn("кабинет: поколение пропусков не прочитано", "err", err)
 		return 0
 	}
-	a.rememberEpoch(tgID, n)
+	// Аккаунт по почте живёт, пока есть его запись в web_users. Её нет —
+	// аккаунт удалён или переехал на Telegram: поколение -1, и пропуск с ним
+	// отвергается при проверке (miniAuth), даже выписанный в гонке с удалением.
+	if tgID < 0 {
+		wu, werr := a.store.GetWebUserByTgID(ctx, tgID)
+		switch {
+		case wu != nil:
+		case werr == nil || errors.Is(werr, sql.ErrNoRows):
+			n = -1
+		default:
+			a.log.Warn("кабинет: аккаунт не прочитан", "err", werr)
+			return n
+		}
+	}
+	a.epochMu.Lock()
+	if a.epochGen == gen {
+		a.putEpochLocked(tgID, n)
+	}
+	a.epochMu.Unlock()
 	return n
 }
 
+// rememberEpoch записывает новое поколение аккаунта сразу за записью в базу.
 func (a *App) rememberEpoch(tgID int64, n int) {
 	a.epochMu.Lock()
+	a.epochGen++
+	a.putEpochLocked(tgID, n)
+	a.epochMu.Unlock()
+}
+
+// forgetEpoch убирает поколение из памяти: следующий запрос перечитает базу.
+func (a *App) forgetEpoch(tgID int64) {
+	a.epochMu.Lock()
+	a.epochGen++
+	delete(a.epochs, tgID)
+	a.epochMu.Unlock()
+}
+
+func (a *App) putEpochLocked(tgID int64, n int) {
 	if a.epochs == nil {
 		a.epochs = map[int64]int{}
 	}
@@ -112,7 +146,6 @@ func (a *App) rememberEpoch(tgID int64, n int) {
 		a.epochs = map[int64]int{}
 	}
 	a.epochs[tgID] = n
-	a.epochMu.Unlock()
 }
 
 // bumpEpoch выбивает все прежние пропуска аккаунта.

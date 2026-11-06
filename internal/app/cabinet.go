@@ -156,7 +156,7 @@ const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL1
 // CabinetEmailRegister creates an email+password account and returns its
 // synthetic identity. На адрес уходит письмо с подтверждением: до него
 // аккаунту закрыты платные действия (см. CabinetMoneyBlocked).
-func (a *App) CabinetEmailRegister(ctx context.Context, email, password string) (int64, error) {
+func (a *App) CabinetEmailRegister(ctx context.Context, email, password, start string) (int64, error) {
 	if !a.CabinetEnabled() {
 		return 0, errCabinetOff
 	}
@@ -196,6 +196,11 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password string) 
 	if err := a.store.CreateWebUser(ctx, &model.WebUser{TgID: tgID, Email: email, PassHash: string(hash)}); err != nil {
 		return 0, errCabinetAuth
 	}
+	// Пришёл по ссылке на кабинет — к пригласившему, как /start в чате. До
+	// заведения строки пользователя: привязка действует только для новичка.
+	// Адрес заводится бесплатно: бонусы такому приглашённому — только после
+	// его оплаты (grantReferralBonus).
+	a.bindReferrer(ctx, tgID, start, true)
 	_ = a.store.UpsertUser(ctx, tgID)
 	// Письмо уходит в фоне и на своём контексте: разговор с почтовым сервером
 	// занимает секунды, а ждать их регистрация не должна — тем более что

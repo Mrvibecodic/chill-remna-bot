@@ -56,6 +56,16 @@ type Client struct {
 
 	// squads — последний список сквадов панели для выдачи (см. liveLimits).
 	squads squadCache
+
+	// emailFor — подтверждённая почта аккаунта кабинета ("" — искать по почте
+	// нельзя). Задаётся один раз при создании клиента.
+	emailFor func(ctx context.Context, telegramID int64) string
+}
+
+// SetEmailResolver подключает поиск учётки по почте для аккаунтов кабинета.
+// Вызывать до первого запроса.
+func (c *Client) SetEmailResolver(f func(ctx context.Context, telegramID int64) string) {
+	c.emailFor = f
 }
 
 // hwidSyncAttempts is how many times ResetDevicesByTelegramID tries the HWID
@@ -495,10 +505,18 @@ type panelUser struct {
 	Tag             string `json:"tag"`
 	Username        string `json:"username"`
 	TelegramID      int64  `json:"telegramId"`
+	Email           string `json:"email"`
 	Status          string `json:"status"`
 
+	// byEmail — учётка найдена по подтверждённой почте аккаунта кабинета
+	// (см. findByAccountEmail): владение тогда доказано самим поиском.
+	byEmail bool
+
 	TrafficLimitStrategy string `json:"trafficLimitStrategy"`
-	HwidDeviceLimit      int    `json:"hwidDeviceLimit"`
+	// HwidDeviceLimit: null — действует лимит по умолчанию панели, 0 —
+	// устройства не ограничены, N — свой лимит.
+	HwidDeviceLimit   *int   `json:"hwidDeviceLimit"`
+	ExternalSquadUuid string `json:"externalSquadUuid"`
 
 	TrafficLimitBytes int64 `json:"trafficLimitBytes"`
 	// Used traffic moved into the nested userTraffic object in the panel
@@ -516,6 +534,16 @@ type panelUser struct {
 	// счётчик периода. Единственный ТОЧНЫЙ признак того, что период
 	// сменился: сравнивать сам счётчик бесполезно, он и так бывает нулём.
 	LastTrafficResetAt string `json:"lastTrafficResetAt"`
+	// CreatedAt — от этого дня панель отсчитывает сброс MONTH_ROLLING.
+	CreatedAt string `json:"createdAt"`
+}
+
+// hwidLimit — свой лимит устройств; 0 — своего нет или он снят.
+func (u *panelUser) hwidLimit() int {
+	if u.HwidDeviceLimit == nil || *u.HwidDeviceLimit < 0 {
+		return 0
+	}
+	return *u.HwidDeviceLimit
 }
 
 // ref is how this user is addressed by this panel: uuid before 3.0.0, numeric
@@ -554,6 +582,7 @@ type PanelUser struct {
 	UUID            string
 	Username        string
 	TelegramID      int64
+	Email           string
 	ExpireAt        string
 	SubscriptionURL string
 	Tag             string
@@ -586,11 +615,12 @@ func toPanelUser(u *panelUser) *PanelUser {
 		Ref:             u.ref(),
 		Username:        u.Username,
 		TelegramID:      u.TelegramID,
+		Email:           u.Email,
 		ExpireAt:        u.ExpireAt,
 		SubscriptionURL: u.SubscriptionURL,
 		Tag:             u.Tag,
 		Strategy:        u.TrafficLimitStrategy,
-		DeviceLimit:     u.HwidDeviceLimit,
+		DeviceLimit:     u.hwidLimit(),
 		Status:          u.Status,
 		TrafficLimit:    u.TrafficLimitBytes,
 		TrafficUsed:     u.usedBytes(),
@@ -628,6 +658,9 @@ func newUserBody(telegramID int64, expire string) map[string]any {
 func ownedByBot(u *panelUser, telegramID int64) bool {
 	if u == nil || telegramID == 0 {
 		return false
+	}
+	if u.byEmail {
+		return true
 	}
 	return u.TelegramID == telegramID || u.Username == botUsername(telegramID)
 }
@@ -1642,25 +1675,62 @@ func (c *Client) SubscriptionFull(ctx context.Context, telegramID int64) (url, e
 // поддерживается аккуратно (sentinel-ошибки, routeGone, undecidedStatus) — и
 // схлопывалось в один false ровно здесь, на последнем шаге.
 func (c *Client) SubscriptionState(ctx context.Context, telegramID int64) (url, expireAt, status string, found bool, err error) {
+	s, found, err := c.SubscriptionSnapshot(ctx, telegramID)
+	return s.URL, s.ExpireAt, s.Status, found, err
+}
+
+// SubSnapshot — подписка пользователя одним ответом панели: ссылка, срок,
+// статус и трафик текущего периода (TrafficLimit 0 — безлимит). NextReset —
+// когда панель обнулит счётчик; нулевое — не обнулит (безлимит, NO_RESET,
+// срок кончится раньше) или неизвестно.
+type SubSnapshot struct {
+	URL          string
+	ExpireAt     string
+	Status       string
+	TrafficUsed  int64
+	TrafficLimit int64
+	NextReset    time.Time
+}
+
+// SubscriptionSnapshot — как SubscriptionState, но с трафиком; запрос к
+// панели тот же.
+func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (SubSnapshot, bool, error) {
 	u, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return "", "", "", false, err
+		return SubSnapshot{}, false, err
 	}
 	if u == nil || u.SubscriptionURL == "" {
-		return "", "", "", false, nil
+		return SubSnapshot{}, false, nil
 	}
-	return u.SubscriptionURL, u.ExpireAt, u.Status, true, nil
+	snap := SubSnapshot{
+		URL:          u.SubscriptionURL,
+		ExpireAt:     u.ExpireAt,
+		Status:       u.Status,
+		TrafficUsed:  u.usedBytes(),
+		TrafficLimit: u.TrafficLimitBytes,
+	}
+	if u.TrafficLimitBytes > 0 {
+		created, _ := time.Parse(time.RFC3339, u.CreatedAt)
+		next := NextTrafficReset(u.TrafficLimitStrategy, created, time.Now())
+		if exp, err := time.Parse(time.RFC3339, u.ExpireAt); err == nil && next.After(exp) {
+			next = time.Time{}
+		}
+		snap.NextReset = next
+	}
+	return snap, true, nil
 }
 
 // DeviceInfo is a read-only snapshot of a user's HWID devices.
 // Used is the number of devices currently registered on the subscription;
 // Limit is the per-user device limit. HasLimit is false when no explicit
-// per-user limit is set (0) — the panel-wide HWID_FALLBACK_DEVICE_LIMIT then
-// applies and is unknown to the bot, so callers show only the connected count.
+// positive limit is set: OwnLimit=false means the panel default applies (see
+// HwidDefaults, ExtSquad picks the rule), OwnLimit=true with 0 — no limit.
 type DeviceInfo struct {
 	Used     int
 	Limit    int
 	HasLimit bool
+	OwnLimit bool
+	ExtSquad string
 	// List — сами устройства, как их вернула панель. Пусто, если панель отдала
 	// только счётчик: список — не обязательная часть ответа, и экран обязан
 	// пережить его отсутствие.
@@ -1721,7 +1791,12 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
-	info := DeviceInfo{Limit: u.HwidDeviceLimit, HasLimit: u.HwidDeviceLimit > 0}
+	info := DeviceInfo{
+		Limit:    u.hwidLimit(),
+		HasLimit: u.hwidLimit() > 0,
+		OwnLimit: u.HwidDeviceLimit != nil,
+		ExtSquad: u.ExternalSquadUuid,
+	}
 
 	resp, err := c.do(ctx, http.MethodGet, "/api/hwid/devices/"+u.ref().path(), nil)
 	if err != nil {
@@ -1784,7 +1859,11 @@ func (c *Client) findByTelegram(ctx context.Context, telegramID int64) (*panelUs
 		// отрицательное значение — это HTTP 400, а не «никого не нашли», и
 		// поиск по нему обрывает всю выдачу. Такие аккаунты ищем по имени:
 		// маршрут by-username есть и до 3.0.0, и после.
-		return c.findByBotUsername(ctx, telegramID)
+		u, err := c.findByBotUsername(ctx, telegramID)
+		if err != nil || u != nil {
+			return u, err
+		}
+		return c.findByAccountEmail(ctx, telegramID)
 	}
 	if c.generation() == genV3 {
 		u, gone, err := c.findByTelegramStream(ctx, telegramID)

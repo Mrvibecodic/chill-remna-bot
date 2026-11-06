@@ -29,16 +29,16 @@ func TestReferral_BindAndBonusOnce(t *testing.T) {
 	ctx := context.Background()
 	_ = fs.UpsertUser(ctx, 200)
 
-	a.bindReferrer(ctx, 300, "ref_200")
+	a.bindReferrer(ctx, 300, "ref_200", false)
 	if u, _ := fs.GetUser(ctx, 300); u == nil || u.ReferredBy != 200 {
 		t.Fatalf("referred_by не привязан: %+v", u)
 	}
 
-	a.payReferralBonus(ctx, 300)
+	a.payReferralBonus(ctx, 300, true)
 	if ref, _ := fs.GetUser(ctx, 200); ref.Balance != 5000 {
 		t.Fatalf("ожидался бонус 5000 коп, got %d", ref.Balance)
 	}
-	a.payReferralBonus(ctx, 300)
+	a.payReferralBonus(ctx, 300, true)
 	if ref, _ := fs.GetUser(ctx, 200); ref.Balance != 5000 {
 		t.Fatalf("двойное начисление бонуса: %d", ref.Balance)
 	}
@@ -52,13 +52,13 @@ func TestReferral_SelfAndExistingRejected(t *testing.T) {
 	ctx := context.Background()
 
 	_ = fs.UpsertUser(ctx, 300)
-	a.bindReferrer(ctx, 300, "ref_200")
+	a.bindReferrer(ctx, 300, "ref_200", false)
 	if u, _ := fs.GetUser(ctx, 300); u.ReferredBy != 0 {
 		t.Fatal("существующего пользователя привязывать нельзя")
 	}
 
 	_ = fs.UpsertUser(ctx, 400)
-	a.bindReferrer(ctx, 500, "ref_500")
+	a.bindReferrer(ctx, 500, "ref_500", false)
 	if u, _ := fs.GetUser(ctx, 500); u != nil && u.ReferredBy != 0 {
 		t.Fatal("самоприглашение запрещено")
 	}
@@ -69,7 +69,7 @@ func TestReferral_DisabledNoBind(t *testing.T) {
 	a.botCfg.Referral.Enabled = false
 	ctx := context.Background()
 	_ = fs.UpsertUser(ctx, 200)
-	a.bindReferrer(ctx, 300, "ref_200")
+	a.bindReferrer(ctx, 300, "ref_200", false)
 	if u, _ := fs.GetUser(ctx, 300); u != nil && u.ReferredBy != 0 {
 		t.Fatal("при выключенной рефералке привязки быть не должно")
 	}
@@ -82,8 +82,8 @@ func TestReferral_InviteeBonusAndEarned(t *testing.T) {
 	a.botCfg.Referral.InviteeValue = 30
 
 	_ = fs.UpsertUser(ctx, 200)
-	a.bindReferrer(ctx, 300, "ref_200")
-	a.payReferralBonus(ctx, 300)
+	a.bindReferrer(ctx, 300, "ref_200", false)
+	a.payReferralBonus(ctx, 300, true)
 
 	if ref, _ := fs.GetUser(ctx, 200); ref.Balance != 5000 || ref.RefEarned != 5000 {
 		t.Fatalf("referrer bonus/earned: bal=%d earned=%d", ref.Balance, ref.RefEarned)
@@ -92,7 +92,7 @@ func TestReferral_InviteeBonusAndEarned(t *testing.T) {
 		t.Fatalf("invitee welcome bonus: bal=%d want 3000", inv.Balance)
 	}
 	// once only
-	a.payReferralBonus(ctx, 300)
+	a.payReferralBonus(ctx, 300, true)
 	if inv, _ := fs.GetUser(ctx, 300); inv.Balance != 3000 {
 		t.Fatalf("invitee double-paid: bal=%d", inv.Balance)
 	}
@@ -105,7 +105,7 @@ func TestReferral_Percent(t *testing.T) {
 	a.botCfg.Referral.Percent = 10
 
 	_ = fs.UpsertUser(ctx, 200)
-	a.bindReferrer(ctx, 300, "ref_200")
+	a.bindReferrer(ctx, 300, "ref_200", false)
 
 	a.creditReferralPercent(ctx, 300, "500 ₽")
 	if ref, _ := fs.GetUser(ctx, 200); ref.Balance != 5000 || ref.RefEarned != 5000 {

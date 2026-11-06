@@ -16,7 +16,7 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	a.botCfg.Cabinet.Enabled = true
 	ctx := context.Background()
 
-	id, err := a.CabinetEmailRegister(ctx, "User@Example.com", "secret12")
+	id, err := a.CabinetEmailRegister(ctx, "User@Example.com", "secret12", "")
 	if err != nil || id >= 0 {
 		t.Fatalf("register: id=%d err=%v (id must be negative synthetic)", id, err)
 	}
@@ -26,10 +26,10 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	// Anti-enumeration: re-registering an existing email no longer reveals it
 	// exists. With the CORRECT password it logs the user in (same id, no error);
 	// with a WRONG password it returns the generic auth error.
-	if rid, err := a.CabinetEmailRegister(ctx, "user@example.com", "secret12"); err != nil || rid != id {
+	if rid, err := a.CabinetEmailRegister(ctx, "user@example.com", "secret12", ""); err != nil || rid != id {
 		t.Fatalf("re-register w/ correct pass should log in (case-insensitive): rid=%d err=%v", rid, err)
 	}
-	if _, err := a.CabinetEmailRegister(ctx, "user@example.com", "wrongpass9"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "user@example.com", "wrongpass9", ""); err == nil {
 		t.Fatal("re-register with wrong password must be rejected")
 	}
 	if lid, err := a.CabinetEmailLogin(ctx, "user@example.com", "secret12"); err != nil || lid != id {
@@ -38,7 +38,7 @@ func TestCabinetEmailRegisterLogin(t *testing.T) {
 	if _, err := a.CabinetEmailLogin(ctx, "user@example.com", "wrong"); err == nil {
 		t.Fatal("wrong password must be rejected")
 	}
-	if _, err := a.CabinetEmailRegister(ctx, "a@b.io", "123"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "a@b.io", "123", ""); err == nil {
 		t.Fatal("short password must be rejected")
 	}
 }
@@ -52,7 +52,7 @@ func TestCabinetApprovalGate(t *testing.T) {
 	a.botCfg.Cabinet.Approval = model.CabinetApprovalAll
 	ctx := context.Background()
 
-	if _, err := a.CabinetEmailRegister(ctx, "x@example.com", "password1"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "x@example.com", "password1", ""); err == nil {
 		t.Fatal("registration must be gated when approval=all")
 	}
 	wu, _ := fs.GetWebUserByEmail(ctx, "x@example.com")
@@ -85,7 +85,7 @@ func TestCabinetDeniedGate(t *testing.T) {
 	a.botCfg.Cabinet.Approval = model.CabinetApprovalAll
 	ctx := context.Background()
 
-	if _, err := a.CabinetEmailRegister(ctx, "denied@example.com", "password1"); err == nil {
+	if _, err := a.CabinetEmailRegister(ctx, "denied@example.com", "password1", ""); err == nil {
 		t.Fatal("регистрация должна быть загейчена при approval=all")
 	}
 	wu, _ := fs.GetWebUserByEmail(ctx, "denied@example.com")
@@ -166,5 +166,150 @@ func TestCabinetP2PScreenshot_PDFAndImage(t *testing.T) {
 				t.Fatalf("способ отправки админу неверный: документы=%v\n%s", fm.sentDocIDs, fm.joined())
 			}
 		})
+	}
+}
+
+// Удалённый из бота аккаунт по почте не входит в кабинет ни заново, ни по
+// выданному раньше пропуску.
+func TestCabinetDeletedUserCannotSignIn(t *testing.T) {
+	for _, mode := range []string{"usr:delbot:", "usr:delfull:"} {
+		t.Run(mode, func(t *testing.T) {
+			a, _, fs := newTestApp(t)
+			a.store = fs
+			a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+			a.botCfg.NormalizeCabinet()
+			a.botCfg.Cabinet.Enabled = true
+			ctx := context.Background()
+
+			id, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1", "")
+			if err != nil {
+				t.Fatalf("регистрация: %v", err)
+			}
+			if e := a.SessionEpoch(ctx, id); e != 0 {
+				t.Fatalf("поколение живого аккаунта %d, want 0", e)
+			}
+
+			a.handleCallback(ctx, cb(100, mode+itoa64(id)))
+
+			if _, err := a.CabinetEmailLogin(ctx, "gone@example.com", "password1"); err == nil {
+				t.Fatal("после удаления вход по почте должен быть закрыт")
+			}
+			if e := a.SessionEpoch(ctx, id); e >= 0 {
+				t.Fatalf("старый пропуск удалённого аккаунта не должен приниматься: поколение %d", e)
+			}
+			// Тот же адрес можно зарегистрировать заново — это новый аккаунт.
+			nid, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password2", "")
+			if err != nil || nid == id {
+				t.Fatalf("повторная регистрация: id=%d (старый %d) err=%v", nid, id, err)
+			}
+		})
+	}
+}
+
+// Удалили человека с неотвеченной заявкой в кабинет — при новом входе админу
+// приходит новая заявка, а не тишина до перезапуска бота.
+func TestCabinetDeletedUserRequestsAgain(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	a.botCfg.Cabinet.Approval = model.CabinetApprovalTG
+	ctx := context.Background()
+	const user = int64(1000000731)
+	// Отметка о заявке живёт в памяти процесса — чистим её до и после теста.
+	forget := func() {
+		cabNotifyMu.Lock()
+		delete(cabNotified, user)
+		cabNotifyMu.Unlock()
+	}
+	forget()
+	t.Cleanup(forget)
+
+	_ = fs.UpsertUser(ctx, user)
+	if err := a.CabinetGate(ctx, user, false); err == nil {
+		t.Fatal("вход через Telegram должен ждать одобрения")
+	}
+	a.handleCallback(ctx, cb(100, "usr:delbot:"+itoa64(user)))
+	_ = fs.UpsertUser(ctx, user)
+	if err := a.CabinetGate(ctx, user, false); err == nil {
+		t.Fatal("после удаления вход снова должен ждать одобрения")
+	}
+	if n := strings.Count(fm.joined(), "Запрос доступа в веб-кабинет"); n != 2 {
+		t.Fatalf("после удаления админу должна прийти новая заявка, всего заявок %d", n)
+	}
+}
+
+// Удаление посреди чтения поколения из базы: устаревшее значение не должно
+// остаться в памяти, иначе старый пропуск удалённого аккаунта жил бы до
+// перезапуска бота.
+func TestSessionEpochStaleReadNotCached(t *testing.T) {
+	a, _, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	ctx := context.Background()
+
+	id, err := a.CabinetEmailRegister(ctx, "race@example.com", "password1", "")
+	if err != nil {
+		t.Fatalf("регистрация: %v", err)
+	}
+	a.forgetEpoch(id)
+	fs.afterWebUserRead = func() {
+		fs.afterWebUserRead = nil
+		a.handleCallback(ctx, cb(100, "usr:delbot:"+itoa64(id)))
+	}
+	_ = a.SessionEpoch(ctx, id) // застало аккаунт живым, удаление прошло посреди
+	if e := a.SessionEpoch(ctx, id); e != -1 {
+		t.Fatalf("после удаления поколение %d, want -1", e)
+	}
+}
+
+// Одобрение новых в кабинете — два независимых тумблера; кнопка из старых
+// сообщений режим не меняет.
+func TestCabinetApprovalToggles(t *testing.T) {
+	a, fm, fs := newTestApp(t)
+	a.store = fs
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	ctx := context.Background()
+	mode := func() string {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.botCfg.Cabinet.Approval
+	}
+
+	steps := []struct{ tap, want, screen string }{
+		{"menu:cabappem", model.CabinetApprovalEmail, "Telegram — <b>нет</b>, почта — <b>да</b>"},
+		{"menu:cabapptg", model.CabinetApprovalAll, "Telegram — <b>да</b>, почта — <b>да</b>"},
+		{"menu:cabappem", model.CabinetApprovalTG, "Telegram — <b>да</b>, почта — <b>нет</b>"},
+		{"menu:cabapprove", model.CabinetApprovalTG, "Telegram — <b>да</b>, почта — <b>нет</b>"},
+		{"menu:cabapptg", model.CabinetApprovalOff, "Telegram — <b>нет</b>, почта — <b>нет</b>"},
+	}
+	for _, s := range steps {
+		fm.texts = nil
+		a.handleCallback(ctx, cb(100, s.tap))
+		if got := mode(); got != s.want {
+			t.Fatalf("%s: режим %q, want %q", s.tap, got, s.want)
+		}
+		if !strings.Contains(fm.joined(), s.screen) {
+			t.Fatalf("%s: на экране нет %q:\n%s", s.tap, s.screen, fm.joined())
+		}
+	}
+	// Не админ режим не меняет.
+	a.handleCallback(ctx, cb(1000000001, "menu:cabappem"))
+	if got := mode(); got != model.CabinetApprovalOff {
+		t.Fatalf("не админ поменял режим: %q", got)
+	}
+	// В закрытом боте почту одобряет админ всегда — экран это говорит.
+	a.mu.Lock()
+	a.botCfg.AccessMode = model.AccessWhitelist
+	a.mu.Unlock()
+	fm.texts = nil
+	a.handleCallback(ctx, cb(100, "menu:cabinet"))
+	if !strings.Contains(fm.joined(), "почта — <b>да (бот закрыт)</b>") {
+		t.Fatalf("закрытый бот: %s", fm.joined())
 	}
 }
