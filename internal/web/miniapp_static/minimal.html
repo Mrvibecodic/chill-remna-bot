@@ -457,7 +457,9 @@ function rub(k){return (Math.round(k)/100).toLocaleString(loc())+' ₽';}
 function num(s){var v=parseFloat(String(s==null?'':s).replace(/[\s\u00a0]/g,'').replace(',','.'));return isFinite(v)?v:NaN;}
 function price(d){return (String(d.price||'')+' '+(d.currency||'')).trim();}
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
-function dateS(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
+// Даты — по Москве, как в боте: по часам браузера у клиента западнее
+// Москвы сброс в 03:20 МСК выходил вчерашним числом.
+function dateS(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
 function haptic(k){try{if(tg&&tg.HapticFeedback){if(k==='ok')tg.HapticFeedback.notificationOccurred('success');else if(k==='err')tg.HapticFeedback.notificationOccurred('error');else tg.HapticFeedback.impactOccurred('light');}}catch(e){}}
 function busy(el,on){if(el&&el.tagName)el.disabled=!!on;}
 var toastT=null;

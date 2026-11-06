@@ -883,7 +883,9 @@ function openPlan(code){
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
 function monthsWord(n){return n+' '+plural(n,'месяц','месяца','месяцев');}
 function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
-function shortDate(ts){var d=new Date(ts*1000),p=function(n){return(n<10?'0':'')+n;};return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
+// Даты — по Москве, как в боте: по часам браузера у клиента западнее
+// Москвы сброс в 03:20 МСК выходил вчерашним числом.
+function shortDate(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
 function daysWord(n){return plural(n,'день','дня','дней');}
 // Названия и описания способов приходят с сервера (правятся в боте, «Тексты
 // бота»); встроенные ниже — запасные для старого сервера.
