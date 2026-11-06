@@ -320,7 +320,7 @@ var en = map[string]string{
 	"user.unlink_own":       "ℹ️ This account was created by the bot itself — it can't be unlinked because the panel does not rename accounts. It can only be deleted together with the user.",
 	"user.unlink_done":      "✅ Account <code>%s</code> unlinked. It is unchanged in the panel.",
 	"user.unlink_fail":      "❌ Failed to unlink: %s",
-	"sync.linked": "🔗 <b>We found your subscription in the panel</b> — it is now bound to this account.\n" +
+	"sync.linked": "🔗 <b>We found your subscription</b> — it is now bound to this account.\n" +
 		"Valid until: <b>%s</b>.\nTrial is not available for this account.",
 	"cmd.support":      "🛟 For payment and subscription issues — tap the button below.",
 	"cmd.support_none": "🛟 Contact the bot administrator — see the bot description.",
@@ -1620,7 +1620,7 @@ var en = map[string]string{
 	"tx.optional_hint":           "This text is optional: while it is empty, it is simply not shown.",
 	"tx.edit_ask_empty":          "✏️ <b>Send the text in one message.</b>\n\n%s",
 	"tx.methods_btn_fixed":       "⚠️ The chat buttons of these methods have a custom text without <code>{payment_method}</code> — a new name will not show on them: %s. Tap the method name → «🔘 Chat button (icon)» and add the variable or restore the default.",
-	"mini.trial_found_sub":       "we found your subscription in the panel — it is now bound to this account, valid until %s. Reload the page",
+	"mini.trial_found_sub":       "we found your subscription — it is now bound to this account, valid until %s. Reload the page",
 	"mini.trial_unavailable":     "trial is unavailable",
 	"mini.plan_unavailable":      "plan is unavailable",
 	"mini.legal_first":           "accept the service documents first",

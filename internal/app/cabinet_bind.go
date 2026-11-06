@@ -37,7 +37,7 @@ var (
 	errBindOnlyEmail = errors.New("привязка доступна аккаунту, заведённому по почте")
 	errBindBusy      = errors.New("у этого Telegram уже есть аккаунт в боте — напишите в поддержку")
 	errBindDenied    = errors.New("доступ к боту для этого Telegram ограничен")
-	errBindPanel     = errors.New("панель недоступна, попробуйте позже")
+	errBindPanel     = errors.New("сервис временно недоступен, попробуйте позже")
 )
 
 // bindMu делает привязку строго последовательной. Операция редкая, а две
