@@ -95,12 +95,17 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 	if cab.AntiFP {
 		fpLabel = i18n.T(lang, "cabinet.btn_antifp") + ": " + i18n.T(lang, "cabinet.on")
 	}
+	tgLabel := i18n.T(lang, "cabinet.btn_tglogin", i18n.T(lang, "cabinet.tglogin_old"))
+	if cab.TGLoginNew {
+		tgLabel = i18n.T(lang, "cabinet.btn_tglogin", i18n.T(lang, "cabinet.tglogin_new"))
+	}
 	rows := [][]models.InlineKeyboardButton{
 		{btn(toggle, "menu:cabtoggle")},
 		{btn(i18n.T(lang, "cabinet.btn_appr_tg", mark(apprTG)), "menu:cabapptg"), btn(i18n.T(lang, "cabinet.btn_appr_email", mark(apprEmail)), "menu:cabappem")},
 		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath")},
 		{btn(i18n.T(lang, "cabinet.btn_title"), "menu:cabtitle"), btn(i18n.T(lang, "cabinet.btn_desc"), "menu:cabdesc")},
 		{btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav"), btn(fpLabel, "menu:cabfp")},
+		{btn(tgLabel, "menu:cabtgl")},
 		{btn(i18n.T(lang, "cabinet.btn_logout_all"), "menu:cablogout")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
@@ -259,6 +264,17 @@ func (a *App) toggleCabinetAntiFP(ctx context.Context, chatID int64) {
 	if a.botCfg != nil {
 		a.botCfg.NormalizeCabinet()
 		a.botCfg.Cabinet.AntiFP = !a.botCfg.Cabinet.AntiFP
+	}
+	a.mu.Unlock()
+	_ = a.saveBotConfig(ctx)
+	a.showCabinetAdmin(ctx, chatID)
+}
+
+func (a *App) toggleCabinetTGLogin(ctx context.Context, chatID int64) {
+	a.mu.Lock()
+	if a.botCfg != nil {
+		a.botCfg.NormalizeCabinet()
+		a.botCfg.Cabinet.TGLoginNew = !a.botCfg.Cabinet.TGLoginNew
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)

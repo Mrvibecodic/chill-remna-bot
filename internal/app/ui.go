@@ -882,6 +882,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.toggleCabinetAntiFP(ctx, chatID)
 		}
+	case "cabtgl":
+		if isAdmin {
+			a.toggleCabinetTGLogin(ctx, chatID)
+		}
 	case "cablogout":
 		if isAdmin {
 			a.logoutAllSessions(ctx, chatID)
