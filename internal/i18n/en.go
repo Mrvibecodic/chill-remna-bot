@@ -1495,6 +1495,7 @@ var en = map[string]string{
 	"webui.btn_logod":            "🌙 For dark theme",
 	"webui.btn_logod_url":        "🔗 Dark by link",
 	"webui.btn_logo_reset":       "🗑 Remove logos",
+	"webui.btn_logo_del":         "🗑 Remove this logo",
 	"webui.btn_best_on":          "🏷 «Best value» badge: on",
 	"webui.btn_best_off":         "🏷 «Best value» badge: off",
 	"webui.ask_name":             "✏️ Send the service name for the page header (up to 40 characters), or «-» to remove.",

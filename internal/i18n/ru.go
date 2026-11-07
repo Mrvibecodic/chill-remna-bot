@@ -1495,6 +1495,7 @@ var ru = map[string]string{
 	"webui.btn_logod":            "🌙 Для тёмной темы",
 	"webui.btn_logod_url":        "🔗 Тёмный ссылкой",
 	"webui.btn_logo_reset":       "🗑 Убрать логотипы",
+	"webui.btn_logo_del":         "🗑 Убрать этот логотип",
 	"webui.btn_best_on":          "🏷 Плашка «Выгодно»: вкл",
 	"webui.btn_best_off":         "🏷 Плашка «Выгодно»: выкл",
 	"webui.ask_name":             "✏️ Пришлите название сервиса для шапки страниц (до 40 символов), или «-» — убрать.",
