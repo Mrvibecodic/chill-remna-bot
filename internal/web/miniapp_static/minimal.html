@@ -184,6 +184,7 @@ input[type=file].field{padding:12px;height:auto}
 .big{font-size:40px;font-weight:750;letter-spacing:-1.2px;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
 .empty{padding:26px 16px;text-align:center;color:var(--muted)}
 .ava{width:40px;height:40px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+.ava img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
 .hero-logo{display:flex;justify-content:center;margin:26px 0 6px}
 .hero-logo img{height:48px;max-width:220px;object-fit:contain}
 .tgw{display:flex;justify-content:center;min-height:48px;margin-top:12px}
@@ -448,6 +449,24 @@ function monthsW(n){return n+' '+plural(n,T('month1'),T('month2'),T('month5'));}
 function daysW(n){return plural(n,T('day1'),T('day2'),T('day5'));}
 
 /* ---------- утилиты ---------- */
+// Фото профиля Telegram отдаёт сам бот (/api/miniapp/avatar): браузер не ходит
+// за ним к Telegram. Фото привязано к пользователю, а не к пропуску: новый
+// пропуск того же человека (смена пароля, перевход мини-аппа) его не сбрасывает,
+// другой аккаунт чужого фото не увидит. Аккаунт по почте без Telegram фото не
+// имеет — в кружке буква.
+var AVA='',AVA_ID=0;
+function avaID(){return (STATE&&STATE.me&&STATE.me.tg_id)||0;}
+function avaHTML(ini){return AVA&&AVA_ID&&AVA_ID===avaID()?'<img src="'+AVA+'" alt="">':esc(ini);}
+function loadAva(){
+  var id=avaID();
+  if(!TOKEN||id<=0||AVA_ID===id)return;
+  AVA_ID=id;if(AVA){try{URL.revokeObjectURL(AVA);}catch(e){}AVA='';}
+  fetch('/api/miniapp/avatar',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.ok?r.blob():null;}).then(function(b){
+    if(!b||AVA_ID!==id||!window.URL)return;
+    AVA=URL.createObjectURL(b);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ava]'),function(e){e.innerHTML='<img src="'+AVA+'" alt="">';});
+  }).catch(function(){});
+}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'\\n').replace(/\r/g,'\\r');}
 function loc(){return STATE.lang==='en'?'en-US':'ru-RU';}
@@ -609,7 +628,7 @@ function renderSide(on){
   if(m.group_url)ext+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>'+esc(T('group'))+'</span></button>';
   if(ext)h+='<div class="ssep"></div>'+ext;
   var who=STATE.me_email||STATE.me_name||T('acct');
-  h+='<div class="sfoot"><div class="ava">'+esc(String(who).trim().charAt(0).toUpperCase()||'?')+'</div><div class="who"><div class="t">'+esc(who)+'</div><div class="s">'+esc(STATE.me_email?T('email'):'Telegram')+'</div></div>'+
+  h+='<div class="sfoot"><div class="ava" data-ava>'+avaHTML(String(who).trim().charAt(0).toUpperCase()||'?')+'</div><div class="who"><div class="t">'+esc(who)+'</div><div class="s">'+esc(STATE.me_email?T('email'):'Telegram')+'</div></div>'+
     '<button class="ibtn" title="'+esc(T('theme'))+'" aria-label="'+esc(T('theme'))+'" onclick="cycleTheme()">'+IC.palette+'</button>'+
     '<button class="ibtn" title="'+esc(T('logout'))+'" aria-label="'+esc(T('logout'))+'" onclick="logout()">'+IC.logout+'</button></div>';
   side.innerHTML=h;
@@ -1237,7 +1256,7 @@ async function resend(el){busy(el,true);try{await post('/api/cabinet/email/verif
 SCREENS.account=async function(){
   var a=STATE.acct||{};try{a=await api('/api/cabinet/account');STATE.acct=a;}catch(e){}
   if(!CUR||CUR.name!=='account')return;
-  var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava">'+esc(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2" style="min-width:0">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
+  var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava" data-ava>'+avaHTML(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2" style="min-width:0">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
   if(a.email){h+='<div class="kv"><span class="k">'+esc(T('email'))+'</span><span class="v">'+esc(a.email)+'</span></div><div class="kv"><span class="k">'+esc(T('addr'))+'</span><span class="v" style="color:'+(a.email_verified?'var(--ok)':'var(--bad)')+'">'+esc(a.email_verified?T('verified'):T('not_verified'))+'</span></div>';}
   h+='<div class="kv"><span class="k">Telegram</span><span class="v">'+esc(a.tg_linked?T('tg_linked'):T('tg_not'))+'</span></div></div>';
   if(a.email&&!a.email_verified&&a.mail_on)h+='<button class="btn sec" style="margin-top:12px" onclick="resend(this)">'+esc(T('resend'))+'</button>';
@@ -1383,7 +1402,7 @@ async function refresh(){
   if(me.lang&&L[me.lang])STATE.lang=me.lang;
   try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
   if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
-  paintBalance();paintBrand();
+  paintBalance();paintBrand();loadAva();
 }
 async function handleStart(s){
   var t=String(s||'').split('\n');

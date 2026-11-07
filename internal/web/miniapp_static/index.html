@@ -236,6 +236,7 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 body.web .wrap{max-width:960px}
 .ublock{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--stroke);border-radius:16px;padding:11px 13px;margin-bottom:14px;backdrop-filter:blur(12px)}
 .uava{width:42px;height:42px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
+.uava img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
 .uinfo{flex:1;min-width:0}
 .uname{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .usub{font-size:12px;color:var(--muted)}
@@ -491,7 +492,7 @@ function renderSide(){
     if(m.group_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>Наша группа</span></button>';
   }
   var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
-  h+='<div class="sfoot"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
+  h+='<div class="sfoot"><div class="uava" data-ava>'+avaHTML(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
     '<button class="sout" title="Выйти" aria-label="Выйти" onclick="cabLogout()">'+IC.login+'</button></div>';
   side.innerHTML=h;
 }
@@ -505,6 +506,24 @@ function deskSplit(left,right){
   return st+'<div class="split"><div>'+body+'</div><div>'+right+'</div></div>';
 }
 
+// Фото профиля Telegram отдаёт сам бот (/api/miniapp/avatar): браузер не ходит
+// за ним к Telegram. Фото привязано к пользователю, а не к пропуску: новый
+// пропуск того же человека (смена пароля, перевход мини-аппа) его не сбрасывает,
+// другой аккаунт чужого фото не увидит. Аккаунт по почте без Telegram фото не
+// имеет — в кружке буква.
+var AVA='',AVA_ID=0;
+function avaID(){return (STATE&&STATE.me_id)||0;}
+function avaHTML(ini){return AVA&&AVA_ID&&AVA_ID===avaID()?'<img src="'+AVA+'" alt="">':esc(ini);}
+function loadAva(){
+  var id=avaID();
+  if(!TOKEN||id<=0||AVA_ID===id)return;
+  AVA_ID=id;if(AVA){try{URL.revokeObjectURL(AVA);}catch(e){}AVA='';}
+  fetch('/api/miniapp/avatar',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.ok?r.blob():null;}).then(function(b){
+    if(!b||AVA_ID!==id||!window.URL)return;
+    AVA=URL.createObjectURL(b);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ava]'),function(e){e.innerHTML='<img src="'+AVA+'" alt="">';});
+  }).catch(function(){});
+}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function jsq(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function rub(k){return (Math.round(k)/100).toLocaleString('ru-RU');}
@@ -633,7 +652,7 @@ function render(me,menu,sub,plans){
   PAGE='home';
   if(DESK){renderHomeDesk(menu,sub);return;}
   var ub='';
-  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
+  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava" data-ava>'+avaHTML(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
   let h='<div class="stagger">';
   h+=verifyBanner();
   if(sub.active){
@@ -1383,7 +1402,7 @@ async function openAccount(){
   var h='<div class="stagger">';
   if(DESK){
     var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
-    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" style="width:52px;height:52px;font-size:22px">'+esc(ini)+'</div>'+
+    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" data-ava style="width:52px;height:52px;font-size:22px">'+avaHTML(ini)+'</div>'+
       '<div class="uinfo"><div class="uname" style="font-size:17px">'+esc(who)+'</div><div class="usub">'+(a.email?'Вход по почте':'Вход через Telegram')+'</div></div></div></div>';
   }
   h+='<div class="sec-title'+(DESK?' deskhide':'')+'">'+IC.users+'Аккаунт</div><div class="card">';
@@ -1673,6 +1692,7 @@ async function boot(){
     // закрыта, и человек обязан увидеть почему — иначе кнопка просто «не
     // работает».
     if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
+    STATE.me_id=me.tg_id||0;loadAva();
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
