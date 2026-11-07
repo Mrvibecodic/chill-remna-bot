@@ -296,6 +296,8 @@ var en = map[string]string{
 	"user.sub_active":     "📦 Subscription active until <b>%s</b>\nLink (tap to copy):\n<code>%s</code>",
 	"user.sub_blocked":    "🛑 Subscription is blocked in the panel (DISABLED).\nLink:\n<code>%s</code>",
 	"user.no_sub":         "📭 No active subscription in the panel.",
+	"user.plan":           "🏷 Last plan: <b>%s</b>",
+	"user.plan_gone":      "🏷 Last plan: <b>%s</b> (plan deleted)",
 	"btn.link_panel":      "🔗 Link panel account",
 	"btn.user_plans":      "🎟 Allow-list plans",
 	"user.plans_title":    "🎟 <b>Allow-list plan access</b>\nUser: %s\n\nTap to grant or revoke access.",
