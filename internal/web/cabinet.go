@@ -74,6 +74,42 @@ func validateTelegramLogin(fields map[string]string, botToken string, ttl time.D
 	return id, nil
 }
 
+// tgLoginReq — данные входа через Telegram: id_token новой библиотеки входа
+// либо поля прежнего виджета с подписью hash (их ещё может прислать открытая
+// до обновления вкладка).
+type tgLoginReq struct {
+	IDToken   string `json:"id_token"`
+	Verifier  string `json:"verifier"`
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+	PhotoURL  string `json:"photo_url"`
+	AuthDate  int64  `json:"auth_date"`
+	Hash      string `json:"hash"`
+}
+
+func (s *Server) cabinetTGUser(req tgLoginReq) (tgLoginUser, error) {
+	if req.IDToken != "" {
+		return s.checkTGIDToken(req.IDToken, req.Verifier)
+	}
+	fields := map[string]string{
+		"id":        strconv.FormatInt(req.ID, 10),
+		"auth_date": strconv.FormatInt(req.AuthDate, 10),
+		"hash":      req.Hash,
+	}
+	for k, v := range map[string]string{"first_name": req.FirstName, "last_name": req.LastName, "username": req.Username, "photo_url": req.PhotoURL} {
+		if v != "" {
+			fields[k] = v
+		}
+	}
+	id, err := validateTelegramLogin(fields, s.mini.MiniBotToken(), loginTTL)
+	if err != nil {
+		return tgLoginUser{}, err
+	}
+	return tgLoginUser{ID: id, Username: req.Username, FirstName: req.FirstName}, nil
+}
+
 // handleFlag serves a self-hosted country-flag SVG (see privacy F1: flags are
 // fetched once at startup and served from this server, never from a third-party
 // CDN at the visitor's browser).
@@ -115,16 +151,22 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"bot_username": s.mini.CabinetBotUsername(),
 		// mail_on гасит на входе и «забыли пароль», и обещание письма при
 		// регистрации: предлагать действие, которое заведомо не сработает,
 		// хуже, чем не предлагать его вовсе.
 		"mail_on": s.mini.MailReady(),
-	})
+	}
+	// client_id есть — страница ставит кнопку новой библиотеки входа Telegram,
+	// нет — прежний виджет по bot_username. Сервер принимает оба вида входа.
+	if s.mini.CabinetTGLoginNew() {
+		out["client_id"] = tgBotID(s.mini.MiniBotToken())
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
-// handleCabinetTelegramAuth exchanges Telegram Login Widget data for a token.
+// handleCabinetTelegramAuth exchanges a Telegram login (id_token or legacy widget data) for a token.
 func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Request) {
 	if !s.cabinetOK() {
 		http.NotFound(w, r)
@@ -137,13 +179,7 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req struct {
-		ID        int64  `json:"id"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		Username  string `json:"username"`
-		PhotoURL  string `json:"photo_url"`
-		AuthDate  int64  `json:"auth_date"`
-		Hash      string `json:"hash"`
+		tgLoginReq
 		// Start — параметр ссылки, по которой открыли кабинет (ref_, inv_).
 		// В подпись виджета не входит, поэтому доверия к нему не больше, чем к
 		// /start в чате: действует только для нового аккаунта и по тем же
@@ -154,23 +190,14 @@ func (s *Server) handleCabinetTelegramAuth(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	fields := map[string]string{
-		"id":        strconv.FormatInt(req.ID, 10),
-		"auth_date": strconv.FormatInt(req.AuthDate, 10),
-		"hash":      req.Hash,
-	}
-	for k, v := range map[string]string{"first_name": req.FirstName, "last_name": req.LastName, "username": req.Username, "photo_url": req.PhotoURL} {
-		if v != "" {
-			fields[k] = v
-		}
-	}
-	tgID, err := validateTelegramLogin(fields, s.mini.MiniBotToken(), loginTTL)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	u, err := s.cabinetTGUser(req.tgLoginReq)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "не удалось проверить вход через Telegram"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
+	tgID := u.ID
 	// До заведения пользователя: привязка к пригласившему действует только
 	// для новичка.
 	if st := strings.TrimSpace(req.Start); st != "" && len(st) <= 64 {
@@ -548,41 +575,23 @@ func (s *Server) handleCabinetBind(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "только для веб-кабинета"})
 		return
 	}
-	var req struct {
-		ID        int64  `json:"id"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		Username  string `json:"username"`
-		PhotoURL  string `json:"photo_url"`
-		AuthDate  int64  `json:"auth_date"`
-		Hash      string `json:"hash"`
-	}
+	var req tgLoginReq
 	if !cabinetJSON(r, &req) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	fields := map[string]string{
-		"id":        strconv.FormatInt(req.ID, 10),
-		"auth_date": strconv.FormatInt(req.AuthDate, 10),
-		"hash":      req.Hash,
-	}
-	for k, v := range map[string]string{"first_name": req.FirstName, "last_name": req.LastName, "username": req.Username, "photo_url": req.PhotoURL} {
-		if v != "" {
-			fields[k] = v
-		}
-	}
-	newID, err := validateTelegramLogin(fields, s.mini.MiniBotToken(), loginTTL)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	u, err := s.cabinetTGUser(req)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "не удалось проверить вход через Telegram"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	bound, err := s.mini.CabinetBindTelegram(ctx, id, newID)
+	bound, err := s.mini.CabinetBindTelegram(ctx, id, u.ID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mini.CabinetBindName(ctx, bound, req.Username, req.FirstName)
+	s.mini.CabinetBindName(ctx, bound, u.Username, u.FirstName)
 	s.issueCabinetToken(ctx, w, bound)
 }

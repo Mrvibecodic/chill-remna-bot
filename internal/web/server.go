@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
@@ -61,6 +62,9 @@ type Server struct {
 	// прокси не выставляет X-Forwarded-Proto: до этой правки у них всё
 	// работало по открытому HTTP молча, и апдейт не должен их ронять.
 	allowPlainHTTP bool
+	tgKeys         *tgJWKS
+	tgUsed         *tgReplay
+	tgAlgWarn      atomic.Int64
 }
 
 // SetMiniApp wires the Mini App data provider. Routes read it live, so it may
@@ -148,14 +152,22 @@ const shutdownGrace = 3 * time.Second
 // без HTTPS» (переменная окружения для установок, чей прокси не выставляет
 // X-Forwarded-Proto).
 func newServer(log *slog.Logger, h Handlers) *Server {
-	return &Server{
+	s := &Server{
 		log:            log,
 		handlers:       h,
 		authLimiter:    newRateLimiter(authLimitHits, authLimitWindow),
 		moneyLimiter:   newRateLimiter(moneyLimitHits, moneyLimitWindow),
 		readLimiter:    newRateLimiter(readLimitHits, readLimitWindow),
 		allowPlainHTTP: os.Getenv("ALLOW_PLAIN_HTTP") == "1",
+		tgKeys:         newTGJWKS(),
+		tgUsed:         &tgReplay{},
 	}
+	s.tgKeys.onErr = func(err error) {
+		if s.log != nil {
+			s.log.Warn("вход через Telegram: ключи с oauth.telegram.org не загрузились", "err", err)
+		}
+	}
+	return s
 }
 
 func New(addr string, h Handlers, log *slog.Logger) *Server {

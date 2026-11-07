@@ -111,6 +111,7 @@ type MiniProvider interface {
 	CabinetDescription() string
 	CabinetFavicon() string
 	CabinetAntiFP() bool
+	CabinetTGLoginNew() bool
 	CabinetEnsureUser(ctx context.Context, tgID int64)
 	// CabinetEmailRegister заводит аккаунт по почте; start — параметр ссылки,
 	// по которой открыли кабинет (ref_ привязывает к пригласившему).
