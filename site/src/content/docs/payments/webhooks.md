@@ -126,6 +126,8 @@ location ~ ^/(webhook|miniapp|api|cabinet|flags|brand)/ {
 
 Для входа в кабинет через Telegram укажите домен кабинета у @BotFather командой `/setdomain`.
 
+Если в @BotFather у бота включён новый **Login Widget** (прежняя кнопка входа тогда показывает страницу «deprecated»), настройте его по [инструкции Telegram](https://core.telegram.org/bots/telegram-login#registering-your-allowed-urls): в **Redirect URIs** — адрес кабинета точно как в браузере, например `https://bot.example.com/cabinet/`, в **Trusted Origins** — `https://bot.example.com`. Client ID там должен совпадать с числом до двоеточия в токене бота. Затем в настройках веб-кабинета в боте переключите **🔑 Вход через Telegram** на «новый».
+
 :::note[HTTPS обязателен]
 Мини-апп, кабинет и их API работают только по HTTPS; исключение — `/webhook/` и `/healthz`. Бот понимает, что HTTPS включён на прокси, по заголовку `X-Forwarded-Proto: https`. Без него API отвечает `426` «требуется HTTPS».
 
