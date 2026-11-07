@@ -376,7 +376,7 @@ var L={ru:{
  bind_tg:'Привязать Telegram',bind_text:'После привязки в кабинет можно входить кнопкой Telegram, а бот в чате покажет эту же подписку. Ссылка подписки не изменится.',bind_ok:'Telegram привязан',bind_fail:'Не удалось привязать',
  pass_change:'Сменить пароль',pass_old:'Текущий пароль',pass_new:'Новый пароль (мин. 8)',pass_new2:'Новый пароль ещё раз',pass_note:'Все остальные входы в аккаунт будут завершены.',
  pass_fill:'Заполните все поля',pass_mismatch:'Пароли не совпадают',pass_short:'Пароль слишком короткий',pass_ok:'Пароль изменён',
- logout:'Выйти',logout_hint:'Завершить вход в кабинет на этом устройстве. Подписка и баланс останутся.',login:'Вход',login_text:'Войдите через Telegram или по почте.',via_tg:'Через Telegram',via_email:'По почте',password:'Пароль',
+ logout:'Выйти',logout_hint:'Завершить вход в кабинет на этом устройстве. Подписка и баланс останутся.',login:'Вход',login_text:'Войдите через Telegram или по почте.',via_tg:'Через Telegram',tg_sign_in:'Войти через Telegram',tg_fail:'Не удалось войти через Telegram',tg_off:'Вход через Telegram сейчас недоступен',via_email:'По почте',password:'Пароль',
  sign_in:'Войти',register:'Зарегистрироваться',forgot:'Забыли пароль?',reg_mail:'После регистрации на адрес придёт письмо. Пока адрес не подтверждён, оплата недоступна.',
  reg_nomail:'Регистрация без подтверждения почты. Восстановление пароля недоступно — сохраните пароль.',
  fill_login:'Заполните почту и пароль',login_fail:'Не удалось войти',
@@ -431,7 +431,7 @@ var L={ru:{
  bind_tg:'Link Telegram',bind_text:'After linking you can sign in with Telegram, and the bot chat shows the same subscription. The subscription link stays the same.',bind_ok:'Telegram linked',bind_fail:'Could not link',
  pass_change:'Change password',pass_old:'Current password',pass_new:'New password (min. 8)',pass_new2:'Repeat new password',pass_note:'All other sign-ins will be ended.',
  pass_fill:'Fill in all fields',pass_mismatch:'Passwords do not match',pass_short:'Password is too short',pass_ok:'Password changed',
- logout:'Sign out',logout_hint:'Sign out of the cabinet on this device. Your subscription and balance stay.',login:'Sign in',login_text:'Sign in with Telegram or email.',via_tg:'With Telegram',via_email:'With email',password:'Password',
+ logout:'Sign out',logout_hint:'Sign out of the cabinet on this device. Your subscription and balance stay.',login:'Sign in',login_text:'Sign in with Telegram or email.',via_tg:'With Telegram',tg_sign_in:'Sign in with Telegram',tg_fail:'Could not sign in with Telegram',tg_off:'Telegram sign-in is unavailable right now',via_email:'With email',password:'Password',
  sign_in:'Sign in',register:'Sign up',forgot:'Forgot password?',reg_mail:'After signing up you get an email. Until the address is confirmed, payments are unavailable.',
  reg_nomail:'Sign-up without email confirmation. Password recovery is unavailable — keep your password.',
  fill_login:'Enter email and password',login_fail:'Sign-in failed',
@@ -1239,15 +1239,50 @@ SCREENS.account=async function(){
   else h+='<button class="btn danger" style="margin-top:16px" onclick="logout()">'+IC.logout+esc(T('logout'))+'</button>';
   h=dsplit(hl,h);
   view(h);
-  if(!a.tg_linked)mountTG('tgbind','onTGBind(user)');
+  if(!a.tg_linked)mountTG('tgbind','onTGBind',T('bind_tg'));
 };
-function mountTG(id,cb){
-  var put=function(u){if(!u)return;var m=document.getElementById(id);if(!m)return;var s=document.createElement('script');s.async=true;s.src='https://telegram.org/js/telegram-widget.js?22';
-    s.setAttribute('data-telegram-login',u);s.setAttribute('data-size','large');s.setAttribute('data-radius','12');s.setAttribute('data-onauth',cb);s.setAttribute('data-request-access','write');m.appendChild(s);};
-  if(STATE.botUser){put(STATE.botUser);return;}
-  api('/api/cabinet/config').then(function(c){STATE.botUser=c&&c.bot_username;put(STATE.botUser);},function(){});
+// Кнопка входа Telegram: новая библиотека telegram-login.js, если в конфиге
+// есть client_id (так решил админ), иначе прежний виджет telegram-widget.js —
+// Telegram выключает его только ботам, у которых в @BotFather включён новый
+// способ. fn — имя обработчика, он получает тело запроса на сервер.
+// TG_V — verifier по nonce: окно Telegram, открытое до перерисовки кнопки,
+// вернёт токен со старым nonce, и verifier берётся по нему, а не последний.
+var TG_CFG=null,TG_LIB=null,TG_V={};
+function tgLoginLib(){
+  if(!TG_LIB)TG_LIB=new Promise(function(ok,no){var s=document.createElement('script');s.async=true;s.src='https://oauth.telegram.org/js/telegram-login.js';
+    s.onload=function(){if(window.Telegram&&Telegram.Login)ok(Telegram.Login);else{TG_LIB=null;no();}};s.onerror=function(){TG_LIB=null;no();};document.head.appendChild(s);});
+  return TG_LIB;
 }
-window.onTGBind=function(u){post('/api/cabinet/tg/bind',u).then(function(r){if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);toast(T('bind_ok'),'ok');STATE.acct=null;boot();return;}toast(T('bind_fail'),'err');}).catch(function(e){toast(e.message||T('bind_fail'),'err');});};
+// tgNonce — пара verifier/nonce: nonce уходит в Telegram и попадает в токен,
+// verifier — только на наш сервер. Без verifier перехваченный токен не годится.
+function tgNonce(){
+  try{
+    if(!(window.crypto&&crypto.subtle&&crypto.getRandomValues&&window.TextEncoder))return Promise.resolve({v:'',n:''});
+    var b=new Uint8Array(32);crypto.getRandomValues(b);
+    var v=btoa(String.fromCharCode.apply(null,b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    return crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)).then(function(h){
+      return {v:v,n:Array.prototype.map.call(new Uint8Array(h),function(x){return ('0'+x.toString(16)).slice(-2);}).join('')};
+    },function(){return {v:'',n:''};});
+  }catch(e){return Promise.resolve({v:'',n:''});}
+}
+function mountTG(id,fn,label){
+  var put=function(c){var m=document.getElementById(id);if(!m||!c)return;
+    if(c.client_id){
+      Promise.all([tgLoginLib(),tgNonce()]).then(function(x){var L=x[0],p=x[1],m=document.getElementById(id);if(!m)return;
+        m.innerHTML='<button type="button" class="tg-auth-button" data-style="square">'+esc(label)+'</button>';
+        var o={client_id:c.client_id,request_access:['write'],lang:STATE.lang==='en'?'en':'ru'};if(p.n){o.nonce=p.n;TG_V[p.n]=p.v;}
+        L.init(o,function(r){
+          if(r&&r.id_token){window[fn]({id_token:r.id_token,verifier:(r.user&&TG_V[r.user.nonce])||p.v});return;}
+          if(r&&r.error&&r.error!=='popup_closed')toast(T('tg_fail'),'err');});
+      },function(){var m=document.getElementById(id);if(m)m.innerHTML='<div class="hint">'+esc(T('tg_off'))+'</div>';});
+      return;}
+    if(!c.bot_username)return;
+    var s=document.createElement('script');s.async=true;s.src='https://telegram.org/js/telegram-widget.js?22';
+    s.setAttribute('data-telegram-login',c.bot_username);s.setAttribute('data-size','large');s.setAttribute('data-radius','12');s.setAttribute('data-onauth',fn+'(user)');s.setAttribute('data-request-access','write');m.appendChild(s);};
+  if(TG_CFG){put(TG_CFG);return;}
+  api('/api/cabinet/config').then(function(c){TG_CFG=c;put(c);},function(){});
+}
+window.onTGBind=function(body){post('/api/cabinet/tg/bind',body).then(function(r){if(r&&r.token){TOKEN=r.token;store('cab_tok',r.token);toast(T('bind_ok'),'ok');STATE.acct=null;boot();return;}toast(T('bind_fail'),'err');}).catch(function(e){toast(e.message||T('bind_fail'),'err');});};
 async function changePass(el){
   var v=function(i){var e=document.getElementById(i);return e?e.value:'';};
   var o=v('pw0'),n=v('pw1'),n2=v('pw2');
@@ -1257,7 +1292,7 @@ async function changePass(el){
   catch(e){toast(e.message||T('error'),'err');}
   busy(el,false);
 }
-function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang,botUser:STATE.botUser};paintBalance();renderLogin();}
+function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang};paintBalance();renderLogin();}
 
 /* ---------- вход в кабинет ---------- */
 // Параметры ссылки (?ref=, ?inv=, ?promo=, ?plan=, ?start=) — их можно
@@ -1282,15 +1317,15 @@ async function renderLogin(){
   STACK=[];CUR={name:'login'};setBack(false);paintBalance();
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   if(BRAND.logo)document.getElementById('brand').innerHTML='';
-  STATE.botUser=cfg.bot_username;
+  TG_CFG=cfg;
   var h='<div class="narrow">'+brandHTML(true)+'<div class="h1 center" style="margin-top:'+(BRAND.logo?'8':'28')+'px">'+esc(T('login'))+'</div><div class="hint center">'+esc(T('login_text'))+'</div>';
-  if(cfg.bot_username)h+='<div class="sect">'+esc(T('via_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="tgw" id="tglogin" style="margin-top:0"></div></div>';
+  if(cfg.client_id||cfg.bot_username)h+='<div class="sect">'+esc(T('via_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="tgw" id="tglogin" style="margin-top:0"></div></div>';
   h+='<div class="sect">'+esc(T('via_email'))+'</div><div class="card flat stack" style="margin-top:0"><input id="le" class="field" type="email" autocomplete="email" placeholder="'+esc(T('email'))+'"><input id="lp" class="field" type="password" autocomplete="current-password" placeholder="'+esc(T('password'))+'">'+
     '<button class="btn" onclick="cabAuth(\'login\',this)">'+esc(T('sign_in'))+'</button><button class="btn sec" onclick="cabAuth(\'register\',this)">'+esc(T('register'))+'</button>';
   if(cfg.mail_on)h+='<button class="btn ghost" onclick="go(\'forgot\')">'+esc(T('forgot'))+'</button><div class="hint">'+esc(T('reg_mail'))+'</div>';
   else h+='<div class="hint">'+esc(T('reg_nomail'))+'</div>';
   view(h+'</div></div>');
-  if(cfg.bot_username)mountTG('tglogin','onTGAuth(user)');
+  if(cfg.client_id||cfg.bot_username)mountTG('tglogin','onTGAuth',T('tg_sign_in'));
 }
 window.onTGAuth=function(u){
   var body=Object.assign({},u);var st=serverStart(load('cab_start'));if(st)body.start=st;
