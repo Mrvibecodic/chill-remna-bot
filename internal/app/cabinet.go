@@ -50,6 +50,9 @@ func (a *App) CabinetDescription() string { return a.cabinetCfg().Desc }
 func (a *App) CabinetFavicon() string     { return a.cabinetCfg().Favicon }
 func (a *App) CabinetAntiFP() bool        { return a.cabinetCfg().AntiFP }
 
+// CabinetTGLoginNew — каким способом кабинет предлагает вход через Telegram.
+func (a *App) CabinetTGLoginNew() bool { return a.cabinetCfg().TGLoginNew }
+
 // CabinetBotUsername returns the bot @username (for the Telegram Login Widget).
 func (a *App) CabinetBotUsername() string { return a.botUsername(context.Background()) }
 

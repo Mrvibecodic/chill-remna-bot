@@ -24,10 +24,17 @@ func (a *App) showPromoUser(ctx context.Context, chatID int64) {
 }
 
 func (a *App) onPromoUser(ctx context.Context, chatID int64, val string) {
-	if val == "enter" {
-		a.getUI(chatID).awaitPromo = true
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "promo.ask"), "menu:promo")
+	back := "menu:promo"
+	switch val {
+	case "enter":
+	case "enterw":
+		// Ввод открыт из кошелька — «Отмена» возвращает туда же.
+		back = "menu:balance"
+	default:
+		return
 	}
+	a.getUI(chatID).awaitPromo = true
+	a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "promo.ask"), back)
 }
 
 func (a *App) applyPromo(ctx context.Context, chatID int64, raw string) {

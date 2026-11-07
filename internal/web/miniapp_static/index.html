@@ -236,6 +236,7 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 body.web .wrap{max-width:960px}
 .ublock{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--stroke);border-radius:16px;padding:11px 13px;margin-bottom:14px;backdrop-filter:blur(12px)}
 .uava{width:42px;height:42px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
+.uava img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
 .uinfo{flex:1;min-width:0}
 .uname{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .usub{font-size:12px;color:var(--muted)}
@@ -450,12 +451,18 @@ function setBack(fn){
   backFn=fn;
   try{if(tg&&tg.BackButton){if(fn)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}
 }
+// NOFX — следующий экран встаёт на место скелета загрузки без анимации
+// появления: иначе после скелета мелькает пустая область.
+var NOFX=false;
 /* swap the #app content with a fresh fade-in */
 function view(html,back){
   stopWait();
   setBack(back||null);
   app.innerHTML=html;
-  app.style.animation='none'; void app.offsetWidth; app.style.animation='';
+  if(NOFX){
+    NOFX=false;app.style.animation='none';
+    Array.prototype.forEach.call(app.querySelectorAll('.stagger>*'),function(e){e.style.animation='none';e.style.opacity='1';});
+  }else{app.style.animation='none'; void app.offsetWidth; app.style.animation='';}
   renderSide();
 }
 function renderSide(){
@@ -464,6 +471,13 @@ function renderSide(){
   if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.textContent='Личный кабинет';return;}
   document.body.classList.remove('noside');
   if(h1)h1.textContent=PAGE_TITLES[PAGE]||'Личный кабинет';
+  // Данные ещё грузятся — заготовка меню, чтобы раскладка не прыгала.
+  if(!STATE.menu){
+    var sk='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+    [76,96,108,84].forEach(function(w){sk+='<div class="snav"><span class="sk-line" style="width:18px;height:18px;border-radius:6px;flex:none"></span><span class="sk-line" style="width:'+w+'px"></span></div>';});
+    side.innerHTML=sk+'<div class="sfoot"><span class="sk-line" style="width:36px;height:36px;border-radius:50%;flex:none"></span><span class="sk-line" style="width:96px"></span></div>';
+    return;
+  }
   var m=STATE.menu||{},sub=STATE.sub||{};
   function item(key,ic,label,fn,bdg){return '<button class="snav'+(PAGE===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+label+'</span>'+(bdg?'<span class="bdg">'+bdg+'</span>':'')+'</button>';}
   var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
@@ -478,7 +492,7 @@ function renderSide(){
     if(m.group_url)h+='<button class="snav" onclick="openSmart(\''+jsq(m.group_url)+'\')">'+IC.users+'<span>Наша группа</span></button>';
   }
   var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
-  h+='<div class="sfoot"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
+  h+='<div class="sfoot"><div class="uava" data-ava>'+avaHTML(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div>'+
     '<button class="sout" title="Выйти" aria-label="Выйти" onclick="cabLogout()">'+IC.login+'</button></div>';
   side.innerHTML=h;
 }
@@ -492,6 +506,24 @@ function deskSplit(left,right){
   return st+'<div class="split"><div>'+body+'</div><div>'+right+'</div></div>';
 }
 
+// Фото профиля Telegram отдаёт сам бот (/api/miniapp/avatar): браузер не ходит
+// за ним к Telegram. Фото привязано к пользователю, а не к пропуску: новый
+// пропуск того же человека (смена пароля, перевход мини-аппа) его не сбрасывает,
+// другой аккаунт чужого фото не увидит. Аккаунт по почте без Telegram фото не
+// имеет — в кружке буква.
+var AVA='',AVA_ID=0;
+function avaID(){return (STATE&&STATE.me_id)||0;}
+function avaHTML(ini){return AVA&&AVA_ID&&AVA_ID===avaID()?'<img src="'+AVA+'" alt="">':esc(ini);}
+function loadAva(){
+  var id=avaID();
+  if(!TOKEN||id<=0||AVA_ID===id)return;
+  AVA_ID=id;if(AVA){try{URL.revokeObjectURL(AVA);}catch(e){}AVA='';}
+  fetch('/api/miniapp/avatar',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.ok?r.blob():null;}).then(function(b){
+    if(!b||AVA_ID!==id||!window.URL)return;
+    AVA=URL.createObjectURL(b);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ava]'),function(e){e.innerHTML='<img src="'+AVA+'" alt="">';});
+  }).catch(function(){});
+}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function jsq(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function rub(k){return (Math.round(k)/100).toLocaleString('ru-RU');}
@@ -620,7 +652,7 @@ function render(me,menu,sub,plans){
   PAGE='home';
   if(DESK){renderHomeDesk(menu,sub);return;}
   var ub='';
-  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava">'+esc(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
+  if(WEB){var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();ub='<div class="ublock"><div class="uava" data-ava>'+avaHTML(ini)+'</div><div class="uinfo"><div class="uname">'+esc(who)+'</div><div class="usub">'+(STATE.me_email?'email-аккаунт':'Telegram')+'</div></div><button class="btn sec ulogout" onclick="cabLogout()">Выйти</button></div>';}
   let h='<div class="stagger">';
   h+=verifyBanner();
   if(sub.active){
@@ -1370,7 +1402,7 @@ async function openAccount(){
   var h='<div class="stagger">';
   if(DESK){
     var who=STATE.me_email||STATE.me_name||'Аккаунт';var ini=(String(who).trim().charAt(0)||'?').toUpperCase();
-    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" style="width:52px;height:52px;font-size:22px">'+esc(ini)+'</div>'+
+    h+='<div class="card"><div class="dhead" style="justify-content:flex-start;gap:14px"><div class="uava" data-ava style="width:52px;height:52px;font-size:22px">'+avaHTML(ini)+'</div>'+
       '<div class="uinfo"><div class="uname" style="font-size:17px">'+esc(who)+'</div><div class="usub">'+(a.email?'Вход по почте':'Вход через Telegram')+'</div></div></div></div>';
   }
   h+='<div class="sec-title'+(DESK?' deskhide':'')+'">'+IC.users+'Аккаунт</div><div class="card">';
@@ -1404,26 +1436,63 @@ async function openAccount(){
   h=deskSplit(hl,h);
   h+='<button class="btn ghost back" style="margin-top:16px" onclick="openMore()">← Назад</button></div>';
   view(h,openMore);
-  if(!a.tg_linked)mountTGWidget('tgbind','onTGBind(user)');
+  if(!a.tg_linked)mountTGWidget('tgbind','onTGBind','Привязать Telegram');
 }
-// mountTGWidget вставляет виджет входа Telegram в контейнер. Отдельной функцией
-// потому, что мест два — экран входа и привязка, — а различаются они только
-// именем обработчика.
-function mountTGWidget(elID,onauth){
-  var cfgUser=STATE.botUser;
-  var put=function(u){
-    if(!u)return;
-    var m=document.getElementById(elID); if(!m)return;
+// mountTGWidget ставит кнопку входа Telegram. Мест два — вход и привязка;
+// fn — имя обработчика, он получает тело запроса на сервер. Способ входа
+// выбирает админ: новая библиотека telegram-login.js (в ответе конфига есть
+// client_id) или прежний виджет telegram-widget.js — Telegram выключает его
+// только ботам, у которых в @BotFather включён новый способ.
+// TG_V — verifier по nonce: окно Telegram, открытое до перерисовки кнопки,
+// вернёт токен со старым nonce, и verifier берётся по нему, а не последний.
+var TG_CFG=null,TG_LIB=null,TG_V={};
+function tgLoginLib(){
+  if(!TG_LIB)TG_LIB=new Promise(function(ok,no){
+    var sc=document.createElement('script');sc.async=true;sc.src='https://oauth.telegram.org/js/telegram-login.js';
+    sc.onload=function(){if(window.Telegram&&Telegram.Login)ok(Telegram.Login);else{TG_LIB=null;no();}};
+    sc.onerror=function(){TG_LIB=null;no();};
+    document.head.appendChild(sc);
+  });
+  return TG_LIB;
+}
+// tgNonce — пара verifier/nonce: nonce уходит в Telegram и попадает в токен,
+// verifier — только на наш сервер. Без verifier перехваченный токен не годится.
+function tgNonce(){
+  try{
+    if(!(window.crypto&&crypto.subtle&&crypto.getRandomValues&&window.TextEncoder))return Promise.resolve({v:'',n:''});
+    var b=new Uint8Array(32);crypto.getRandomValues(b);
+    var v=btoa(String.fromCharCode.apply(null,b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    return crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)).then(function(h){
+      return {v:v,n:Array.prototype.map.call(new Uint8Array(h),function(x){return ('0'+x.toString(16)).slice(-2);}).join('')};
+    },function(){return {v:'',n:''};});
+  }catch(e){return Promise.resolve({v:'',n:''});}
+}
+function mountTGWidget(elID,fn,label){
+  var put=function(c){
+    var m=document.getElementById(elID);if(!m||!c)return;
+    if(c.client_id){
+      Promise.all([tgLoginLib(),tgNonce()]).then(function(x){
+        var L=x[0],p=x[1],m=document.getElementById(elID);if(!m)return;
+        m.innerHTML='<button type="button" class="tg-auth-button">'+esc(label)+'</button>';
+        var o={client_id:c.client_id,request_access:['write'],lang:'ru'};if(p.n){o.nonce=p.n;TG_V[p.n]=p.v;}
+        L.init(o,function(r){
+          if(r&&r.id_token){window[fn]({id_token:r.id_token,verifier:(r.user&&TG_V[r.user.nonce])||p.v});return;}
+          if(r&&r.error&&r.error!=='popup_closed')toast('Не удалось войти через Telegram','err');
+        });
+      },function(){var m=document.getElementById(elID);if(m)m.innerHTML='<div class="hint">Вход через Telegram сейчас недоступен</div>';});
+      return;
+    }
+    if(!c.bot_username)return;
     var sc=document.createElement('script');sc.async=true;sc.src='https://telegram.org/js/telegram-widget.js?22';
-    sc.setAttribute('data-telegram-login',u);sc.setAttribute('data-size','large');
-    sc.setAttribute('data-onauth',onauth);sc.setAttribute('data-request-access','write');
+    sc.setAttribute('data-telegram-login',c.bot_username);sc.setAttribute('data-size','large');
+    sc.setAttribute('data-onauth',fn+'(user)');sc.setAttribute('data-request-access','write');
     m.appendChild(sc);
   };
-  if(cfgUser){put(cfgUser);return;}
-  api('/api/cabinet/config').then(function(c){STATE.botUser=c&&c.bot_username;put(STATE.botUser);},function(){});
+  if(TG_CFG){put(TG_CFG);return;}
+  api('/api/cabinet/config').then(function(c){TG_CFG=c;put(c);},function(){});
 }
-window.onTGBind=function(user){
-  post('/api/cabinet/tg/bind',user).then(function(r){
+window.onTGBind=function(body){
+  post('/api/cabinet/tg/bind',body).then(function(r){
     if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);haptic('ok');toast('Telegram привязан','ok');STATE.acct=null;boot();return;}
     toast('Не удалось привязать','err');
   }).catch(function(e){haptic('err');toast(e.message||'Не удалось привязать','err');});
@@ -1512,15 +1581,17 @@ async function doForgot(el){
 function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
-  PAGE=null;
+  PAGE=null;renderSide();
+  // Первая загрузка: скелет главной меняется на скелет формы входа, пока
+  // грузятся настройки, — иначе на экране входа мелькает чужая раскладка.
+  if(NOFX)app.innerHTML='<div class="authwrap"><div class="sk sk-hero" style="height:118px"></div><div class="sk sk-row" style="height:320px"></div></div>';
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
-  var known=STATE.botUser;
-  STATE={balanceK:0,methods:[],botUser:known};
+  STATE={balanceK:0,methods:[]};
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Вход</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Войдите через Telegram или по email.</div></div>';
-  if(cfg.bot_username)h+='<div class="sec-title">'+IC.bolt+'Через Telegram</div><div class="tgwrap"><div id="tglogin"></div></div>';
+  if(cfg.client_id||cfg.bot_username)h+='<div class="sec-title">'+IC.bolt+'Через Telegram</div><div class="tgwrap"><div id="tglogin"></div></div>';
   h+='<div class="sec-title">'+IC.tag+'По email</div><div class="card">'+
     '<input id="lemail" class="field" type="email" placeholder="Email" autocomplete="email">'+
     '<input id="lpass" class="field" style="margin-top:10px" type="password" placeholder="Пароль (мин. 8)" autocomplete="current-password">'+
@@ -1535,7 +1606,7 @@ async function renderLogin(){
   h+='</div>';
   h+='</div></div>';
   view(h,null);
-  if(cfg.bot_username){STATE.botUser=cfg.bot_username;mountTGWidget('tglogin','onTGAuth(user)');}
+  if(cfg.client_id||cfg.bot_username){TG_CFG=cfg;mountTGWidget('tglogin','onTGAuth','Войти через Telegram');}
 }
 window.onTGAuth=function(user){renderLoginBusy();var body=Object.assign({},user);var st=serverStart(lsGet('cab_start'));if(st)body.start=st;post('/api/cabinet/auth/telegram',body).then(function(r){if(r&&r.token){TOKEN=r.token;setStoredToken(r.token);boot();}else{toast('Не удалось войти','err');renderLogin();}}).catch(function(e){toast(e.message||'Ошибка входа','err');renderLogin();});};
 function renderLoginBusy(){skSimple();}
@@ -1607,11 +1678,11 @@ async function boot(){
       if(rTok){dropQuery();openReset(rTok);return;}
       if(sp)dropQuery();
       if(!TOKEN)TOKEN=getStoredToken();
-      if(!TOKEN){renderLogin();return;}
+      if(!TOKEN){NOFX=true;renderLogin();return;}
       start=lsGet('cab_start')||'';
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
     else if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
-    skMain();
+    PAGE='home';skMain();renderSide();
     if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
@@ -1621,10 +1692,11 @@ async function boot(){
     // закрыта, и человек обязан увидеть почему — иначе кнопка просто «не
     // работает».
     if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
+    STATE.me_id=me.tg_id||0;loadAva();
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
-    render(me,menu,sub,plans);
+    NOFX=true;render(me,menu,sub,plans);NOFX=false;
     // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
     // вызовется снова. В кабинете она до тех пор лежит в localStorage и
     // переживает перезагрузку; снимается, только когда кабинет загрузился
@@ -1636,7 +1708,7 @@ async function boot(){
       var ps=WEB?start:STATE.pendingStart;STATE.pendingStart='';
       if(ps)await handleStart(ps);
     }
-  }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
+  }catch(e){if(WEB&&e.status===401){clearToken();NOFX=true;renderLogin();return;}if(!STATE.menu)PAGE=null;view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }
 boot();
 </script>

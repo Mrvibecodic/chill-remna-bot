@@ -86,6 +86,9 @@ type messenger interface {
 	// кнопками — так уходят чеки об оплате, которые пришли не картинкой.
 	SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int
 	Download(ctx context.Context, fileID string) ([]byte, error)
+	// ProfilePhotoID — file_id последнего фото профиля в размере для
+	// аватарки; "" — фото нет.
+	ProfilePhotoID(ctx context.Context, userID int64) (string, error)
 }
 
 type App struct {
@@ -183,6 +186,8 @@ type App struct {
 	// баннера (ключ — file_id или ссылка). Живёт под a.mu.
 	bannerFail map[string]int
 
+	avatars avatarCache
+
 	scrMu  sync.Mutex
 	screen map[int64][]int
 	// screenDropDelay — через сколько после нового экрана удаляется старый
@@ -193,6 +198,11 @@ type App struct {
 	editTarget      map[int64]int
 	editProt        map[int64]bool
 	screenSection   map[int64]string
+	// notices — уведомления с одной кнопкой «Главная» (notify): они не экран,
+	// и без учёта оставались висеть после ухода с них. noticeHit — уведомление,
+	// на кнопку которого нажали: уходит вместе со старым экраном.
+	notices   map[int64][]int
+	noticeHit map[int64]int
 
 	subMu    sync.Mutex
 	subCache map[int64]subCacheEntry
@@ -1379,6 +1389,18 @@ func (a *App) setEditTarget(chatID int64, msgID int) {
 	if a.editTarget == nil {
 		a.editTarget = map[int64]int{}
 	}
+	if a.noticeHit == nil {
+		a.noticeHit = map[int64]int{}
+	}
+	delete(a.noticeHit, chatID)
+	if i := slices.Index(a.notices[chatID], msgID); msgID != 0 && i >= 0 {
+		if n := slices.Delete(a.notices[chatID], i, i+1); len(n) > 0 {
+			a.notices[chatID] = n
+		} else {
+			delete(a.notices, chatID)
+		}
+		a.noticeHit[chatID] = msgID
+	}
 	delete(a.editProt, chatID)
 	if msgID == 0 {
 		delete(a.editTarget, chatID)
@@ -1465,6 +1487,10 @@ func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 	}
 	a.scrMu.Lock()
 	a.screen[chatID] = []int{id}
+	if hit := a.noticeHit[chatID]; hit != 0 {
+		delete(a.noticeHit, chatID)
+		toDelete = append(toDelete, hit)
+	}
 	a.scrMu.Unlock()
 	if a.store != nil {
 		_ = a.store.SetScreenMsg(ctx, chatID, id)
@@ -1759,7 +1785,21 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	if !hasChat(chatID) {
 		return
 	}
-	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
+	id := a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
+	if id == 0 {
+		return
+	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.notices == nil {
+		a.notices = map[int64][]int{}
+	}
+	// Хватает последних: старые уведомления после перезапуска и так забыты.
+	n := append(a.notices[chatID], id)
+	if len(n) > 20 {
+		n = n[len(n)-20:]
+	}
+	a.notices[chatID] = n
 }
 
 // noticeThen показывает короткое пояснение и сразу под ним экран. Пояснение
@@ -2220,6 +2260,26 @@ func (m botMessenger) Download(ctx context.Context, fileID string) ([]byte, erro
 		return nil, errors.New("файл слишком большой")
 	}
 	return data, nil
+}
+
+// ProfilePhotoID берёт самый маленький размер не меньше 160 точек: для кружка
+// в меню больше не нужно, а меньше — мыльно на экранах с высокой плотностью.
+func (m botMessenger) ProfilePhotoID(ctx context.Context, userID int64) (string, error) {
+	p, err := m.b.GetUserProfilePhotos(ctx, &bot.GetUserProfilePhotosParams{UserID: userID, Limit: 1})
+	if err != nil {
+		return "", err
+	}
+	if p == nil || len(p.Photos) == 0 || len(p.Photos[0]) == 0 {
+		return "", nil
+	}
+	sizes := p.Photos[0]
+	best := sizes[len(sizes)-1]
+	for _, s := range sizes {
+		if s.Width >= 160 && s.Width < best.Width {
+			best = s
+		}
+	}
+	return best.FileID, nil
 }
 
 func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {

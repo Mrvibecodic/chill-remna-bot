@@ -102,7 +102,7 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 	}
 	a.sendPayKB(ctx, chatID, caption, [][]models.InlineKeyboardButton{
 		topRow,
-		{btn(i18n.T(lang, "btn.promo"), "pr:enter")},
+		{btn(i18n.T(lang, "btn.promo"), "pr:enterw")},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }

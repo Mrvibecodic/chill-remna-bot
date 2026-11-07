@@ -1193,6 +1193,11 @@ type CabinetConfig struct {
 	Desc    string `json:"desc"`
 	Favicon string `json:"favicon"`
 	AntiFP  bool   `json:"anti_fp"`
+	// TGLoginNew — вход через Telegram новой библиотекой Telegram (в @BotFather
+	// включён Login Widget с Redirect URIs); false — прежний виджет. Временный
+	// переключатель на переход: старый виджет Telegram выключает только тем
+	// ботам, у которых в @BotFather включён новый способ.
+	TGLoginNew bool `json:"tg_login_new,omitempty"`
 	// SessionVer — поколение выданных пропусков. Ключ подписи выведен из токена
 	// бота и не меняется даже при перезапуске, а в самом пропуске нет ни
 	// идентификатора, ни срока отзыва — поэтому «разлогинить всех» делается
