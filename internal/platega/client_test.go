@@ -31,7 +31,7 @@ func TestCreateAndStatus(t *testing.T) {
 	defer func() { BaseURL = prev }()
 
 	c := New("m1", "s1")
-	tx, err := c.CreateTransaction(context.Background(), MethodSBP, 150, "RUB", "VPN", "https://t.me", "telegram_id=300&months=1")
+	tx, err := c.CreateTransaction(context.Background(), MethodSBP, 150, "RUB", "VPN", "https://t.me", "telegram_id=300&months=1", Buyer{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -44,5 +44,36 @@ func TestCreateAndStatus(t *testing.T) {
 	}
 	if st.Status != "CONFIRMED" || st.Payload != "telegram_id=300&months=1" {
 		t.Fatalf("bad status: %+v", st)
+	}
+}
+
+// Покупатель уходит в metadata: почта и ID, а без покупателя блока нет вовсе.
+func TestCreateTransactionMetadata(t *testing.T) {
+	var got []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got = append(got, body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"transactionId": "tx1", "redirect": "https://pay/x", "status": "PENDING"})
+	}))
+	defer srv.Close()
+	prev := BaseURL
+	BaseURL = srv.URL
+	defer func() { BaseURL = prev }()
+
+	c := New("m1", "s1")
+	ctx := context.Background()
+	if _, err := c.CreateTransaction(ctx, MethodSBP, 150, "RUB", "VPN", "https://t.me", "p", Buyer{Email: "1000000001@telegram.org", UserID: "1000000001"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateTransaction(ctx, MethodSBP, 150, "RUB", "VPN", "https://t.me", "p", Buyer{}); err != nil {
+		t.Fatal(err)
+	}
+	md, _ := got[0]["metadata"].(map[string]any)
+	if md["user_email"] != "1000000001@telegram.org" || md["userId"] != "1000000001" {
+		t.Fatalf("metadata: %v", got[0])
+	}
+	if _, ok := got[1]["metadata"]; ok {
+		t.Fatalf("пустой покупатель не должен давать metadata: %v", got[1])
 	}
 }
