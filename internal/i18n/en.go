@@ -1014,7 +1014,7 @@ var en = map[string]string{
 	"access.mode_public":    "public",
 	"access.mode_invite":    "invite only",
 	"access.mode_whitelist": "whitelist",
-	"access.hint_public":    "Anyone can open the bot and buy a subscription.",
+	"access.hint_public":    "Anyone can open the bot and buy a subscription. Invite links don't restrict access here — they show who came through them.",
 	"access.hint_invite":    "Only an invite link gets you in. You generate the link and set its lifetime and number of sign-ups. Whoever uses it keeps access permanently.",
 	"access.hint_whitelist": "Only users you added to the whitelist (by Telegram ID or from the user card) can enter.",
 	"access.btn_public":     "🌍 Public",
@@ -1032,7 +1032,7 @@ var en = map[string]string{
 	"inv.ask_uses":          "How many sign-ups does this link allow? Send a number (0 — unlimited).",
 	"inv.list_title":        "✉️ <b>Invites</b>\nTotal: %d\n\nTap an invite to open its link and manage it.",
 	"inv.list_empty":        "✉️ <b>Invites</b>\n\nNone yet. Create the first one — the bot returns a link you can send to a person.",
-	"inv.card":              "✉️ <b>Invite</b> · %s\n\n<code>%s</code>\n\nUses: %s\nValid until: %s\n\nSend the link to a person: opening it grants them permanent access to the bot.",
+	"inv.card":              "✉️ <b>Invite</b> · %s\n\n<code>%s</code>\n\nUses: %s\nValid until: %s",
 	"inv.state_active":      "🟢",
 	"inv.state_revoked":     "🚫",
 	"inv.state_done":        "⚪️",
@@ -1040,7 +1040,14 @@ var en = map[string]string{
 	"inv.ok":                "✅ Invite accepted — access granted. Welcome!",
 	"inv.bad":               "⛔️ This invite link is not valid: it was revoked, expired or already used. Ask the administrator for a new one.",
 	"inv.used_admin":        "✉️ Invite <code>%s</code> was used by: %s",
-	"inv.mode_hint":         "ℹ️ The link is created, but the access mode is not «invite only» right now — switch it on the Access screen, otherwise the bot lets everyone in anyway.",
+	"inv.btn_who":           "👥 Who joined (%d)",
+	"inv.who_title":         "👥 <b>Joined via invite</b> <code>%s</code>\n\nTotal: %d. Tap a person to open their card.",
+	"inv.who_empty":         "👥 Nobody has been recorded for invite <code>%s</code> yet.",
+	"inv.who_untracked":     "\n\nActivations without a recorded person: %d — they happened before the bot update or were a repeat entry by the same person.",
+
+	"inv.card_hint_invite":    "Send the link to a person: opening it grants them permanent access to the bot.",
+	"inv.card_hint_public":    "The bot is open to everyone: the link grants nothing, but newcomers who use it appear under “Who joined”.",
+	"inv.card_hint_whitelist": "The whitelist is on — nobody can enter or be recorded via this link.",
 
 	// --- Automatic renewal (YooKassa recurring payments) ---
 	"ap.pay_hint":              "🔁 After the payment we will offer to turn on auto-renewal — the card is stored by YooKassa (the bot never sees its number), and nothing is charged unless you agree.",

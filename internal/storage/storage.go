@@ -54,7 +54,8 @@ type Storage interface {
 	CreateInvite(ctx context.Context, inv *model.Invite) error
 	GetInvite(ctx context.Context, code string) (*model.Invite, error)
 	ListInvites(ctx context.Context) ([]model.Invite, error)
-	UseInvite(ctx context.Context, code string) (bool, error)
+	UseInvite(ctx context.Context, code string, telegramID int64, open bool) (bool, error)
+	InviteUses(ctx context.Context, code string, limit, offset int) ([]model.InviteUse, int, error)
 	RevokeInvite(ctx context.Context, code string) error
 	DeleteInvite(ctx context.Context, code string) error
 
@@ -1394,6 +1395,7 @@ type Snapshot struct {
 	// доступ выдали заранее, и невыданные приглашения.
 	WhitelistIDs []int64
 	Invites      []model.Invite
+	InviteUses   []model.InviteUse
 	// InvoiceSnaps — условия выставленных счетов Stars: строки счёта у них
 	// нет, и без переноса оплата пришла бы на текущие условия, а не на
 	// проданные.
@@ -1554,6 +1556,23 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	} else {
 		return nil, err
 	}
+	iurows, err := b.db.QueryContext(ctx, "SELECT code, telegram_id, created_at FROM invite_uses")
+	if err != nil {
+		return nil, err
+	}
+	for iurows.Next() {
+		var u model.InviteUse
+		if err := iurows.Scan(&u.Code, &u.TelegramID, &u.CreatedAt); err != nil {
+			_ = iurows.Close()
+			return nil, err
+		}
+		snap.InviteUses = append(snap.InviteUses, u)
+	}
+	if err := iurows.Err(); err != nil {
+		_ = iurows.Close()
+		return nil, err
+	}
+	_ = iurows.Close()
 	intentRows, err := b.db.QueryContext(ctx, "SELECT "+intentCols+" FROM purchase_intents")
 	if err != nil {
 		return nil, err
@@ -1755,6 +1774,14 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 	}
 	for i := range s.Invites {
 		if err := b.CreateInvite(ctx, &s.Invites[i]); err != nil && !isUniqueViolation(err) {
+			return err
+		}
+	}
+	for i := range s.InviteUses {
+		u := &s.InviteUses[i]
+		if _, err := b.db.ExecContext(ctx,
+			"INSERT INTO invite_uses (code, telegram_id, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+")",
+			u.Code, u.TelegramID, u.CreatedAt); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}
@@ -2589,17 +2616,41 @@ func (b *base) ListInvites(ctx context.Context) ([]model.Invite, error) {
 	return out, rows.Err()
 }
 
-// UseInvite атомарно «тратит» одну активацию приглашения: увеличивает счётчик
-// только если приглашение не отозвано, не просрочено и лимит не исчерпан.
-// Возвращает false, если приглашение недействительно (или его нет).
-func (b *base) UseInvite(ctx context.Context, code string) (bool, error) {
-	res, err := b.db.ExecContext(ctx,
+// UseInvite тратит одну активацию приглашения и записывает, кто пришёл.
+// В закрытом режиме (open=false) действуют отзыв, срок и лимит; повторный
+// вход того же человека тратит активацию, как и раньше, а строка остаётся
+// прежней. В открытом режиме (open=true) приглашение только помечает
+// пришедших: срок и лимит не мешают, отозванное не пишет, и каждый человек
+// считается один раз. false без ошибки — записывать и выдавать нечего.
+func (b *base) UseInvite(ctx context.Context, code string, telegramID int64, open bool) (bool, error) {
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-		"UPDATE invites SET used = used + 1 WHERE code = "+b.ph(1)+
-			" AND revoked = 0"+
-			" AND (max_uses <= 0 OR used < max_uses)"+
-			" AND (expires_at = '' OR expires_at > "+b.ph(2)+")",
-		code, nowStr())
+		"INSERT INTO invite_uses (code, telegram_id, created_at) VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+") "+
+			"ON CONFLICT (code, telegram_id) DO NOTHING",
+		code, telegramID, nowStr())
+	if err != nil {
+		return false, err
+	}
+	added, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if open && added == 0 {
+		return false, nil
+	}
+	q := "UPDATE invites SET used = used + 1 WHERE code = " + b.ph(1) + " AND revoked = 0"
+	args := []any{code}
+	if !open {
+		q += " AND (max_uses <= 0 OR used < max_uses) AND (expires_at = '' OR expires_at > " + b.ph(2) + ")"
+		args = append(args, nowStr())
+	}
+	res, err = tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -2607,7 +2658,44 @@ func (b *base) UseInvite(ctx context.Context, code string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return n > 0, nil
+	if n == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// InviteUses — кто пришёл по приглашению, свежие первыми, и сколько всего.
+// limit <= 0 — только число.
+func (b *base) InviteUses(ctx context.Context, code string, limit, offset int) ([]model.InviteUse, int, error) {
+	var total int
+	if err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM invite_uses WHERE code = "+b.ph(1), code).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 || total == 0 {
+		return nil, total, nil
+	}
+	rows, err := b.db.QueryContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"SELECT code, telegram_id, created_at FROM invite_uses WHERE code = "+b.ph(1)+
+			" ORDER BY created_at DESC, telegram_id LIMIT "+b.ph(2)+" OFFSET "+b.ph(3),
+		code, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.InviteUse
+	for rows.Next() {
+		var u model.InviteUse
+		if err := rows.Scan(&u.Code, &u.TelegramID, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
 }
 
 func (b *base) RevokeInvite(ctx context.Context, code string) error {
@@ -2618,9 +2706,19 @@ func (b *base) RevokeInvite(ctx context.Context, code string) error {
 }
 
 func (b *base) DeleteInvite(ctx context.Context, code string) error {
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM invite_uses WHERE code = "+b.ph(1), code); err != nil {
+		return err
+	}
 	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
-	_, err := b.db.ExecContext(ctx, "DELETE FROM invites WHERE code = "+b.ph(1), code)
-	return err
+	if _, err := tx.ExecContext(ctx, "DELETE FROM invites WHERE code = "+b.ph(1), code); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---------------------------------------------------------------------------
