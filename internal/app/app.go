@@ -86,6 +86,9 @@ type messenger interface {
 	// кнопками — так уходят чеки об оплате, которые пришли не картинкой.
 	SendDocumentKB(ctx context.Context, chatID int64, doc models.InputFile, caption string, rm models.ReplyMarkup) int
 	Download(ctx context.Context, fileID string) ([]byte, error)
+	// ProfilePhotoID — file_id последнего фото профиля в размере для
+	// аватарки; "" — фото нет.
+	ProfilePhotoID(ctx context.Context, userID int64) (string, error)
 }
 
 type App struct {
@@ -182,6 +185,8 @@ type App struct {
 	// bannerFail — сколько отказов подряд пришло на конкретную картинку
 	// баннера (ключ — file_id или ссылка). Живёт под a.mu.
 	bannerFail map[string]int
+
+	avatars avatarCache
 
 	scrMu  sync.Mutex
 	screen map[int64][]int
@@ -2255,6 +2260,26 @@ func (m botMessenger) Download(ctx context.Context, fileID string) ([]byte, erro
 		return nil, errors.New("файл слишком большой")
 	}
 	return data, nil
+}
+
+// ProfilePhotoID берёт самый маленький размер не меньше 160 точек: для кружка
+// в меню больше не нужно, а меньше — мыльно на экранах с высокой плотностью.
+func (m botMessenger) ProfilePhotoID(ctx context.Context, userID int64) (string, error) {
+	p, err := m.b.GetUserProfilePhotos(ctx, &bot.GetUserProfilePhotosParams{UserID: userID, Limit: 1})
+	if err != nil {
+		return "", err
+	}
+	if p == nil || len(p.Photos) == 0 || len(p.Photos[0]) == 0 {
+		return "", nil
+	}
+	sizes := p.Photos[0]
+	best := sizes[len(sizes)-1]
+	for _, s := range sizes {
+		if s.Width >= 160 && s.Width < best.Width {
+			best = s
+		}
+	}
+	return best.FileID, nil
 }
 
 func (m botMessenger) Delete(ctx context.Context, chatID int64, msgID int) {

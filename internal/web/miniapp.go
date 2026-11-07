@@ -39,6 +39,7 @@ type MiniProvider interface {
 	MiniBotToken() string
 
 	MiniMe(ctx context.Context, tgID int64) MiniMeDTO
+	MiniAvatar(ctx context.Context, tgID int64) ([]byte, bool)
 	MiniMenu(ctx context.Context, tgID int64, web bool) MiniMenuDTO
 	MiniSubscription(ctx context.Context, tgID int64) MiniSubDTO
 	MiniPlans(ctx context.Context, tgID int64) MiniPlansDTO
@@ -645,6 +646,28 @@ func (s *Server) handleMiniMe(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniMe(ctx, id))
+}
+
+// handleMiniAvatar отдаёт фото профиля Telegram владельца пропуска. Ссылка на
+// CDN Telegram страницу не нужна: браузер посетителя не ходит к третьим лицам.
+func (s *Server) handleMiniAvatar(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	data, ok := s.mini.MiniAvatar(ctx, id)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	// Адрес у всех один, а браузерный кэш пропуск в заголовке не различает:
+	// сохранённое фото досталось бы следующему на том же компьютере. Фото
+	// кэширует сервер, а страница держит его в памяти до смены аккаунта.
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleMiniMenu(w http.ResponseWriter, r *http.Request) {
