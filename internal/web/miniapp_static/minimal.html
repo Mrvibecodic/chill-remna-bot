@@ -555,7 +555,11 @@ function post(p,b){return api(p,{method:'POST',body:JSON.stringify(b||{})});}
 
 /* ---------- навигация ---------- */
 function setBack(on){try{if(tg&&tg.BackButton){if(on)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}}
-function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();var sd=sideOn();if(sd&&!/\b(dgrid|dsplit|dwide|dcenter)\b/.test(html))html='<div class="dnarrow">'+html+'</div>';app.innerHTML=html;renderSide(sd);app.style.animation='none';void app.offsetWidth;app.style.animation='';window.scrollTo(0,0);setBack(STACK.length>0);}
+// BOOTING — кабинет грузит данные после перезагрузки: меню слева рисуется
+// заготовкой сразу, а не после загрузки. NOFX — следующий экран встаёт на
+// место скелета без анимации появления: иначе мелькает пустая область.
+var BOOTING=false,NOFX=false;
+function view(html){stopPoll();if(!CUR||CUR.name!=='wait')guardOff();var sd=sideOn();if(sd&&!/\b(dgrid|dsplit|dwide|dcenter)\b/.test(html))html='<div class="dnarrow">'+html+'</div>';app.innerHTML=html;renderSide(sd);if(NOFX){NOFX=false;app.style.animation='none';}else{app.style.animation='none';void app.offsetWidth;app.style.animation='';}window.scrollTo(0,0);setBack(STACK.length>0);}
 var SCREENS={};
 function go(name,arg,opt){
   haptic();
@@ -571,7 +575,7 @@ function goBack(){haptic();if(!STACK.length){goHome();return;}CUR=STACK.pop();SC
 function goHome(){if(WEB&&!TOKEN){renderLogin();return;}STACK=[];CUR={name:'home'};SCREENS.home();}
 function rerender(){if(CUR)SCREENS[CUR.name](CUR.arg);}
 function startGate(x){return x&&x.name==='legalgate'&&!x.arg;}
-function sideOn(){return !!(DESK&&TOKEN&&STATE.me&&CUR&&CUR.name!=='login'&&CUR.name!=='forgot'&&!startGate(CUR)&&!STACK.some(startGate));}
+function sideOn(){if(DESK&&TOKEN&&BOOTING&&!STATE.me)return true;return !!(DESK&&TOKEN&&STATE.me&&CUR&&CUR.name!=='login'&&CUR.name!=='forgot'&&!startGate(CUR)&&!STACK.some(startGate));}
 // Раздел меню для открытого экрана; экран без своего раздела оставляет прежний.
 var SECTS={home:'home',plans:'plans',plan:'plans',checkout:'plans',wallet:'wallet',promo:'wallet',connect:'connect',devices:'devices',ref:'ref',account:'account',docs:'docs',doc:'docs',theme:'account'};
 // К списку тарифов с экрана тарифа: пришли из списка — просто назад, иначе
@@ -582,6 +586,12 @@ function renderSide(on){
   var side=document.getElementById('side');if(!side)return;
   document.body.classList.toggle('noside',!on);
   if(!on){side.innerHTML='';return;}
+  if(!STATE.me){
+    var sk='<div class="sbrand">'+brandHTML(false)+'</div>';
+    [76,96,108,84,70].forEach(function(w){sk+='<div class="snav"><span class="sk" style="margin:0;border:0;background:var(--soft);width:18px;height:18px;border-radius:6px;flex:none"></span><span class="sk" style="margin:0;border:0;background:var(--soft);height:12px;border-radius:6px;width:'+w+'px"></span></div>';});
+    side.innerHTML=sk+'<div class="sfoot"><span class="sk" style="margin:0;border:0;background:var(--soft);width:36px;height:36px;border-radius:50%;flex:none"></span><span class="sk" style="margin:0;border:0;background:var(--soft);height:12px;border-radius:6px;width:96px"></span></div>';
+    return;
+  }
   if(CUR.name==='p2p')SECT=CUR.arg&&CUR.arg.topup?'wallet':'plans';else if(SECTS[CUR.name])SECT=SECTS[CUR.name];
   var m=STATE.menu||{},s=STATE.sub||{};
   function it(key,ic,label,fn,bdg){return '<button class="snav'+(SECT===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+esc(label)+'</span>'+(bdg?'<span class="bdg">'+esc(bdg)+'</span>':'')+'</button>';}
@@ -1314,7 +1324,7 @@ function serverStart(s){
   return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
 }
 async function renderLogin(){
-  STACK=[];CUR={name:'login'};setBack(false);paintBalance();
+  STACK=[];CUR={name:'login'};setBack(false);paintBalance();renderSide(false);
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
   if(BRAND.logo)document.getElementById('brand').innerHTML='';
   TG_CFG=cfg;
@@ -1406,24 +1416,26 @@ async function boot(){
       var rt=q.get('reset');if(rt){dropQuery();openReset(rt);return;}
       if(sp)dropQuery();
       if(!TOKEN)TOKEN=load('cab_tok');
-      if(!TOKEN){renderLogin();return;}
+      if(!TOKEN){NOFX=true;renderLogin();return;}
       start=load('cab_start')||'';
     }else{
       if(!tg||!tg.initData){view('<div class="card empty">'+esc(T('open_tg'))+'</div>');return;}
       if(!TOKEN)await authenticate();
       if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
     }
-    if(!STATE.me)view('<div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div>');
-    await refresh();
+    var sk=!STATE.me;
+    if(sk){BOOTING=WEB;view('<div class="sk" style="height:190px"></div><div class="sk" style="height:220px"></div>');}
+    try{await refresh();}finally{BOOTING=false;}
+    NOFX=sk;
     // Параметр ссылки снимается, только когда кабинет загрузился (с протухшим
     // входом дождётся нового) и нет экрана документов на входе: до «Принимаю»
     // он переживает перезагрузку, снимает его legalAccept.
     var m0=STATE.menu||{};
     if(WEB&&!(m0.legal_accept&&m0.legal_gate_start&&legalDocs().length))store('cab_start',null);
-    if(start&&await handleStart(start))return;
-    goHome();
+    if(start&&await handleStart(start)){NOFX=false;return;}
+    goHome();NOFX=false;
   }catch(e){
-    if(WEB&&e.status===401){store('cab_tok',null);TOKEN=null;renderLogin();return;}
+    if(WEB&&e.status===401){store('cab_tok',null);TOKEN=null;NOFX=true;renderLogin();return;}
     view('<div class="card empty">'+esc(T('loading_fail'))+': '+esc(e.message)+'<button class="btn sec" style="margin-top:14px" onclick="boot()">'+IC.refresh+'</button></div>');
   }
 }

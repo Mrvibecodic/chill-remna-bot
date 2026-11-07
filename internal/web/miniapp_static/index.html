@@ -450,12 +450,18 @@ function setBack(fn){
   backFn=fn;
   try{if(tg&&tg.BackButton){if(fn)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}
 }
+// NOFX — следующий экран встаёт на место скелета загрузки без анимации
+// появления: иначе после скелета мелькает пустая область.
+var NOFX=false;
 /* swap the #app content with a fresh fade-in */
 function view(html,back){
   stopWait();
   setBack(back||null);
   app.innerHTML=html;
-  app.style.animation='none'; void app.offsetWidth; app.style.animation='';
+  if(NOFX){
+    NOFX=false;app.style.animation='none';
+    Array.prototype.forEach.call(app.querySelectorAll('.stagger>*'),function(e){e.style.animation='none';e.style.opacity='1';});
+  }else{app.style.animation='none'; void app.offsetWidth; app.style.animation='';}
   renderSide();
 }
 function renderSide(){
@@ -464,6 +470,13 @@ function renderSide(){
   if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.textContent='Личный кабинет';return;}
   document.body.classList.remove('noside');
   if(h1)h1.textContent=PAGE_TITLES[PAGE]||'Личный кабинет';
+  // Данные ещё грузятся — заготовка меню, чтобы раскладка не прыгала.
+  if(!STATE.menu){
+    var sk='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+    [76,96,108,84].forEach(function(w){sk+='<div class="snav"><span class="sk-line" style="width:18px;height:18px;border-radius:6px;flex:none"></span><span class="sk-line" style="width:'+w+'px"></span></div>';});
+    side.innerHTML=sk+'<div class="sfoot"><span class="sk-line" style="width:36px;height:36px;border-radius:50%;flex:none"></span><span class="sk-line" style="width:96px"></span></div>';
+    return;
+  }
   var m=STATE.menu||{},sub=STATE.sub||{};
   function item(key,ic,label,fn,bdg){return '<button class="snav'+(PAGE===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+label+'</span>'+(bdg?'<span class="bdg">'+bdg+'</span>':'')+'</button>';}
   var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
@@ -1549,7 +1562,10 @@ async function doForgot(el){
 function cabVal(id){var e=document.getElementById(id);return e?e.value.trim():'';}
 function cabLogout(){clearToken();renderLogin();}
 async function renderLogin(){
-  PAGE=null;
+  PAGE=null;renderSide();
+  // Первая загрузка: скелет главной меняется на скелет формы входа, пока
+  // грузятся настройки, — иначе на экране входа мелькает чужая раскладка.
+  if(NOFX)app.innerHTML='<div class="authwrap"><div class="sk sk-hero" style="height:118px"></div><div class="sk sk-row" style="height:320px"></div></div>';
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   STATE={balanceK:0,methods:[]};
@@ -1643,11 +1659,11 @@ async function boot(){
       if(rTok){dropQuery();openReset(rTok);return;}
       if(sp)dropQuery();
       if(!TOKEN)TOKEN=getStoredToken();
-      if(!TOKEN){renderLogin();return;}
+      if(!TOKEN){NOFX=true;renderLogin();return;}
       start=lsGet('cab_start')||'';
     }else if(!tg||!tg.initData){view('<div class="card err">Откройте через Telegram.</div>',null);return;}
     else if(!STATE.startDone){STATE.startDone=true;try{start=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';}catch(e){}}
-    skMain();
+    PAGE='home';skMain();renderSide();
     if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
       api('/api/miniapp/me'),api('/api/miniapp/menu'),
@@ -1660,7 +1676,7 @@ async function boot(){
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
     balchip.style.display='inline-flex';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
-    render(me,menu,sub,plans);
+    NOFX=true;render(me,menu,sub,plans);NOFX=false;
     // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()
     // вызовется снова. В кабинете она до тех пор лежит в localStorage и
     // переживает перезагрузку; снимается, только когда кабинет загрузился
@@ -1672,7 +1688,7 @@ async function boot(){
       var ps=WEB?start:STATE.pendingStart;STATE.pendingStart='';
       if(ps)await handleStart(ps);
     }
-  }catch(e){if(WEB&&e.status===401){clearToken();renderLogin();return;}view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
+  }catch(e){if(WEB&&e.status===401){clearToken();NOFX=true;renderLogin();return;}if(!STATE.menu)PAGE=null;view('<div class="card err">Не удалось загрузить: '+esc(e.message)+'</div>',null);}
 }
 boot();
 </script>
