@@ -193,6 +193,11 @@ type App struct {
 	editTarget      map[int64]int
 	editProt        map[int64]bool
 	screenSection   map[int64]string
+	// notices — уведомления с одной кнопкой «Главная» (notify): они не экран,
+	// и без учёта оставались висеть после ухода с них. noticeHit — уведомление,
+	// на кнопку которого нажали: уходит вместе со старым экраном.
+	notices   map[int64][]int
+	noticeHit map[int64]int
 
 	subMu    sync.Mutex
 	subCache map[int64]subCacheEntry
@@ -1379,6 +1384,18 @@ func (a *App) setEditTarget(chatID int64, msgID int) {
 	if a.editTarget == nil {
 		a.editTarget = map[int64]int{}
 	}
+	if a.noticeHit == nil {
+		a.noticeHit = map[int64]int{}
+	}
+	delete(a.noticeHit, chatID)
+	if i := slices.Index(a.notices[chatID], msgID); msgID != 0 && i >= 0 {
+		if n := slices.Delete(a.notices[chatID], i, i+1); len(n) > 0 {
+			a.notices[chatID] = n
+		} else {
+			delete(a.notices, chatID)
+		}
+		a.noticeHit[chatID] = msgID
+	}
 	delete(a.editProt, chatID)
 	if msgID == 0 {
 		delete(a.editTarget, chatID)
@@ -1465,6 +1482,10 @@ func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
 	}
 	a.scrMu.Lock()
 	a.screen[chatID] = []int{id}
+	if hit := a.noticeHit[chatID]; hit != 0 {
+		delete(a.noticeHit, chatID)
+		toDelete = append(toDelete, hit)
+	}
 	a.scrMu.Unlock()
 	if a.store != nil {
 		_ = a.store.SetScreenMsg(ctx, chatID, id)
@@ -1759,7 +1780,21 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	if !hasChat(chatID) {
 		return
 	}
-	a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
+	id := a.msg.SendKB(ctx, chatID, a.applyPremium(text), [][]models.InlineKeyboardButton{backHomeRow(a.lang(chatID))})
+	if id == 0 {
+		return
+	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.notices == nil {
+		a.notices = map[int64][]int{}
+	}
+	// Хватает последних: старые уведомления после перезапуска и так забыты.
+	n := append(a.notices[chatID], id)
+	if len(n) > 20 {
+		n = n[len(n)-20:]
+	}
+	a.notices[chatID] = n
 }
 
 // noticeThen показывает короткое пояснение и сразу под ним экран. Пояснение
