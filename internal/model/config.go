@@ -77,6 +77,13 @@ type Invite struct {
 	Note      string
 }
 
+// InviteUse — человек, пришедший по приглашению.
+type InviteUse struct {
+	Code       string
+	TelegramID int64
+	CreatedAt  string
+}
+
 // Active сообщает, можно ли ещё активировать приглашение на момент now
 // (RFC3339-время в UTC).
 func (i *Invite) Active(now time.Time) bool {

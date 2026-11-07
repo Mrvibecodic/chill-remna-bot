@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -394,7 +395,7 @@ func TestRestoreLegacyStateFromConfig(t *testing.T) {
 	j := i + strings.Index(data[i:], `{"t":"te"`)
 	k := j + strings.Index(data[j:], "\n") + 1
 	data = data[:i] + data[k:]
-	data = strings.Replace(data, `"tables":22}`, `"tables":21}`, 1)
+	data = strings.Replace(data, fmt.Sprintf(`"tables":%d}`, len(backupTables)), fmt.Sprintf(`"tables":%d}`, len(backupTables)-1), 1)
 	file := replaceConfig(t, []byte(data), `{"installed":true,"backup":{"hours":12,"password":"старый","chat_id":-1000000000077}}`)
 	g := &model.RestoreGuard{At: "2026-11-03T12:00:00Z", Chat: 100}
 	if err := st.RestoreBackup(ctx, opener(file), g); err != nil {

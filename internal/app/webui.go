@@ -245,13 +245,28 @@ func (a *App) onWebUIAdmin(ctx context.Context, chatID int64, val string) {
 	case "logo", "logod":
 		ui.adminInput = ""
 		ui.awaitLogo = "light"
+		c := a.webUICfg()
+		set := c.LogoFile != "" || c.LogoURL != ""
 		if val == "logod" {
 			ui.awaitLogo = "dark"
+			set = c.LogoDarkFile != "" || c.LogoDarkURL != ""
 		}
-		a.sendKB(ctx, chatID, i18n.T(lang, "webui.ask_logo"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "btn.cancel"), cbWebUI+":cancel")},
-		})
+		rows := [][]models.InlineKeyboardButton{}
+		if set {
+			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "webui.btn_logo_del"), cbWebUI+":"+val+"del")})
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.cancel"), cbWebUI+":cancel")})
+		a.sendKB(ctx, chatID, i18n.T(lang, "webui.ask_logo"), rows)
 		return
+	case "logodel", "logoddel":
+		ui.awaitLogo = ""
+		a.editWebUI(ctx, func(w *model.WebUIConfig) {
+			if val == "logoddel" {
+				w.LogoDarkFile, w.LogoDarkURL = "", ""
+			} else {
+				w.LogoFile, w.LogoURL = "", ""
+			}
+		})
 	case "cancel":
 		ui.awaitLogo = ""
 	case "logoreset":

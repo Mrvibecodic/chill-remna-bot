@@ -45,6 +45,19 @@ type paymentDetails struct {
 	Currency string  `json:"currency"`
 }
 
+// Buyer — кто платит. Platega узнаёт покупателя по Email (одно значение во
+// всех его платежах), UserID нужен её антифроду. Без почты платёжная форма
+// спрашивает адрес у плательщика сама.
+type Buyer struct {
+	Email  string
+	UserID string
+}
+
+type metadata struct {
+	UserEmail string `json:"user_email,omitempty"`
+	UserID    string `json:"userId,omitempty"`
+}
+
 type createRequest struct {
 	PaymentMethod  int            `json:"paymentMethod"`
 	PaymentDetails paymentDetails `json:"paymentDetails"`
@@ -52,6 +65,7 @@ type createRequest struct {
 	Return         string         `json:"return"`
 	FailedURL      string         `json:"failedUrl"`
 	Payload        string         `json:"payload,omitempty"`
+	Metadata       *metadata      `json:"metadata,omitempty"`
 }
 
 type createResponse struct {
@@ -83,16 +97,20 @@ func (c *Client) headers(req *http.Request) {
 	req.Header.Set("X-Secret", c.secret)
 }
 
-func (c *Client) CreateTransaction(ctx context.Context, method int, amount float64, currency, desc, returnURL, payload string) (*Transaction, error) {
-	body, _ := json.Marshal(createRequest{
+func (c *Client) CreateTransaction(ctx context.Context, method int, amount float64, currency, desc, returnURL, payload string, buyer Buyer) (*Transaction, error) {
+	body := createRequest{
 		PaymentMethod:  method,
 		PaymentDetails: paymentDetails{Amount: amount, Currency: currency},
 		Description:    desc,
 		Return:         returnURL,
 		FailedURL:      returnURL,
 		Payload:        payload,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, BaseURL+"/transaction/process", bytes.NewReader(body))
+	}
+	if buyer.Email != "" || buyer.UserID != "" {
+		body.Metadata = &metadata{UserEmail: buyer.Email, UserID: buyer.UserID}
+	}
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, BaseURL+"/transaction/process", bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}

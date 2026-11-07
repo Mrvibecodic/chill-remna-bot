@@ -183,9 +183,14 @@ func (a *App) redeemInvite(ctx context.Context, chatID int64, code string) (stri
 	if a.store == nil || code == "" {
 		return "", false
 	}
-	// Приглашения работают только в своём режиме: иначе старая ссылка тихо
-	// открывала бы вход в боте, переведённом на белый список.
-	if a.accessMode() != model.AccessInvite {
+	switch a.accessMode() {
+	case model.AccessInvite:
+	case model.AccessPublic:
+		a.markOpenInvite(ctx, chatID, code)
+		return "", true
+	default:
+		// В белом списке приглашение не действует: иначе старая ссылка тихо
+		// открывала бы вход в закрытый бот.
 		return "", false
 	}
 	// Забаненный не должен сжигать активацию чужого приглашения.
@@ -196,7 +201,7 @@ func (a *App) redeemInvite(ctx context.Context, chatID int64, code string) (stri
 		// Доступ уже есть — приглашение не тратим.
 		return "", true
 	}
-	ok, err := a.store.UseInvite(ctx, code)
+	ok, err := a.store.UseInvite(ctx, code, chatID, false)
 	if err != nil {
 		a.log.Warn("invite: активация", "code", code, "err", err)
 		return i18n.T(lang, "inv.bad"), false
@@ -215,6 +220,18 @@ func (a *App) redeemInvite(ctx context.Context, chatID int64, code string) (stri
 	alang := a.lang(a.cfg.AdminID)
 	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "inv.used_admin", code, a.userLabelByID(ctx, chatID)))
 	return i18n.T(lang, "inv.ok"), true
+}
+
+// markOpenInvite — открытый бот: приглашение ничего не выдаёт, только
+// помечает новичка, пришедшего по ссылке. Уже знакомых бот не записывает.
+func (a *App) markOpenInvite(ctx context.Context, chatID int64, code string) {
+	u, err := a.store.GetUser(ctx, chatID)
+	if err != nil || u != nil {
+		return
+	}
+	if _, err := a.store.UseInvite(ctx, code, chatID, true); err != nil {
+		a.log.Warn("invite: запись пришедшего", "code", code, "err", err)
+	}
 }
 
 // showAccess — админский экран «Доступ»: режим публичности + приглашения.
@@ -249,7 +266,7 @@ func (a *App) showAccess(ctx context.Context, chatID int64) {
 		{pick(model.AccessInvite, "access.btn_invite")},
 		{pick(model.AccessWhitelist, "access.btn_whitelist")},
 	}
-	if mode == model.AccessInvite {
+	if mode != model.AccessWhitelist {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "inv.btn_new"), "acc:new"),
 			btn(i18n.T(lang, "inv.btn_list"), "acc:list"),
@@ -384,8 +401,11 @@ func (a *App) showInvite(ctx context.Context, chatID int64, code string) {
 	case !inv.Active(time.Now().UTC()):
 		state = i18n.T(lang, "inv.state_done")
 	}
-	text := i18n.T(lang, "inv.card", state, link, uses, exp)
+	text := i18n.T(lang, "inv.card", state, link, uses, exp) + "\n\n" + i18n.T(lang, "inv.card_hint_"+a.accessMode())
 	rows := [][]models.InlineKeyboardButton{}
+	if _, joined, err := a.store.InviteUses(ctx, inv.Code, 0, 0); err == nil && (joined > 0 || inv.Used > 0) {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "inv.btn_who", joined), "acc:who:"+inv.Code+":0")})
+	}
 	if !inv.Revoked {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "inv.btn_revoke"), "acc:revoke:"+inv.Code)})
 	}
@@ -396,6 +416,65 @@ func (a *App) showInvite(ctx context.Context, chatID int64, code string) {
 	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, rows)
 }
 
+// inviteUsesPageSize — сколько пришедших показываем на одной странице.
+const inviteUsesPageSize = 10
+
+// showInviteUses — кто пришёл по приглашению: кнопки ведут в карточки людей.
+func (a *App) showInviteUses(ctx context.Context, chatID int64, code string, page int) {
+	lang := a.lang(chatID)
+	if a.store == nil {
+		return
+	}
+	inv, err := a.store.GetInvite(ctx, code)
+	if err != nil || inv == nil {
+		a.showInvites(ctx, chatID, 0)
+		return
+	}
+	if page < 0 {
+		page = 0
+	}
+	list, total, err := a.store.InviteUses(ctx, inv.Code, inviteUsesPageSize, page*inviteUsesPageSize)
+	if err != nil {
+		a.sendHome(ctx, chatID, "❌ "+err.Error())
+		return
+	}
+	pages := (total + inviteUsesPageSize - 1) / inviteUsesPageSize
+	if page >= pages && pages > 0 {
+		page = pages - 1
+		list, _, err = a.store.InviteUses(ctx, inv.Code, inviteUsesPageSize, page*inviteUsesPageSize)
+		if err != nil {
+			a.sendHome(ctx, chatID, "❌ "+err.Error())
+			return
+		}
+	}
+	text := i18n.T(lang, "inv.who_title", inv.Code, total)
+	if total == 0 {
+		text = i18n.T(lang, "inv.who_empty", inv.Code)
+	}
+	if extra := inv.Used - total; extra > 0 {
+		text += i18n.T(lang, "inv.who_untracked", extra)
+	}
+	rows := [][]models.InlineKeyboardButton{}
+	now := time.Now().UTC()
+	for _, use := range list {
+		when := " · " + shortDate(use.CreatedAt)
+		if u, _ := a.store.GetUser(ctx, use.TelegramID); u != nil {
+			b := userListBtn(u, a.userButtonLabel(ctx, u)+when, now)
+			rows = append(rows, []models.InlineKeyboardButton{b})
+			continue
+		}
+		id := strconv.FormatInt(use.TelegramID, 10)
+		rows = append(rows, []models.InlineKeyboardButton{btn(id+when, "usr:view:"+id)})
+	}
+	if nav := paginationRow("acc:who:"+inv.Code+":", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+	rows = append(rows, []models.InlineKeyboardButton{
+		btn(i18n.T(lang, "btn.back"), "acc:show:"+inv.Code), btn(i18n.T(lang, "btn.home"), "menu:home"),
+	})
+	a.sendKBSection(ctx, chatID, assets.SectionReferral, text, rows)
+}
+
 // onAccess обрабатывает кнопки экрана «Доступ» (только админ).
 func (a *App) onAccess(ctx context.Context, chatID int64, val string) {
 	action, arg, _ := strings.Cut(val, ":")
@@ -403,6 +482,10 @@ func (a *App) onAccess(ctx context.Context, chatID int64, val string) {
 	switch action {
 	case "show":
 		a.showInvite(ctx, chatID, arg)
+	case "who":
+		code, p, _ := strings.Cut(arg, ":")
+		page, _ := strconv.Atoi(p)
+		a.showInviteUses(ctx, chatID, code, page)
 	case "mode":
 		switch arg {
 		case model.AccessInvite, model.AccessWhitelist:
@@ -483,11 +566,6 @@ func (a *App) createInviteUses(ctx context.Context, chatID int64, text string) {
 	}
 	if err := a.store.CreateInvite(ctx, inv); err != nil {
 		a.sendHome(ctx, chatID, "❌ "+err.Error())
-		return
-	}
-	if a.accessMode() != model.AccessInvite {
-		// Ссылка бесполезна, пока режим не «по приглашениям» — подсказываем.
-		a.noticeThen(ctx, chatID, i18n.T(lang, "inv.mode_hint"), func() { a.showInvite(ctx, chatID, inv.Code) })
 		return
 	}
 	a.showInvite(ctx, chatID, inv.Code)

@@ -71,6 +71,7 @@ var backupTables = []string{
 	"promo_redemptions",
 	"whitelist",
 	"invites",
+	"invite_uses",
 	"media_cache",
 	"torrent_reports",
 	"torrent_strikes",

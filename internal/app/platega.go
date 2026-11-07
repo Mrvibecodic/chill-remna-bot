@@ -11,6 +11,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/mailer"
 	"remnabot/internal/model"
 	"remnabot/internal/platega"
 )
@@ -325,6 +326,34 @@ func (a *App) setPlategaField(ctx context.Context, chatID int64, field, text str
 	a.showPlategaAdmin(ctx, chatID)
 }
 
+// plBuyer — покупатель для Platega. Аккаунт, заведённый по почте, передаёт
+// свою почту — и после привязки Telegram тоже: Platega связывает платежи
+// человека по одному адресу. Telegram-пользователь без такого аккаунта —
+// числовой ID с доменом telegram.org (ID не меняется, в отличие от ника).
+// Почту не нашли — передаём только ID, адрес тогда спросит платёжная форма.
+func (a *App) plBuyer(ctx context.Context, chatID int64) platega.Buyer {
+	if chatID == 0 {
+		return platega.Buyer{}
+	}
+	b := platega.Buyer{UserID: strconv.FormatInt(chatID, 10)}
+	if a.store == nil {
+		if chatID > 0 {
+			b.Email = b.UserID + "@telegram.org"
+		}
+		return b
+	}
+	wu, err := a.store.GetWebUserByTgID(ctx, chatID)
+	switch {
+	case err == nil && wu != nil && mailer.ValidAddress(wu.Email):
+		b.Email = wu.Email
+	case chatID > 0:
+		b.Email = b.UserID + "@telegram.org"
+	default:
+		a.log.Warn("platega: почта покупателя не найдена", "tg_id", chatID, "err", err)
+	}
+	return b
+}
+
 // plCreateTransactionSnap creates a Platega transaction + pending record and
 // returns the redirect URL. Shared by chat flow and Mini App. snap == nil
 // означает «Базовый по текущей сетке».
@@ -336,7 +365,7 @@ func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months 
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plPayload(chatID, months))
+	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plPayload(chatID, months), a.plBuyer(ctx, chatID))
 	if err != nil {
 		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
 		return "", "", err
@@ -362,7 +391,7 @@ func (a *App) plCreateTopUp(ctx context.Context, chatID, kopecks int64, desc, re
 		return "", "", fmt.Errorf("platega: сумма пополнения %d коп", kopecks)
 	}
 	amount := float64(kopecks) / 100
-	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plTopUpPayload(chatID, kopecks))
+	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plTopUpPayload(chatID, kopecks), a.plBuyer(ctx, chatID))
 	if err != nil {
 		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "topup kopecks=%d: %v", kopecks, err)
 		return "", "", err

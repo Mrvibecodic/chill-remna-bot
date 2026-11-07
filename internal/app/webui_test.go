@@ -127,3 +127,60 @@ func TestWebUIAdmin_AwaitLogoClearedOnLeave(t *testing.T) {
 		t.Fatal("фото после ухода с экрана стало логотипом")
 	}
 }
+
+// Загруженный логотип убирается по одному: кнопка в запросе файла снимает
+// только свой слот, а «Убрать логотипы» на экране есть, пока задан любой.
+func TestWebUIAdmin_LogoRemoveOne(t *testing.T) {
+	ctx := context.Background()
+	a, _ := planApp(t)
+	fm := a.msg.(*fakeMsg)
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01")
+	fm.downloads = map[string][]byte{"light": png, "dark": png}
+	doc := func(id string) *models.Message {
+		return &models.Message{From: &models.User{ID: 100}, Chat: models.Chat{ID: 100},
+			Document: &models.Document{FileID: id, FileSize: 100, MimeType: "image/png"}}
+	}
+	has := func(from int, data string) bool {
+		for _, d := range fm.allCallbackData()[from:] {
+			if d == data {
+				return true
+			}
+		}
+		return false
+	}
+
+	n := len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(100, "wui:logo"))
+	if has(n, "wui:logodel") {
+		t.Fatal("кнопка удаления при пустом слоте")
+	}
+	a.handleDocument(ctx, doc("light"))
+	a.handleCallback(ctx, cb(100, "wui:logod"))
+	a.handleDocument(ctx, doc("dark"))
+	n = len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(100, "menu:webui"))
+	if !has(n, "wui:logoreset") {
+		t.Fatal("на экране нет «Убрать логотипы» при загруженном логотипе")
+	}
+
+	n = len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(100, "wui:logo"))
+	if !has(n, "wui:logodel") {
+		t.Fatal("в запросе логотипа нет кнопки удаления")
+	}
+	a.handleCallback(ctx, cb(100, "wui:logodel"))
+	if c := a.webUICfg(); c.LogoFile != "" || c.LogoDarkFile != "dark" {
+		t.Fatalf("убрать светлый: %+v", c)
+	}
+	if a.getUI(100).awaitLogo != "" {
+		t.Fatal("после удаления бот всё ещё ждёт файл")
+	}
+	if a.WebUI().Logo != "" {
+		t.Fatal("убранный логотип всё ещё отдаётся странице")
+	}
+	a.handleCallback(ctx, cb(100, "wui:logod"))
+	a.handleCallback(ctx, cb(100, "wui:logoddel"))
+	if c := a.webUICfg(); c.LogoDarkFile != "" || c.LogoDarkURL != "" {
+		t.Fatalf("убрать тёмный: %+v", c)
+	}
+}

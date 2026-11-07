@@ -418,12 +418,13 @@ type fakeStore struct {
 	paylogs          []model.PayLogEntry
 	torrents         []model.TorrentReport
 	// failMark — столько ближайших вызовов MarkTorrentUnblockNotified упадут.
-	failMark int
-	strikes  map[int64]string
-	wlIDs    map[int64]bool
-	invites  map[string]*model.Invite
-	autopays map[int64]*model.AutoPay
-	seq      int64
+	failMark   int
+	strikes    map[int64]string
+	wlIDs      map[int64]bool
+	invites    map[string]*model.Invite
+	inviteUses []model.InviteUse
+	autopays   map[int64]*model.AutoPay
+	seq        int64
 }
 
 func (s *fakeStore) WhitelistAllUsers(context.Context) (int64, error) {
@@ -520,13 +521,42 @@ func (s *fakeStore) ListInvites(context.Context) ([]model.Invite, error) {
 	return out, nil
 }
 
-func (s *fakeStore) UseInvite(_ context.Context, code string) (bool, error) {
+func (s *fakeStore) UseInvite(_ context.Context, code string, telegramID int64, open bool) (bool, error) {
 	inv := s.invites[code]
-	if inv == nil || !inv.Active(time.Now().UTC()) {
+	if inv == nil || inv.Revoked || (!open && !inv.Active(time.Now().UTC())) {
 		return false, nil
+	}
+	seen := false
+	for _, u := range s.inviteUses {
+		if u.Code == code && u.TelegramID == telegramID {
+			seen = true
+		}
+	}
+	if open && seen {
+		return false, nil
+	}
+	if !seen {
+		s.inviteUses = append(s.inviteUses, model.InviteUse{Code: code, TelegramID: telegramID, CreatedAt: time.Now().UTC().Format(time.RFC3339)})
 	}
 	inv.Used++
 	return true, nil
+}
+
+func (s *fakeStore) InviteUses(_ context.Context, code string, limit, offset int) ([]model.InviteUse, int, error) {
+	var all []model.InviteUse
+	for i := len(s.inviteUses) - 1; i >= 0; i-- {
+		if s.inviteUses[i].Code == code {
+			all = append(all, s.inviteUses[i])
+		}
+	}
+	if limit <= 0 || offset >= len(all) {
+		return nil, len(all), nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], len(all), nil
 }
 
 func (s *fakeStore) RevokeInvite(_ context.Context, code string) error {
@@ -538,6 +568,13 @@ func (s *fakeStore) RevokeInvite(_ context.Context, code string) error {
 
 func (s *fakeStore) DeleteInvite(_ context.Context, code string) error {
 	delete(s.invites, code)
+	kept := s.inviteUses[:0]
+	for _, u := range s.inviteUses {
+		if u.Code != code {
+			kept = append(kept, u)
+		}
+	}
+	s.inviteUses = kept
 	return nil
 }
 

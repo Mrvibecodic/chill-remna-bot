@@ -444,6 +444,9 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 			}
 		}
 	}
+	if line := a.userPlanLine(ctx, lang, u); line != "" {
+		subBlock = line + "\n" + subBlock
+	}
 	// Нарушения показываем только тем, у кого они есть: пустая строка «0»
 	// в каждой карточке — это шум.
 	torLine, torCount := "", 0
@@ -492,6 +495,35 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), backToUserList(a.getUI(chatID))), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	)
 	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", a.userLabelFor(ctx, u), created, p2p, status, subBlock)+torLine, rows)
+}
+
+// userPlanLine — тариф последней покупки для карточки ("" — покупок не было).
+// Имя берётся текущее: переименованный тариф показывается под новым именем.
+func (a *App) userPlanLine(ctx context.Context, lang string, u *model.User) string {
+	code := planCodeOf(u.Snapshot)
+	if code == "" {
+		return ""
+	}
+	p, err := a.planByCode(ctx, code)
+	if err != nil {
+		p = nil
+	}
+	if p == nil && err == nil && code == model.PlanCodeBase {
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+	}
+	if p != nil {
+		return i18n.T(lang, "user.plan", planTitleHTML(lang, p))
+	}
+	name := strings.TrimSpace(u.Snapshot.Name)
+	if name == "" {
+		name = code
+	}
+	if err != nil {
+		return i18n.T(lang, "user.plan", html.EscapeString(name))
+	}
+	return i18n.T(lang, "user.plan_gone", html.EscapeString(name))
 }
 
 func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExists, subBlocked bool) {

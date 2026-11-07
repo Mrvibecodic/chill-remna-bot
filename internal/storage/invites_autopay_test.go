@@ -18,12 +18,12 @@ func TestInvites(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < 2; i++ {
-			ok, err := st.UseInvite(ctx, "two")
+			ok, err := st.UseInvite(ctx, "two", int64(1000000001+i), false)
 			if err != nil || !ok {
 				t.Fatalf("активация %d: ok=%v err=%v", i+1, ok, err)
 			}
 		}
-		if ok, _ := st.UseInvite(ctx, "two"); ok {
+		if ok, _ := st.UseInvite(ctx, "two", 1000000009, false); ok {
 			t.Fatal("третья активация сверх лимита не должна проходить")
 		}
 		inv, err := st.GetInvite(ctx, "two")
@@ -33,7 +33,7 @@ func TestInvites(t *testing.T) {
 
 		past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
 		_ = st.CreateInvite(ctx, &model.Invite{Code: "old", MaxUses: 0, ExpiresAt: past})
-		if ok, _ := st.UseInvite(ctx, "old"); ok {
+		if ok, _ := st.UseInvite(ctx, "old", 1000000001, false); ok {
 			t.Fatal("просроченное приглашение не должно активироваться")
 		}
 
@@ -41,7 +41,7 @@ func TestInvites(t *testing.T) {
 		if err := st.RevokeInvite(ctx, "rev"); err != nil {
 			t.Fatal(err)
 		}
-		if ok, _ := st.UseInvite(ctx, "rev"); ok {
+		if ok, _ := st.UseInvite(ctx, "rev", 1000000001, false); ok {
 			t.Fatal("отозванное приглашение не должно активироваться")
 		}
 
@@ -55,7 +55,7 @@ func TestInvites(t *testing.T) {
 		if inv, _ := st.GetInvite(ctx, "rev"); inv != nil {
 			t.Fatal("удалённое приглашение не должно читаться")
 		}
-		if ok, _ := st.UseInvite(ctx, "нет-такого"); ok {
+		if ok, _ := st.UseInvite(ctx, "нет-такого", 1000000001, false); ok {
 			t.Fatal("несуществующий код не должен активироваться")
 		}
 	})
@@ -333,6 +333,86 @@ func TestClearWhitelistIDs(t *testing.T) {
 		ids, err := st.ListWhitelistIDs(ctx)
 		if err != nil || len(ids) != 0 {
 			t.Fatalf("список после очистки = %v, err=%v", ids, err)
+		}
+	})
+}
+
+// Кто пришёл по приглашению: закрытый режим держит лимит и пишет человека
+// один раз даже при повторе, открытый — пишет новичков мимо лимита и срока,
+// но не по отозванной ссылке и не дважды. Записи едут в снимке и
+// удаляются вместе с приглашением.
+func TestInviteUses(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		_ = st.CreateInvite(ctx, &model.Invite{Code: "lim", MaxUses: 2})
+		if ok, err := st.UseInvite(ctx, "lim", 1000000001, false); err != nil || !ok {
+			t.Fatalf("активация: ok=%v err=%v", ok, err)
+		}
+		if ok, _ := st.UseInvite(ctx, "lim", 1000000001, false); !ok {
+			t.Fatal("повторная активация тем же человеком должна тратить активацию, как раньше")
+		}
+		if ok, _ := st.UseInvite(ctx, "lim", 1000000003, false); ok {
+			t.Fatal("сверх лимита активация прошла")
+		}
+		list, total, err := st.InviteUses(ctx, "lim", 10, 0)
+		if err != nil || total != 1 || len(list) != 1 || list[0].TelegramID != 1000000001 {
+			t.Fatalf("пришедшие по lim: %+v total=%d err=%v", list, total, err)
+		}
+		if inv, _ := st.GetInvite(ctx, "lim"); inv.Used != 2 {
+			t.Fatalf("счётчик lim: %d", inv.Used)
+		}
+
+		past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+		_ = st.CreateInvite(ctx, &model.Invite{Code: "open", MaxUses: 1, ExpiresAt: past})
+		for _, id := range []int64{1000000004, 1000000005, 1000000006} {
+			if ok, err := st.UseInvite(ctx, "open", id, true); err != nil || !ok {
+				t.Fatalf("открытый режим, %d: ok=%v err=%v", id, ok, err)
+			}
+		}
+		if ok, _ := st.UseInvite(ctx, "open", 1000000004, true); ok {
+			t.Fatal("в открытом режиме один человек записан дважды")
+		}
+		if inv, _ := st.GetInvite(ctx, "open"); inv.Used != 3 {
+			t.Fatalf("счётчик open: %d", inv.Used)
+		}
+		page, total, err := st.InviteUses(ctx, "open", 2, 2)
+		if err != nil || total != 3 || len(page) != 1 {
+			t.Fatalf("вторая страница: %+v total=%d err=%v", page, total, err)
+		}
+		if _, n, _ := st.InviteUses(ctx, "open", 0, 0); n != 3 {
+			t.Fatalf("число без выборки: %d", n)
+		}
+
+		_ = st.CreateInvite(ctx, &model.Invite{Code: "revo", MaxUses: 0})
+		_ = st.RevokeInvite(ctx, "revo")
+		if ok, _ := st.UseInvite(ctx, "revo", 1000000007, true); ok {
+			t.Fatal("отозванное приглашение записало человека")
+		}
+		if ok, _ := st.UseInvite(ctx, "нет-такого", 1000000007, true); ok {
+			t.Fatal("несуществующее приглашение записало человека")
+		}
+		for _, c := range []string{"revo", "нет-такого"} {
+			if _, n, _ := st.InviteUses(ctx, c, 0, 0); n != 0 {
+				t.Fatalf("%s: осталась запись после отказа", c)
+			}
+		}
+
+		snap, err := st.Export(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snap.InviteUses) != 4 {
+			t.Fatalf("в снимок попало пришедших: %d, ждали 4", len(snap.InviteUses))
+		}
+
+		if err := st.DeleteInvite(ctx, "open"); err != nil {
+			t.Fatal(err)
+		}
+		if _, n, _ := st.InviteUses(ctx, "open", 0, 0); n != 0 {
+			t.Fatalf("после удаления приглашения осталось записей: %d", n)
+		}
+		if _, n, _ := st.InviteUses(ctx, "lim", 0, 0); n != 1 {
+			t.Fatalf("удаление задело чужое приглашение: %d", n)
 		}
 	})
 }
