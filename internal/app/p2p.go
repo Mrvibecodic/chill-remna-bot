@@ -1328,6 +1328,9 @@ func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
 		sold = false
 	}
 	s.AddSub = &sold
+	if sold {
+		s.AddSubTrafficGB, s.AddSubSquads = planAddSubTerms(a.basePlanRef)
+	}
 	s.Price = pr.Base[months]
 	s.Currency = pr.Currency
 	return s
@@ -1595,6 +1598,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.applyTextSearch(ctx, chatID, text)
 	case "plan_name", "plan_desc", "plan_icon", "plan_addsub_name", "plan_addsub_desc":
 		a.applyPlanText(ctx, chatID, ui.adminInput, text)
+	case "plan_addsub_gb":
+		a.applyPlanAddSubGB(ctx, chatID, text)
 	case "plan_access":
 		a.applyPlanAccessInput(ctx, chatID, text)
 	case "cards":

@@ -216,11 +216,15 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 		}
 		u := targets[i]
 		// Тариф пользователя мог быть продан без опции — такому доп-подписка
-		// не создаётся и при массовой синхронизации.
-		if u.TelegramID != 0 && !a.addSubSoldTo(ctx, u.TelegramID) {
+		// не создаётся и при массовой синхронизации. Трафик и сквады — те,
+		// что проданы его сделкой, иначе общие.
+		snap := a.userSnapshot(ctx, u.TelegramID)
+		if !snap.AddSubSold() {
 			continue
 		}
-		res, uerr := panel.UpsertAddSubForUser(ctx, u, opt)
+		uopt := opt
+		applyAddSubSnap(&uopt, snap)
+		res, uerr := panel.UpsertAddSubForUser(ctx, u, uopt)
 		switch {
 		case uerr != nil:
 			st.failed++

@@ -40,21 +40,25 @@ type planFile struct {
 }
 
 type planFilePlan struct {
-	Code         string               `json:"code"`
-	Name         string               `json:"name"`
-	Description  string               `json:"description,omitempty"`
-	Icon         string               `json:"icon,omitempty"`
-	Availability string               `json:"availability,omitempty"`
-	AddSub       string               `json:"addsub,omitempty"`
-	AddSubName   string               `json:"addsub_name,omitempty"`
-	AddSubDesc   string               `json:"addsub_desc,omitempty"`
-	TrafficGB    int                  `json:"traffic_gb,omitempty"`
-	DeviceLimit  int                  `json:"device_limit,omitempty"`
-	Strategy     string               `json:"strategy,omitempty"`
-	IntSquads    []string             `json:"int_squads,omitempty"`
-	ExtSquad     string               `json:"ext_squad,omitempty"`
-	Currency     string               `json:"currency,omitempty"`
-	Durations    []model.PlanDuration `json:"durations,omitempty"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Icon         string `json:"icon,omitempty"`
+	Availability string `json:"availability,omitempty"`
+	AddSub       string `json:"addsub,omitempty"`
+	AddSubName   string `json:"addsub_name,omitempty"`
+	AddSubDesc   string `json:"addsub_desc,omitempty"`
+	// Свои трафик и сквады доп-подписки; нет поля — как в общих. Пишутся
+	// только заданные: файл без них читает и предыдущая версия бота.
+	AddSubTrafficGB *int                 `json:"addsub_traffic_gb,omitempty"`
+	AddSubSquads    []string             `json:"addsub_squads,omitempty"`
+	TrafficGB       int                  `json:"traffic_gb,omitempty"`
+	DeviceLimit     int                  `json:"device_limit,omitempty"`
+	Strategy        string               `json:"strategy,omitempty"`
+	IntSquads       []string             `json:"int_squads,omitempty"`
+	ExtSquad        string               `json:"ext_squad,omitempty"`
+	Currency        string               `json:"currency,omitempty"`
+	Durations       []model.PlanDuration `json:"durations,omitempty"`
 }
 
 type planFileAccess struct {
@@ -82,6 +86,7 @@ func (a *App) exportPlan(ctx context.Context, chatID int64, code string) {
 			Code: p.Code, Name: p.Name, Description: p.Description, Icon: p.Icon,
 			Availability: p.Availability,
 			AddSub:       p.AddSub, AddSubName: p.AddSubName, AddSubDesc: p.AddSubDesc,
+			AddSubTrafficGB: p.AddSubTrafficGB, AddSubSquads: p.AddSubSquads,
 			TrafficGB: p.TrafficGB, DeviceLimit: p.DeviceLimit,
 			Strategy: p.Strategy, IntSquads: p.IntSquads, ExtSquad: p.ExtSquad,
 			Currency: p.Currency, Durations: p.Durations,
@@ -135,6 +140,7 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 		Description: f.Plan.Description, Icon: strings.TrimSpace(f.Plan.Icon),
 		Availability: f.Plan.Availability,
 		AddSub:       f.Plan.AddSub, AddSubName: strings.TrimSpace(f.Plan.AddSubName), AddSubDesc: f.Plan.AddSubDesc,
+		AddSubTrafficGB: f.Plan.AddSubTrafficGB, AddSubSquads: f.Plan.AddSubSquads,
 		TrafficGB:   f.Plan.TrafficGB,
 		DeviceLimit: f.Plan.DeviceLimit, Strategy: f.Plan.Strategy,
 		IntSquads: f.Plan.IntSquads, ExtSquad: f.Plan.ExtSquad,

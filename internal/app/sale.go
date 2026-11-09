@@ -285,6 +285,9 @@ func (a *App) planSnapshotOf(p *model.Plan, d *model.PlanDuration, months int) *
 		AddSub:   &sold,
 		Currency: p.Currency,
 	}
+	if sold {
+		snap.AddSubTrafficGB, snap.AddSubSquads = planAddSubTerms(p)
+	}
 	if d != nil {
 		snap.Price = d.Base
 	}

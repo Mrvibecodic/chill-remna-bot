@@ -67,6 +67,7 @@ func basePlanFrom(cfg *model.BotConfig, existing *model.Plan) *model.Plan {
 		p.AddSub = existing.AddSub
 		p.AddSubName = existing.AddSubName
 		p.AddSubDesc = existing.AddSubDesc
+		p.AddSubTrafficGB, p.AddSubSquads = planAddSubTerms(existing)
 		p.Enabled = existing.Enabled
 		p.CreatedAt = existing.CreatedAt
 	}
@@ -234,6 +235,7 @@ func (a *App) rememberBasePlan(p *model.Plan) {
 	cp := *p
 	cp.IntSquads = append([]string(nil), p.IntSquads...)
 	cp.Durations = append([]model.PlanDuration(nil), p.Durations...)
+	cp.AddSubTrafficGB, cp.AddSubSquads = planAddSubTerms(p)
 	a.mu.Lock()
 	a.basePlanRef = &cp
 	a.mu.Unlock()
@@ -266,7 +268,18 @@ func samePlan(a, b *model.Plan) bool {
 		a.FromConfig != b.FromConfig {
 		return false
 	}
-	if model.EncodeStrings(a.IntSquads) != model.EncodeStrings(b.IntSquads) {
+	if model.EncodeStrings(a.IntSquads) != model.EncodeStrings(b.IntSquads) ||
+		model.EncodeStrings(a.AddSubSquads) != model.EncodeStrings(b.AddSubSquads) {
+		return false
+	}
+	at, bt := -1, -1
+	if a.AddSubTrafficGB != nil {
+		at = *a.AddSubTrafficGB
+	}
+	if b.AddSubTrafficGB != nil {
+		bt = *b.AddSubTrafficGB
+	}
+	if at != bt {
 		return false
 	}
 	return model.EncodeDurations(a.Durations) == model.EncodeDurations(b.Durations)

@@ -422,6 +422,16 @@ func (a *App) onPlanSquadToggle(ctx context.Context, chatID int64, val string) {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "plans.sq_stale"))
 		return
 	}
+	// Сквады доп-подписки живут вне сетки цен: пишутся через editPlan, как и
+	// режим опции, и не переводят «Базовый» на ведение редактором.
+	if kind == "a" {
+		if err := a.togglePlanAddSubSquad(ctx, code, uuid); err != nil {
+			a.planEditFailed(ctx, chatID, code, err)
+			return
+		}
+		a.showPlanAddSubSquads(ctx, chatID, code)
+		return
+	}
 	// Месяц из callback-данных не принимается на веру: подделанный или
 	// оставшийся от прежней сетки месяц завёл бы длительность-призрак.
 	if mo != 0 {
