@@ -73,6 +73,10 @@ func (a *App) showPlanAddSub(ctx context.Context, chatID int64, code string) {
 		b.WriteString("\n\n")
 		b.WriteString(i18n.T(lang, "plans.addsub_infra_off"))
 	}
+	if warn := a.planAddSubSquadsWarning(ctx, p); warn != "" {
+		b.WriteString("\n\n")
+		b.WriteString(i18n.T(lang, warn))
+	}
 
 	cur := model.NormalizeAddSubMode(p.AddSub)
 	var rows [][]models.InlineKeyboardButton
@@ -110,6 +114,10 @@ func (a *App) setPlanAddSubMode(ctx context.Context, chatID int64, code, tok str
 	a.showPlanAddSub(ctx, chatID, code)
 }
 
+// addSubMaxGB — верхняя граница трафика доп-подписки: больше в байтах не
+// влезает разумно, а опечатка с лишними нулями переполнила бы int64.
+const addSubMaxGB = 1_000_000
+
 // planAddSubTrafficLabel — трафик доп-подписки тарифа для экрана: свой или
 // «как в общих» с тем, что сейчас стоит в общих настройках.
 func (a *App) planAddSubTrafficLabel(lang string, p *model.Plan) string {
@@ -135,9 +143,6 @@ func (a *App) planAddSubTrafficLabel(lang string, p *model.Plan) string {
 func (a *App) planAddSubSquadsLabel(ctx context.Context, lang string, p *model.Plan) string {
 	if len(p.AddSubSquads) > 0 {
 		names, _ := a.squadNames(ctx, p.AddSubSquads, "")
-		if names == "" {
-			names = strconv.Itoa(len(p.AddSubSquads))
-		}
 		return names
 	}
 	a.mu.Lock()
@@ -165,8 +170,8 @@ func (a *App) applyPlanAddSubGB(ctx context.Context, chatID int64, text string) 
 	var traffic *int
 	if v != "-" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.addsub_bad_gb"),
+		if err != nil || n < 0 || n > addSubMaxGB {
+			a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.addsub_bad_gb", addSubMaxGB),
 				[][]models.InlineKeyboardButton{navBack(lang, "pln:as:"+code)})
 			return
 		}
@@ -266,4 +271,30 @@ func (a *App) clearPlanAddSubSquads(ctx context.Context, code string) error {
 		return nil
 	})
 	return err
+}
+
+// planAddSubSquadsWarning — ключ предупреждения о сквадах доп-подписки
+// тарифа: свои сквады все удалены в панели (покупатели получат общие) или
+// своих нет, а общие не выбраны (доп-подписка будет без серверов). Пусто —
+// предупреждать не о чем.
+func (a *App) planAddSubSquadsWarning(ctx context.Context, p *model.Plan) string {
+	if !a.planAddSubOn(p) {
+		return ""
+	}
+	if len(p.AddSubSquads) > 0 {
+		if kept, _ := a.liveSquads(ctx).KeepInt(p.AddSubSquads); len(kept) == 0 {
+			return "plans.addsub_sq_all_gone"
+		}
+		return ""
+	}
+	a.mu.Lock()
+	common := 0
+	if a.botCfg != nil {
+		common = len(a.botCfg.AddSub.InternalSquads)
+	}
+	a.mu.Unlock()
+	if common == 0 {
+		return "plans.addsub_sq_none"
+	}
+	return ""
 }

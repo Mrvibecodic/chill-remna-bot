@@ -2079,6 +2079,11 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		if n < 0 {
 			n = 0
 		}
+		if n > addSubMaxGB {
+			a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "addsub.bad_gb", addSubMaxGB),
+				[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:addsub")})
+			return
+		}
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.AddSub.TrafficGB = n

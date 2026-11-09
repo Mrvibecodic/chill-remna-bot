@@ -223,7 +223,9 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 			continue
 		}
 		uopt := opt
-		applyAddSubSnap(&uopt, snap)
+		if applyAddSubSnap(&uopt, snap, addSubLiveFor(ctx, panel, snap)) {
+			a.log.Warn("addsub: все сквады тарифа удалены в панели, взяты общие", "user", u.Username, "plan", snap.Code)
+		}
 		res, uerr := panel.UpsertAddSubForUser(ctx, u, uopt)
 		switch {
 		case uerr != nil:

@@ -193,13 +193,13 @@ func TestAddSubTerms_AdminScreen(t *testing.T) {
 	squads := func() string { got, _ := fs.GetPlan(ctx, p.Code); return strings.Join(got.AddSubSquads, ",") }
 
 	planTap(t, a, "pln:as:"+p.Code)
-	if !strings.Contains(fm.last(), "как в общих (10 GB)") {
+	if !strings.Contains(fm.last(), "как в настройках (10 GB)") {
 		t.Fatalf("экран не показывает общий трафик: %q", fm.last())
 	}
 	for _, step := range []struct {
 		in   string
 		want *int
-	}{{"25", intp(25)}, {"0", intp(0)}, {"мало", intp(0)}, {"-1", intp(0)}, {"-", nil}} {
+	}{{"25", intp(25)}, {"0", intp(0)}, {"мало", intp(0)}, {"-1", intp(0)}, {"1000001", intp(0)}, {"1000000", intp(1000000)}, {"-", nil}} {
 		planTap(t, a, "pln:ast:"+p.Code)
 		a.handleMessage(ctx, msgText(planAdmin, step.in))
 		got := traffic()
@@ -207,7 +207,7 @@ func TestAddSubTerms_AdminScreen(t *testing.T) {
 			t.Fatalf("ввод %q: трафик %v", step.in, got)
 		}
 	}
-	if !strings.Contains(fm.last(), "как в общих") {
+	if !strings.Contains(fm.last(), "как в настройках (") {
 		t.Fatalf("после прочерка экран не вернулся к общим: %q", fm.last())
 	}
 
@@ -316,5 +316,99 @@ func TestAddSubTerms_ExportImport(t *testing.T) {
 	}
 	if got.AddSubTrafficGB != nil || got.AddSubSquads != nil {
 		t.Fatalf("файл без условий дал свои условия: %+v", got)
+	}
+}
+
+// Все свои сквады тарифа удалены в панели: доп-подписка получает общие, а
+// экран тарифа предупреждает.
+func TestAddSubTerms_GoneSquadsFallBackToCommon(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs, panel := addSubTermsApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	p.AddSubSquads = []string{"gone-1"}
+	_ = fs.SavePlan(ctx, p)
+	snap := a.planSnapshotOf(p, p.Duration(1), 1)
+	if _, _, err := a.finalizePurchase(ctx, 555, 1, model.PayMethodYooKassa, "990 ₽", "yk_terms_gone", snap); err != nil {
+		t.Fatal(err)
+	}
+	if _, squads := panel.last(t); squads != "g1" {
+		t.Fatalf("доп-подписка без живых сквадов тарифа не взяла общие: %q", squads)
+	}
+	planTap(t, a, "pln:as:"+p.Code)
+	if !strings.Contains(fm.last(), "удалены в панели") {
+		t.Fatalf("нет предупреждения об удалённых сквадах: %q", fm.last())
+	}
+	// Хотя бы один живой — свои сквады остаются.
+	p.AddSubSquads = []string{"gone-1", "s2"}
+	_ = fs.SavePlan(ctx, p)
+	snap = a.planSnapshotOf(p, p.Duration(1), 1)
+	if _, _, err := a.finalizePurchase(ctx, 555, 1, model.PayMethodYooKassa, "990 ₽", "yk_terms_gone2", snap); err != nil {
+		t.Fatal(err)
+	}
+	if _, squads := panel.last(t); squads != "s2" {
+		t.Fatalf("живой сквад тарифа потерян: %q", squads)
+	}
+}
+
+// Ни своих, ни общих сквадов — экран тарифа предупреждает; общий трафик
+// тоже не принимает опечатку с лишними нулями.
+func TestAddSubTerms_NoSquadsWarningAndGlobalCap(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs, _ := addSubTermsApp(t)
+	a.botCfg.AddSub.InternalSquads = nil
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	planTap(t, a, "pln:as:"+p.Code)
+	if !strings.Contains(fm.last(), "без серверов") {
+		t.Fatalf("нет предупреждения о пустых сквадах: %q", fm.last())
+	}
+	a.botCfg.AddSub.InternalSquads = []string{"g1"}
+	planTap(t, a, "pln:as:"+p.Code)
+	if strings.Contains(fm.last(), "без серверов") || strings.Contains(fm.last(), "удалены в панели") {
+		t.Fatalf("лишнее предупреждение: %q", fm.last())
+	}
+
+	planTap(t, a, "addsub:gb")
+	a.handleMessage(ctx, msgText(planAdmin, "1000000000000"))
+	if a.botCfg.AddSub.TrafficGB != 10 {
+		t.Fatalf("общий трафик принял переполнение: %d", a.botCfg.AddSub.TrafficGB)
+	}
+	planTap(t, a, "addsub:gb")
+	a.handleMessage(ctx, msgText(planAdmin, "40"))
+	if a.botCfg.AddSub.TrafficGB != 40 {
+		t.Fatalf("общий трафик не сохранился: %d", a.botCfg.AddSub.TrafficGB)
+	}
+}
+
+// Версия файла тарифа: без своих условий — 1 (читают прежние версии бота),
+// со своими — 2; файл новее понятного отклоняется внятно, даже с незнакомыми
+// полями; трафик вне границ не импортируется.
+func TestAddSubTerms_PlanFileVersion(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs, _ := addSubTermsApp(t)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+	version := func() int {
+		planTap(t, a, "pln:exp:"+p.Code)
+		var head struct {
+			Version int `json:"version"`
+		}
+		_ = json.Unmarshal(fm.docs["plan_"+p.Code+".json"], &head)
+		return head.Version
+	}
+	if v := version(); v != 1 {
+		t.Fatalf("файл без своих условий записан версией %d", v)
+	}
+	p.AddSubTrafficGB = intp(5)
+	_ = fs.SavePlan(ctx, p)
+	if v := version(); v != 2 {
+		t.Fatalf("файл со своими условиями записан версией %d", v)
+	}
+
+	_, _, err := parsePlanFile([]byte(`{"format":"remnabot-plan","version":3,"plan":{"code":"abc","name":"x","future":1}}`))
+	if err == nil || !strings.Contains(err.Error(), "более новой версии") {
+		t.Fatalf("файл новой версии отклонён невнятно: %v", err)
+	}
+	_, _, err = parsePlanFile([]byte(`{"format":"remnabot-plan","version":2,"plan":{"code":"abcd","name":"x","addsub_traffic_gb":1000001}}`))
+	if err == nil || !strings.Contains(err.Error(), "трафик доп-подписки") {
+		t.Fatalf("импорт принял трафик вне границ: %v", err)
 	}
 }

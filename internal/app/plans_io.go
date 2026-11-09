@@ -21,8 +21,12 @@ import (
 // молча терять поля.
 
 const (
-	planFileFormat  = "remnabot-plan"
-	planFileVersion = 1
+	planFileFormat = "remnabot-plan"
+	// planFileVersion — новейшая версия файла, которую этот бот читает. Файл
+	// без своих условий доп-подписки пишется версией 1: его читают и прежние
+	// версии бота.
+	planFileVersion     = 2
+	planFileVersionBase = 1
 	// planImportMaxBytes — предел размера файла импорта. Тариф с большим
 	// списком допущенных занимает десятки килобайт; мегабайты — это не тариф.
 	planImportMaxBytes = 256 << 10
@@ -81,7 +85,7 @@ func (a *App) exportPlan(ctx context.Context, chatID int64, code string) {
 	}
 	f := planFile{
 		Format:  planFileFormat,
-		Version: planFileVersion,
+		Version: planFileVersionBase,
 		Plan: planFilePlan{
 			Code: p.Code, Name: p.Name, Description: p.Description, Icon: p.Icon,
 			Availability: p.Availability,
@@ -91,6 +95,9 @@ func (a *App) exportPlan(ctx context.Context, chatID int64, code string) {
 			Strategy: p.Strategy, IntSquads: p.IntSquads, ExtSquad: p.ExtSquad,
 			Currency: p.Currency, Durations: p.Durations,
 		},
+	}
+	if p.AddSubTrafficGB != nil || len(p.AddSubSquads) > 0 {
+		f.Version = planFileVersion
 	}
 	for _, e := range access {
 		f.Access = append(f.Access, planFileAccess{TelegramID: e.TelegramID, Email: e.Email})
@@ -123,6 +130,15 @@ var errPlanFile = errors.New("файл не разобран")
 // тариф (без Order/Enabled/FromConfig — их решает применение) и список
 // допущенных.
 func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
+	// Версия проверяется до строгого разбора: файл более новой версии с
+	// незнакомыми полями иначе отклонялся бы невнятным «unknown field».
+	var head struct {
+		Format  string `json:"format"`
+		Version int    `json:"version"`
+	}
+	if err := json.Unmarshal(data, &head); err == nil && head.Format == planFileFormat && head.Version > planFileVersion {
+		return nil, nil, fmt.Errorf("%w: файл из более новой версии бота (version=%d)", errPlanFile, head.Version)
+	}
 	var f planFile
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
@@ -148,6 +164,9 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 	}
 	if !model.ValidPlanCode(p.Code) {
 		return nil, nil, fmt.Errorf("%w: недопустимый код тарифа %q", errPlanFile, p.Code)
+	}
+	if p.AddSubTrafficGB != nil && (*p.AddSubTrafficGB < 0 || *p.AddSubTrafficGB > addSubMaxGB) {
+		return nil, nil, fmt.Errorf("%w: трафик доп-подписки вне 0…%d GB", errPlanFile, addSubMaxGB)
 	}
 	if n := len([]rune(p.AddSubName)); n > planNameMaxLen {
 		return nil, nil, fmt.Errorf("%w: название опции длиннее %d символов", errPlanFile, planNameMaxLen)

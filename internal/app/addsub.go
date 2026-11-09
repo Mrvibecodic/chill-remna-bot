@@ -42,17 +42,32 @@ func (a *App) addSubOptions(resetTraffic bool) (*remnawave.Client, bool, remnawa
 
 // applyAddSubSnap накладывает на общие условия доп-подписки свои трафик и
 // сквады тарифа, проданные этой сделкой. Без снимка или без своих условий у
-// тарифа остаются общие.
-func applyAddSubSnap(opt *remnawave.AddSubOptions, snap *model.PlanSnapshot) {
+// тарифа остаются общие. Если все свои сквады удалены в панели, остаются
+// общие (fellBack): иначе новому покупателю доп-подписка не создалась бы
+// вовсе, а у старого остались бы прежние серверы.
+func applyAddSubSnap(opt *remnawave.AddSubOptions, snap *model.PlanSnapshot, live remnawave.LiveSquads) (fellBack bool) {
 	if snap == nil {
-		return
+		return false
 	}
 	if snap.AddSubTrafficGB != nil && *snap.AddSubTrafficGB >= 0 {
 		opt.TrafficBytes = int64(*snap.AddSubTrafficGB) * 1024 * 1024 * 1024
 	}
 	if len(snap.AddSubSquads) > 0 {
+		if kept, _ := live.KeepInt(snap.AddSubSquads); len(kept) == 0 {
+			return true
+		}
 		opt.InternalSquads = append([]string(nil), snap.AddSubSquads...)
 	}
+	return false
+}
+
+// addSubLiveFor — список сквадов панели, только если сделка несёт свои
+// сквады: остальным он не нужен, а лишний поход в панель — нет.
+func addSubLiveFor(ctx context.Context, panel *remnawave.Client, snap *model.PlanSnapshot) remnawave.LiveSquads {
+	if panel == nil || snap == nil || len(snap.AddSubSquads) == 0 {
+		return remnawave.LiveSquads{}
+	}
+	return panel.LiveSquads(ctx)
 }
 
 // planAddSubTerms — свои трафик и сквады доп-подписки тарифа для снимка
@@ -157,7 +172,9 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 		}
 		return
 	}
-	applyAddSubSnap(&opt, snap)
+	if applyAddSubSnap(&opt, snap, addSubLiveFor(ctx, panel, snap)) {
+		a.log.Warn("addsub: все сквады тарифа удалены в панели, взяты общие", "tg_id", telegramID, "plan", snap.Code)
+	}
 	res, err := panel.UpsertAddSub(ctx, telegramID, opt)
 	if err != nil {
 		a.log.Warn("addsub: upsert", "tg_id", telegramID, "err", err)
