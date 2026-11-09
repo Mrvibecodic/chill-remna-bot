@@ -23,7 +23,7 @@ func TestAddSubOfferTerms(t *testing.T) {
 		noInfra   bool // список сквадов и хостов панели не получен
 		traffic   string
 		countries string // "" — строки нет
-		miniGB    int
+		miniGB    int    // -1 — в мини-апп не присылается
 		miniN     int
 	}{
 		{"свои условия", gb(50), []string{"s1"}, false, false,
@@ -32,7 +32,7 @@ func TestAddSubOfferTerms(t *testing.T) {
 			"📊 Трафик: 30 ГБ в месяц", "🌍 Страны (1): 🇩🇪 Германия", 30, 1},
 		{"свои сквады удалены в панели", gb(0), []string{"gone"}, false, false,
 			"📊 Трафик: безлимит", "🌍 Страны (1): 🇩🇪 Германия", 0, 1},
-		{"строки убраны в текстах", gb(50), []string{"s1"}, true, false, "", "", 50, 2},
+		{"строки убраны в текстах", gb(50), []string{"s1"}, true, false, "", "", -1, 0},
 		{"панель не ответила", gb(50), []string{"s1"}, false, true, "📊 Трафик: 50 ГБ в месяц", "", 50, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +80,11 @@ func TestAddSubOfferTerms(t *testing.T) {
 					continue
 				}
 				found = true
-				if mp.AddSubTrafficGB == nil || *mp.AddSubTrafficGB != tc.miniGB || len(mp.AddSubCountries) != tc.miniN {
+				gotGB := -1 // -1 — трафик не прислан
+				if mp.AddSubTrafficGB != nil {
+					gotGB = *mp.AddSubTrafficGB
+				}
+				if gotGB != tc.miniGB || len(mp.AddSubCountries) != tc.miniN {
 					t.Fatalf("мини-апп: трафик %v, стран %d", mp.AddSubTrafficGB, len(mp.AddSubCountries))
 				}
 			}

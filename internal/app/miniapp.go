@@ -249,10 +249,16 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	}
 	if a.planAddSubOn(p) {
 		pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
+		// Строку, убранную в «Текстах бота», не показывают и мини-апп с ЛК —
+		// как строку серверов.
 		gb, g := a.addSubShown(ctx, p)
-		pd.AddSubTrafficGB = &gb
-		for _, c := range g.countries {
-			pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+		if i18n.T(lang, "buy.addsub_traffic", "1") != "" {
+			pd.AddSubTrafficGB = &gb
+		}
+		if i18n.T(lang, "buy.addsub_countries", 1, "1") != "" {
+			for _, c := range g.countries {
+				pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+			}
 		}
 	}
 	// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
