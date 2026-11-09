@@ -42,6 +42,11 @@ type PlanSnapshot struct {
 	// раньше» — опция есть, пока включена глобально. Явный false появляется
 	// только у тарифов, проданных без опции.
 	AddSub *bool `json:"addsub,omitempty"`
+	// AddSubTrafficGB и AddSubSquads — свои условия доп-подписки у тарифа на
+	// момент сделки (0 — безлимит). Нет поля — как в общих настройках
+	// доп-подписки, и тогда действуют сегодняшние общие настройки.
+	AddSubTrafficGB *int     `json:"addsub_traffic_gb,omitempty"`
+	AddSubSquads    []string `json:"addsub_squads,omitempty"`
 
 	Price    string `json:"price,omitempty"`
 	Currency string `json:"currency,omitempty"`
