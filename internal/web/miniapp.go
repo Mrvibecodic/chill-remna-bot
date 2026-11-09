@@ -345,6 +345,9 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+	// PlanTitle — тариф текущей подписки (на триале — «Пробный период»);
+	// пусто — тариф неизвестен, фронт строку не показывает.
+	PlanTitle string `json:"plan_title,omitempty"`
 	// TrafficUsed/TrafficLimit — трафик текущего периода в байтах (лимит 0 —
 	// безлимит); TrafficOK — сервер их прислал.
 	TrafficOK    bool  `json:"traffic_ok"`

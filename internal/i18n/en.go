@@ -367,6 +367,8 @@ var en = map[string]string{
 	"sub.active":               "%s, your subscription is active until <b>%s</b>.\n\n📋 Link to add to your app (tap to copy):\n<code>%s</code>\n\n🌐 Or open %s in a browser (preferably on the same device where you will install the client) — there you can pick an app, install it and read the guides.\n\n❓ Questions? Use the support button below.",
 	"sub.no_expire":            "no expiry",
 	"sub.tz_msk":               "MSK (Moscow time)",
+	"sub.plan":                 "🏷 Plan: <b>%s</b>",
+	"sub.plan_trial":           "🎁 Free trial",
 	"sub.traffic":              "📊 Traffic: <b>%s of %s GB</b>",
 	"sub.traffic_unlim":        "📊 Traffic: <b>%s GB</b>, unlimited",
 	"sub.traffic_reset":        "♻️ Traffic reset: <b>%s</b>",

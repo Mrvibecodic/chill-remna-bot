@@ -692,6 +692,13 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "addsub", Ru: "доп_подписка", Desc: [2]string{"название доп-подписки из настроек тарифа или общих; если не задано — текст «addsub.default_name»", "add-on subscription name from plan or global settings; if not set — the «addsub.default_name» text"}, Example: [2]string{"Доп-сервер", "Add-on server"}},
 		}},
+	{Key: "sub.plan", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Экран «Мои подписки» — тариф текущей подписки", "«My subscriptions» screen — plan of the current subscription"},
+		Vars: []EditVar{
+			{Name: "plan", Ru: "тариф", Desc: [2]string{"значок и название тарифа последней покупки; на пробном периоде — текст «sub.plan_trial»", "icon and name of the last purchased plan; during a trial — the «sub.plan_trial» text"}, Example: [2]string{"⚡ Стандарт", "⚡ Standard"}},
+		}},
+	{Key: "sub.plan_trial", Section: "sub", Kind: KindButton,
+		Where: [2]string{"Название тарифа на пробном периоде (чат, мини-апп и ЛК)", "Plan name during a free trial (chat, mini-app and web cabinet)"}},
 	{Key: "sub.traffic", Section: "sub", Kind: KindHTML,
 		Where: [2]string{"Экран «Мои подписки» — трафик периода при лимите", "«My subscriptions» screen — period traffic with a limit"},
 		Vars: []EditVar{
