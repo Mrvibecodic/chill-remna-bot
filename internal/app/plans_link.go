@@ -216,16 +216,6 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 		b.WriteString("\n\n")
 		b.WriteString(html.EscapeString(desc))
 	}
-	// Опция доп-подписки: покупатель видит её только там, где она продаётся.
-	if a.planAddSubOn(p) {
-		name, desc := a.addSubTexts(lang, p)
-		b.WriteString("\n\n")
-		b.WriteString(i18n.T(lang, "buy.addsub_line", html.EscapeString(name)))
-		if desc != "" {
-			b.WriteString("\n")
-			b.WriteString(html.EscapeString(desc))
-		}
-	}
 	// Смена тарифа: остаток не сгорает — говорим об этом прямо на карточке.
 	// Точный сдвиг в днях (по соотношению цен) покажет экран способов оплаты:
 	// он зависит от выбранного срока.
@@ -242,6 +232,21 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	if terms := planTermsText(lang, p, dev); terms != "" {
 		b.WriteString("\n\n")
 		b.WriteString(terms)
+	}
+	// Опция доп-подписки — после условий тарифа: у неё свои трафик и страны,
+	// рядом с основными их легко перепутать. Видна только там, где продаётся.
+	if a.planAddSubOn(p) {
+		name, desc := a.addSubTexts(lang, p)
+		b.WriteString("\n\n")
+		b.WriteString(i18n.T(lang, "buy.addsub_line", html.EscapeString(name)))
+		if desc != "" {
+			b.WriteString("\n")
+			b.WriteString(html.EscapeString(desc))
+		}
+		if terms := a.addSubTermsText(ctx, lang, p); terms != "" {
+			b.WriteString("\n")
+			b.WriteString(terms)
+		}
 	}
 	b.WriteString("\n\n")
 	b.WriteString(i18n.T(lang, "plans.offer_choose"))

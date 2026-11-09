@@ -74,6 +74,17 @@ var editableList = []Editable{
 		}},
 	{Key: "buy.choose_tariff", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Экран «Купить» — заголовок витрины со списком тарифов", "«Buy» screen — storefront header with the plan list"}},
+	{Key: "buy.addsub_traffic", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа — трафик доп-подписки под её названием", "Plan card — add-on subscription traffic under its name"},
+		Vars: []EditVar{
+			{Name: "traffic", Ru: "трафик", Desc: [2]string{"трафик доп-подписки тарифа, например «50 ГБ в месяц» или «безлимит» (сбрасывается вместе с основным)", "the plan's add-on traffic, e.g. “50 GB per month” or “unlimited” (resets with the main one)"}, Example: [2]string{"50 ГБ в месяц", "50 GB per month"}},
+		}},
+	{Key: "buy.addsub_countries", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа — страны доп-подписки под её названием", "Plan card — add-on subscription countries under its name"},
+		Vars: []EditVar{
+			{Name: "country_count", Ru: "число_стран", Desc: [2]string{"сколько стран у доп-подписки (число)", "number of add-on countries"}, Example: [2]string{"2", "2"}},
+			{Name: "countries", Ru: "страны", Desc: [2]string{"страны доп-подписки через запятую: флаг и название (если название не определено — только флаг)", "comma-separated add-on countries: flag and name (flag only if the name is unknown)"}, Example: [2]string{"🇷🇺 Россия, 🇰🇿 Казахстан", "🇷🇺 Russia, 🇰🇿 Kazakhstan"}},
+		}},
 	{Key: "buy.countries", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Карточка тарифа и экран выбора оплаты — список доступных стран", "Plan card and payment method screen — list of available countries"},
 		Vars: []EditVar{

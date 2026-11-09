@@ -245,6 +245,11 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	}
 	if a.planAddSubOn(p) {
 		pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
+		gb, g := a.addSubShown(ctx, p)
+		pd.AddSubTrafficGB = &gb
+		for _, c := range g.countries {
+			pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+		}
 	}
 	// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
 	// получатель — telegram_user_id покупателя.

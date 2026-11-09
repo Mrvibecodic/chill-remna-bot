@@ -99,6 +99,8 @@ var en = map[string]string{
 	"buy.per_n_mo":            "/%d mo",
 	"buy.btn_switch_plan":     "🔀 Pick another plan",
 	"buy.addsub_line":         "➕ <b>%s</b> — included in the plan",
+	"buy.addsub_traffic":      "📊 Traffic: %s",
+	"buy.addsub_countries":    "🌍 Countries (%d): %s",
 	"buy.switch_note":         "💱 The remainder of your current plan is not lost: when switching it is converted into days by price ratio. The exact shift is shown before payment.",
 	"buy.switch_days":         "💱 Current plan remainder credit: %+d day(s) to the term after payment (converted by price ratio).",
 	"renew.plan_gone":         "ℹ️ The plan you were on is no longer available. Pick a new one — your current subscription is unaffected: the paid terms are locked until it ends.",

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,62 @@ func planAddSubTerms(p *model.Plan) (*int, []string) {
 		squads = append([]string(nil), p.AddSubSquads...)
 	}
 	return traffic, squads
+}
+
+// addSubShown — условия доп-подписки тарифа для витрины: трафик в GB (0 —
+// безлимит) и страны её сквадов. Свои условия тарифа, иначе общие; свои
+// сквады, удалённые в панели все до одного, заменяются общими — как при
+// выдаче (applyAddSubSnap).
+func (a *App) addSubShown(ctx context.Context, p *model.Plan) (gb int, g planGeo) {
+	_, _, _, trafficBytes, squads := a.addSubParams()
+	gb = int(trafficBytes / (1024 * 1024 * 1024))
+	own, ownSquads := planAddSubTerms(p)
+	if own != nil {
+		gb = *own
+	}
+	if len(ownSquads) > 0 {
+		known, _ := a.infra(ctx)
+		if len(known) == 0 || anySquadKnown(known, ownSquads) {
+			squads = ownSquads
+		}
+	}
+	return gb, a.squadGeo(ctx, squads)
+}
+
+// anySquadKnown — есть ли в панели хотя бы один из сквадов.
+func anySquadKnown(known []remnawave.SquadFull, ids []string) bool {
+	for _, s := range known {
+		for _, id := range ids {
+			if s.UUID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// addSubTermsText — трафик и страны доп-подписки для карточки тарифа в чате.
+// Каждую строку админ может убрать в «Текстах бота».
+func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) string {
+	gb, g := a.addSubShown(ctx, p)
+	var lines []string
+	if line := i18n.T(lang, "buy.addsub_traffic", trafficValue(lang, p.Strategy, gb)); line != "" {
+		lines = append(lines, line)
+	}
+	if len(g.countries) > 0 {
+		parts := make([]string, 0, len(g.countries))
+		for _, c := range g.countries {
+			if c.Name != "" {
+				parts = append(parts, c.Flag+" "+c.Name)
+			} else {
+				parts = append(parts, c.Flag)
+			}
+		}
+		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), html.EscapeString(strings.Join(parts, ", "))); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // planAddSubOn — продаётся ли опция доп-подписки с этим тарифом. Глобальный
