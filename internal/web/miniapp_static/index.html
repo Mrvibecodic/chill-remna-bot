@@ -220,7 +220,8 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .pass .ph{position:relative;padding:15px 16px 13px}
 .pass .pl{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .pass .brand{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#cdd6ff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:12px}
-.pass .pstat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#bdf3da}
+.pass .pstat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#bdf3da;flex:none}
+.pass .pstat.bad{color:#fecaca}.pass .pstat.warn{color:#fde68a}
 .pass .route{display:flex;align-items:center;justify-content:space-between;color:#fff}
 .pass .route .pt{font-size:17px;font-weight:800}
 .pass .route .pic svg{color:#9fb4e8}
@@ -624,13 +625,23 @@ function skMain(){
 function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px"></div><div class="sk sk-row"></div><div class="sk sk-row"></div>';}
 
 /* ---- main screen ---- */
+// Статус подписки для карточки: панель отдаёт учётку и после окончания
+// срока, трафика или при блокировке. null — подписка работает.
+function subDead(sub){
+  var st=String(sub.status||'').toUpperCase();
+  if(st==='DISABLED')return {t:'отключена',c:'bad'};
+  if(st==='LIMITED')return {t:'трафик исчерпан',c:'warn'};
+  if(st==='EXPIRED'||(sub.expire_ts&&sub.expire_ts*1000<=Date.now()))return {t:'истекла',c:'bad'};
+  return null;
+}
 function passHTML(sub){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
     var atext=addSubText(sub);
+    var dead=subDead(sub);
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
-      '<div class="pl"><span class="brand">'+(sub.plan_title?'ТАРИФ · '+esc(String(sub.plan_title).toUpperCase()):'ДОСТУП · BOARDING')+'</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
+      '<div class="pl"><span class="brand">'+(sub.plan_title?'ТАРИФ · '+esc(String(sub.plan_title).toUpperCase()):'ДОСТУП · BOARDING')+'</span>'+(dead?'<span class="pstat '+dead.c+'"><span class="dot off"></span>'+dead.t+'</span>':'<span class="pstat"><span class="dot"></span>активно</span>')+'</div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
       '<div class="perf"></div><div class="stub'+(dleft!==null&&dtext!==null&&atext!==null?' n4':'')+'">'+
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
@@ -681,7 +692,7 @@ function render(me,menu,sub,plans){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
     STATE.plans.forEach(function(p){
       h+='<div class="plan" onclick="openPlan(\''+jsq(p.code)+'\')">'+
-        '<div class="pl"><span class="pm">'+esc(planTitle(p))+(p.own?'<span class="fbadge" style="margin-left:8px;vertical-align:2px">Ваш тариф</span>':'')+'</span><span class="ps">'+esc(planCardSub(p))+'</span></div>'+
+        '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span>'+(p.own?'<span class="fbadge" style="align-self:flex-start;margin:2px 0">Ваш тариф</span>':'')+'<span class="ps">'+esc(planCardSub(p))+'</span></div>'+
         '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';

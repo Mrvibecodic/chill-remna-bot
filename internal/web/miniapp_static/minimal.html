@@ -681,9 +681,9 @@ function addsubT(s){if(!s.addsub_ok)return null;if(s.addsub_off)return T('addsub
 /* ---------- главная ---------- */
 function statusBadge(s){
   var st=String(s.status||'').toUpperCase();
-  if(st==='LIMITED')return '<span class="badge warn"><span class="d"></span>'+esc(T('sub_limited'))+'</span>';
-  if(st==='EXPIRED')return '<span class="badge bad"><span class="d"></span>'+esc(T('sub_expired'))+'</span>';
   if(st==='DISABLED')return '<span class="badge bad"><span class="d"></span>'+esc(T('sub_disabled'))+'</span>';
+  if(st==='LIMITED')return '<span class="badge warn"><span class="d"></span>'+esc(T('sub_limited'))+'</span>';
+  if(st==='EXPIRED'||(s.expire_ts&&s.expire_ts*1000<=Date.now()))return '<span class="badge bad"><span class="d"></span>'+esc(T('sub_expired'))+'</span>';
   return '<span class="badge ok"><span class="d"></span>'+esc(T('sub_active'))+'</span>';
 }
 function subCard(){
