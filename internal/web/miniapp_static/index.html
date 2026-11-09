@@ -219,7 +219,7 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .pass .sheen{position:absolute;inset:0;background:linear-gradient(115deg,transparent 33%,rgba(255,255,255,.12) 49%,transparent 64%);pointer-events:none}
 .pass .ph{position:relative;padding:15px 16px 13px}
 .pass .pl{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.pass .brand{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#cdd6ff}
+.pass .brand{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#cdd6ff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:12px}
 .pass .pstat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#bdf3da}
 .pass .route{display:flex;align-items:center;justify-content:space-between;color:#fff}
 .pass .route .pt{font-size:17px;font-weight:800}
@@ -630,7 +630,7 @@ function passHTML(sub){
     var dtext=devicesText(sub);
     var atext=addSubText(sub);
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
-      '<div class="pl"><span class="brand">ДОСТУП · BOARDING</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
+      '<div class="pl"><span class="brand">'+(sub.plan_title?'ТАРИФ · '+esc(String(sub.plan_title).toUpperCase()):'ДОСТУП · BOARDING')+'</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
       '<div class="perf"></div><div class="stub'+(dleft!==null&&dtext!==null&&atext!==null?' n4':'')+'">'+
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
@@ -681,7 +681,7 @@ function render(me,menu,sub,plans){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
     STATE.plans.forEach(function(p){
       h+='<div class="plan" onclick="openPlan(\''+jsq(p.code)+'\')">'+
-        '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span><span class="ps">'+esc(planCardSub(p))+'</span></div>'+
+        '<div class="pl"><span class="pm">'+esc(planTitle(p))+(p.own?'<span class="fbadge" style="margin-left:8px;vertical-align:2px">Ваш тариф</span>':'')+'</span><span class="ps">'+esc(planCardSub(p))+'</span></div>'+
         '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';

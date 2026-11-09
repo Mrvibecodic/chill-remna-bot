@@ -336,7 +336,7 @@ var L={ru:{
  cabinet:'Кабинет',account_title:'Личный\u00a0кабинет',loading_fail:'Не удалось загрузить',open_tg:'Откройте через Telegram',
  back:'Назад',copy:'Копировать',opening:'Открываем страницу оплаты…',gb:'ГБ',dev1:'устройство',dev2:'устройства',dev5:'устройств',bind_only:'Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.',choose_file:'Выбрать файл',home:'Главная',copied:'Скопировано',copy_fail:'Не удалось скопировать',error:'Ошибка',done:'Готово',
  sub:'Подписка',sub_active:'Активна',sub_limited:'Трафик исчерпан',sub_expired:'Истекла',sub_disabled:'Отключена',
- days_left:'осталось',until:'до',devices:'Устройства',addsub:'Доп-сервер',addsub_off:'выкл',addsub_out:'исчерпан',unlimited:'безлимит',
+ days_left:'осталось',until:'до',plan_cur:'Тариф',devices:'Устройства',addsub:'Доп-сервер',addsub_off:'выкл',addsub_out:'исчерпан',unlimited:'безлимит',
  connect:'Подключить',renew:'Продлить',
  no_sub:'Нет активной подписки',no_sub_hint:'Выберите тариф — подключение займёт минуту.',
  try_free:'Попробовать бесплатно',choose_plan:'Выбрать тариф',trial_fail:'Не удалось активировать пробный период',trial_ok:'Пробный период активирован',
@@ -391,7 +391,7 @@ var L={ru:{
  cabinet:'Account',account_title:'Account',loading_fail:'Failed to load',open_tg:'Open it from Telegram',
  back:'Back',copy:'Copy',opening:'Opening the payment page…',gb:'GB',dev1:'device',dev2:'devices',dev5:'devices',bind_only:'Linking works only if this Telegram has no bot account yet.',choose_file:'Choose file',home:'Home',copied:'Copied',copy_fail:'Could not copy',error:'Error',done:'Done',
  sub:'Subscription',sub_active:'Active',sub_limited:'Traffic used up',sub_expired:'Expired',sub_disabled:'Disabled',
- days_left:'left',until:'until',devices:'Devices',addsub:'Add-on',addsub_off:'off',addsub_out:'used up',unlimited:'unlimited',
+ days_left:'left',until:'until',plan_cur:'Plan',devices:'Devices',addsub:'Add-on',addsub_off:'off',addsub_out:'used up',unlimited:'unlimited',
  connect:'Connect',renew:'Renew',
  no_sub:'No active subscription',no_sub_hint:'Pick a plan — connecting takes a minute.',
  try_free:'Try for free',choose_plan:'Choose a plan',trial_fail:'Could not activate the trial',trial_ok:'Trial activated',
@@ -687,6 +687,7 @@ function subCard(){
     if(s.expire_ts){var dl=daysLeft(s.expire_ts);h+='<div class="days"><b>'+dl+'</b><span>'+esc(daysW(dl))+' '+esc(T('days_left'))+'</span></div><div class="muted small">'+esc(T('until'))+' '+esc(dateS(s.expire_ts))+'</div>';}
     else if(s.expire_at)h+='<div class="h2" style="margin-top:10px">'+esc(T('until'))+' '+esc(s.expire_at)+'</div>';
     var meta='';
+    if(s.plan_title)meta+='<span>'+esc(T('plan_cur'))+': <b>'+esc(s.plan_title)+'</b></span>';
     if(s.devices_ok)meta+='<span>'+esc(T('devices'))+': <b>'+esc(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used))+'</b></span>';
     var at=addsubT(s);if(at!==null)meta+='<span>'+esc(s.addsub_name||T('addsub'))+': <b>'+esc(at)+'</b></span>';
     if(meta)h+='<div class="meta">'+meta+'</div>';
