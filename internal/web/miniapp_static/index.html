@@ -883,6 +883,22 @@ async function doResetDevices(el){
 var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'каждый день',WEEK:'каждый понедельник',MONTH:'1-го числа каждого месяца',MONTH_ROLLING:'каждый месяц в день подключения'};
 // planTraffic/planDevices/planSub принимают СРОК тарифа (duration): лимиты
 // в v2-схеме живут на сроке, а не на тарифе.
+// Условия опции доп-подписки тарифа: трафик и число стран (что сервер прислал).
+function addsubBits(p,short){
+  var b=[];
+  if(typeof p.addsub_traffic_gb==='number')b.push(planTraffic({traffic_gb:p.addsub_traffic_gb})+(short?'':' трафик'));
+  var n=(p.addsub_countries||[]).length;if(n)b.push((short?'':'🌍 ')+n+' '+plural(n,'страна','страны','стран'));
+  return b;
+}
+function addsubChips(p,mb){
+  var cs=p.addsub_countries||[];if(!cs.length)return '';
+  var h='<div class="chips" style="margin:10px 0 '+(mb||0)+'px">';
+  cs.forEach(function(c){
+    var fl=c.code?('<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">'):(c.flag?esc(c.flag)+' ':'');
+    h+='<span class="chip2">'+fl+esc(c.name||c.flag||'')+'</span>';
+  });
+  return h+'</div>';
+}
 function planTraffic(d){return (d&&d.traffic_gb>0)?(d.traffic_gb+' ГБ'):'Безлимит';}
 function planDevices(d){return !d?'':d.devices>0?(d.devices+' устр.'):d.devices_unlim?'без лимита устройств':'';}
 function planSub(d){var x=planDevices(d);return planTraffic(d)+' трафик'+(x?(' · '+x):'');}
@@ -934,7 +950,8 @@ function openPlan(code,renew){
   if(renew&&p.own&&STATE.menu&&STATE.menu.renew_note)h+='<div class="card"><div class="hint">'+esc(STATE.menu.renew_note)+'</div></div>';
   if(p.addsub_name){
     h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
-      (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
+      (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+
+      (addsubBits(p).length?'<div class="hint" style="margin-top:8px;color:var(--text)">'+esc(addsubBits(p).join(' · '))+'</div>':'')+addsubChips(p)+'</div>';
   }
   if(DESK)h+=planInfoDesk(p);
   var hl=h;h='';
@@ -980,7 +997,7 @@ function buyPlan(code,months){
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
-  if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
+  if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>'+esc(addsubBits(p,true).join(' · ')||'включено')+'</b></div>';
   // Смена тарифа: сервер прислал зачёт остатка — показываем сдвиг срока до оплаты.
   if(d.switch_days)h+='<div class="frow"><span class="l">💱 Зачёт остатка</span><b>'+(d.switch_days>0?'+':'')+d.switch_days+' '+plural(Math.abs(d.switch_days),'день','дня','дней')+'</b></div>';
   h+='</div>';
