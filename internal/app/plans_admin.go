@@ -485,6 +485,16 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		a.askPlanTextTo(ctx, chatID, arg, "plan_addsub_name", "plans.ask_addsub_name", "pln:as:"+arg)
 	case "asd":
 		a.askPlanTextTo(ctx, chatID, arg, "plan_addsub_desc", "plans.ask_addsub_desc", "pln:as:"+arg)
+	case "ast":
+		a.askPlanTextTo(ctx, chatID, arg, "plan_addsub_gb", "plans.ask_addsub_gb", "pln:as:"+arg)
+	case "asq":
+		a.showPlanAddSubSquads(ctx, chatID, arg)
+	case "asqc":
+		if err := a.clearPlanAddSubSquads(ctx, arg); err != nil {
+			a.planEditFailed(ctx, chatID, arg, err)
+			return
+		}
+		a.showPlanAddSubSquads(ctx, chatID, arg)
 	case "exp":
 		a.exportPlan(ctx, chatID, arg)
 	case "imp":
@@ -523,7 +533,7 @@ func (a *App) forgetPlanInput(chatID int64) {
 	ui := a.getUI(chatID)
 	switch ui.adminInput {
 	case "plan_name", "plan_desc", "plan_icon", "plan_access",
-		"plan_addsub_name", "plan_addsub_desc",
+		"plan_addsub_name", "plan_addsub_desc", "plan_addsub_gb",
 		"baseprice", "price", "ykprice", "starprice",
 		"traffic_gb", "device_per", "device_limit", "currency",
 		"trb_plid", "trb_plurl":

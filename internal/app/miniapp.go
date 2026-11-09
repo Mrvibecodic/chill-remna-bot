@@ -139,6 +139,11 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.TrafficResetTS = snap.NextReset.Unix()
 	}
 	dto.ExpireAt = formatExpire(expireAt, a.lang(tgID))
+	// Тариф — только у живой подписки, как в чате: у истёкшей, исчерпанной
+	// и заблокированной там отдельный экран без него.
+	if !strings.EqualFold(snap.Status, remnawave.StatusDisabled) && subDeadKey(snap.Status, expireAt) == "" {
+		dto.PlanTitle = a.clientPlanTitle(ctx, a.lang(tgID), tgID)
+	}
 	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()
 	}
@@ -244,6 +249,17 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	}
 	if a.planAddSubOn(p) {
 		pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
+		// Строку, убранную в «Текстах бота», не показывают и мини-апп с ЛК —
+		// как строку серверов.
+		gb, g := a.addSubShown(ctx, p)
+		if i18n.T(lang, "buy.addsub_traffic", "1") != "" {
+			pd.AddSubTrafficGB = &gb
+		}
+		if i18n.T(lang, "buy.addsub_countries", 1, "1") != "" {
+			for _, c := range g.countries {
+				pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+			}
+		}
 	}
 	// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
 	// получатель — telegram_user_id покупателя.

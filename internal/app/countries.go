@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"regexp"
 	"strconv"
 	"strings"
@@ -321,6 +322,12 @@ func countriesText(lang string, cs []country) string {
 	if len(cs) == 0 {
 		return ""
 	}
+	return i18n.T(lang, "buy.countries", len(cs), countryListHTML(cs))
+}
+
+// countryListHTML — страны через запятую: флаг и название (без названия —
+// один флаг). Названия берутся из имён хостов панели, поэтому экранируются.
+func countryListHTML(cs []country) string {
 	parts := make([]string, 0, len(cs))
 	for _, c := range cs {
 		if c.Name != "" {
@@ -329,5 +336,5 @@ func countriesText(lang string, cs []country) string {
 			parts = append(parts, c.Flag)
 		}
 	}
-	return i18n.T(lang, "buy.countries", len(cs), strings.Join(parts, ", "))
+	return html.EscapeString(strings.Join(parts, ", "))
 }

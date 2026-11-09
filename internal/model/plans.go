@@ -53,6 +53,12 @@ type Plan struct {
 	// текст. Пользователь видит опцию только там, где она включена.
 	AddSubName string
 	AddSubDesc string
+	// AddSubTrafficGB и AddSubSquads — свои трафик и сквады доп-подписки у
+	// тарифа. nil и пустой список — как в общих настройках доп-подписки;
+	// трафик 0 — безлимит. Попадают в снимок сделки: проданные условия
+	// держатся до следующей оплаты, продление берёт текущие условия тарифа.
+	AddSubTrafficGB *int
+	AddSubSquads    []string
 
 	Currency string
 	// Durations — длительности тарифа, у каждой свои цены. Пустой список =
@@ -189,6 +195,12 @@ func (p *Plan) Normalize() {
 	}
 	if p.DeviceLimit < 0 {
 		p.DeviceLimit = 0
+	}
+	if p.AddSubTrafficGB != nil && *p.AddSubTrafficGB < 0 {
+		p.AddSubTrafficGB = nil
+	}
+	if len(p.AddSubSquads) == 0 {
+		p.AddSubSquads = nil
 	}
 	p.Strategy = normalizeStrategy(p.Strategy)
 	for i := range p.Durations {

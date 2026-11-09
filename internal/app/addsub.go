@@ -40,6 +40,103 @@ func (a *App) addSubOptions(resetTraffic bool) (*remnawave.Client, bool, remnawa
 	}
 }
 
+// applyAddSubSnap накладывает на общие условия доп-подписки свои трафик и
+// сквады тарифа, проданные этой сделкой. Без снимка или без своих условий у
+// тарифа остаются общие. Если все свои сквады удалены в панели, остаются
+// общие (fellBack): иначе новому покупателю доп-подписка не создалась бы
+// вовсе, а у старого остались бы прежние серверы.
+func applyAddSubSnap(opt *remnawave.AddSubOptions, snap *model.PlanSnapshot, live remnawave.LiveSquads) (fellBack bool) {
+	if snap == nil {
+		return false
+	}
+	if snap.AddSubTrafficGB != nil && *snap.AddSubTrafficGB >= 0 {
+		opt.TrafficBytes = int64(*snap.AddSubTrafficGB) * 1024 * 1024 * 1024
+	}
+	if len(snap.AddSubSquads) > 0 {
+		if kept, _ := live.KeepInt(snap.AddSubSquads); len(kept) == 0 {
+			return true
+		}
+		opt.InternalSquads = append([]string(nil), snap.AddSubSquads...)
+	}
+	return false
+}
+
+// addSubLiveFor — список сквадов панели, только если сделка несёт свои
+// сквады: остальным он не нужен, а лишний поход в панель — нет.
+func addSubLiveFor(ctx context.Context, panel *remnawave.Client, snap *model.PlanSnapshot) remnawave.LiveSquads {
+	if panel == nil || snap == nil || len(snap.AddSubSquads) == 0 {
+		return remnawave.LiveSquads{}
+	}
+	return panel.LiveSquads(ctx)
+}
+
+// planAddSubTerms — свои трафик и сквады доп-подписки тарифа для снимка
+// сделки (копии: снимок не делит память с тарифом). nil — как в общих.
+func planAddSubTerms(p *model.Plan) (*int, []string) {
+	if p == nil {
+		return nil, nil
+	}
+	var traffic *int
+	if p.AddSubTrafficGB != nil && *p.AddSubTrafficGB >= 0 {
+		v := *p.AddSubTrafficGB
+		traffic = &v
+	}
+	var squads []string
+	if len(p.AddSubSquads) > 0 {
+		squads = append([]string(nil), p.AddSubSquads...)
+	}
+	return traffic, squads
+}
+
+// addSubShown — условия доп-подписки тарифа для витрины: трафик в GB (0 —
+// безлимит) и страны её сквадов. Свои условия тарифа, иначе общие; свои
+// сквады, удалённые в панели все до одного, заменяются общими — как при
+// выдаче (applyAddSubSnap).
+func (a *App) addSubShown(ctx context.Context, p *model.Plan) (gb int, g planGeo) {
+	_, _, _, trafficBytes, squads := a.addSubParams()
+	gb = int(trafficBytes / (1024 * 1024 * 1024))
+	own, ownSquads := planAddSubTerms(p)
+	if own != nil {
+		gb = *own
+	}
+	if len(ownSquads) > 0 {
+		// Без списка сквадов панели стран не посчитать всё равно — какой
+		// набор взять, тогда неважно.
+		if known, _ := a.infra(ctx); anySquadKnown(known, ownSquads) {
+			squads = ownSquads
+		}
+	}
+	return gb, a.squadGeo(ctx, squads)
+}
+
+// anySquadKnown — есть ли в панели хотя бы один из сквадов.
+func anySquadKnown(known []remnawave.SquadFull, ids []string) bool {
+	for _, s := range known {
+		for _, id := range ids {
+			if s.UUID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// addSubTermsText — трафик и страны доп-подписки для карточки тарифа в чате.
+// Каждую строку админ может убрать в «Текстах бота».
+func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) string {
+	gb, g := a.addSubShown(ctx, p)
+	var lines []string
+	if line := i18n.T(lang, "buy.addsub_traffic", trafficValue(lang, p.Strategy, gb)); line != "" {
+		lines = append(lines, line)
+	}
+	if len(g.countries) > 0 {
+		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(g.countries)); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // planAddSubOn — продаётся ли опция доп-подписки с этим тарифом. Глобальный
 // переключатель — мастер-рубильник инфраструктуры: без него опции нет ни у
 // кого. Режим тарифа: «выкл» снимает опцию, «вкл» и «наследовать» при
@@ -94,17 +191,7 @@ func (a *App) userAddSubName(ctx context.Context, telegramID int64) string {
 // последней сделки. Снимка или поля нет — «как раньше»: опция есть, пока
 // включена глобально (так живут покупки до появления опции и триалы).
 func (a *App) addSubSoldTo(ctx context.Context, telegramID int64) bool {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
-	if st == nil {
-		return true
-	}
-	u, err := st.GetUser(ctx, telegramID)
-	if err != nil || u == nil {
-		return true
-	}
-	return u.Snapshot.AddSubSold()
+	return a.userSnapshot(ctx, telegramID).AddSubSold()
 }
 
 // syncAddSub upserts the add-on user B for telegramID (best-effort; a failure
@@ -125,17 +212,17 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 	if !enabled || panel == nil {
 		return
 	}
-	var sold bool
-	if snap != nil {
-		sold = snap.AddSubSold()
-	} else {
-		sold = a.addSubSoldTo(ctx, telegramID)
+	if snap == nil {
+		snap = a.userSnapshot(ctx, telegramID)
 	}
-	if !sold {
+	if !snap.AddSubSold() {
 		if err := panel.SetAddSubEnabled(ctx, telegramID, opt.Suffix, false); err != nil {
 			a.log.Warn("addsub: отключение по тарифу без опции", "tg_id", telegramID, "err", err)
 		}
 		return
+	}
+	if applyAddSubSnap(&opt, snap, addSubLiveFor(ctx, panel, snap)) {
+		a.log.Warn("addsub: все сквады тарифа удалены в панели, взяты общие", "tg_id", telegramID, "plan", snap.Code)
 	}
 	res, err := panel.UpsertAddSub(ctx, telegramID, opt)
 	if err != nil {
@@ -151,6 +238,20 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 		a.log.Info("addsub: доп-подписка живёт под старым именем; «Синхронизировать всех» переведёт её на новое",
 			"tg_id", telegramID, "legacy", res.Legacy)
 	}
+}
+
+// syncAddSubTrial — доп-подписка на триале: общие трафик и сквады, даже если
+// у человека осталась прошлая сделка со своими условиями тарифа. Продана ли
+// опция, по-прежнему решает эта сделка.
+func (a *App) syncAddSubTrial(ctx context.Context, telegramID int64) {
+	snap := &model.PlanSnapshot{}
+	if cur := a.userSnapshot(ctx, telegramID); cur != nil {
+		cp := *cur
+		snap = &cp
+	}
+	snap.AddSubTrafficGB = nil
+	snap.AddSubSquads = nil
+	a.syncAddSubSnap(ctx, telegramID, false, snap)
 }
 
 // removeAddSub deletes user B (runs regardless of the toggle, to clean up).

@@ -74,6 +74,17 @@ var editableList = []Editable{
 		}},
 	{Key: "buy.choose_tariff", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Экран «Купить» — заголовок витрины со списком тарифов", "«Buy» screen — storefront header with the plan list"}},
+	{Key: "buy.addsub_traffic", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа — трафик доп-подписки под её названием", "Plan card — add-on subscription traffic under its name"},
+		Vars: []EditVar{
+			{Name: "traffic", Ru: "трафик", Desc: [2]string{"трафик доп-подписки тарифа, например «50 ГБ в месяц» или «безлимит» (сбрасывается вместе с основным)", "the plan's add-on traffic, e.g. “50 GB per month” or “unlimited” (resets with the main one)"}, Example: [2]string{"50 ГБ в месяц", "50 GB per month"}},
+		}},
+	{Key: "buy.addsub_countries", Section: "buy", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Карточка тарифа — страны доп-подписки под её названием", "Plan card — add-on subscription countries under its name"},
+		Vars: []EditVar{
+			{Name: "country_count", Ru: "число_стран", Desc: [2]string{"сколько стран у доп-подписки (число)", "number of add-on countries"}, Example: [2]string{"2", "2"}},
+			{Name: "countries", Ru: "страны", Desc: [2]string{"страны доп-подписки через запятую: флаг и название (если название не определено — только флаг)", "comma-separated add-on countries: flag and name (flag only if the name is unknown)"}, Example: [2]string{"🇷🇺 Россия, 🇰🇿 Казахстан", "🇷🇺 Russia, 🇰🇿 Kazakhstan"}},
+		}},
 	{Key: "buy.countries", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Карточка тарифа и экран выбора оплаты — список доступных стран", "Plan card and payment method screen — list of available countries"},
 		Vars: []EditVar{
@@ -692,6 +703,13 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "addsub", Ru: "доп_подписка", Desc: [2]string{"название доп-подписки из настроек тарифа или общих; если не задано — текст «addsub.default_name»", "add-on subscription name from plan or global settings; if not set — the «addsub.default_name» text"}, Example: [2]string{"Доп-сервер", "Add-on server"}},
 		}},
+	{Key: "sub.plan", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Экран «Мои подписки» — тариф текущей подписки", "«My subscriptions» screen — plan of the current subscription"},
+		Vars: []EditVar{
+			{Name: "plan", Ru: "тариф", Desc: [2]string{"значок и название тарифа последней покупки; на пробном периоде — текст «sub.plan_trial»", "icon and name of the last purchased plan; during a trial — the «sub.plan_trial» text"}, Example: [2]string{"⚡ Стандарт", "⚡ Standard"}},
+		}},
+	{Key: "sub.plan_trial", Section: "sub", Kind: KindButton,
+		Where: [2]string{"Название тарифа на пробном периоде (чат, мини-апп и ЛК)", "Plan name during a free trial (chat, mini-app and web cabinet)"}},
 	{Key: "sub.traffic", Section: "sub", Kind: KindHTML,
 		Where: [2]string{"Экран «Мои подписки» — трафик периода при лимите", "«My subscriptions» screen — period traffic with a limit"},
 		Vars: []EditVar{

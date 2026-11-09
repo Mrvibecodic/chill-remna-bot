@@ -15,7 +15,8 @@ import (
 // настоящей базе идут только из этого файла. Отсюда одна константа на все
 // запросы и round-trip тест против реальной БД.
 const planCols = "code, name, description, icon, sort_order, enabled, traffic_gb, device_limit, " +
-	"strategy, int_squads, ext_squad, availability, addsub, addsub_name, addsub_desc, currency, durations, from_config, created_at, updated_at"
+	"strategy, int_squads, ext_squad, availability, addsub, addsub_name, addsub_desc, currency, durations, from_config, created_at, updated_at, " +
+	"addsub_traffic_gb, addsub_squads"
 
 // ErrPlanCode — код тарифа не прошёл проверку.
 var ErrPlanCode = errors.New("storage: недопустимый код тарифа")
@@ -40,19 +41,22 @@ func (b *base) SavePlan(ctx context.Context, p *model.Plan) error {
 		"INSERT INTO plans ("+planCols+") VALUES ("+
 			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+
 			b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+", "+b.ph(11)+", "+b.ph(12)+", "+b.ph(13)+", "+b.ph(14)+", "+
-			b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+", "+b.ph(18)+", "+b.ph(19)+", "+b.ph(20)+") "+
+			b.ph(15)+", "+b.ph(16)+", "+b.ph(17)+", "+b.ph(18)+", "+b.ph(19)+", "+b.ph(20)+", "+
+			b.ph(21)+", "+b.ph(22)+") "+
 			"ON CONFLICT (code) DO UPDATE SET name = excluded.name, description = excluded.description, "+
 			"icon = excluded.icon, sort_order = excluded.sort_order, enabled = excluded.enabled, "+
 			"traffic_gb = excluded.traffic_gb, device_limit = excluded.device_limit, "+
 			"strategy = excluded.strategy, int_squads = excluded.int_squads, ext_squad = excluded.ext_squad, "+
 			"availability = excluded.availability, addsub = excluded.addsub, "+
 			"addsub_name = excluded.addsub_name, addsub_desc = excluded.addsub_desc, "+
+			"addsub_traffic_gb = excluded.addsub_traffic_gb, addsub_squads = excluded.addsub_squads, "+
 			"currency = excluded.currency, "+
 			"durations = excluded.durations, from_config = excluded.from_config, "+
 			"updated_at = excluded.updated_at",
 		p.Code, p.Name, p.Description, p.Icon, p.Order, boolToInt(p.Enabled), p.TrafficGB, p.DeviceLimit,
 		p.Strategy, model.EncodeStrings(p.IntSquads), p.ExtSquad, p.Availability, p.AddSub, p.AddSubName, p.AddSubDesc, p.Currency,
-		model.EncodeDurations(p.Durations), boolToInt(p.FromConfig), p.CreatedAt, p.UpdatedAt)
+		model.EncodeDurations(p.Durations), boolToInt(p.FromConfig), p.CreatedAt, p.UpdatedAt,
+		addSubTrafficCol(p.AddSubTrafficGB), model.EncodeStrings(p.AddSubSquads))
 	return err
 }
 
@@ -259,6 +263,15 @@ func scanPlanAccess(rows *sql.Rows) ([]model.PlanAccess, error) {
 	return out, rows.Err()
 }
 
+// addSubTrafficCol — трафик доп-подписки тарифа для колонки: -1 — как в общих
+// настройках (в колонке нет NULL, а 0 занят безлимитом).
+func addSubTrafficCol(v *int) int {
+	if v == nil || *v < 0 {
+		return -1
+	}
+	return *v
+}
+
 // scanRow — общее у *sql.Row и *sql.Rows: один Scan на оба пути чтения, чтобы
 // список колонок и аргументы Scan не разъехались между GetPlan и ListPlans.
 type scanRow interface {
@@ -268,13 +281,19 @@ type scanRow interface {
 func scanPlan(row scanRow) (*model.Plan, error) {
 	var p model.Plan
 	var enabled, fromConfig int
-	var intSquads, durations string
+	var intSquads, durations, addSubSquads string
+	var addSubTraffic int
 	if err := row.Scan(&p.Code, &p.Name, &p.Description, &p.Icon, &p.Order, &enabled,
 		&p.TrafficGB, &p.DeviceLimit, &p.Strategy, &intSquads, &p.ExtSquad, &p.Availability,
 		&p.AddSub, &p.AddSubName, &p.AddSubDesc,
-		&p.Currency, &durations, &fromConfig, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Currency, &durations, &fromConfig, &p.CreatedAt, &p.UpdatedAt,
+		&addSubTraffic, &addSubSquads); err != nil {
 		return nil, err
 	}
+	if addSubTraffic >= 0 {
+		p.AddSubTrafficGB = &addSubTraffic
+	}
+	p.AddSubSquads = model.DecodeStrings(addSubSquads)
 	p.Enabled = enabled != 0
 	p.FromConfig = fromConfig != 0
 	p.IntSquads = model.DecodeStrings(intSquads)

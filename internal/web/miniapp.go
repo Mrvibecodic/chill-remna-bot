@@ -345,6 +345,9 @@ type MiniSubDTO struct {
 	DeviceLimit int    `json:"device_limit"`
 	HasLimit    bool   `json:"has_limit"`
 	DevicesOK   bool   `json:"devices_ok"`
+	// PlanTitle — тариф текущей подписки (на триале — «Пробный период»);
+	// пусто — тариф неизвестен, фронт строку не показывает.
+	PlanTitle string `json:"plan_title,omitempty"`
 	// TrafficUsed/TrafficLimit — трафик текущего периода в байтах (лимит 0 —
 	// безлимит); TrafficOK — сервер их прислал.
 	TrafficOK    bool  `json:"traffic_ok"`
@@ -390,6 +393,10 @@ type MiniPlanDTO struct {
 	// «опция продаётся с тарифом», иначе фронт её не показывает.
 	AddSubName string `json:"addsub_name,omitempty"`
 	AddSubDesc string `json:"addsub_desc,omitempty"`
+	// AddSubTrafficGB и AddSubCountries — трафик (0 — безлимит) и страны
+	// опции; присылаются вместе с названием.
+	AddSubTrafficGB *int             `json:"addsub_traffic_gb,omitempty"`
+	AddSubCountries []MiniCountryDTO `json:"addsub_countries,omitempty"`
 	// Tribute — тариф продаётся через Tribute (привязана подписка). Способ
 	// общий в списке, но кнопка есть только у таких тарифов.
 	Tribute bool `json:"tribute,omitempty"`

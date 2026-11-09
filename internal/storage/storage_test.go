@@ -767,6 +767,7 @@ func TestPlanRoundTrip(t *testing.T) {
 			Order: 1, Enabled: true, TrafficGB: 100, DeviceLimit: 3, Strategy: "MONTH",
 			IntSquads: []string{"sq-1", "sq-2"}, ExtSquad: "ext-1",
 			Availability: model.PlanAvailAll, Currency: "₽", FromConfig: true,
+			AddSubTrafficGB: &dev, AddSubSquads: []string{"sq-add"},
 			Durations: []model.PlanDuration{
 				{Months: 1, Base: "150", P2P: "140", YooKassa: "160", Stars: 99},
 				{Months: 12, Base: "1500", TrafficGB: &gb, DeviceLimit: &dev, IntSquads: &squads, ExtSquad: &ext},
@@ -775,6 +776,22 @@ func TestPlanRoundTrip(t *testing.T) {
 		if err := st.SavePlan(ctx, p); err != nil {
 			t.Fatal(err)
 		}
+		// Безлимит доп-подписки (0) обязан пережить хранение, а «как в общих»
+		// (nil) — не превратиться в безлимит.
+		if got, _ := st.GetPlan(ctx, "base"); got == nil || got.AddSubTrafficGB == nil || *got.AddSubTrafficGB != 0 ||
+			len(got.AddSubSquads) != 1 || got.AddSubSquads[0] != "sq-add" {
+			t.Fatalf("условия доп-подписки тарифа искажены: %+v", got)
+		}
+		inh := *p
+		inh.Code = "inherit"
+		inh.AddSubTrafficGB, inh.AddSubSquads = nil, nil
+		if err := st.SavePlan(ctx, &inh); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := st.GetPlan(ctx, "inherit"); got == nil || got.AddSubTrafficGB != nil || got.AddSubSquads != nil {
+			t.Fatalf("«как в общих» не сохранилось: %+v", got)
+		}
+		_ = st.DeletePlan(ctx, "inherit")
 		if p.CreatedAt == "" || p.UpdatedAt == "" {
 			t.Fatalf("время не проставилось: %+v", p)
 		}

@@ -499,6 +499,6 @@ func (a *App) trialProvision(ctx context.Context, chatID int64) (string, string,
 	}
 	a.invalidateSubCache(chatID)
 	// Триал не сбрасывает трафик основной подписки — значит и доп-подписке нельзя.
-	a.syncAddSub(ctx, chatID, false)
+	a.syncAddSubTrial(ctx, chatID)
 	return link, expireAt, nil
 }

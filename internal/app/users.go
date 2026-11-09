@@ -497,6 +497,53 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	a.sendUsrKB(ctx, chatID, i18n.T(lang, "user.card", a.userLabelFor(ctx, u), created, p2p, status, subBlock)+torLine, rows)
 }
 
+// clientPlanTitle — тариф текущей подписки для экранов клиента (чат,
+// мини-апп, ЛК): на триале — «Пробный период», иначе тариф последней
+// покупки под текущим именем. "" — тариф неизвестен (подписку выдали
+// вручную или привязали учётку без покупки), строку тогда не показываем.
+func (a *App) clientPlanTitle(ctx context.Context, lang string, uid int64) string {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return ""
+	}
+	u, err := st.GetUser(ctx, uid)
+	if err != nil || u == nil {
+		return ""
+	}
+	if u.NotifyKind == "trial" {
+		return i18n.T(lang, "sub.plan_trial")
+	}
+	code := planCodeOf(u.Snapshot)
+	if code == "" {
+		return ""
+	}
+	p, err := a.planByCode(ctx, code)
+	if err != nil {
+		p = nil
+	}
+	if p == nil && err == nil && code == model.PlanCodeBase {
+		a.mu.Lock()
+		p = basePlanFrom(a.botCfg, nil)
+		a.mu.Unlock()
+	}
+	if p != nil {
+		return planTitle(lang, p)
+	}
+	// Тариф удалён (или база не ответила) — имя, под которым его купили.
+	return strings.TrimSpace(u.Snapshot.Name)
+}
+
+// planLine — строка тарифа на экране «Мои подписки».
+func (a *App) planLine(ctx context.Context, lang string, uid int64) string {
+	t := a.clientPlanTitle(ctx, lang, uid)
+	if t == "" {
+		return ""
+	}
+	return "\n\n" + i18n.T(lang, "sub.plan", html.EscapeString(t))
+}
+
 // userPlanLine — тариф последней покупки для карточки ("" — покупок не было).
 // Имя берётся текущее: переименованный тариф показывается под новым именем.
 func (a *App) userPlanLine(ctx context.Context, lang string, u *model.User) string {
@@ -1125,7 +1172,7 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + trafficLine(lang, snap) + devLine + a.addSubLine(ctx, chatID)
+	text := a.subActiveText(ctx, chatID, url, expireAt) + a.planLine(ctx, lang, chatID) + trafficLine(lang, snap) + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 

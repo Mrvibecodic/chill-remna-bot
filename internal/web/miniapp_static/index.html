@@ -219,8 +219,9 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .pass .sheen{position:absolute;inset:0;background:linear-gradient(115deg,transparent 33%,rgba(255,255,255,.12) 49%,transparent 64%);pointer-events:none}
 .pass .ph{position:relative;padding:15px 16px 13px}
 .pass .pl{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.pass .brand{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#cdd6ff}
-.pass .pstat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#bdf3da}
+.pass .brand{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#cdd6ff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:12px}
+.pass .pstat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#bdf3da;flex:none}
+.pass .pstat.bad{color:#fecaca}.pass .pstat.warn{color:#fde68a}
 .pass .route{display:flex;align-items:center;justify-content:space-between;color:#fff}
 .pass .route .pt{font-size:17px;font-weight:800}
 .pass .route .pic svg{color:#9fb4e8}
@@ -624,13 +625,23 @@ function skMain(){
 function skSimple(){app.innerHTML='<div class="sk sk-hero" style="height:120px"></div><div class="sk sk-row"></div><div class="sk sk-row"></div>';}
 
 /* ---- main screen ---- */
+// Статус подписки для карточки: панель отдаёт учётку и после окончания
+// срока, трафика или при блокировке. null — подписка работает.
+function subDead(sub){
+  var st=String(sub.status||'').toUpperCase();
+  if(st==='DISABLED')return {t:'отключена',c:'bad'};
+  if(st==='LIMITED')return {t:'трафик исчерпан',c:'warn'};
+  if(st==='EXPIRED'||(sub.expire_ts&&sub.expire_ts*1000<=Date.now()))return {t:'истекла',c:'bad'};
+  return null;
+}
 function passHTML(sub){
     var dleft=sub.expire_ts?daysLeft(sub.expire_ts):null;
     var dshort=sub.expire_ts?shortDate(sub.expire_ts):(sub.expire_at||'');
     var dtext=devicesText(sub);
     var atext=addSubText(sub);
+    var dead=subDead(sub);
     var pass='<div class="pass"><div class="sheen"></div><div class="ph">'+
-      '<div class="pl"><span class="brand">ДОСТУП · BOARDING</span><span class="pstat"><span class="dot"></span>активно</span></div>'+
+      '<div class="pl"><span class="brand">'+(sub.plan_title?'ТАРИФ · '+esc(String(sub.plan_title).toUpperCase()):'ДОСТУП · BOARDING')+'</span>'+(dead?'<span class="pstat '+dead.c+'"><span class="dot off"></span>'+dead.t+'</span>':'<span class="pstat"><span class="dot"></span>активно</span>')+'</div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
       '<div class="perf"></div><div class="stub'+(dleft!==null&&dtext!==null&&atext!==null?' n4':'')+'">'+
         '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
@@ -681,7 +692,7 @@ function render(me,menu,sub,plans){
     h+='<div class="sec-title">'+IC.tag+'Тарифы</div><div class="cols">';
     STATE.plans.forEach(function(p){
       h+='<div class="plan" onclick="openPlan(\''+jsq(p.code)+'\')">'+
-        '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span><span class="ps">'+esc(planCardSub(p))+'</span></div>'+
+        '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span>'+(p.own?'<span class="fbadge" style="align-self:flex-start;margin:2px 0">Ваш тариф</span>':'')+'<span class="ps">'+esc(planCardSub(p))+'</span></div>'+
         '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';
@@ -883,6 +894,22 @@ async function doResetDevices(el){
 var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'каждый день',WEEK:'каждый понедельник',MONTH:'1-го числа каждого месяца',MONTH_ROLLING:'каждый месяц в день подключения'};
 // planTraffic/planDevices/planSub принимают СРОК тарифа (duration): лимиты
 // в v2-схеме живут на сроке, а не на тарифе.
+// Условия опции доп-подписки тарифа: трафик и число стран (что сервер прислал).
+function addsubBits(p,short){
+  var b=[];
+  if(typeof p.addsub_traffic_gb==='number')b.push(planTraffic({traffic_gb:p.addsub_traffic_gb})+(short?'':' трафик'));
+  var n=(p.addsub_countries||[]).length;if(n)b.push((short?'':'🌍 ')+n+' '+plural(n,'страна','страны','стран'));
+  return b;
+}
+function addsubChips(p,mb){
+  var cs=p.addsub_countries||[];if(!cs.length)return '';
+  var h='<div class="chips" style="margin:10px 0 '+(mb||0)+'px">';
+  cs.forEach(function(c){
+    var fl=c.code?('<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">'):(c.flag?esc(c.flag)+' ':'');
+    h+='<span class="chip2">'+fl+esc(c.name||c.flag||'')+'</span>';
+  });
+  return h+'</div>';
+}
 function planTraffic(d){return (d&&d.traffic_gb>0)?(d.traffic_gb+' ГБ'):'Безлимит';}
 function planDevices(d){return !d?'':d.devices>0?(d.devices+' устр.'):d.devices_unlim?'без лимита устройств':'';}
 function planSub(d){var x=planDevices(d);return planTraffic(d)+' трафик'+(x?(' · '+x):'');}
@@ -934,7 +961,8 @@ function openPlan(code,renew){
   if(renew&&p.own&&STATE.menu&&STATE.menu.renew_note)h+='<div class="card"><div class="hint">'+esc(STATE.menu.renew_note)+'</div></div>';
   if(p.addsub_name){
     h+='<div class="card"><b>➕ '+esc(p.addsub_name)+'</b>'+
-      (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+'</div>';
+      (p.addsub_desc?'<div class="hint" style="margin-top:4px">'+esc(p.addsub_desc)+'</div>':'')+
+      (addsubBits(p).length?'<div class="hint" style="margin-top:8px;color:var(--text)">'+esc(addsubBits(p).join(' · '))+'</div>':'')+addsubChips(p)+'</div>';
   }
   if(DESK)h+=planInfoDesk(p);
   var hl=h;h='';
@@ -980,7 +1008,7 @@ function buyPlan(code,months){
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
-  if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>включено</b></div>';
+  if(p.addsub_name)h+='<div class="frow"><span class="l">➕ '+esc(p.addsub_name)+'</span><b>'+esc(addsubBits(p,true).join(' · ')||'включено')+'</b></div>';
   // Смена тарифа: сервер прислал зачёт остатка — показываем сдвиг срока до оплаты.
   if(d.switch_days)h+='<div class="frow"><span class="l">💱 Зачёт остатка</span><b>'+(d.switch_days>0?'+':'')+d.switch_days+' '+plural(Math.abs(d.switch_days),'день','дня','дней')+'</b></div>';
   h+='</div>';
