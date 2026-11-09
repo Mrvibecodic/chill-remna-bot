@@ -20,18 +20,20 @@ func TestAddSubOfferTerms(t *testing.T) {
 		ownGB     *int
 		ownSquads []string
 		hide      bool
+		noInfra   bool // список сквадов и хостов панели не получен
 		traffic   string
 		countries string // "" — строки нет
 		miniGB    int
 		miniN     int
 	}{
-		{"свои условия", gb(50), []string{"s1"}, false,
+		{"свои условия", gb(50), []string{"s1"}, false, false,
 			"📊 Трафик: 50 ГБ в месяц", "🌍 Страны (2): 🇷🇺 Россия, 🇰🇿 Казахстан", 50, 2},
-		{"как в настройках", nil, nil, false,
+		{"как в настройках", nil, nil, false, false,
 			"📊 Трафик: 30 ГБ в месяц", "🌍 Страны (1): 🇩🇪 Германия", 30, 1},
-		{"свои сквады удалены в панели", gb(0), []string{"gone"}, false,
+		{"свои сквады удалены в панели", gb(0), []string{"gone"}, false, false,
 			"📊 Трафик: безлимит", "🌍 Страны (1): 🇩🇪 Германия", 0, 1},
-		{"строки убраны в текстах", gb(50), []string{"s1"}, true, "", "", 50, 2},
+		{"строки убраны в текстах", gb(50), []string{"s1"}, true, false, "", "", 50, 2},
+		{"панель не ответила", gb(50), []string{"s1"}, false, true, "📊 Трафик: 50 ГБ в месяц", "", 50, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fm, p := storefrontApp(t)
@@ -41,19 +43,8 @@ func TestAddSubOfferTerms(t *testing.T) {
 			if err := a.store.SavePlan(ctx, p); err != nil {
 				t.Fatal(err)
 			}
-			a.infraCache = &infraCacheEntry{
-				fetchedAt: time.Now(),
-				squads: []remnawave.SquadFull{
-					{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}},
-					{UUID: "s1", InboundsCount: 1, InboundUUIDs: []string{"ib2"}},
-					{UUID: "g1", InboundsCount: 1, InboundUUIDs: []string{"ib3"}},
-				},
-				hosts: []remnawave.Host{
-					{Remark: "🇳🇱 Нидерланды", InboundUUID: "ib1"},
-					{Remark: "🇷🇺 Россия", InboundUUID: "ib2"},
-					{Remark: "🇰🇿 Казахстан", InboundUUID: "ib2"},
-					{Remark: "🇩🇪 Германия", InboundUUID: "ib3"},
-				},
+			if !tc.noInfra {
+				a.infraCache = addSubOfferInfra()
 			}
 			if tc.hide {
 				if rej := i18n.SetOverrides(map[string]map[string]string{"ru": {"buy.addsub_traffic": "", "buy.addsub_countries": ""}}); rej != nil {
@@ -67,7 +58,7 @@ func TestAddSubOfferTerms(t *testing.T) {
 			if line < 0 {
 				t.Fatalf("опции доп-подписки нет:\n%s", out)
 			}
-			if main := strings.Index(out, "Нидерланды"); main < 0 || main > line {
+			if main := strings.Index(out, "📱"); main < 0 || main > line {
 				t.Fatalf("доп-подписка должна идти после условий тарифа:\n%s", out)
 			}
 			tail := out[line:]
@@ -76,7 +67,10 @@ func TestAddSubOfferTerms(t *testing.T) {
 					t.Fatalf("нет %q:\n%s", want, tail)
 				}
 			}
-			if tc.hide && (strings.Contains(tail, "📊") || strings.Contains(tail, "🌍")) {
+			if tc.countries == "" && strings.Contains(tail, "🌍") {
+				t.Fatalf("строки стран быть не должно:\n%s", tail)
+			}
+			if tc.hide && strings.Contains(tail, "📊") {
 				t.Fatalf("убранные строки показаны:\n%s", tail)
 			}
 
@@ -94,5 +88,40 @@ func TestAddSubOfferTerms(t *testing.T) {
 				t.Fatal("тарифа нет в мини-аппе")
 			}
 		})
+	}
+}
+
+func addSubOfferInfra() *infraCacheEntry {
+	return &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads: []remnawave.SquadFull{
+			{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}},
+			{UUID: "s1", InboundsCount: 1, InboundUUIDs: []string{"ib2"}},
+			{UUID: "g1", InboundsCount: 1, InboundUUIDs: []string{"ib3"}},
+		},
+		hosts: []remnawave.Host{
+			{Remark: "🇳🇱 Нидерланды", InboundUUID: "ib1"},
+			{Remark: "🇷🇺 Россия", InboundUUID: "ib2"},
+			{Remark: "🇰🇿 Казахстан", InboundUUID: "ib2"},
+			{Remark: "🇩🇪 Германия", InboundUUID: "ib3"},
+		},
+	}
+}
+
+// Названия стран приходят из имён хостов панели: в карточке тарифа (HTML)
+// они экранируются — и у тарифа, и у доп-подписки.
+func TestOfferCountriesEscaped(t *testing.T) {
+	a, fm, p := storefrontApp(t)
+	ctx := context.Background()
+	a.botCfg.AddSub = model.AddSubConfig{Enabled: true, Init: true, InternalSquads: []string{"sq-vip"}}
+	a.infraCache = &infraCacheEntry{
+		fetchedAt: time.Now(),
+		squads:    []remnawave.SquadFull{{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}}},
+		hosts:     []remnawave.Host{{Remark: "🇬🇧 UK & <Ireland>", InboundUUID: "ib1"}},
+	}
+	a.handleCallback(ctx, cb(int64(1000000001), "plo:"+p.Code))
+	out := fm.joined()
+	if strings.Contains(out, "<Ireland>") || strings.Count(out, "UK &amp; &lt;Ireland&gt;") != 2 {
+		t.Fatalf("страны не экранированы (ждали у тарифа и у доп-подписки):\n%s", out)
 	}
 }

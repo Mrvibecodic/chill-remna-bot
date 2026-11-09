@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -101,8 +100,9 @@ func (a *App) addSubShown(ctx context.Context, p *model.Plan) (gb int, g planGeo
 		gb = *own
 	}
 	if len(ownSquads) > 0 {
-		known, _ := a.infra(ctx)
-		if len(known) == 0 || anySquadKnown(known, ownSquads) {
+		// Без списка сквадов панели стран не посчитать всё равно — какой
+		// набор взять, тогда неважно.
+		if known, _ := a.infra(ctx); anySquadKnown(known, ownSquads) {
 			squads = ownSquads
 		}
 	}
@@ -130,15 +130,7 @@ func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) s
 		lines = append(lines, line)
 	}
 	if len(g.countries) > 0 {
-		parts := make([]string, 0, len(g.countries))
-		for _, c := range g.countries {
-			if c.Name != "" {
-				parts = append(parts, c.Flag+" "+c.Name)
-			} else {
-				parts = append(parts, c.Flag)
-			}
-		}
-		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), html.EscapeString(strings.Join(parts, ", "))); line != "" {
+		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(g.countries)); line != "" {
 			lines = append(lines, line)
 		}
 	}
