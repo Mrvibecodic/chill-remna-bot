@@ -139,7 +139,11 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 		dto.TrafficResetTS = snap.NextReset.Unix()
 	}
 	dto.ExpireAt = formatExpire(expireAt, a.lang(tgID))
-	dto.PlanTitle = a.clientPlanTitle(ctx, a.lang(tgID), tgID)
+	// Тариф — только у живой подписки, как в чате: у истёкшей, исчерпанной
+	// и заблокированной там отдельный экран без него.
+	if !strings.EqualFold(snap.Status, remnawave.StatusDisabled) && subDeadKey(snap.Status, expireAt) == "" {
+		dto.PlanTitle = a.clientPlanTitle(ctx, a.lang(tgID), tgID)
+	}
 	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()
 	}

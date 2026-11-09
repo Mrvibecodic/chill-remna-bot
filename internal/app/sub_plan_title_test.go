@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,31 +14,55 @@ import (
 	"remnabot/internal/remnawave"
 )
 
-// Тариф текущей подписки виден клиенту и в чате, и в мини-аппе/ЛК.
+// planTitlePanel — панель с одной учёткой заданного статуса и срока.
+func planTitlePanel(t *testing.T, status, expire string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/by-telegram-id/") {
+			_, _ = w.Write([]byte(`{"response":[{"uuid":"u-1","telegramId":1000000001,"status":"` + status +
+				`","subscriptionUrl":"https://s/ex","expireAt":"` + expire + `"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// Тариф текущей подписки виден клиенту и в чате, и в мини-аппе/ЛК — только
+// у живой подписки.
 func TestSubPlanTitle(t *testing.T) {
-	srv := devicesPanel(t, "", 0)
-	defer srv.Close()
 	const uid int64 = 1000000001
+	const future, past = "2030-01-02T03:04:05Z", "2020-01-02T03:04:05Z"
+	std := &model.Plan{Code: "std", Name: "Стандарт", Icon: "⚡", Enabled: true}
 	for _, tc := range []struct {
-		name  string
-		kind  string
-		snap  *model.PlanSnapshot
-		plan  *model.Plan
-		want  string // в мини-аппе
-		wantC string // строка в чате; "" — строки нет
+		name   string
+		status string
+		expire string
+		kind   string
+		snap   *model.PlanSnapshot
+		plan   *model.Plan
+		want   string // в мини-аппе
+		wantC  string // строка в чате; "" — строки нет
+		screen string // что точно есть на экране чата
 	}{
-		{"переименованный тариф", "paid", &model.PlanSnapshot{Code: "std", Name: "Старое"},
-			&model.Plan{Code: "std", Name: "Стандарт", Icon: "⚡", Enabled: true},
-			"⚡ Стандарт", "🏷 Тариф: <b>⚡ Стандарт</b>"},
-		{"тариф удалён", "paid", &model.PlanSnapshot{Code: "old", Name: "Архив"}, nil,
-			"Архив", "🏷 Тариф: <b>Архив</b>"},
-		{"триал", "trial", &model.PlanSnapshot{Code: "std", Name: "Стандарт"},
-			&model.Plan{Code: "std", Name: "Стандарт", Enabled: true},
-			"🎁 Пробный период", "🏷 Тариф: <b>🎁 Пробный период</b>"},
-		{"покупок не было", "paid", nil, nil, "", ""},
-		{"разметка в имени", "paid", &model.PlanSnapshot{Code: "x"},
+		{"переименованный тариф", "ACTIVE", future, "paid", &model.PlanSnapshot{Code: "std", Name: "Старое"}, std,
+			"⚡ Стандарт", "🏷 Тариф: <b>⚡ Стандарт</b>", "активна до"},
+		{"тариф удалён", "ACTIVE", future, "paid", &model.PlanSnapshot{Code: "old", Name: "Архив"}, nil,
+			"Архив", "🏷 Тариф: <b>Архив</b>", "активна до"},
+		{"«Базовый» ещё не в базе", "ACTIVE", future, "paid", &model.PlanSnapshot{Code: model.PlanCodeBase}, nil,
+			"Базовый", "🏷 Тариф: <b>Базовый</b>", "активна до"},
+		{"триал", "ACTIVE", future, "trial", &model.PlanSnapshot{Code: "std", Name: "Стандарт"}, std,
+			"🎁 Пробный период", "🏷 Тариф: <b>🎁 Пробный период</b>", "активна до"},
+		{"покупок не было", "ACTIVE", future, "paid", nil, nil, "", "", "активна до"},
+		{"разметка в имени", "ACTIVE", future, "paid", &model.PlanSnapshot{Code: "x"},
 			&model.Plan{Code: "x", Name: "<i>Про", Enabled: true},
-			"<i>Про", "🏷 Тариф: <b>&lt;i&gt;Про</b>"},
+			"<i>Про", "🏷 Тариф: <b>&lt;i&gt;Про</b>", "активна до"},
+		{"истекла", "EXPIRED", past, "paid", &model.PlanSnapshot{Code: "std"}, std, "", "", "закончился"},
+		{"срок прошёл, статус ещё старый", "ACTIVE", past, "paid", &model.PlanSnapshot{Code: "std"}, std, "", "", "закончился"},
+		{"трафик исчерпан", "LIMITED", future, "paid", &model.PlanSnapshot{Code: "std"}, std, "", "", "исчерпан"},
+		{"заблокирована", "DISABLED", future, "paid", &model.PlanSnapshot{Code: "std"}, std, "", "", "заблокирована"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -50,10 +76,10 @@ func TestSubPlanTitle(t *testing.T) {
 				ui:     map[int64]*uiState{},
 				store:  fs,
 				botCfg: fullyConfigured(),
-				panel:  remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"}),
+				panel:  remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: planTitlePanel(t, tc.status, tc.expire), APIToken: "t"}),
 			}
 			_ = fs.UpsertUser(ctx, uid)
-			_ = fs.SetSubExpiry(ctx, uid, "2030-01-02T03:04:05Z", tc.kind)
+			_ = fs.SetSubExpiry(ctx, uid, tc.expire, tc.kind)
 			_ = fs.SetUserSnapshot(ctx, uid, tc.snap)
 			if tc.plan != nil {
 				_ = fs.SavePlan(ctx, tc.plan)
@@ -63,8 +89,8 @@ func TestSubPlanTitle(t *testing.T) {
 			}
 			a.handleCallback(ctx, cb(uid, "menu:mysubs"))
 			out := fm.joined()
-			if !strings.Contains(out, "активна до") {
-				t.Fatalf("экран подписки не показан:\n%s", out)
+			if !strings.Contains(out, tc.screen) {
+				t.Fatalf("не тот экран подписки (ждали %q):\n%s", tc.screen, out)
 			}
 			if tc.wantC == "" {
 				if strings.Contains(out, "Тариф:") {
