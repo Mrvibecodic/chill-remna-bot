@@ -71,6 +71,8 @@ type uiState struct {
 	inputBack string
 
 	broadcastText string
+	// bcastSegs — кому уйдёт рассылка; пусто — всем.
+	bcastSegs bcastSegs
 
 	p2pSubmitMsgID int
 	p2pShotMsgID   int

@@ -56,6 +56,12 @@ type fakeMsg struct {
 	// forbidden — чаты, где Telegram отвечает 403 («человек заблокировал
 	// бота»): так проверяется, что рассылка отличает это от временной ошибки.
 	forbidden map[int64]bool
+	// sendErrs — чем Telegram ответит SendErr на этот чат.
+	sendErrs map[int64]error
+	// onSendErr зовётся перед каждой отправкой SendErr.
+	onSendErr func(chatID int64)
+	// edited — тексты, на которые правились сообщения (EditText).
+	edited []string
 	// sendDelay — искусственная задержка отправки: так проверяется поведение
 	// при одновременных доставках.
 	sendDelay time.Duration
@@ -179,6 +185,12 @@ func (f *fakeMsg) SendErr(_ context.Context, chatID int64, text string) (int, er
 	if f.forbidden != nil && f.forbidden[chatID] {
 		return 0, bot.ErrorForbidden
 	}
+	if f.onSendErr != nil {
+		f.onSendErr(chatID)
+	}
+	if err := f.sendErrs[chatID]; err != nil {
+		return 0, err
+	}
 	id := f.add(text)
 	if f.kbFail {
 		return 0, errors.New("не доставлено")
@@ -235,8 +247,14 @@ func (f *fakeMsg) StarTransactions(_ context.Context, offset, limit int) ([]mode
 	}
 	return f.starTx[offset:end], nil
 }
-func (f *fakeMsg) EditText(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
-	return f.noteEdit(id)
+func (f *fakeMsg) EditText(_ context.Context, _ int64, id int, text string, _ [][]models.InlineKeyboardButton) bool {
+	ok := f.noteEdit(id)
+	if ok {
+		f.mu.Lock()
+		f.edited = append(f.edited, text)
+		f.mu.Unlock()
+	}
+	return ok
 }
 func (f *fakeMsg) EditCaption(_ context.Context, _ int64, id int, _ string, _ [][]models.InlineKeyboardButton) bool {
 	return f.noteEdit(id)
@@ -1896,6 +1914,15 @@ func (s *fakeStore) AllUserIDs(_ context.Context) ([]int64, error) {
 		}
 	}
 	return ids, nil
+}
+func (s *fakeStore) BroadcastAudience(_ context.Context) ([]model.User, error) {
+	var out []model.User
+	for id, u := range s.users {
+		if !u.Blocked && s.unreachable[id] == "" {
+			out = append(out, model.User{TelegramID: id, SubExpireAt: u.SubExpireAt, NotifyKind: u.NotifyKind, Snapshot: u.Snapshot})
+		}
+	}
+	return out, nil
 }
 func (s *fakeStore) CountReferrals(_ context.Context, ref int64) (int, error) {
 	n := 0

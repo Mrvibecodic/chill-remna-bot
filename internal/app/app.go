@@ -686,6 +686,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.prunePlanAccess(ctx)
 	a.notifyUpdated(ctx)
 	a.noticeRestored(ctx)
+	a.resumeBroadcast(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)
 	if a.MiniEnabled() || a.CabinetEnabled() {
@@ -2065,7 +2066,12 @@ func (m botMessenger) Send(ctx context.Context, chatID int64, text string) int {
 }
 
 func (m botMessenger) SendErr(ctx context.Context, chatID int64, text string) (int, error) {
-	return m.sendKBErr(ctx, chatID, text, nil)
+	return m.sendKBErr(ctx, chatID, text, nil, true)
+}
+
+// htmlRejected — Telegram отказал из-за разметки: сообщение точно не ушло.
+func htmlRejected(err error) bool {
+	return errors.Is(err, bot.ErrorBadRequest) && strings.Contains(strings.ToLower(err.Error()), "can't parse entities")
 }
 
 // sendWithRetry retries a Telegram call when the API replies 429 Too Many
@@ -2101,11 +2107,14 @@ func (m botMessenger) sendWithRetry(ctx context.Context, do func() error) error 
 }
 
 func (m botMessenger) SendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) int {
-	id, _ := m.sendKBErr(ctx, chatID, text, rows)
+	id, _ := m.sendKBErr(ctx, chatID, text, rows, false)
 	return id
 }
 
-func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) (int, error) {
+// sendKBErr: strict — повторять без разметки только после отказа в разметке.
+// Сбой сети или 5xx не значат, что сообщение не дошло, и повтор дал бы дубль.
+// Рассылке дубль хуже недоставки; уведомлениям по-прежнему важнее дойти.
+func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton, strict bool) (int, error) {
 	rows = fitKeyboard(rows)
 	params := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML, ProtectContent: protectedCtx(ctx)}
 	if len(rows) > 0 {
@@ -2123,6 +2132,10 @@ func (m botMessenger) sendKBErr(ctx context.Context, chatID int64, text string, 
 		// каждом уведомлении.
 		if errors.Is(err, bot.ErrorForbidden) {
 			m.log.Warn("send message: чат недоступен", "chat_id", chatID)
+			return 0, err
+		}
+		if strict && !htmlRejected(err) {
+			m.log.Warn("send message", "chat_id", chatID, "err", err)
 			return 0, err
 		}
 		params.ParseMode = ""

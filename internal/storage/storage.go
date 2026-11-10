@@ -69,6 +69,9 @@ type Storage interface {
 	DeleteAutoPay(ctx context.Context, telegramID int64) error
 	DeleteUser(ctx context.Context, telegramID int64) error
 	AllUserIDs(ctx context.Context) ([]int64, error)
+	// BroadcastAudience — те же получатели, что у AllUserIDs, с полями для
+	// выбора по подписке: срок, вид срока и снимок сделки.
+	BroadcastAudience(ctx context.Context) ([]model.User, error)
 	// SetUnreachable помечает, что Telegram ответил «чат недоступен». Это НЕ
 	// бан: доступ к боту не закрывается, метка только выводит человека из
 	// рассылки и снимается любым его сообщением.
@@ -2347,6 +2350,26 @@ func (b *base) AllUserIDs(ctx context.Context) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (b *base) BroadcastAudience(ctx context.Context) ([]model.User, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT telegram_id, sub_expire_at, notify_kind, plan_snapshot FROM users WHERE blocked = 0 AND unreachable_at = ''")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.User
+	for rows.Next() {
+		var u model.User
+		var snapRaw string
+		if err := rows.Scan(&u.TelegramID, &u.SubExpireAt, &u.NotifyKind, &snapRaw); err != nil {
+			return nil, err
+		}
+		u.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 func (b *base) CreateWebUser(ctx context.Context, u *model.WebUser) error {
