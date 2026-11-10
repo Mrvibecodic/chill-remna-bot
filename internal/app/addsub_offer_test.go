@@ -112,8 +112,8 @@ func addSubOfferInfra() *infraCacheEntry {
 	}
 }
 
-// Названия стран приходят из имён хостов панели: в карточке тарифа (HTML)
-// они экранируются — и у тарифа, и у доп-подписки.
+// Флага нет в словаре — название берётся из имени хоста панели, и в карточке
+// тарифа (HTML) оно экранируется — и у тарифа, и у доп-подписки.
 func TestOfferCountriesEscaped(t *testing.T) {
 	a, fm, p := storefrontApp(t)
 	ctx := context.Background()
@@ -121,7 +121,7 @@ func TestOfferCountriesEscaped(t *testing.T) {
 	a.infraCache = &infraCacheEntry{
 		fetchedAt: time.Now(),
 		squads:    []remnawave.SquadFull{{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}}},
-		hosts:     []remnawave.Host{{Remark: "🇬🇧 UK & <Ireland>", InboundUUID: "ib1"}},
+		hosts:     []remnawave.Host{{Remark: "🇨🇶 UK & <Ireland>", InboundUUID: "ib1"}},
 	}
 	a.handleCallback(ctx, cb(int64(1000000001), "plo:"+p.Code))
 	out := fm.joined()

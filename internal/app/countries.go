@@ -79,11 +79,23 @@ func (a *App) planSquadUUIDs(months int) []string {
 
 // country is one distinct destination available to a plan: the flag emoji, its
 // ISO-3166-1 alpha-2 code (lowercase, for image rendering on platforms that do
-// not draw flag emoji, e.g. Windows webviews), and the display name.
+// not draw flag emoji, e.g. Windows webviews), and the name from the host remark.
 type country struct {
 	Flag string
 	Code string
 	Name string
+}
+
+// label — название страны на языке бота: из словаря по флагу, а для флага,
+// которого там нет, — из названия хоста.
+func (c country) label(lang string) string {
+	if n, ok := countryNames[c.Code]; ok {
+		if lang == "en" {
+			return n[1]
+		}
+		return n[0]
+	}
+	return c.Name
 }
 
 // planGeo — что достанется подписке тарифа: страны, конфиги и хосты.
@@ -108,7 +120,7 @@ func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) strin
 }
 
 // planCountries returns the distinct countries available to a plan, taken from
-// host remarks (e.g. "🇩🇪 Германия"), deduped by flag and in first-seen order,
+// the flags in host remarks (e.g. "🇩🇪 Frankfurt"), deduped by flag and in first-seen order,
 // plus the count of accessible inbounds (configs).
 func (a *App) planCountries(ctx context.Context, months int) (countries []country, inbounds int) {
 	return a.squadCountries(ctx, a.planSquadUUIDs(months))
@@ -322,16 +334,16 @@ func countriesText(lang string, cs []country) string {
 	if len(cs) == 0 {
 		return ""
 	}
-	return i18n.T(lang, "buy.countries", len(cs), countryListHTML(cs))
+	return i18n.T(lang, "buy.countries", len(cs), countryListHTML(lang, cs))
 }
 
 // countryListHTML — страны через запятую: флаг и название (без названия —
-// один флаг). Названия берутся из имён хостов панели, поэтому экранируются.
-func countryListHTML(cs []country) string {
+// один флаг). Название может прийти из имени хоста панели, поэтому экранируется.
+func countryListHTML(lang string, cs []country) string {
 	parts := make([]string, 0, len(cs))
 	for _, c := range cs {
-		if c.Name != "" {
-			parts = append(parts, c.Flag+" "+c.Name)
+		if name := c.label(lang); name != "" {
+			parts = append(parts, c.Flag+" "+name)
 		} else {
 			parts = append(parts, c.Flag)
 		}

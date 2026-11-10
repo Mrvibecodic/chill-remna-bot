@@ -130,7 +130,7 @@ func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) s
 		lines = append(lines, line)
 	}
 	if len(g.countries) > 0 {
-		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(g.countries)); line != "" {
+		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(lang, g.countries)); line != "" {
 			lines = append(lines, line)
 		}
 	}
