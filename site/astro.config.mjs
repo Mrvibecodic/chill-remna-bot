@@ -18,6 +18,10 @@ export default defineConfig({
       defaultLocale: 'root',
       locales: { root: { label: 'Русский', lang: 'ru' } },
       customCss: ['./src/styles/theme.css'],
+      components: {
+        // Выбор дизайна рядом с выбором темы.
+        ThemeSelect: './src/components/ThemeSelect.astro',
+      },
       // Длинные команды (curl с URL) переносим по словам, чтобы блок кода не
       // уезжал в горизонтальный скролл — особенно на телефоне.
       expressiveCode: {
@@ -38,7 +42,13 @@ export default defineConfig({
         { tag: 'link', attrs: { rel: 'icon', href: '/favicon-16.png', sizes: '16x16', type: 'image/png' } },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
         { tag: 'link', attrs: { rel: 'manifest', href: '/site.webmanifest' } },
-        { tag: 'meta', attrs: { name: 'theme-color', content: '#0a0d15' } },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#f4f5f7', media: '(prefers-color-scheme: light)' } },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#0d0e11', media: '(prefers-color-scheme: dark)' } },
+        // Дизайн ставится до первой отрисовки: по умолчанию минималистичный.
+        {
+          tag: 'script',
+          content: `(function(){var d='minimal';try{if(localStorage.getItem('docs-design')==='classic')d='classic';}catch(e){}document.documentElement.dataset.design=d;})();`,
+        },
         // Старый одностраничник жил на якорях (#install, #faq и т.д.) — такие
         // ссылки ходят по чатам и постам. Переводим их на новые страницы.
         {
@@ -56,54 +66,55 @@ export default defineConfig({
         {
           label: 'Начало',
           items: [
-            { label: 'Что умеет бот', slug: 'start/features' },
-            { label: 'Что нужно перед стартом', slug: 'start/requirements' },
+            { label: 'Введение', slug: 'start/features' },
+            { label: 'Что подготовить', slug: 'start/requirements' },
             { label: 'Требования к серверу', slug: 'start/server' },
-            { label: 'Установка за 4 шага', slug: 'start/install' },
-            { label: 'Мастер настройки', slug: 'start/wizard' },
           ],
         },
         {
-          label: 'Админка',
+          label: 'Установка',
           items: [
-            { label: 'Обзор', slug: 'admin/overview' },
+            { label: 'Установка за 4 шага', slug: 'start/install' },
+            { label: 'Мастер настройки', slug: 'start/wizard' },
+            { label: 'После установки', slug: 'start/after-install' },
+          ],
+        },
+        {
+          label: 'Возможности',
+          items: [
+            { label: 'Админка: обзор', slug: 'admin/overview' },
             { label: 'Продажи', slug: 'admin/sales' },
             { label: 'Маркетинг', slug: 'admin/marketing' },
             { label: 'Интерфейс', slug: 'admin/interface' },
             { label: 'Тексты бота', slug: 'admin/texts' },
             { label: 'Пользователи', slug: 'admin/users' },
             { label: 'Система', slug: 'admin/system' },
+            { label: 'Как это выглядит', slug: 'screens' },
           ],
         },
         {
-          label: 'Платежи',
+          label: 'Оплата',
           items: [
-            { label: 'Вебхуки и reverse-proxy', slug: 'payments/webhooks' },
+            { label: 'Вебхуки и свой домен', slug: 'payments/webhooks' },
             { label: 'Tribute', slug: 'payments/tribute' },
             { label: 'ЮMoney', slug: 'payments/yoomoney' },
           ],
         },
         {
-          label: 'Справочник',
-          items: [
-            { label: 'Команды бота', slug: 'reference/commands' },
-            { label: 'Переменные окружения', slug: 'reference/env' },
-            { label: 'Права токена панели', slug: 'reference/panel-scopes' },
-          ],
-        },
-        {
-          label: 'Эксплуатация',
+          label: 'Обслуживание',
           items: [
             { label: 'Обновление и бэкап', slug: 'ops/update' },
             { label: 'Каналы релизов', slug: 'ops/channels' },
             { label: 'Если что-то не работает', slug: 'ops/troubleshooting' },
-            { label: 'FAQ', slug: 'ops/faq' },
+            { label: 'Вопросы и ответы', slug: 'ops/faq' },
           ],
         },
         {
-          label: 'Ещё',
+          label: 'Дополнительно',
           items: [
-            { label: 'Скриншоты', slug: 'screens' },
+            { label: 'Команды бота', slug: 'reference/commands' },
+            { label: 'Переменные окружения', slug: 'reference/env' },
+            { label: 'Права токена панели', slug: 'reference/panel-scopes' },
             { label: 'Лицензия', slug: 'license' },
           ],
         },

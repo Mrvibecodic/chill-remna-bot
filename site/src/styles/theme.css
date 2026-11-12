@@ -1,62 +1,196 @@
-/* Палитра сайта chill-remna-bot — та же, что была на старой странице:
-   тёмный сине-серый фон, синий акцент, зелёный «stable», сиреневый «dev». */
+/* Оформление сайта документации в тонах личного кабинета бота.
+
+   Два дизайна, как у кабинета, — переключатель в шапке рядом с выбором темы:
+   • «Минимализм» (по умолчанию) — палитра нового дизайна кабинета: ровные
+     плоскости, синий акцент, без свечений;
+   • «Классика» — палитра классического кабинета: глубокий тёмный фон,
+     сине-фиолетовый акцент, мягкое свечение.
+   Цветовая схема (светлая / тёмная) по умолчанию берётся с устройства; человек
+   может выбрать её сам. Дизайн хранится в data-design у <html>, схема — в
+   data-theme (её ведёт Starlight). */
 :root {
-  --brand-bg: #0a0d15;
-  --brand-bg2: #121726;
-  --brand-card: #151a2a;
-  --brand-line: #232c42;
-  --brand-fg: #e8edf7;
-  --brand-muted: #97a3bb;
-  --brand-accent: #5b8cff;
+  --brand-line: var(--sl-color-hairline);
   --brand-accent2: #27d3a2;
   --brand-dev: #b58bff;
-  --brand-warn: #ffb454;
+  --docs-radius: 14px;
 }
 
-/* Тёмная тема — палитра прежнего сайта. Светлую оставляем штатной Starlight,
-   иначе подсветка кода (Expressive Code) остаётся светлой на тёмном фоне. */
-[data-theme='dark'] {
-  --sl-color-accent-low: #16224a;
-  --sl-color-accent: #3f6fe0;
-  --sl-color-accent-high: #b9ccff;
+/* ── Минимализм: светлая ── */
+:root[data-theme='light'] {
+  --sl-color-white: #0f1115;
+  --sl-color-gray-1: #1d2129;
+  --sl-color-gray-2: #344054;
+  --sl-color-gray-3: #667085;
+  --sl-color-gray-4: #98a2b3;
+  --sl-color-gray-5: #d0d5dd;
+  --sl-color-gray-6: #eef0f3;
+  --sl-color-gray-7: #f7f8fa;
+  --sl-color-black: #ffffff;
+  --sl-color-accent-low: #dfe8ff;
+  --sl-color-accent: #2f6bff;
+  --sl-color-accent-high: #1a3fa6;
+  --sl-color-text-accent: #2f6bff;
+  --sl-color-bg: #f4f5f7;
+  --sl-color-bg-nav: rgba(244, 245, 247, 0.9);
+  --sl-color-bg-sidebar: #f4f5f7;
+  --sl-color-bg-inline-code: #e9ecf1;
+  --sl-color-hairline: #e4e7ec;
+  --sl-color-hairline-light: #eef0f3;
+  --sl-color-hairline-shade: #d0d5dd;
+  --brand-accent2: #067647;
+  --brand-dev: #6941c6;
+  --docs-card: #ffffff;
+}
+
+/* ── Минимализм: тёмная ── */
+:root[data-theme='dark'] {
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #e8edf7;
+  --sl-color-gray-1: #f1f3f6;
+  --sl-color-gray-2: #c9ced6;
+  --sl-color-gray-3: #9aa1ad;
+  --sl-color-gray-4: #6b7280;
+  --sl-color-gray-5: #2c3038;
+  --sl-color-gray-6: #17191e;
+  --sl-color-black: #0d0e11;
+  --sl-color-accent-low: #18244a;
+  --sl-color-accent: #3f6fe0;
+  --sl-color-accent-high: #c7d7ff;
+  --sl-color-text-accent: #7aa2ff;
+  --sl-color-bg: #0d0e11;
+  --sl-color-bg-nav: rgba(13, 14, 17, 0.9);
+  --sl-color-bg-sidebar: #0d0e11;
+  --sl-color-bg-inline-code: #1f2228;
+  --sl-color-hairline: #262930;
+  --sl-color-hairline-light: #1f2228;
+  --sl-color-hairline-shade: #0d0e11;
+  --docs-card: #17191e;
+}
+
+/* ── Классика: тёмная ── */
+:root[data-design='classic'][data-theme='dark'] {
+  --sl-color-gray-1: #eef2f8;
   --sl-color-gray-2: #c3cbdd;
-  --sl-color-gray-3: #97a3bb;
-  --sl-color-gray-4: #5b6780;
-  --sl-color-gray-5: #2a3452;
-  --sl-color-gray-6: #192035;
-  --sl-color-black: #0a0d15;
-  --sl-color-bg: #0a0d15;
-  --sl-color-bg-nav: rgba(10, 13, 21, 0.85);
-  --sl-color-bg-sidebar: #0c1019;
-  --sl-color-hairline: #232c42;
-  --sl-color-hairline-light: #2a3452;
-  --sl-color-text-accent: #8fb0ff;
+  --sl-color-gray-3: #8b94a7;
+  --sl-color-gray-4: #5f6877;
+  --sl-color-gray-5: #232c42;
+  --sl-color-gray-6: #141a2a;
+  --sl-color-black: #0b0f17;
+  --sl-color-accent-low: #1b1f4d;
+  --sl-color-accent: #5b6ef0;
+  --sl-color-accent-high: #cfd3ff;
+  --sl-color-text-accent: #9fb0ff;
+  --sl-color-bg: #0b0f17;
+  --sl-color-bg-nav: rgba(11, 15, 23, 0.85);
+  --sl-color-bg-sidebar: #0e1320;
+  --sl-color-bg-inline-code: #1a2136;
+  --sl-color-hairline: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.07);
+  --sl-color-hairline-shade: #0b0f17;
+  --docs-card: rgba(255, 255, 255, 0.045);
+  --docs-radius: 20px;
 }
 
-[data-theme='light'] {
-  --sl-color-accent-low: #d8e2ff;
-  --sl-color-accent: #2f5fd0;
-  --sl-color-accent-high: #16306e;
-  --sl-color-text-accent: #2f5fd0;
+/* ── Классика: светлая (те же сине-фиолетовые тона на светлом) ── */
+:root[data-design='classic'][data-theme='light'] {
+  --sl-color-white: #141a2e;
+  --sl-color-gray-1: #1f2740;
+  --sl-color-gray-2: #3a4463;
+  --sl-color-gray-3: #636d8a;
+  --sl-color-gray-4: #9099b3;
+  --sl-color-gray-5: #cfd4e6;
+  --sl-color-gray-6: #e9ebf7;
+  --sl-color-gray-7: #f4f5fc;
+  --sl-color-accent-low: #e3e1ff;
+  --sl-color-accent: #5b5ff0;
+  --sl-color-accent-high: #2f2a9c;
+  --sl-color-text-accent: #5148e0;
+  --sl-color-bg: #f2f3fb;
+  --sl-color-bg-nav: rgba(242, 243, 251, 0.88);
+  --sl-color-bg-sidebar: #eceef9;
+  --sl-color-bg-inline-code: #e4e6f5;
+  --sl-color-hairline: #dcdff0;
+  --sl-color-hairline-light: #e6e8f5;
+  --docs-radius: 20px;
 }
 
-/* Фоновое свечение, как на прежней главной. */
-[data-theme='dark'] body {
+/* Свечение фона и градиентный заголовок — только у «Классики». */
+:root[data-design='classic'][data-theme='dark'] body {
   background-image:
-    radial-gradient(1100px 520px at 78% -8%, rgba(91, 140, 255, 0.1), transparent),
-    radial-gradient(900px 480px at 8% 4%, rgba(39, 211, 162, 0.07), transparent);
+    radial-gradient(1100px 520px at 78% -8%, rgba(91, 140, 255, 0.12), transparent),
+    radial-gradient(900px 480px at 8% 4%, rgba(157, 123, 255, 0.1), transparent);
   background-attachment: fixed;
 }
-
-/* Заголовок страницы — тот же градиентный текст, что был в шапке сайта. */
-[data-theme='dark'] .content-panel h1#_top {
+:root[data-design='classic'][data-theme='light'] body {
+  background-image: radial-gradient(1000px 480px at 80% -10%, rgba(157, 123, 255, 0.14), transparent);
+  background-attachment: fixed;
+}
+:root[data-design='classic'][data-theme='dark'] .content-panel h1#_top {
   background: linear-gradient(180deg, #fff, #b9c6e6);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   letter-spacing: -0.02em;
+}
+:root[data-design='classic'] .sl-link-button.primary,
+:root[data-design='classic'] .hero .sl-link-button.primary {
+  background: linear-gradient(135deg, #5b8cff, #9d7bff);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* Общие формы: скругления кабинета у карточек, кода, заметок и поиска. */
+.sl-markdown-content .card,
+.sl-markdown-content .sl-link-card,
+.starlight-aside,
+.expressive-code .frame,
+.sl-markdown-content table,
+site-search button[data-open-modal] {
+  border-radius: var(--docs-radius);
+}
+.sl-markdown-content .card,
+.sl-markdown-content .sl-link-card {
+  background: var(--docs-card);
+  border-color: var(--sl-color-hairline);
+}
+.sl-markdown-content :not(pre) > code {
+  border-radius: 6px;
+}
+
+/* Выбор дизайна в шапке — в один ряд с выбором темы. */
+docs-design-select label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--sl-color-gray-1);
+}
+docs-design-select select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.625rem 1.4rem 0.625rem 0.25rem;
+  margin: 0;
+  width: 9.2em;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+docs-design-select option {
+  background: var(--sl-color-bg-nav);
+  color: var(--sl-color-gray-1);
+}
+docs-design-select svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: none;
+  pointer-events: none;
+}
+docs-design-select .caret {
+  position: absolute;
+  right: 0;
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 /* Таблицы: компактнее и с полосами — их в доке много. */
@@ -64,7 +198,7 @@
   font-size: 0.94em;
 }
 .sl-markdown-content tbody tr:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--sl-color-gray-5) 22%, transparent);
 }
 .sl-markdown-content th {
   color: var(--sl-color-white);
@@ -171,5 +305,52 @@
     --sl-sidebar-width: 18rem;
     --toc-width: 17rem;
     --sl-content-width: 60rem;
+  }
+}
+
+/* ── Телефон ───────────────────────────────────────────────────────────
+   Широкие таблицы и длинные строки не должны растягивать страницу: таблица
+   прокручивается внутри себя, длинные адреса и команды переносятся. */
+.sl-markdown-content {
+  overflow-wrap: anywhere;
+}
+.sl-markdown-content img {
+  height: auto;
+  max-width: 100%;
+}
+@media (max-width: 49.99rem) {
+  .sl-markdown-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.9em;
+  }
+  .sl-markdown-content th {
+    white-space: normal;
+  }
+  .sl-markdown-content td,
+  .sl-markdown-content th {
+    padding: 0.45rem 0.6rem;
+  }
+  .sl-markdown-content h1 {
+    font-size: 1.7rem;
+  }
+  .sl-markdown-content h2 {
+    font-size: 1.35rem;
+  }
+  .hero-chips {
+    gap: 6px;
+  }
+  .hero-chips span {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+  /* Крупные области нажатия в меню и пагинации. */
+  .sidebar-content a,
+  .pagination-links a {
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
   }
 }

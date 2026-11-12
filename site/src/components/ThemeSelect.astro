@@ -1,0 +1,48 @@
+---
+// Шапка: рядом со штатным выбором темы — выбор дизайна (как у кабинета бота).
+import Default from '@astrojs/starlight/components/ThemeSelect.astro';
+---
+
+<docs-design-select>
+	<label>
+		<span class="sr-only">Оформление</span>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"></rect><path d="M3 9h18M9 21V9"></path></svg>
+		<select autocomplete="off" aria-label="Оформление">
+			<option value="minimal">Минимализм</option>
+			<option value="classic">Классика</option>
+		</select>
+		<svg class="caret" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1 1 0 0 0 1.42 0L17 10.59a1 1 0 0 0 0-1.42Z"></path></svg>
+	</label>
+</docs-design-select>
+
+{/* Сразу, без ожидания модуля: в списке стоит выбранный дизайн. */}
+<script is:inline>
+	(function () {
+		var d = document.documentElement.dataset.design === 'classic' ? 'classic' : 'minimal';
+		document.querySelectorAll('docs-design-select select').forEach(function (s) {
+			s.value = d;
+		});
+	})();
+</script>
+
+<script>
+	class DocsDesignSelect extends HTMLElement {
+		constructor() {
+			super();
+			const select = this.querySelector('select');
+			select?.addEventListener('change', () => {
+				const design = select.value === 'classic' ? 'classic' : 'minimal';
+				document.documentElement.dataset.design = design;
+				try {
+					localStorage.setItem('docs-design', design === 'classic' ? 'classic' : '');
+				} catch {}
+				document.querySelectorAll<HTMLSelectElement>('docs-design-select select').forEach((s) => {
+					s.value = design;
+				});
+			});
+		}
+	}
+	customElements.define('docs-design-select', DocsDesignSelect);
+</script>
+
+<Default />
