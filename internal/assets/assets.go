@@ -10,19 +10,9 @@ import (
 var sectionsFS embed.FS
 
 const (
-	SectionWizardWelcome       = "wizard_welcome"
-	SectionWizardDBChoose      = "wizard_db_choose"
-	SectionWizardDBPostgresUp  = "wizard_db_pg_up"
-	SectionWizardLocation      = "wizard_location"
-	SectionWizardInstallChoice = "wizard_install_choice"
-	SectionWizardToken         = "wizard_token"
-	SectionWizardCookie        = "wizard_cookie"
-	SectionWizardVerifyOK      = "wizard_verify_ok"
-
 	SectionMainMenu        = "main_menu"
 	SectionBuySubscription = "buy_subscription"
 	SectionMySubscription  = "my_subscription"
-	SectionTrial           = "trial"
 	SectionReferral        = "referral"
 	SectionPromoCode       = "promo_code"
 	SectionAdminStats      = "admin_stats"
@@ -35,20 +25,9 @@ type Section struct {
 }
 
 var AllSections = []Section{
-
-	{SectionWizardWelcome, "👋 Приветствие мастера", "👋 Wizard welcome"},
-	{SectionWizardDBChoose, "🗄 Шаг: выбор БД", "🗄 Step: DB choice"},
-	{SectionWizardDBPostgresUp, "🐘 Шаг: PostgreSQL up", "🐘 Step: PostgreSQL up"},
-	{SectionWizardLocation, "📍 Шаг: локально/удалённо", "📍 Step: local/remote"},
-	{SectionWizardInstallChoice, "🧩 Шаг: способ установки", "🧩 Step: install type"},
-	{SectionWizardToken, "🔑 Шаг: API-токен", "🔑 Step: API token"},
-	{SectionWizardCookie, "🍪 Шаг: nginx-кука", "🍪 Step: nginx cookie"},
-	{SectionWizardVerifyOK, "✅ Шаг: проверка успешна", "✅ Step: verify OK"},
-
 	{SectionMainMenu, "🏠 Меню «Интерфейс»", "🏠 Menu «Interface»"},
 	{SectionBuySubscription, "🛒 Купить / Оплата", "🛒 Buy / Payments menu"},
 	{SectionMySubscription, "📦 Мои подписки", "📦 My subscriptions"},
-	{SectionTrial, "🎁 Триал", "🎁 Trial"},
 	{SectionReferral, "👥 Пользователи / реферал", "👥 Users / referral"},
 	{SectionPromoCode, "💸 Платежи / промокод", "💸 Payments / promo"},
 	{SectionAdminStats, "⚙️ Управление", "⚙️ Manage"},
