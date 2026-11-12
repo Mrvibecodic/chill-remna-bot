@@ -772,12 +772,16 @@ type AddSubOptions struct {
 	// to its subscription URL in the middleware. Therefore it never runs on the
 	// automatic paths: only from the explicit admin "sync everyone" action.
 	MigrateLegacyName bool
+	// OnlyExisting leaves users without an add-on alone: the pass rewrites the
+	// add-ons that already exist and creates none.
+	OnlyExisting bool
 }
 
 // AddSubUpsert reports what an upsert actually did.
 type AddSubUpsert struct {
 	// Done is true when B was created or updated (false = the user was skipped:
-	// expired, no expiry, or an add-on itself — not an error).
+	// expired, no expiry, an add-on itself, or nothing to update under
+	// OnlyExisting — not an error).
 	Done bool
 	// Legacy carries the username of an add-on found under the old naming
 	// scheme. Outside migration it keeps being managed exactly as before and is
@@ -826,6 +830,9 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 	existing, want, err := c.findAddSub(ctx, main.Username, main.TelegramID, opt.Suffix)
 	if err != nil {
 		return res, err
+	}
+	if existing == nil && opt.OnlyExisting {
+		return res, nil
 	}
 	mainDisabled := strings.EqualFold(main.Status, StatusDisabled)
 

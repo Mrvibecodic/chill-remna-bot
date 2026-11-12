@@ -235,7 +235,7 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 		a.log.Warn("addsub: включение после upsert", "tg_id", telegramID, "err", err)
 	}
 	if res.Legacy != "" {
-		a.log.Info("addsub: доп-подписка живёт под старым именем; «Синхронизировать всех» переведёт её на новое",
+		a.log.Info("addsub: доп-подписка живёт под старым именем; «Синхронизация» переведёт её на новое",
 			"tg_id", telegramID, "legacy", res.Legacy)
 	}
 }

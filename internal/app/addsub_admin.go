@@ -10,6 +10,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 )
 
@@ -88,14 +89,19 @@ func (a *App) onAddSubAdmin(ctx context.Context, chatID int64, val string) {
 		a.toggleAddSubInternal(ctx, chatID, arg)
 		a.showAddSubSquads(ctx, chatID)
 	case "sync":
-		if arg == "go" {
-			a.startAddSubBackfill(ctx, chatID)
-			return
+		switch arg {
+		case "upd":
+			a.startAddSubBackfill(ctx, chatID, true)
+		case "all", "go":
+			// go — кнопка экрана прежних версий: она создавала доп-подписки.
+			a.startAddSubBackfill(ctx, chatID, false)
+		default:
+			a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "addsub.sync_confirm"), [][]models.InlineKeyboardButton{
+				{btn(i18n.T(a.lang(chatID), "addsub.btn_sync_upd"), "addsub:sync:upd")},
+				{btn(i18n.T(a.lang(chatID), "addsub.btn_sync_all"), "addsub:sync:all")},
+				{btn(i18n.T(a.lang(chatID), "btn.back"), "menu:addsub")},
+			})
 		}
-		a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "addsub.sync_confirm"), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(a.lang(chatID), "addsub.btn_sync_go"), "addsub:sync:go")},
-			{btn(i18n.T(a.lang(chatID), "btn.back"), "menu:addsub")},
-		})
 	}
 }
 
@@ -114,10 +120,12 @@ const (
 // startAddSubBackfill mirrors the add-on subscription onto every active
 // bot-owned panel user. Without it, enabling the feature only reaches users at
 // their next purchase — everyone already paid up would stay without B (and so
-// without the merge) until they renew.
-func (a *App) startAddSubBackfill(ctx context.Context, chatID int64) {
+// without the merge) until they renew. onlyExisting — режим «обновить тем, у
+// кого есть»: условия пишутся в созданные доп-подписки, новые не создаются.
+func (a *App) startAddSubBackfill(ctx context.Context, chatID int64, onlyExisting bool) {
 	lang := a.lang(chatID)
 	panel, enabled, opt := a.addSubOptions(false)
+	opt.OnlyExisting = onlyExisting
 	// The explicit admin action is the only place allowed to move a legacy-named
 	// add-on onto the discoverable name (it deletes the old panel user).
 	opt.MigrateLegacyName = true
@@ -136,6 +144,11 @@ func (a *App) startAddSubBackfill(ctx context.Context, chatID int64) {
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.sync_started"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.back"), "menu:addsub")},
 	})
+	mode := "addsub.btn_sync_all"
+	if onlyExisting {
+		mode = "addsub.btn_sync_upd"
+	}
+	head := "<b>" + i18n.T(lang, mode) + "</b>\n"
 	go func() {
 		defer a.addSubSyncing.Store(false)
 		bg, cancel := context.WithTimeout(a.bgContext(), addSubBackfillBudget)
@@ -146,10 +159,10 @@ func (a *App) startAddSubBackfill(ctx context.Context, chatID int64) {
 		rep, repCancel := context.WithTimeout(a.bgContext(), 30*time.Second)
 		defer repCancel()
 		if st.err != nil {
-			a.notify(rep, chatID, i18n.T(lang, "addsub.sync_err", st.err.Error(), st.ok, st.migrated, st.failed))
+			a.notify(rep, chatID, head+i18n.T(lang, "addsub.sync_err", st.err.Error(), st.ok, st.migrated, st.failed))
 			return
 		}
-		a.notify(rep, chatID, i18n.T(lang, "addsub.sync_done", st.ok, st.migrated, st.failed))
+		a.notify(rep, chatID, head+i18n.T(lang, "addsub.sync_done", st.ok, st.migrated, st.failed))
 	}()
 }
 
@@ -215,18 +228,39 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 			return st
 		}
 		u := targets[i]
-		// Тариф пользователя мог быть продан без опции — такому доп-подписка
-		// не создаётся и при массовой синхронизации. Трафик и сквады — те,
-		// что проданы его сделкой, иначе общие.
-		snap := a.userSnapshot(ctx, u.TelegramID)
+		// Трафик и сквады — те, что проданы сделкой пользователя, иначе общие.
+		// Сделка без опции получает её, если у тарифа она не выключена.
+		snap, trial := a.addSubDeal(ctx, u.TelegramID)
+		granted := false
 		if !snap.AddSubSold() {
-			continue
+			if opt.OnlyExisting {
+				continue
+			}
+			byPlan, gerr := a.addSubByPlan(ctx, snap)
+			if gerr != nil {
+				st.failed++
+				a.log.Warn("addsub: backfill", "user", u.Username, "err", gerr)
+				continue
+			}
+			if byPlan == nil {
+				continue
+			}
+			snap, granted = byPlan, true
 		}
 		uopt := opt
-		if applyAddSubSnap(&uopt, snap, addSubLiveFor(ctx, panel, snap)) {
+		// На триале действуют общие условия, даже если осталась прошлая сделка.
+		if !trial && applyAddSubSnap(&uopt, snap, addSubLiveFor(ctx, panel, snap)) {
 			a.log.Warn("addsub: все сквады тарифа удалены в панели, взяты общие", "user", u.Username, "plan", snap.Code)
 		}
 		res, uerr := panel.UpsertAddSubForUser(ctx, u, uopt)
+		if res.Done && granted {
+			// Опция попадает в снимок только вместе с созданной доп-подпиской:
+			// истёкшей подписке она не создаётся, и считать её проданной рано.
+			// Созданная при частичном сбое — уже создана, отметка нужна и ей.
+			if gerr := a.grantAddSub(ctx, u.TelegramID, snap); gerr != nil && uerr == nil {
+				uerr = gerr
+			}
+		}
 		switch {
 		case uerr != nil:
 			st.failed++
@@ -249,6 +283,69 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 		}
 	}
 	return st
+}
+
+// addSubByPlan — сделка записана без доп-подписки (так бывает, когда покупка
+// прошла при выключенной доп-подписке): снимок с опцией на сегодняшних
+// условиях тарифа, а если тариф удалён — на общих. nil без ошибки — опция
+// выключена у самого тарифа.
+func (a *App) addSubByPlan(ctx context.Context, snap *model.PlanSnapshot) (*model.PlanSnapshot, error) {
+	p, err := a.planByCode(ctx, snapCodeOr(snap, model.PlanCodeBase))
+	if err != nil {
+		return nil, err
+	}
+	if !a.planAddSubOn(p) {
+		return nil, nil
+	}
+	out := *snap
+	sold := true
+	out.AddSub = &sold
+	out.AddSubTrafficGB, out.AddSubSquads = planAddSubTerms(p)
+	return &out, nil
+}
+
+// grantAddSub записывает выданную опцию в снимок пользователя — иначе
+// продление бонусом или разблокировка выключили бы только что созданную
+// доп-подписку. granted — снимок, по которому она создана.
+func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSnapshot) error {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return nil
+	}
+	// Снимок пишется целиком: без замка выдачи запись затёрла бы сделку,
+	// оплаченную между чтением и записью.
+	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(tgID, 10))]
+	lk.Lock()
+	defer lk.Unlock()
+	u, err := st.GetUser(ctx, tgID)
+	if err != nil {
+		return err
+	}
+	// Опция уже есть или сделка успела смениться — у новой свой ответ.
+	if u == nil || u.Snapshot.AddSubSold() || planCodeOf(u.Snapshot) != planCodeOf(granted) {
+		return nil
+	}
+	snap := *u.Snapshot
+	snap.AddSub = granted.AddSub
+	snap.AddSubTrafficGB, snap.AddSubSquads = granted.AddSubTrafficGB, granted.AddSubSquads
+	return st.SetUserSnapshot(ctx, tgID, &snap)
+}
+
+// addSubDeal — снимок последней сделки пользователя и идёт ли у него триал.
+func (a *App) addSubDeal(ctx context.Context, tgID int64) (*model.PlanSnapshot, bool) {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil {
+		return nil, false
+	}
+	u, err := st.GetUser(ctx, tgID)
+	if err != nil || u == nil {
+		return nil, false
+	}
+	return u.Snapshot, u.NotifyKind == "trial"
 }
 
 func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
