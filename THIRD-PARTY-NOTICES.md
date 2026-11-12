@@ -61,6 +61,10 @@
 результат сборки — статические HTML/CSS/JS, публикуемые на GitHub Pages. Полный
 список зависимостей сборки — `site/package-lock.json`.
 
+Шрифт сайта — **Onest** (SIL Open Font License 1.1, © The Onest Project Authors,
+<https://github.com/simpals/onest>), подключён пакетом `@fontsource-variable/onest`.
+Файлы шрифта публикуются вместе с сайтом без изменений; в поставку бота не входят.
+
 ## Собственные материалы проекта
 
 Иллюстрации разделов (`assets/`, `internal/assets/sections/`), иконки сайта

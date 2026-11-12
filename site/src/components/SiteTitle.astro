@@ -1,0 +1,12 @@
+---
+// Название сайта: значок, имя и подпись — как в меню у документации прослойки.
+const { siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title docs-brand">
+	<img src="/icon-192.png" width="34" height="34" alt="" />
+	<span class="docs-brand-text">
+		<b translate="no">Chill Remna bot</b>
+		<small>для Remnawave</small>
+	</span>
+</a>

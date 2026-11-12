@@ -1,0 +1,29 @@
+---
+// Заголовок страницы: путь (раздел › страница), сам заголовок и короткое
+// описание из шапки файла.
+const route = Astro.locals.starlightRoute;
+const { title, description } = route.entry.data;
+
+let group = '';
+for (const entry of route.sidebar) {
+	if (entry.type !== 'group') continue;
+	if (entry.entries.some((e) => e.type === 'link' && e.isCurrent)) {
+		group = entry.label;
+		break;
+	}
+}
+---
+
+{
+	group && (
+		<nav class="docs-crumbs" aria-label="Путь">
+			<span>{group}</span>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<path d="M9 6l6 6-6 6" />
+			</svg>
+			<span>{title}</span>
+		</nav>
+	)
+}
+<h1 id="_top">{title}</h1>
+{description && <p class="docs-lead">{description}</p>}
