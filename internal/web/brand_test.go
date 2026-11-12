@@ -40,7 +40,7 @@ func brandServer(f *brandMini) http.Handler {
 }
 
 // Выбор дизайна: новый дизайн отдаёт свою страницу с подставленными
-// настройками, классический — прежнюю страницу байт в байт.
+// настройками, классический — прежнюю страницу; в обе вставлен общий скрипт.
 func TestDesignSelection(t *testing.T) {
 	f := &brandMini{ui: WebUIDTO{Design: designMinimal, Theme: "dark", Name: "Acme </script><b>", Accent: "#112233"}}
 	h := brandServer(f)
@@ -62,8 +62,8 @@ func TestDesignSelection(t *testing.T) {
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/miniapp/", nil))
 	classic, _ := miniStaticFS.ReadFile("miniapp_static/index.html")
-	if w.Body.String() != string(classic) {
-		t.Fatal("классический дизайн обязан отдаваться без изменений")
+	if w.Body.String() != string(injectShared(classic)) {
+		t.Fatal("классический дизайн обязан отдаваться без изменений, кроме вставки общего скрипта")
 	}
 }
 

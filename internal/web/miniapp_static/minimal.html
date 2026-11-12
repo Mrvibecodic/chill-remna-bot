@@ -276,6 +276,7 @@ input[type=file].field{padding:12px;height:auto}
 </div></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="modal" class="modal"><div class="box" role="dialog" aria-modal="true"><div class="msg"></div><div class="row2"><button class="btn sec" data-no></button><button class="btn" data-yes></button></div></div></div>
+<script>/*SHARED*/</script>
 <script>
 'use strict';
 /* Иконки нарисованы в стиле Feather Icons (MIT, (c) 2013-2023 Cole Bemis) и
@@ -327,7 +328,6 @@ var STACK=[]; // история экранов для «Назад»
 // Узкий экран и мини-апп в Telegram остаются как были.
 var DESKMQ=null;try{DESKMQ=WEB&&window.matchMedia?window.matchMedia('(min-width:960px)'):null;}catch(e){}
 var DESK=false,SECT=null;
-function setDesk(){DESK=!!(DESKMQ&&DESKMQ.matches);try{document.body.classList.toggle('desk',DESK);}catch(e){}}
 var CUR=null; // текущий экран {name,arg}
 var POLL=null;
 
@@ -456,24 +456,11 @@ function daysW(n){return plural(n,T('day1'),T('day2'),T('day5'));}
 // имеет — в кружке буква.
 var AVA='',AVA_ID=0;
 function avaID(){return (STATE&&STATE.me&&STATE.me.tg_id)||0;}
-function avaHTML(ini){return AVA&&AVA_ID&&AVA_ID===avaID()?'<img src="'+AVA+'" alt="">':esc(ini);}
-function loadAva(){
-  var id=avaID();
-  if(!TOKEN||id<=0||AVA_ID===id)return;
-  AVA_ID=id;if(AVA){try{URL.revokeObjectURL(AVA);}catch(e){}AVA='';}
-  fetch('/api/miniapp/avatar',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.ok?r.blob():null;}).then(function(b){
-    if(!b||AVA_ID!==id||!window.URL)return;
-    AVA=URL.createObjectURL(b);
-    Array.prototype.forEach.call(document.querySelectorAll('[data-ava]'),function(e){e.innerHTML='<img src="'+AVA+'" alt="">';});
-  }).catch(function(){});
-}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'\\n').replace(/\r/g,'\\r');}
 function loc(){return STATE.lang==='en'?'en-US':'ru-RU';}
 function rub(k){return (Math.round(k)/100).toLocaleString(loc())+' ₽';}
 function num(s){var v=parseFloat(String(s==null?'':s).replace(/[\s\u00a0]/g,'').replace(',','.'));return isFinite(v)?v:NaN;}
 function price(d){return (String(d.price||'')+' '+(d.currency||'')).trim();}
-function daysLeft(ts){var d=Math.ceil((ts*1000-Date.now())/86400000);return d>0?d:0;}
 // Даты — по Москве, как в боте: по часам браузера у клиента западнее
 // Москвы сброс в 03:20 МСК выходил вчерашним числом.
 function dateS(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
@@ -481,13 +468,10 @@ function haptic(k){try{if(tg&&tg.HapticFeedback){if(k==='ok')tg.HapticFeedback.n
 function busy(el,on){if(el&&el.tagName)el.disabled=!!on;}
 var toastT=null;
 function toast(msg,kind){var t=document.getElementById('toast');t.innerHTML=(kind==='ok'?IC.check:kind==='err'?IC.help:'')+'<span>'+esc(msg)+'</span>';t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(function(){t.classList.remove('show');},2800);if(kind)haptic(kind);}
-function fallbackCopy(t){try{var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.left='-9999px';document.body.appendChild(a);a.select();a.setSelectionRange(0,String(t).length);var ok=document.execCommand('copy');document.body.removeChild(a);return ok;}catch(e){return false;}}
 function copy(t){var done=function(ok){toast(ok?T('copied'):T('copy_fail'),ok?'ok':'err');};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){done(true);},function(){done(fallbackCopy(t));});return;}done(fallbackCopy(t));}
 /* Ссылки приходят с сервера, но часть — из конфига страницы подписки: исполняемые схемы не открываем. */
 function safeURL(u){return !/^\s*(javascript|data|vbscript|file):/i.test(String(u||''));}
 function openL(u){if(!safeURL(u))return;if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank','noopener');}
-function isTgLink(u){return /^(https:\/\/t\.me\/|tg:\/\/)/i.test(String(u||''));}
-function openSmart(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return true;}catch(e){}}openL(u);return false;}
 function openDeep(u){if(!safeURL(u))return;try{window.location.href=u;}catch(e){}}
 function guardOn(){try{if(tg&&tg.enableClosingConfirmation)tg.enableClosingConfirmation();}catch(e){}}
 function guardOff(){try{if(tg&&tg.disableClosingConfirmation)tg.disableClosingConfirmation();}catch(e){}}
@@ -550,7 +534,6 @@ function paintBrand(){document.getElementById('brand').innerHTML=brandHTML(false
 function paintBalance(){var b=document.getElementById('bal');if(TOKEN&&STATE.me){b.style.display='inline-flex';b.innerHTML=IC.wallet+esc(rub(STATE.balanceK));}else{b.style.display='none';b.innerHTML='';}}
 
 /* ---------- API ---------- */
-function mkErr(st,m){var e=new Error(m||('HTTP '+st));e.status=st;return e;}
 async function authenticate(){
   var a=await api('/api/miniapp/auth',{method:'POST',body:JSON.stringify({init_data:tg.initData}),noRetry:true});
   TOKEN=a.token;if(a.notice&&!STATE.noticeShown){STATE.noticeShown=true;setTimeout(function(){toast(a.notice);},400);}return TOKEN;
@@ -570,7 +553,6 @@ async function api(path,opts){
   if(!r.ok){var m=null;try{var j=await r.json();if(j&&j.error)m=j.error;}catch(e){}throw mkErr(r.status,m);}
   return r.json();
 }
-function post(p,b){return api(p,{method:'POST',body:JSON.stringify(b||{})});}
 
 /* ---------- навигация ---------- */
 function setBack(on){try{if(tg&&tg.BackButton){if(on)tg.BackButton.show();else tg.BackButton.hide();}}catch(e){}}
@@ -658,7 +640,6 @@ function confirmAsk(msg,yes,cb){
 /* ---------- данные ---------- */
 function planBy(c){for(var i=0;i<STATE.plans.length;i++)if(STATE.plans[i].code===c)return STATE.plans[i];return null;}
 function durBy(p,m){var l=(p&&p.durations)||[];for(var i=0;i<l.length;i++)if(l[i].months==m)return l[i];return null;}
-function planTitle(p){return (p.icon?p.icon+' ':'')+(p.name||p.code);}
 function planMin(p){var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)+(d.months>1?T('per_n').replace('{n}',d.months):d.months===1?T('per_mo'):'')};});return b?b.l:'';}
 function addsubBits(p){
   var b=[];
@@ -668,7 +649,6 @@ function addsubBits(p){
 }
 function trafficT(d){return d&&d.traffic_gb>0?d.traffic_gb+' '+T('gb'):T('traffic_unl');}
 function planSubT(d){return trafficT(d)+(!d?'':d.devices>0?' · '+d.devices+' '+plural(d.devices,T('dev1'),T('dev2'),T('dev5')):d.devices_unlim?' · '+T('dev_unl'):'');}
-function legalDocs(){return (STATE.menu&&STATE.menu.legal)||[];}
 function methods(p){
   var out=[];if(STATE.balanceK>0)out.push('balance');
   (STATE.methods||[]).forEach(function(m){if(m==='balance')return;if(WEB&&m==='stars')return;if(m==='tribute'&&!p.tribute)return;out.push(m);});
@@ -897,7 +877,6 @@ function payTabGo(w,url){
   if(!w||w.closed||!safeURL(url))return false;
   try{w.location.href=url;return true;}catch(e){return false;}
 }
-function payTabDrop(w){try{if(w&&!w.closed)w.close();}catch(e){}}
 async function pay(code,months,method,el,shown){
   haptic();busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
@@ -1294,18 +1273,6 @@ function tgLoginLib(){
     s.onload=function(){if(window.Telegram&&Telegram.Login)ok(Telegram.Login);else{TG_LIB=null;no();}};s.onerror=function(){TG_LIB=null;no();};document.head.appendChild(s);});
   return TG_LIB;
 }
-// tgNonce — пара verifier/nonce: nonce уходит в Telegram и попадает в токен,
-// verifier — только на наш сервер. Без verifier перехваченный токен не годится.
-function tgNonce(){
-  try{
-    if(!(window.crypto&&crypto.subtle&&crypto.getRandomValues&&window.TextEncoder))return Promise.resolve({v:'',n:''});
-    var b=new Uint8Array(32);crypto.getRandomValues(b);
-    var v=btoa(String.fromCharCode.apply(null,b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-    return crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)).then(function(h){
-      return {v:v,n:Array.prototype.map.call(new Uint8Array(h),function(x){return ('0'+x.toString(16)).slice(-2);}).join('')};
-    },function(){return {v:'',n:''};});
-  }catch(e){return Promise.resolve({v:'',n:''});}
-}
 function mountTG(id,fn,label){
   var put=function(c){var m=document.getElementById(id);if(!m||!c)return;
     if(c.client_id){
@@ -1333,35 +1300,9 @@ async function changePass(el){
   catch(e){toast(e.message||T('error'),'err');}
   busy(el,false);
 }
-// Сторонний чат поддержки: только кабинет в браузере, скрипт ставится один раз.
-var CHAT_ON=false;
-function mountChat(src){
-  if(CHAT_ON||!WEB||!src||!/^https:\/\//i.test(src))return;
-  CHAT_ON=true;
-  var s=document.createElement('script');s.src=src;s.async=true;document.body.appendChild(s);
-}
-function guestChat(){api('/api/cabinet/config').then(function(c){mountChat(c.chat_src);},function(){});}
 function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang};paintBalance();renderLogin();}
 
 /* ---------- вход в кабинет ---------- */
-// Параметры ссылки (?ref=, ?inv=, ?promo=, ?plan=, ?start=) — их можно
-// сочетать; хранятся одной строкой через перевод строки.
-function startParams(){
-  var out=[];
-  try{var q=new URLSearchParams(location.search);
-    ['ref','inv','promo','plan'].forEach(function(k){var v=q.get(k);if(v)out.push(k+'_'+v);});
-    var s=q.get('start');if(s)out.push(s);
-  }catch(e){}
-  // Разделитель — перевод строки: в коде промокода бывает что угодно, кроме
-  // пробельных символов.
-  return out.map(function(t){return t.replace(/\s/g,'').slice(0,64);}).filter(Boolean).join('\n');
-}
-// На сервер при входе уходит одно: приглашение в закрытый бот или
-// пригласивший друг.
-function serverStart(s){
-  var t=String(s||'').split('\n');
-  return t.filter(function(x){return x.indexOf('inv_')===0;})[0]||t.filter(function(x){return x.indexOf('ref_')===0;})[0]||'';
-}
 async function renderLogin(){
   STACK=[];CUR={name:'login'};setBack(false);paintBalance();renderSide(false);
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
