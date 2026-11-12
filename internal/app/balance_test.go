@@ -163,3 +163,27 @@ func TestBalanceExtID_DistinguishesPurchases(t *testing.T) {
 		t.Fatal("без различителя ключа быть не должно — иначе законная покупка заблокируется навсегда")
 	}
 }
+
+// Оплата с баланса из мини-аппа оставляет в журнале платежей ту же запись о
+// списании, что и оплата из чата: путь у них один.
+func TestMiniBalancePurchaseIsJournaled(t *testing.T) {
+	var patched map[string]any
+	srv := snapPanel(t, &patched)
+	a, fs := snapApp(t, srv.URL)
+	ctx := context.Background()
+	const uid int64 = 555 // под этим id пользователя знает панель-заглушка
+	_ = fs.UpsertUser(ctx, uid)
+	_ = fs.AddBalance(ctx, uid, 99000)
+	p := vipPlan(t, fs, model.PlanAvailAll)
+
+	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false); !r.OK {
+		t.Fatalf("покупка не прошла: %+v", r)
+	}
+	logs, _ := fs.PayLogs(ctx, "", uid, 0)
+	for _, e := range logs {
+		if e.Stage == "balance_deducted" {
+			return
+		}
+	}
+	t.Fatalf("в журнале нет записи о списании: %+v", logs)
+}

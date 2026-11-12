@@ -592,7 +592,7 @@ func (a *App) finalizeTopUp(ctx context.Context, chatID int64, kopecks int64, me
 	// Пользователя удалили, а оплата пришла позже: не заводим его заново с
 	// деньгами, а зовём админа — так же, как это делает сверка счетов.
 	if u, err := a.store.GetUser(ctx, chatID); err == nil && u == nil {
-		a.payLog(ctx, method, extID, chatID, "orphan_paid", "пополнение на удалённого пользователя: %s", amount)
+		a.payLog(ctx, method, extID, chatID, stageOrphanPaid, "пополнение на удалённого пользователя: %s", amount)
 		alang := a.lang(a.cfg.AdminID)
 		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.orphan_payment",
 			escapeName(method), escapeName(extID), escapeName(amount), chatID))
@@ -737,75 +737,140 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 	if s == nil {
 		return
 	}
+	// Момент выбора берётся из намерения покупки; ошибку чтения игнорируем —
+	// тогда ключа сделки не будет и поведение останется прежним.
+	res := a.payBalance(ctx, chatID, s, false, func() string {
+		if in, ierr := a.buyIntent(ctx, chatID); ierr == nil && in != nil {
+			return in.CreatedAt
+		}
+		return ""
+	})
+	switch res.kind {
+	case balCurrency:
+		// Отдельная ветка: раньше сюда попадало «Тарифы пока не настроены» —
+		// человеку, стоящему на карточке настроенного тарифа.
+		a.sendHome(ctx, chatID, i18n.T(lang, "buy.currency_mismatch",
+			curSymbol(a.saleCurrency(s)), curSymbol(a.pricing().Currency)))
+	case balNoPrice:
+		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
+	case balNoStore:
+		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
+	case balAlready, balJustBought:
+		a.showMySubs(ctx, chatID)
+	case balDeductFailed:
+		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "списание с баланса", res.err))
+	case balNoFunds:
+		rows := [][]models.InlineKeyboardButton{}
+		if a.topUpEnabled() {
+			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
+		}
+		rows = append(rows, homeRow(lang))
+		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(res.kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
+	case balFailed:
+		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", a.clientErr(ctx, chatID, "оплата с баланса", res.err)))
+	case balIssued:
+		a.sendSubActive(ctx, chatID, res.link, res.expireAt)
+	}
+}
+
+// balancePaid — чем закончилась оплата с баланса.
+type balancePaid int
+
+const (
+	balIssued       balancePaid = iota // подписка выдана
+	balCurrency                        // тариф в другой валюте, с баланса не продаётся
+	balNoPrice                         // цены на этот срок нет
+	balNoStore                         // хранилище недоступно
+	balJustBought                      // повторное нажатие сразу после покупки
+	balAlready                         // эта сделка уже выполнена
+	balDeductFailed                    // списание не прошло, деньги не тронуты
+	balNoFunds                         // на балансе не хватает
+	balFailed                          // выдача не удалась, деньги возвращены
+)
+
+type balanceResult struct {
+	kind           balancePaid
+	kopecks        int64
+	link, expireAt string
+	err            error
+}
+
+// payBalance — оплата с баланса, одна на чат, мини-апп и кабинет: проверки,
+// списание, выдача и возврат при отказе обязаны совпадать, где бы человек ни
+// нажал кнопку.
+//
+// discr отличает эту сделку от следующей такой же (см. balanceExtID) и
+// читается под замком. concurrent — запросы приходят параллельно (веб, в
+// отличие от чата, где апдейты идут по очереди): покупка идёт под замком и
+// оставляет отметку «только что куплено».
+func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bool, discr func() string) balanceResult {
 	months := s.Months
 	priceStr := a.saleBase(s)
 	kopecks, ok := rubToKopecks(priceStr)
 	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
 	// иначе «5 $» молча списались бы как «5 ₽».
 	if !a.saleGridCurrency(s) {
-		// Отдельная ветка: раньше сюда попадало «Тарифы пока не настроены» —
-		// человеку, стоящему на карточке настроенного тарифа.
-		a.sendHome(ctx, chatID, i18n.T(lang, "buy.currency_mismatch",
-			curSymbol(a.saleCurrency(s)), curSymbol(a.pricing().Currency)))
-		return
+		return balanceResult{kind: balCurrency}
 	}
 	if priceStr == "" || !ok || kopecks <= 0 {
-		a.sendHome(ctx, chatID, i18n.T(lang, "buy.no_plans"))
-		return
+		return balanceResult{kind: balNoPrice}
 	}
-	// Ключ сделки — до списания: по нему отсекается двойное нажатие. Момент
-	// выбора берётся из намерения покупки; ошибку чтения игнорируем — тогда
-	// ключа не будет и поведение останется прежним.
-	discr := ""
-	if in, ierr := a.buyIntent(ctx, chatID); ierr == nil && in != nil {
-		discr = in.CreatedAt
+	if a.store == nil {
+		return balanceResult{kind: balNoStore}
 	}
-	extID := balanceExtID(chatID, s.planCode(), months, discr)
+	buyKey := strconv.FormatInt(tgID, 10) + "|" + s.planCode() + "|" + strconv.Itoa(months)
+	if concurrent {
+		// Ключ сделки ниже строится из состояния, ПРОЧИТАННОГО ДО списания, а
+		// оно сдвигается каждой выдачей: второй запрос, успевший прочитать его
+		// после первой выдачи, получал другой ключ и списывал деньги во второй
+		// раз. Замок закрывает окно, а отметка — двойной тап с паузой, когда
+		// ключ уже заведомо разошёлся.
+		clk := &a.checkoutLk[extLockIndex(buyKey)]
+		clk.Lock()
+		defer clk.Unlock()
+		if a.boughtJustNow(buyKey) {
+			a.payLog(ctx, "balance", "", tgID, "duplicate", "повторное нажатие: покупка только что выполнена")
+			return balanceResult{kind: balJustBought}
+		}
+	}
+	// Ключ сделки — до списания: по нему отсекается двойное нажатие.
+	extID := balanceExtID(tgID, s.planCode(), months, discr())
 	if extID != "" {
 		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
 			// Первое нажатие уже выдало подписку. Денег не трогаем вовсе —
 			// иначе списали бы и тут же вернули, оставив в журнале пугающий
 			// откат вместо честного «уже куплено».
-			a.payLog(ctx, "balance", extID, chatID, "duplicate", "повторное нажатие: покупка уже выполнена")
-			a.showMySubs(ctx, chatID)
-			return
+			a.payLog(ctx, "balance", extID, tgID, "duplicate", "повторное нажатие: покупка уже выполнена")
+			return balanceResult{kind: balAlready}
 		}
 	}
 	// Снимок — до списания: после DeductBalance отказ по любой причине означает
 	// возврат денег, и лишних причин отказа быть не должно.
 	snap := a.saleSnapshot(s)
-	deducted, err := a.store.DeductBalance(ctx, chatID, kopecks)
+	deducted, err := a.store.DeductBalance(ctx, tgID, kopecks)
 	if err != nil {
-		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "списание с баланса", err))
-		return
-	}
-	if deducted {
-		a.payLog(ctx, "balance", extID, chatID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
+		return balanceResult{kind: balDeductFailed, err: err}
 	}
 	if !deducted {
-		rows := [][]models.InlineKeyboardButton{}
-		if a.topUpEnabled() {
-			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
-		}
-		rows = append(rows, homeRow(lang))
-		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
-		return
+		return balanceResult{kind: balNoFunds, kopecks: kopecks}
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
+	a.payLog(ctx, "balance", extID, tgID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
+	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
 	if err != nil {
 		// Дубль поймало ядро выдачи (второе нажатие прошло проверку выше, пока
 		// первое ещё не записало платёж): деньги вернуть, но это не сбой —
 		// подписка выдана первым нажатием.
 		if errors.Is(err, storage.ErrDuplicateExtID) {
-			a.refundBalance(chatID, kopecks, nil)
-			a.showMySubs(ctx, chatID)
-			return
+			a.refundBalance(tgID, kopecks, nil)
+			return balanceResult{kind: balAlready}
 		}
-		a.refundBalance(chatID, kopecks, err)
-		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", a.clientErr(ctx, chatID, "оплата с баланса", err)))
-		return
+		a.refundBalance(tgID, kopecks, err)
+		return balanceResult{kind: balFailed, err: err}
 	}
-	a.sendSubActive(ctx, chatID, link, expireAt)
+	if concurrent {
+		a.markBought(buyKey)
+	}
+	return balanceResult{kind: balIssued, kopecks: kopecks, link: link, expireAt: expireAt}
 }
 
 // forecastShown — показывать ли в кошельке блок «На сколько хватит».

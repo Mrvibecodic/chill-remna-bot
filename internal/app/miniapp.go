@@ -2,15 +2,12 @@ package app
 
 import (
 	"context"
-	"errors"
-	"strconv"
 	"strings"
 	"time"
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
-	"remnabot/internal/storage"
 	"remnabot/internal/web"
 )
 
@@ -446,66 +443,30 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 		return web.MiniActionDTO{OK: true, PayURL: payURL, Invoice: invoice}
 	}
 
-	priceStr := a.saleBase(s)
-	kopecks, ok := rubToKopecks(priceStr)
-	// Баланс живёт в рублях: тариф в другой валюте с баланса не продаётся —
-	// иначе «5 $» молча списались бы как «5 ₽».
-	if priceStr == "" || !ok || kopecks <= 0 || !a.saleGridCurrency(s) {
-		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.plan_unavailable"))}
-	}
-	if a.store == nil {
+	// Намерения покупки здесь нет (счёт из мини-аппа намеренно не перебивает
+	// выбор в чате), поэтому сделки различает конец срока ДО покупки.
+	res := a.payBalance(ctx, tgID, s, true, func() string {
+		if u, uerr := a.store.GetUser(ctx, tgID); uerr == nil && u != nil {
+			return "exp:" + u.SubExpireAt
+		}
+		return "none"
+	})
+	lang := a.lang(tgID)
+	switch res.kind {
+	case balIssued:
+		return web.MiniActionDTO{OK: true, SubURL: res.link, ExpireAt: formatExpire(res.expireAt, lang)}
+	case balNoStore:
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	case balJustBought:
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "buy.just_bought"))}
+	case balAlready:
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.already_bought"))}
+	case balNoFunds:
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.no_funds"))}
+	case balDeductFailed, balFailed:
+		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", res.err))}
 	}
-	// Запросы веб-сервера конкурентны, в отличие от чата, где апдейты идут по
-	// очереди. Ключ сделки ниже строится из конца срока, ПРОЧИТАННОГО ДО
-	// списания, — а он сдвигается каждой выдачей: второй запрос, успевший
-	// прочитать его после первой выдачи, получал другой ключ и списывал
-	// деньги во второй раз. Замок закрывает окно, а отметка ниже — двойной
-	// тап с паузой, когда ключ уже заведомо разошёлся.
-	buyKey := strconv.FormatInt(tgID, 10) + "|" + s.planCode() + "|" + strconv.Itoa(months)
-	clk := &a.checkoutLk[extLockIndex(buyKey)]
-	clk.Lock()
-	defer clk.Unlock()
-	if a.boughtJustNow(buyKey) {
-		a.payLog(ctx, "balance", "", tgID, "duplicate", "повторное нажатие: покупка только что выполнена")
-		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "buy.just_bought"))}
-	}
-
-	// Ключ сделки против двойного нажатия. Намерения покупки здесь нет (счёт
-	// из мини-аппа намеренно не перебивает выбор в чате), поэтому момент
-	// различается концом срока ДО покупки.
-	discr := "none"
-	if u, uerr := a.store.GetUser(ctx, tgID); uerr == nil && u != nil {
-		discr = "exp:" + u.SubExpireAt
-	}
-	extID := balanceExtID(tgID, s.planCode(), months, discr)
-	if extID != "" {
-		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
-			a.payLog(ctx, "balance", extID, tgID, "duplicate", "повторный запрос: покупка уже выполнена")
-			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.already_bought"))}
-		}
-	}
-	// Снимок — до списания (как в чате): после DeductBalance любой отказ
-	// означает возврат денег, и лишних причин отказа быть не должно.
-	snap := a.saleSnapshot(s)
-	deducted, err := a.store.DeductBalance(ctx, tgID, kopecks)
-	if err != nil {
-		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
-	}
-	if !deducted {
-		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.no_funds"))}
-	}
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
-	if err != nil {
-		if errors.Is(err, storage.ErrDuplicateExtID) {
-			a.refundBalance(tgID, kopecks, nil)
-			return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.already_bought"))}
-		}
-		a.refundBalance(tgID, kopecks, err)
-		return web.MiniActionDTO{Error: stripHTMLTags(a.clientErr(ctx, tgID, "мини-апп", err))}
-	}
-	a.markBought(buyKey)
-	return web.MiniActionDTO{OK: true, SubURL: link, ExpireAt: formatExpire(expireAt, a.lang(tgID))}
+	return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.plan_unavailable"))}
 }
 
 // buyCooldown — сколько после выдачи повтор той же покупки считается двойным
