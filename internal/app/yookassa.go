@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/storage"
 	"remnabot/internal/yookassa"
 )
 
@@ -171,50 +173,96 @@ func (a *App) onYKCheck(ctx context.Context, chatID int64, payID string) {
 		})
 		return
 	}
-	if a.store != nil {
-		if p, _ := a.store.PendingByExtID(ctx, payID); p != nil && p.Purpose == "topup" {
-			amount := pay.Amount.Value + " " + pay.Amount.Currency
-			// Гасим счёт только при успехе — см. finalizeTopUp: иначе
-			// неудачное зачисление уносит пополнение вместе со страховкой.
-			if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodYooKassa, amount, payID); err != nil {
-				a.log.Error("yookassa topup finalize", "err", err, "ext_id", payID)
-				return
-			}
-			_ = a.store.ResolvePending(ctx, p.ID)
-			return
-		}
-	}
-	payChat, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
-	months, _ := strconv.Atoi(pay.Metadata["months"])
-	if (payChat == 0 || months == 0) && a.store != nil {
-		if p, _ := a.store.PendingByExtID(ctx, payID); p != nil {
-			if payChat == 0 {
-				payChat = p.TelegramID
-			}
-			if months == 0 {
-				months = p.Months
-			}
-		}
-	}
-	if payChat != 0 && months == 0 {
-		a.noPeriodForPayment(ctx, model.PayMethodYooKassa, payID, payChat)
-		return
-	}
-	if payChat == 0 || months == 0 {
-		// Как и в вебхуке: без metadata получатель и срок неизвестны — не
-		// угадываем (нажавшему кнопку и сроку «по умолчанию» выдавать нельзя).
+	res, err := a.settleYooKassa(ctx, pay, payID)
+	switch res {
+	case ykTopUpFailed:
+		a.log.Error("yookassa topup finalize", "err", err, "ext_id", payID)
+	case ykNoMeta:
+		// Без metadata получатель и срок неизвестны — не угадываем (нажавшему
+		// кнопку и сроку «по умолчанию» выдавать нельзя).
 		a.payLog(ctx, model.PayMethodYooKassa, payID, chatID, "error", "в metadata платежа нет telegram_id/months — получатель неизвестен")
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.fail", "metadata"))
-		return
-	}
-	amount := pay.Amount.Value + " " + pay.Amount.Currency
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodYooKassa, amount, payID, a.pendingSnapshot(ctx, payID))
-	if err != nil {
+	case ykAlready:
+		// Вебхук успел раньше, пока шёл запрос к ЮKassa: подписка выдана.
+		a.showMySubs(ctx, chatID)
+	case ykFailed, ykOrphan, ykHeld:
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
-		return
 	}
-	a.saveAutoPayFromPayment(ctx, payChat, months, pay, a.pendingSnapshot(ctx, payID))
-	a.sendSubActive(ctx, payChat, link, expireAt)
+}
+
+// ykSettled — чем закончился разбор оплаченного платежа ЮKassa.
+type ykSettled int
+
+const (
+	ykIssued      ykSettled = iota // подписка выдана и отправлена получателю
+	ykToppedUp                     // пополнение зачислено
+	ykTopUpFailed                  // пополнение не зачислено, счёт оставлен сверке
+	ykNoPeriod                     // срок неизвестен, администратор извещён
+	ykNoMeta                       // получатель неизвестен
+	ykAlready                      // уже выдано другой доставкой
+	ykHeld                         // счёт до восстановления базы, решает администратор
+	ykOrphan                       // получателя удалили, администратор извещён
+	ykFailed                       // выдача не удалась
+)
+
+// settleYooKassa разбирает платёж, который ЮKassa по API подтвердила
+// оплаченным (succeeded и paid, возврат уже исключён). Один разбор на вебхук
+// и кнопку «Проверить оплату»: кому, на какой срок и на каких условиях
+// выдавать, оба обязаны решать одинаково.
+func (a *App) settleYooKassa(ctx context.Context, pay *yookassa.Payment, payID string) (ykSettled, error) {
+	amount := pay.Amount.Value + " " + pay.Amount.Currency
+	var pending *model.PendingInvoice
+	if a.store != nil {
+		pending, _ = a.store.PendingByExtID(ctx, payID)
+	}
+	if pending != nil && pending.Purpose == "topup" {
+		// Счёт гасится только после зачисления: иначе неудачное зачисление
+		// уносит пополнение вместе со страховкой (сверка счёта уже не увидит).
+		if err := a.finalizeTopUp(ctx, pending.TelegramID, pending.Kopecks, model.PayMethodYooKassa, amount, payID); err != nil {
+			return ykTopUpFailed, err
+		}
+		_ = a.store.ResolvePending(ctx, pending.ID)
+		return ykToppedUp, nil
+	}
+	chatID, _ := strconv.ParseInt(pay.Metadata["telegram_id"], 10, 64)
+	months, _ := strconv.Atoi(pay.Metadata["months"])
+	// Метаданные могли не дойти (платёж создан не ботом, потеря на стороне
+	// платёжки) — срок и получатель лежат ещё и в строке счёта.
+	if pending != nil {
+		if chatID == 0 {
+			chatID = pending.TelegramID
+		}
+		if months == 0 {
+			months = pending.Months
+		}
+	}
+	if chatID != 0 && months == 0 {
+		// Деньги приняты, а срок неизвестен: молча пропускать нельзя, но и
+		// повторять доставку незачем — разбирается человек.
+		a.noPeriodForPayment(ctx, model.PayMethodYooKassa, payID, chatID)
+		return ykNoPeriod, nil
+	}
+	if chatID == 0 || months == 0 {
+		return ykNoMeta, nil
+	}
+	snap := pendingSnap(pending)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodYooKassa, amount, payID, snap)
+	var held restoreHeld
+	switch {
+	case errors.As(err, &held):
+		// Раньше дубля: такая оплата тоже «уже обработана», но человеку
+		// положен свой текст, а не экран подписки.
+		return ykHeld, err
+	case errors.Is(err, storage.ErrDuplicateExtID):
+		return ykAlready, nil
+	case errors.Is(err, errOrphanPayment):
+		return ykOrphan, err
+	case err != nil:
+		return ykFailed, err
+	}
+	a.saveAutoPayFromPayment(ctx, chatID, months, pay, snap)
+	a.sendSubActive(ctx, chatID, link, expireAt)
+	return ykIssued, nil
 }
 
 func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {

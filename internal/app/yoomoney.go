@@ -432,7 +432,9 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			return ymIssued
 		}
-		a.log.Error("yoomoney finalize", "err", err, "ext_id", label)
+		if !errors.Is(err, errOrphanPayment) {
+			a.log.Error("yoomoney finalize", "err", err, "ext_id", label)
+		}
 		return ymFailed
 	}
 	a.sendSubActive(ctx, p.TelegramID, link, expireAt)

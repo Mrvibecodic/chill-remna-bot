@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"remnabot/internal/mailer"
 	"remnabot/internal/model"
 	"remnabot/internal/platega"
+	"remnabot/internal/storage"
 )
 
 // plGridCurrencyOK — сетка цен в рублях, и счёт Platega можно выставлять.
@@ -231,7 +233,10 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 	}
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodPlatega, amount, txID, a.pendingSnapshot(ctx, txID))
 	if err != nil {
-		a.log.Error("platega finalize", "err", err, "tx", txID)
+		// Дубль — уведомление и кнопка «Проверить» пришли разом: выдал первый.
+		if !errors.Is(err, errOrphanPayment) && !errors.Is(err, storage.ErrDuplicateExtID) {
+			a.log.Error("platega finalize", "err", err, "tx", txID)
+		}
 		return
 	}
 	a.sendSubActive(ctx, chatID, link, expireAt)

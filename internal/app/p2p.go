@@ -1353,11 +1353,66 @@ func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnap
 	return p.Snapshot
 }
 
+// errOrphanPayment — счёт оплачен, а того, кому его выставляли, уже удалили.
+// Для вызывающего это конец разбора: счёт закрыт, администратор извещён,
+// повторять доставку незачем.
+var errOrphanPayment = errors.New("оплата на удалённого пользователя")
+
+const stageOrphanPaid = "orphan_paid"
+
+// orphanInvoice — оплата по счёту, выставленному пользователю, которого с тех
+// пор удалили. Выдавать нельзя: человек завёлся бы заново с подпиской, но без
+// принятых документов, допуска к тарифам и вайтлиста. Удалять счета вместе с
+// пользователем тоже нельзя: он мог оплатить уже после удаления, и тогда
+// деньги списаны, услуги нет, следов нет. Поэтому счёт закрывается, а
+// разбирается администратор.
+//
+// Проверка стоит в общей точке выдачи: оплату доносят вебхук, кнопка
+// «Проверить оплату» и сверка, и ответ у всех троих обязан быть один.
+// Пути без счёта (Stars, перевод на карту, баланс) сюда не попадают — там
+// строки счёта нет, а пользователь существует по построению.
+func (a *App) orphanInvoice(ctx context.Context, method, extID string, telegramID int64, amount string) bool {
+	a.mu.Lock()
+	st := a.store
+	a.mu.Unlock()
+	if st == nil || extID == "" {
+		return false
+	}
+	p, _ := st.PendingByExtID(ctx, extID)
+	if p == nil {
+		return false
+	}
+	if u, err := st.GetUser(ctx, telegramID); err != nil || u != nil {
+		return false
+	}
+	_ = st.ResolvePending(ctx, p.ID)
+	// Платёжка повторяет доставку, сверка приходит следом — администратору
+	// хватит одного сообщения. Отметка — в журнале: строка счёта к этому
+	// моменту могла быть закрыта и раньше (истёк срок сверки).
+	if logs, err := st.PayLogs(ctx, extID, 0, 0); err == nil {
+		for i := range logs {
+			if logs[i].ExtID == extID && logs[i].Stage == stageOrphanPaid {
+				return true
+			}
+		}
+	}
+	a.payLog(ctx, method, extID, telegramID, stageOrphanPaid,
+		"оплата пришла на удалённого пользователя: %s, purpose=%s", amount, p.Purpose)
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.orphan_payment",
+		escapeName(method), escapeName(extID), escapeName(amount), telegramID))
+	a.log.Warn("оплата на удалённого пользователя", "method", method, "ext_id", extID)
+	return true
+}
+
 // finalizePurchase выдаёт или продлевает подписку по оплаченному счёту. snap —
 // условия сделки, снятые при выставлении счёта; nil означает «снять по
 // текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
 // созданные до появления снимков).
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
+	if a.orphanInvoice(ctx, method, extID, telegramID, amount) {
+		return "", "", errOrphanPayment
+	}
 	// Доступность тарифа оценивается по состоянию ДО покупки: после неё
 	// человек уже «платил» и уже «на этом тарифе», и гейты «только новым» /
 	// «только действующим» задним числом всегда сходились бы.

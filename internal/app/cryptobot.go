@@ -150,50 +150,27 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		}
 	}
 
+	var pending *model.PendingInvoice
 	if a.store != nil {
-		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil && p.Purpose == "topup" {
-			inv, err := client.GetInvoice(ctx, invoiceID)
-			if err != nil {
-				a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
-				return
-			}
-			a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "topup status=%s", inv.Status)
-			if inv.Status == "expired" {
-				a.cbExpired(ctx, chatID, extID, p.ID)
-				return
-			}
-			if inv.Status != "paid" {
-				a.sendKB(ctx, chatID, i18n.T(lang, "cb.pending"), [][]models.InlineKeyboardButton{
-					{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+idStr+":"+mosStr)},
-					{btn(i18n.T(lang, "btn.home"), "menu:home")},
-				})
-				return
-			}
-			// Гасим счёт только при успехе — см. finalizeTopUp.
-			if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodCryptoBot,
-				cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat), extID); err != nil {
-				a.log.Error("cryptobot topup finalize", "err", err, "ext_id", extID)
-				return
-			}
-			_ = a.store.ResolvePending(ctx, p.ID)
-			return
-		}
+		pending, _ = a.store.PendingByExtID(ctx, extID)
 	}
 	inv, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
-	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "status=%s", inv.Status)
+	if pending != nil && pending.Purpose == "topup" {
+		a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "topup status=%s", inv.Status)
+	} else {
+		a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "manual_check", "status=%s", inv.Status)
+	}
 	if inv.Status == "expired" {
 		// Счёт CryptoBot живёт 30 минут, а кнопка «Проверить оплату» — вечно.
 		// «Оплата ещё не поступила, попробуйте через минуту» на мёртвом счёте —
 		// это предложение ждать того, чего не будет.
 		var pendingID int64
-		if a.store != nil {
-			if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
-				pendingID = p.ID
-			}
+		if pending != nil {
+			pendingID = pending.ID
 		}
 		a.cbExpired(ctx, chatID, extID, pendingID)
 		return
@@ -205,35 +182,100 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		})
 		return
 	}
-	payChat, months, perr := parseCryptoBotPayload(inv.Payload)
-	if perr != nil {
-		a.log.Error("cryptobot check: bad invoice payload", "invoice", invoiceID, "err", perr)
-		return
-	}
 	rawAmount := cbAmount(inv.Asset, inv.Amount, inv.PaidAsset, inv.PaidAmount, inv.Fiat)
-	if months <= 0 {
-		// «tg:0» — это оплаченное пополнение, у которого не осталось строки
-		// счёта. Ветка вебхука зовёт админа, и ручная кнопка обязана вести
-		// себя так же: иначе она продлит подписку на ноль месяцев и закроет
-		// ext_id, после чего деньги не зачислить уже никак.
-		a.payLog(ctx, model.PayMethodCryptoBot, extID, payChat, "error", "оплаченное пополнение без pending-записи (сумма %s) — зачислите вручную", rawAmount)
-		alang := a.lang(a.cfg.AdminID)
-		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "cb.admin_lost_topup", extID, rawAmount, a.userLabelByID(ctx, payChat)))
+	res, err := a.settleCryptoBot(ctx, extID, inv.Payload, rawAmount)
+	switch res {
+	case cbTopUpFailed:
+		a.log.Error("cryptobot topup finalize", "err", err, "ext_id", extID)
+	case cbBadPayload:
+		a.log.Error("cryptobot check: bad invoice payload", "invoice", invoiceID, "err", err)
+	case cbLostTopUp:
 		a.sendHome(ctx, chatID, i18n.T(lang, "pay.no_period"))
-		return
-	}
-	pSnap := a.pendingSnapshot(ctx, extID)
-	amount := a.cryptoAmount(pSnap, months, rawAmount)
-	link, expireAt, err := a.finalizePurchase(ctx, payChat, months, model.PayMethodCryptoBot, amount, extID, pSnap)
-	if err != nil {
-		if errors.Is(err, storage.ErrDuplicateExtID) {
-			a.showMySubs(ctx, chatID)
-			return
-		}
+	case cbAlready:
+		a.showMySubs(ctx, chatID)
+	case cbFailed, cbOrphan, cbHeld:
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
-		return
 	}
-	a.sendSubActive(ctx, payChat, link, expireAt)
+}
+
+// cbSettled — чем закончился разбор оплаченного счёта CryptoBot.
+type cbSettled int
+
+const (
+	cbIssued      cbSettled = iota // подписка выдана и отправлена получателю
+	cbToppedUp                     // пополнение зачислено
+	cbTopUpFailed                  // пополнение не зачислено, счёт оставлен сверке
+	cbBadPayload                   // получатель неизвестен: ни payload, ни строки счёта
+	cbLostTopUp                    // пополнение без строки счёта, администратор извещён
+	cbAlready                      // уже выдано другой доставкой
+	cbHeld                         // счёт до восстановления базы, решает администратор
+	cbOrphan                       // получателя удалили, администратор извещён
+	cbFailed                       // выдача не удалась
+)
+
+// settleCryptoBot разбирает оплаченный счёт. Один разбор на вебхук и кнопку
+// «Проверить оплату»: кому, на какой срок и на каких условиях выдавать, оба
+// обязаны решать одинаково.
+func (a *App) settleCryptoBot(ctx context.Context, extID, payload, rawAmount string) (cbSettled, error) {
+	var pending *model.PendingInvoice
+	if a.store != nil {
+		pending, _ = a.store.PendingByExtID(ctx, extID)
+	}
+	if pending != nil && pending.Purpose == "topup" {
+		// Счёт гасится только после зачисления — см. finalizeTopUp.
+		if err := a.finalizeTopUp(ctx, pending.TelegramID, pending.Kopecks, model.PayMethodCryptoBot, rawAmount, extID); err != nil {
+			return cbTopUpFailed, err
+		}
+		_ = a.store.ResolvePending(ctx, pending.ID)
+		return cbToppedUp, nil
+	}
+	chatID, months, perr := parseCryptoBotPayload(payload)
+	// Своя строка счёта доверенней payload: если она есть, получателя и срок
+	// берём из неё — в том числе когда payload не разобрался вовсе.
+	if pending != nil && pending.TelegramID != 0 {
+		switch {
+		case perr != nil:
+			a.payLog(ctx, model.PayMethodCryptoBot, extID, pending.TelegramID, "warning",
+				"payload счёта не разобран (%q) — получатель и срок взяты из pending-записи (%d:%d)",
+				payload, pending.TelegramID, pending.Months)
+		case pending.TelegramID != chatID || pending.Months != months:
+			a.payLog(ctx, model.PayMethodCryptoBot, extID, pending.TelegramID, "warning",
+				"payload вебхука (%d:%d) расходится с pending-записью (%d:%d) — верим записи",
+				chatID, months, pending.TelegramID, pending.Months)
+		}
+		chatID, months, perr = pending.TelegramID, pending.Months, nil
+	}
+	if perr != nil {
+		return cbBadPayload, perr
+	}
+	if months <= 0 {
+		// Payload вида «tg:0» — это пополнение, но pending-записи о нём уже нет
+		// (БД откатили или запись сняли). Молча гасить нельзя: деньги приняты.
+		// Выдавать подписку тоже: она продлилась бы на ноль месяцев и закрыла
+		// ext_id, после чего деньги не зачислить уже никак.
+		a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "error", "оплаченное пополнение без pending-записи (сумма %s) — зачислите вручную", rawAmount)
+		alang := a.lang(a.cfg.AdminID)
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "cb.admin_lost_topup", extID, rawAmount, a.userLabelByID(ctx, chatID)))
+		return cbLostTopUp, nil
+	}
+	snap := pendingSnap(pending)
+	amount := a.cryptoAmount(snap, months, rawAmount)
+	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodCryptoBot, amount, extID, snap)
+	var held restoreHeld
+	switch {
+	case errors.As(err, &held):
+		// Раньше дубля: такая оплата тоже «уже обработана», но человеку
+		// положен свой текст, а не экран подписки.
+		return cbHeld, err
+	case errors.Is(err, storage.ErrDuplicateExtID):
+		return cbAlready, nil
+	case errors.Is(err, errOrphanPayment):
+		return cbOrphan, err
+	case err != nil:
+		return cbFailed, err
+	}
+	a.sendSubActive(ctx, chatID, link, expireAt)
+	return cbIssued, nil
 }
 
 func (a *App) showCryptoBotAdmin(ctx context.Context, chatID int64) {

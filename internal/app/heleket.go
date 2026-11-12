@@ -422,7 +422,7 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 	amount = a.cryptoAmount(pSnap, months, amount)
 	link, expireAt, err := a.finalizePurchase(ctx, chatID, months, model.PayMethodHeleket, amount, extID, pSnap)
 	if err != nil {
-		if errors.Is(err, storage.ErrDuplicateExtID) {
+		if errors.Is(err, storage.ErrDuplicateExtID) || errors.Is(err, errOrphanPayment) {
 			return
 		}
 		a.log.Error("heleket finalize", "err", err, "uuid", inv.UUID)
