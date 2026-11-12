@@ -17,16 +17,7 @@ import (
 const remindTick = 30 * time.Minute
 
 func (a *App) RunReminders(ctx context.Context) {
-	t := time.NewTicker(remindTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			a.remindOnce(ctx)
-		}
-	}
+	everyTick(ctx, remindTick, func() { a.remindOnce(ctx) })
 }
 
 func (a *App) remindOnce(ctx context.Context) {

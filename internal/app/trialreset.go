@@ -38,19 +38,7 @@ const (
 // «триал использован» закрывает ему вход навсегда, хотя услугой он не
 // пользовался ни минуты. Проход снимает отметку и зовёт его обратно.
 func (a *App) RunTrialReset(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(trialResetFirstDelay):
-	}
-	for {
-		a.resetTrialsOnce(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(trialResetInterval):
-		}
-	}
+	afterThenEvery(ctx, trialResetFirstDelay, trialResetInterval, func() { a.resetTrialsOnce(ctx) })
 }
 
 func (a *App) resetTrialsOnce(ctx context.Context) int {

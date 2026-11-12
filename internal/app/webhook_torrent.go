@@ -600,16 +600,7 @@ func (a *App) torrentNotifyUser(ctx context.Context, r *rwTorrentReport, will st
 // RunTorrentUnblocker — фоновый цикл: шлёт «блокировка снята», когда истекает
 // срок из журнала. Переживает рестарт: очередь лежит в БД (unblock_notified).
 func (a *App) RunTorrentUnblocker(ctx context.Context) {
-	t := time.NewTicker(torrentUnblockTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			a.torrentUnblockOnce(ctx)
-		}
-	}
+	everyTick(ctx, torrentUnblockTick, func() { a.torrentUnblockOnce(ctx) })
 }
 
 func (a *App) torrentUnblockOnce(ctx context.Context) {

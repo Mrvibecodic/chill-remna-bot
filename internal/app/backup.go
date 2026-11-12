@@ -693,19 +693,12 @@ func (a *App) backupNow(ctx context.Context, chatID int64) {
 // RunBackups шлёт бэкапы по расписанию и после восстановления базы
 // сверяет сроки подписок с панелью.
 func (a *App) RunBackups(ctx context.Context) {
-	t := time.NewTicker(backupTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			now := time.Now()
-			a.bkPendPurge(now)
-			a.guardTick(ctx, now)
-			a.backupOnce(ctx, now)
-		}
-	}
+	everyTick(ctx, backupTick, func() {
+		now := time.Now()
+		a.bkPendPurge(now)
+		a.guardTick(ctx, now)
+		a.backupOnce(ctx, now)
+	})
 }
 
 // backupDue — пора ли слать бэкап по расписанию.

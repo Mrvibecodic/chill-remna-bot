@@ -283,16 +283,7 @@ func (a *App) autoPayPrice(months int) string {
 // RunAutoPay — планировщик автосписаний: раз в час ищет подписки, которым пора
 // продлеваться, и списывает деньги сохранённым способом оплаты.
 func (a *App) RunAutoPay(ctx context.Context) {
-	t := time.NewTicker(autoPayTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			a.autoPayOnce(ctx)
-		}
-	}
+	everyTick(ctx, autoPayTick, func() { a.autoPayOnce(ctx) })
 }
 
 func (a *App) autoPayOnce(ctx context.Context) {

@@ -27,17 +27,10 @@ const (
 )
 
 func (a *App) RunReconciler(ctx context.Context) {
-	t := time.NewTicker(reconcileInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			a.reconcileOnce(ctx)
-			a.reconcileStars(ctx)
-		}
-	}
+	everyTick(ctx, reconcileInterval, func() {
+		a.reconcileOnce(ctx)
+		a.reconcileStars(ctx)
+	})
 }
 
 func (a *App) reconcileOnce(ctx context.Context) {
