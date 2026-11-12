@@ -211,7 +211,10 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 
 // miniPlanCtxT — общее для всех тарифов витрины: считается один раз.
 type miniPlanCtxT struct {
-	lang        string
+	lang string
+	// geoLang — язык названий стран. Классический дизайн свёрстан только
+	// по-русски, и английские названия в нём выбивались бы из текста.
+	geoLang     string
 	fallbackCur string
 	oldSnap     *model.PlanSnapshot
 	oldExpire   string
@@ -223,6 +226,10 @@ type miniPlanCtxT struct {
 
 func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
 	pc := miniPlanCtxT{lang: a.lang(tgID), fallbackCur: a.pricing().Currency}
+	pc.geoLang = pc.lang
+	if a.webUICfg().Design == model.WebDesignClassic {
+		pc.geoLang = i18n.Fallback
+	}
 	// Снимок последней сделки и конец срока — один раз на витрину, а не на
 	// каждый срок каждого тарифа: зачёт остатка считается чистой функцией.
 	if a.store != nil {
@@ -257,7 +264,7 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 		}
 		if i18n.T(lang, "buy.addsub_countries", 1, "1") != "" {
 			for _, c := range g.countries {
-				pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+				pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.label(pc.geoLang)})
 			}
 		}
 	}
@@ -284,7 +291,7 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 		dv := planDevShown(p, d, pc.hwid, pc.hwidOK)
 		var countries []web.MiniCountryDTO
 		for _, c := range g.countries {
-			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.Name})
+			countries = append(countries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.label(pc.geoLang)})
 		}
 		pd.Durations = append(pd.Durations, web.MiniDurationDTO{
 			Months:       d.Months,

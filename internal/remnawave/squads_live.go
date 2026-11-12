@@ -77,6 +77,12 @@ func (c *Client) LiveSquads(ctx context.Context) LiveSquads {
 	return l
 }
 
+// LiveSquadsCached — список сквадов не старше liveSquadsTTL: для обхода всех
+// пользователей, где читать панель на каждого незачем.
+func (c *Client) LiveSquadsCached(ctx context.Context) LiveSquads {
+	return c.cachedSquads(ctx)
+}
+
 func (c *Client) cachedSquads(ctx context.Context) LiveSquads {
 	c.squads.mu.Lock()
 	l, at := c.squads.live, c.squads.at

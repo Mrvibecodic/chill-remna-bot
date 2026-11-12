@@ -2016,6 +2016,9 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	case "cab_favicon":
 		ui.adminInput = ""
 		a.setCabinetField(ctx, chatID, "favicon", text)
+	case "cab_chat":
+		ui.adminInput = ""
+		a.setCabinetChat(ctx, chatID, text)
 	case "wui_name", "wui_accent", "wui_logourl", "wui_logodurl":
 		field := strings.TrimPrefix(ui.adminInput, "wui_")
 		ui.adminInput = ""

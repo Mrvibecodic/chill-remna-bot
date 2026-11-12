@@ -399,6 +399,14 @@ try{if(WEB)document.body.classList.add('web');}catch(e){}
 function getStoredToken(){try{return WEB?localStorage.getItem('cab_tok'):null;}catch(e){return null;}}
 function setStoredToken(t){try{if(WEB)localStorage.setItem('cab_tok',t||'');}catch(e){}}
 function clearToken(){try{if(WEB)localStorage.removeItem('cab_tok');}catch(e){}TOKEN=null;}
+// Сторонний чат поддержки: только кабинет в браузере, скрипт ставится один раз.
+var CHAT_ON=false;
+function mountChat(src){
+  if(CHAT_ON||!WEB||!src||!/^https:\/\//i.test(src))return;
+  CHAT_ON=true;
+  var s=document.createElement('script');s.src=src;s.async=true;document.body.appendChild(s);
+}
+function guestChat(){api('/api/cabinet/config').then(function(c){mountChat(c.chat_src);},function(){});}
 function lsGet(k){try{return WEB?localStorage.getItem(k):null;}catch(e){return null;}}
 function lsSet(k,v){try{if(!WEB)return;if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);}catch(e){}}
 // Параметры ссылки, по которой открыли кабинет: ?promo=, ?plan=, ?ref=, ?inv=
@@ -1558,7 +1566,7 @@ async function runVerifyLink(tok){
   STATE.acct=null;
 }
 function openReset(tok){
-  PAGE=null;
+  PAGE=null;guestChat();
   setBack(null);
   balchip.style.display='none';balchip.innerHTML='';
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Новый пароль</span></div>'+
@@ -1617,6 +1625,10 @@ async function renderLogin(){
   balchip.style.display='none';balchip.innerHTML='';
   STATE={balanceK:0,methods:[]};
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
+  // Чат, показанный вошедшему, на экране входа не остаётся: чужой скрипт со
+  // страницы не снять, поэтому она загружается заново.
+  if(CHAT_ON&&!cfg.chat_src){location.reload();return;}
+  mountChat(cfg.chat_src);
   var h='<div class="stagger"><div class="authwrap"><div class="card hero glow authcard"><div class="top"><span class="status">'+IC.login+' Вход</span></div>'+
     '<div class="title">Личный кабинет</div><div class="hint" style="margin-top:6px">Войдите через Telegram или по email.</div></div>';
   if(cfg.client_id||cfg.bot_username)h+='<div class="sec-title">'+IC.bolt+'Через Telegram</div><div class="tgwrap"><div id="tglogin"></div></div>';
@@ -1713,7 +1725,7 @@ async function boot(){
     PAGE='home';skMain();renderSide();
     if(!WEB)await authenticate();
     const [me,menu,sub,plans]=await Promise.all([
-      api('/api/miniapp/me'),api('/api/miniapp/menu'),
+      api('/api/miniapp/me').then(function(m){mountChat(m.chat_src);return m;}),api('/api/miniapp/menu'),
       api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
     try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
     // Состояние аккаунта нужно на главной: пока адрес не подтверждён, оплата

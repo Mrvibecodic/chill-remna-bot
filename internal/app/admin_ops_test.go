@@ -325,7 +325,7 @@ func TestBroadcast_StopAndUnreachable(t *testing.T) {
 	if u, _ := fs.GetUser(ctx, 202); u != nil && u.Blocked {
 		t.Fatal("человека забанили за то, что он заблокировал бота")
 	}
-	if !strings.Contains(fm.joined(), "Заблокировали бота: 1") {
+	if !strings.Contains(fm.joined(), "Недоступны (заблокировали бота или нет чата): 1") {
 		t.Fatalf("итог не разделяет отказ и блокировку:\n%s", fm.last())
 	}
 

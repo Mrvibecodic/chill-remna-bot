@@ -1333,6 +1333,14 @@ async function changePass(el){
   catch(e){toast(e.message||T('error'),'err');}
   busy(el,false);
 }
+// Сторонний чат поддержки: только кабинет в браузере, скрипт ставится один раз.
+var CHAT_ON=false;
+function mountChat(src){
+  if(CHAT_ON||!WEB||!src||!/^https:\/\//i.test(src))return;
+  CHAT_ON=true;
+  var s=document.createElement('script');s.src=src;s.async=true;document.body.appendChild(s);
+}
+function guestChat(){api('/api/cabinet/config').then(function(c){mountChat(c.chat_src);},function(){});}
 function logout(){store('cab_tok',null);TOKEN=null;STATE={balanceK:0,methods:[],plans:[],menu:{},sub:{},lang:STATE.lang};paintBalance();renderLogin();}
 
 /* ---------- вход в кабинет ---------- */
@@ -1357,6 +1365,10 @@ function serverStart(s){
 async function renderLogin(){
   STACK=[];CUR={name:'login'};setBack(false);paintBalance();renderSide(false);
   var cfg={};try{cfg=await api('/api/cabinet/config');}catch(e){}
+  // Чат, показанный вошедшему, на экране входа не остаётся: чужой скрипт со
+  // страницы не снять, поэтому она загружается заново.
+  if(CHAT_ON&&!cfg.chat_src){location.reload();return;}
+  mountChat(cfg.chat_src);
   if(BRAND.logo)document.getElementById('brand').innerHTML='';
   TG_CFG=cfg;
   var h='<div class="narrow">'+brandHTML(true)+'<div class="h1 center" style="margin-top:'+(BRAND.logo?'8':'28')+'px">'+esc(T('login'))+'</div><div class="hint center">'+esc(T('login_text'))+'</div>';
@@ -1390,7 +1402,7 @@ SCREENS.forgot=function(){
 };
 async function doForgot(el){var e=document.getElementById('fe');var v=e?e.value.trim():'';if(!v)return;busy(el,true);try{await post('/api/cabinet/password/forgot',{email:v});}catch(x){}busy(el,false);toast(T('restore_sent'),'ok');}
 function openReset(tok){
-  STACK=[];CUR={name:'reset',arg:tok};setBack(false);
+  STACK=[];CUR={name:'reset',arg:tok};setBack(false);guestChat();
   view('<div class="narrow">'+brandHTML(true)+'<div class="h1" style="margin-top:18px">'+esc(T('new_pass'))+'</div><div class="hint">'+esc(T('new_pass_text'))+'</div><div class="card flat stack"><input id="r1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="r2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="doReset2(this,\''+jsq(tok)+'\')">'+esc(T('save'))+'</button><button class="btn ghost" onclick="renderLogin()">'+esc(T('to_login'))+'</button></div></div>');
 }
 SCREENS.reset=function(t){openReset(t);};
@@ -1406,7 +1418,7 @@ function dropQuery(){try{history.replaceState({},'',location.pathname);}catch(e)
 
 /* ---------- загрузка ---------- */
 async function refresh(){
-  var r=await Promise.all([api('/api/miniapp/me'),api('/api/miniapp/menu'),api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
+  var r=await Promise.all([api('/api/miniapp/me').then(function(m){mountChat(m.chat_src);return m;}),api('/api/miniapp/menu'),api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
   var me=r[0],menu=r[1],sub=r[2],plans=r[3];
   var extra=(STATE.plans||[]).filter(function(p){return p.link&&!(plans.plans||[]).some(function(q){return q.code===p.code;});});
   STATE.me=me;STATE.menu=menu||{};STATE.sub=sub||{};STATE.plans=((plans&&plans.plans)||[]).concat(extra);STATE.plansNotice=(plans&&plans.notice)||'';

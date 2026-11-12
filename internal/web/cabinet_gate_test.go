@@ -17,6 +17,8 @@ import (
 // умолчанию».
 type fakeMini struct {
 	MiniProvider
+	chatSrc string
+	chatAll bool
 	epoch   int
 	blocked bool
 	forgot  []string
@@ -34,6 +36,13 @@ func (f *fakeMini) MiniBotToken() string { return fakeBotToken }
 func (f *fakeMini) SessionVersion() int  { return 0 }
 func (f *fakeMini) MailReady() bool      { return true }
 func (f *fakeMini) CabinetPath() string  { return "/cabinet/" }
+func (f *fakeMini) CabinetChat() (string, bool) {
+	return f.chatSrc, f.chatAll
+}
+func (f *fakeMini) CabinetTGLoginNew() bool { return false }
+func (f *fakeMini) MiniMe(_ context.Context, id int64) MiniMeDTO {
+	return MiniMeDTO{TgID: id}
+}
 func (f *fakeMini) CabinetBotUsername() string {
 	return "testbot"
 }

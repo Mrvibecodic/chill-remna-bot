@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,5 +177,72 @@ func TestPlanSquadUUIDs_P2PFallback(t *testing.T) {
 	a.botCfg.Plan.ActiveInternalSquads = []string{"sq-main"}
 	if got := a.planSquadUUIDs(1); len(got) != 1 || got[0] != "sq-main" {
 		t.Fatalf("squads=%v want [sq-main]", got)
+	}
+}
+
+// Название страны берётся по флагу на языке бота, а не из имени хоста — и в
+// чате, и в мини-аппе с кабинетом, у тарифа и у доп-подписки. Классический
+// дизайн свёрстан по-русски и получает русские названия.
+func TestCountryNameByFlag(t *testing.T) {
+	for _, tc := range []struct{ lang, design, want, mini string }{
+		{"ru", model.WebDesignMinimal, "Нидерланды", "Нидерланды"},
+		{"en", model.WebDesignMinimal, "Netherlands", "Netherlands"},
+		{"en", model.WebDesignClassic, "Netherlands", "Нидерланды"},
+	} {
+		t.Run(tc.lang+"/"+tc.design, func(t *testing.T) {
+			a, fm, p := storefrontApp(t)
+			ctx := context.Background()
+			a.botCfg.Language = tc.lang
+			a.botCfg.WebUI.Design = tc.design
+			a.botCfg.AddSub = model.AddSubConfig{Enabled: true, Init: true, InternalSquads: []string{"sq-vip"}}
+			a.infraCache = &infraCacheEntry{
+				fetchedAt: time.Now(),
+				squads:    []remnawave.SquadFull{{UUID: "sq-vip", InboundsCount: 1, InboundUUIDs: []string{"ib1"}}},
+				hosts:     []remnawave.Host{{Remark: "Amsterdam | Gaming 🇳🇱 #2", InboundUUID: "ib1"}},
+			}
+			const uid = int64(1000000001)
+			a.handleCallback(ctx, cb(uid, "plo:"+p.Code))
+			out := fm.joined()
+			if strings.Contains(out, "Amsterdam") || strings.Count(out, "🇳🇱 "+tc.want) != 2 {
+				t.Fatalf("ждали «🇳🇱 %s» у тарифа и у доп-подписки:\n%s", tc.want, out)
+			}
+			found := false
+			for _, mp := range a.MiniPlans(ctx, uid).Plans {
+				if mp.Code != p.Code {
+					continue
+				}
+				found = true
+				if len(mp.AddSubCountries) != 1 || mp.AddSubCountries[0].Name != tc.mini || mp.AddSubCountries[0].Code != "nl" {
+					t.Fatalf("доп-подписка в мини-аппе: %+v", mp.AddSubCountries)
+				}
+				for _, d := range mp.Durations {
+					if len(d.Countries) != 1 || d.Countries[0].Name != tc.mini {
+						t.Fatalf("срок %d в мини-аппе: %+v", d.Months, d.Countries)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("тарифа нет в мини-аппе")
+			}
+		})
+	}
+}
+
+// У каждого флага, картинку которого бот скачивает, есть название.
+func TestCountryNamesTable(t *testing.T) {
+	for _, code := range strings.Fields(isoAlpha2) {
+		n, ok := countryNames[code]
+		if !ok || n[0] == "" || n[1] == "" {
+			t.Fatalf("%q: нет названия (%q)", code, n)
+		}
+	}
+	for code := range countryNames {
+		if len(code) != 2 || code[0] < 'a' || code[0] > 'z' || code[1] < 'a' || code[1] > 'z' {
+			t.Fatalf("код %q: флаг даёт две строчные латинские буквы", code)
+		}
+	}
+	c := country{Flag: "🇨🇶", Code: "cq", Name: "Sark"}
+	if c.label("ru") != "Sark" || c.label("en") != "Sark" {
+		t.Fatal("флаг не из словаря должен брать имя хоста")
 	}
 }

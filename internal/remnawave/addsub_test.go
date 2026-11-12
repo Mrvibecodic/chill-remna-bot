@@ -478,3 +478,25 @@ func TestNoLeftoverProbeOnAutomaticPath(t *testing.T) {
 		t.Fatalf("автопуть ничего не удаляет: deleted=%v res=%+v", p.deleted, res)
 	}
 }
+
+// OnlyExisting: без доп-подписки ничего не создаётся, существующая обновляется.
+func TestUpsertAddSubOnlyExisting(t *testing.T) {
+	p := newAddSubPanel("tg_42")
+	c := addSubClient(t, p)
+	res, err := c.UpsertAddSub(context.Background(), 42, AddSubOptions{OnlyExisting: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Done || len(p.posts) != 0 || len(p.patches) != 0 {
+		t.Fatalf("доп-подписка создана: done=%v posts=%v patches=%v", res.Done, p.posts, p.patches)
+	}
+
+	p.addUser("tg_42_addsub", "b-uuid", BotTagAdd)
+	res, err = c.UpsertAddSub(context.Background(), 42, AddSubOptions{OnlyExisting: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Done || len(p.posts) != 0 || len(p.patches) != 1 {
+		t.Fatalf("доп-подписка не обновлена: done=%v posts=%v patches=%v", res.Done, p.posts, p.patches)
+	}
+}

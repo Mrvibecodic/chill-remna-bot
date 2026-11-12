@@ -70,6 +70,15 @@ func addSubLiveFor(ctx context.Context, panel *remnawave.Client, snap *model.Pla
 	return panel.LiveSquads(ctx)
 }
 
+// addSubLiveCached — то же для обхода всех пользователей: список берётся из
+// кэша клиента панели, а не читается на каждого.
+func addSubLiveCached(ctx context.Context, panel *remnawave.Client, snap *model.PlanSnapshot) remnawave.LiveSquads {
+	if panel == nil || snap == nil || len(snap.AddSubSquads) == 0 {
+		return remnawave.LiveSquads{}
+	}
+	return panel.LiveSquadsCached(ctx)
+}
+
 // planAddSubTerms — свои трафик и сквады доп-подписки тарифа для снимка
 // сделки (копии: снимок не делит память с тарифом). nil — как в общих.
 func planAddSubTerms(p *model.Plan) (*int, []string) {
@@ -130,7 +139,7 @@ func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) s
 		lines = append(lines, line)
 	}
 	if len(g.countries) > 0 {
-		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(g.countries)); line != "" {
+		if line := i18n.T(lang, "buy.addsub_countries", len(g.countries), countryListHTML(lang, g.countries)); line != "" {
 			lines = append(lines, line)
 		}
 	}
@@ -235,7 +244,7 @@ func (a *App) syncAddSubSnap(ctx context.Context, telegramID int64, resetTraffic
 		a.log.Warn("addsub: включение после upsert", "tg_id", telegramID, "err", err)
 	}
 	if res.Legacy != "" {
-		a.log.Info("addsub: доп-подписка живёт под старым именем; «Синхронизировать всех» переведёт её на новое",
+		a.log.Info("addsub: доп-подписка живёт под старым именем; «Синхронизация» переведёт её на новое",
 			"tg_id", telegramID, "legacy", res.Legacy)
 	}
 }
