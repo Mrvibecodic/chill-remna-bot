@@ -24,32 +24,21 @@ type Section struct {
 	LabelEN string
 }
 
-var AllSections = []Section{
-	{SectionMainMenu, "🏠 Меню «Интерфейс»", "🏠 Menu «Interface»"},
-	{SectionBuySubscription, "🛒 Купить / Оплата", "🛒 Buy / Payments menu"},
-	{SectionMySubscription, "📦 Мои подписки", "📦 My subscriptions"},
-	{SectionReferral, "👥 Пользователи / реферал", "👥 Users / referral"},
-	{SectionPromoCode, "💸 Платежи / промокод", "💸 Payments / promo"},
-	{SectionAdminStats, "⚙️ Управление", "⚙️ Manage"},
+var userSections = []Section{
+	{SectionBuySubscription, "🛒 Покупка и кошелёк", "🛒 Purchase and wallet"},
+	{SectionMySubscription, "📲 Мои подписки", "📲 My subscriptions"},
+	{SectionReferral, "🎉 Пригласить друга", "🎉 Invite a friend"},
+	{SectionPromoCode, "🎟 Промокод", "🎟 Promo code"},
 }
 
-var userFacingSections = map[string]bool{
-	SectionBuySubscription: true,
-	SectionMySubscription:  true,
-}
-
+// UserSections — разделы с экранами клиента: их картинку администратор
+// меняет на свою.
 func UserSections() []Section {
-	out := make([]Section, 0, len(userFacingSections))
-	for _, s := range AllSections {
-		if userFacingSections[s.Key] {
-			out = append(out, s)
-		}
-	}
-	return out
+	return append([]Section(nil), userSections...)
 }
 
 func LabelByKey(key, lang string) string {
-	for _, sec := range AllSections {
+	for _, sec := range userSections {
 		if sec.Key == key {
 			if lang == "en" {
 				return sec.LabelEN

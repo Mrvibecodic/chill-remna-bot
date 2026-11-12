@@ -572,7 +572,7 @@ var en = map[string]string{
 	"admin.ask_currency":       "Enter the currency symbol for money methods (e.g. RUB, ₽, USD):",
 
 	"btn.section_banners":          "🖼 Section banners",
-	"banners.title":                "🖼 <b>Section banners</b>\n\nPick a section to see its current image and replace it with your own. Each bot screen has its own banner; «Reset» restores the default image from the repo.",
+	"banners.title":                "🖼 <b>Section banners</b>\n\nPick a section to see its current image and replace it with your own. The purchase, invite and promo code images are also used in the admin area: in «Sales», «Users» and «Marketing». «Reset» restores the default image.",
 	"banners.section_caption":      "<b>%s</b>\n\nThis is the current banner for this section (what users see). Tap «Upload new» and send a photo to change it. «Reset» restores the default.",
 	"banners.ask_upload":           "📤 Send a photo — it will become the banner for «%s».\n\n💡 <b>To avoid heavy compression:</b>\n• Exactly <b>1280×640</b> px (2:1).\n• JPEG, quality 90–95%%.\n• File size <b>60–200 KB</b> (under 40 KB — artifacts already there; over 500 KB — Telegram compresses harder).\n• No transparency; PNG is pointless — Telegram converts to JPEG anyway.",
 	"banners.need_photo":           "🖼 An image is required: send a photo (upload or file). Text cannot become a banner.",

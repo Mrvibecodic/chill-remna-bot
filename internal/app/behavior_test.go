@@ -48,6 +48,9 @@ type fakeMsg struct {
 	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
 	refunds   []string
 	refundErr error
+	// photoIDs — с каким сохранённым file_id уходил каждый экран с баннером
+	// раздела ("" — картинка из сборки).
+	photoIDs []string
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
@@ -263,7 +266,10 @@ func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows 
 	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, cached string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+	f.mu.Lock()
+	f.photoIDs = append(f.photoIDs, cached)
+	f.mu.Unlock()
 	f.recordKB(rows)
 	return f.noteProt(ctx, f.add(caption)), ""
 }
