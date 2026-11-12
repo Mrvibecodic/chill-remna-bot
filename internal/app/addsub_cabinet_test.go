@@ -35,6 +35,7 @@ type cabinetPanel struct {
 	patches int
 	negTG   int
 	lookups int // поиски учётки аккаунта кабинета: по имени бота и по почте
+	squads  int // чтения списка внутренних сквадов
 }
 
 func cabinetUser(name, extra string) string {
@@ -69,6 +70,7 @@ func (p *cabinetPanel) start(t *testing.T) *remnawave.Client {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"User not found"}`))
 		case strings.HasSuffix(path, "/internal-squads"):
+			p.squads++
 			_, _ = w.Write([]byte(`{"response":{"total":1,"internalSquads":[{"uuid":"g1","name":"Общий"}]}}`))
 		case strings.HasSuffix(path, "/external-squads"):
 			_, _ = w.Write([]byte(`{"response":{"total":0,"externalSquads":[]}}`))
@@ -133,6 +135,12 @@ func (p *cabinetPanel) state() (posts []string, patches, negTG int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]string(nil), p.posts...), p.patches, p.negTG
+}
+
+func (p *cabinetPanel) squadReads() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.squads
 }
 
 func (p *cabinetPanel) lookupCount() int {
@@ -356,5 +364,52 @@ func TestAddSubBackfill_CabinetBoughtWhileOff(t *testing.T) {
 	}
 	if posts, patches, negTG := panel.state(); len(posts) != 1 || patches != 1 || negTG != 0 {
 		t.Fatalf("«обновить» после выдачи: создано %d, обновлений %d, отрицательных telegramId %d", len(posts), patches, negTG)
+	}
+}
+
+// Учётка аккаунта кабинета, у которой в панели есть telegramId, уже пройдена
+// по списку панели: второй раз, как учётка аккаунта, она не обрабатывается.
+func TestAddSubBackfill_CabinetAccountWithTelegramOnce(t *testing.T) {
+	ctx := context.Background()
+	a, fs, panel := addSubCabinetApp(t, map[string]string{
+		cabinetName: cabinetUser(cabinetName, `,"tag":"CHILLBOT","telegramId":1000000002`),
+		"client":    cabinetUser("client", `,"email":"`+cabinetEmail+`"`),
+	})
+	_ = fs.CreateWebUser(ctx, &model.WebUser{TgID: cabinetAcc, Email: cabinetEmail, VerifiedAt: "2026-01-01T00:00:00Z"})
+
+	cli, _, opt := a.addSubOptions(false)
+	st := a.addSubBackfill(ctx, cli, opt)
+	posts, patches, _ := panel.state()
+	if st.err != nil || st.failed != 0 || st.ok != 1 {
+		t.Fatalf("синхронизация: %+v", st)
+	}
+	if got := strings.Join(posts, ","); got != cabinetName+"_addsub" || patches != 0 {
+		t.Fatalf("создано %q, обновлений %d; ожидалась одна доп-подписка без повторной записи", got, patches)
+	}
+}
+
+// Список сквадов панели нужен каждому, чья сделка несёт свои сквады, но за
+// обход он читается один раз, а не на каждого пользователя.
+func TestAddSubBackfill_SquadsReadOnce(t *testing.T) {
+	ctx := context.Background()
+	users := map[string]string{}
+	ids := []int64{1000000002, 1000000003, 1000000004}
+	for _, id := range ids {
+		name := "tg_" + itoa64(id)
+		users[name] = cabinetUser(name, `,"tag":"CHILLBOT","telegramId":`+itoa64(id))
+	}
+	a, fs, panel := addSubCabinetApp(t, users)
+	yes := true
+	for _, id := range ids {
+		_ = fs.UpsertUser(ctx, id)
+		_ = fs.SetUserSnapshot(ctx, id, &model.PlanSnapshot{Code: "vipvipvipvip", Months: 1, AddSub: &yes, AddSubSquads: []string{"g1"}})
+	}
+
+	cli, _, opt := a.addSubOptions(false)
+	if st := a.addSubBackfill(ctx, cli, opt); st.err != nil || st.failed != 0 || st.ok != len(ids) {
+		t.Fatalf("синхронизация: %+v", st)
+	}
+	if got := panel.squadReads(); got != 1 {
+		t.Fatalf("список сквадов прочитан %d раз за обход, ожидался один", got)
 	}
 }

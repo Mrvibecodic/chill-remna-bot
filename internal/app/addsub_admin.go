@@ -311,6 +311,9 @@ func (a *App) addSubBackfill(ctx context.Context, panel *remnawave.Client, opt r
 		st.err = err
 		return st
 	}
+	// Свежий список сквадов — один раз перед обходом, дальше его держит кэш
+	// клиента панели: сквад, удалённый перед самым запуском, уже учтён.
+	_ = panel.LiveSquads(ctx)
 	for i := range targets {
 		if ctx.Err() != nil {
 			st.err = ctx.Err()
@@ -380,7 +383,7 @@ func (a *App) addSubBackfillUser(ctx context.Context, panel *remnawave.Client, o
 	}
 	uopt := opt
 	// На триале действуют общие условия, даже если осталась прошлая сделка.
-	if !trial && applyAddSubSnap(&uopt, snap, addSubLiveFor(ctx, panel, snap)) {
+	if !trial && applyAddSubSnap(&uopt, snap, addSubLiveCached(ctx, panel, snap)) {
 		a.log.Warn("addsub: все сквады тарифа удалены в панели, взяты общие", "user", u.Username, "plan", snap.Code)
 	}
 	res, uerr := panel.UpsertAddSubForUser(ctx, u, uopt)

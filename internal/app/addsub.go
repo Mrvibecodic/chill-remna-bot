@@ -70,6 +70,15 @@ func addSubLiveFor(ctx context.Context, panel *remnawave.Client, snap *model.Pla
 	return panel.LiveSquads(ctx)
 }
 
+// addSubLiveCached — то же для обхода всех пользователей: список берётся из
+// кэша клиента панели, а не читается на каждого.
+func addSubLiveCached(ctx context.Context, panel *remnawave.Client, snap *model.PlanSnapshot) remnawave.LiveSquads {
+	if panel == nil || snap == nil || len(snap.AddSubSquads) == 0 {
+		return remnawave.LiveSquads{}
+	}
+	return panel.LiveSquadsCached(ctx)
+}
+
 // planAddSubTerms — свои трафик и сквады доп-подписки тарифа для снимка
 // сделки (копии: снимок не делит память с тарифом). nil — как в общих.
 func planAddSubTerms(p *model.Plan) (*int, []string) {
