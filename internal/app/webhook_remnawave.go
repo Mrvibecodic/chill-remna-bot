@@ -167,6 +167,10 @@ func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event stri
 	if u.TelegramID == 0 {
 		return true
 	}
+	if a.remindCovers(ctx, u.TelegramID, hours) {
+		a.log.Info("remnawave webhook: о сроке напоминает бот, предупреждение панели пропущено", "event", event, "tg_id", u.TelegramID)
+		return true
+	}
 	lang := a.lang(u.TelegramID)
 	text := i18n.T(lang, "rw.warn_expiring")
 	switch {
@@ -175,9 +179,15 @@ func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event stri
 	case hours > 0:
 		text = i18n.T(lang, "rw.warn_expiring_hours", hours)
 	}
-	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	}) != 0
+	// Продление — тому, у кого есть сделка: кнопка откроет его тариф. Человеку
+	// без покупок в боте (подписку завели в панели) продлевать нечего, ему —
+	// витрина, как и раньше.
+	buy := "menu:buy"
+	if planCodeOf(a.userSnapshot(ctx, u.TelegramID)) != "" {
+		buy = "menu:renew"
+	}
+	text, rows := a.expiryNotice(ctx, u.TelegramID, lang, text, buy)
+	ok := a.notifyKB(ctx, u.TelegramID, text, rows) != 0
 	a.log.Info("remnawave webhook: warn sent", "event", event, "tg_id", u.TelegramID, "ok", ok)
 	return ok
 }

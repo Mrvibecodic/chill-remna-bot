@@ -296,21 +296,82 @@ func (a *App) panelExpiry(ctx context.Context, tgID int64) (exp time.Time, ok, r
 
 func (a *App) sendReminder(ctx context.Context, chatID int64, key string, daysLeft int) bool {
 	lang := a.lang(chatID)
+	text, rows := a.expiryNotice(ctx, chatID, lang, i18n.T(lang, key, daysLeft), "menu:renew")
+	return a.notifyKB(ctx, chatID, text, rows) != 0
+}
+
+// expiryNotice дополняет сообщение «подписка скоро кончится» и собирает его
+// кнопки. Общее для напоминания бота и предупреждения по вебхуку панели: о
+// сроке человеку пишут оба, и вести его они обязаны в одно место. buy — куда
+// ведёт кнопка покупки.
+func (a *App) expiryNotice(ctx context.Context, chatID int64, lang, text, buy string) (string, [][]models.InlineKeyboardButton) {
 	rows := [][]models.InlineKeyboardButton{}
 	if row := a.miniAppButtonRow(lang); row != nil {
 		rows = append(rows, row)
 	}
 	// «Продлить», а не «Купить»: подписчику тарифа по ссылке кнопка обязана
 	// открыть ЕГО тариф (showRenew), иначе напоминание продавало бы «Базовый».
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:renew")})
-	text := i18n.T(lang, key, daysLeft)
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), buy)})
 	// Если у человека включено автопродление, напоминание «подписка кончается»
 	// без этой строки читается как «надо срочно платить руками».
 	if a.autoPayOn(ctx, chatID) {
 		text += "\n\n" + i18n.T(lang, "ap.remind_hint", a.autoPayDaysText(lang))
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "ap.btn_manage"), "ap:show")})
 	}
-	return a.notifyKB(ctx, chatID, text, rows) != 0
+	return text, rows
+}
+
+// remindSlack — на сколько срок в зеркале бота может расходиться со сроком,
+// о котором предупреждает панель, чтобы считаться тем же сроком: панель
+// выбирает людей с точностью до минуты и повторяет недоставленное событие.
+const remindSlack = time.Hour
+
+// remindCovers — напоминает ли об этом же сроке сам бот. Панель при
+// подключённом вебхуке шлёт предупреждение «осталось N суток» в ту же минуту,
+// когда планировщик бота шлёт своё «через N дн.», и человек получал два
+// сообщения об одном. Совпадением считается только ровное число суток,
+// которое настроено в напоминаниях для этого человека, и только если бот
+// знает тот же срок, что и панель. Всё остальное (другие интервалы панели,
+// выключенные напоминания бота, срок, изменённый мимо бота) доставляется как
+// раньше.
+func (a *App) remindCovers(ctx context.Context, tgID int64, hours int) bool {
+	if hours <= 0 || hours%24 != 0 {
+		return false
+	}
+	w := hours / 24
+	a.mu.Lock()
+	st := a.store
+	var rc model.RemindersConfig
+	if a.botCfg != nil {
+		rc = a.botCfg.Reminders
+		rc.DaysList = append([]int(nil), rc.DaysList...)
+	}
+	a.mu.Unlock()
+	// После восстановления базы планировщик молчит, пока срок не сверен.
+	if st == nil || a.restoreSyncPending() {
+		return false
+	}
+	u, err := st.GetUser(ctx, tgID)
+	if err != nil || u == nil || u.Blocked {
+		return false
+	}
+	if u.NotifyKind == "trial" {
+		if !rc.TrialEnabled || rc.TrialDaysBefore != w {
+			return false
+		}
+	} else if !rc.Enabled || !rc.HasReminderDay(w) {
+		return false
+	}
+	// Планировщик считает от срока в зеркале бота. Если срок меняли мимо бота
+	// (продлили в панели), зеркало и отметки об отправленном относятся к
+	// прежнему сроку: о новом бот может не напомнить вовсе, и молчать за
+	// панель тогда нельзя.
+	exp, err := time.Parse(time.RFC3339, u.SubExpireAt)
+	if err != nil {
+		return false
+	}
+	d := exp.Sub(time.Now().UTC()) - time.Duration(hours)*time.Hour
+	return d <= remindSlack && d >= -remindSlack
 }
 
 func daysUntil(exp, now time.Time) int {
