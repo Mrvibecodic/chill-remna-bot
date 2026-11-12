@@ -27,143 +27,91 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-func (s *Server) handleYooKassa(w http.ResponseWriter, r *http.Request) {
+// webhook — общий приём вебхука: тело с ограничением размера, срок на
+// обработку и разбор исхода. true — обработано, вызывающему осталось ответить
+// отправителю тем, чего тот ждёт.
+func (s *Server) webhook(w http.ResponseWriter, r *http.Request, name string, call func(ctx context.Context, body []byte) (bool, error)) bool {
 	body, err := readAllLimited(r, 256*1024)
 	if err != nil {
 		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	handled, err := s.handlers.HandleYooKassaWebhook(ctx, body)
-	if err != nil {
-		s.log.Error("yookassa webhook", "err", err)
+	handled, err := call(ctx, body)
+	return s.webhookDone(w, name, handled, err)
+}
+
+// webhookDone переводит исход обработки в ответ отправителю: подпись не
+// прошла — 401, просьба повторить или сбой — 500 (отправитель пришлёт снова).
+// true — ошибки нет.
+func (s *Server) webhookDone(w http.ResponseWriter, name string, handled bool, err error) bool {
+	switch {
+	case errors.Is(err, ErrUnauthorized):
+		s.log.Warn(name+" webhook", "err", err)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	case errors.Is(err, ErrRetryLater):
+		s.log.Warn(name+" webhook: retry later", "err", err)
+		http.Error(w, "retry later", http.StatusInternalServerError)
+		return false
+	case err != nil:
+		s.log.Error(name+" webhook", "err", err)
 		http.Error(w, "internal", http.StatusInternalServerError)
-		return
+		return false
 	}
 	if !handled {
-
-		s.log.Info("yookassa webhook ignored")
+		s.log.Info(name + " webhook ignored")
 	}
-	w.WriteHeader(http.StatusOK)
+	return true
+}
+
+func (s *Server) handleYooKassa(w http.ResponseWriter, r *http.Request) {
+	if s.webhook(w, r, "yookassa", s.handlers.HandleYooKassaWebhook) {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (s *Server) handleCryptoBot(w http.ResponseWriter, r *http.Request) {
 	sig := r.Header.Get("Crypto-Pay-API-Signature")
-	body, err := readAllLimited(r, 256*1024)
-	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-		return
+	if s.webhook(w, r, "cryptobot", func(ctx context.Context, body []byte) (bool, error) {
+		return s.handlers.HandleCryptoBotWebhook(ctx, sig, body)
+	}) {
+		w.WriteHeader(http.StatusOK)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	handled, err := s.handlers.HandleCryptoBotWebhook(ctx, sig, body)
-	if errors.Is(err, ErrUnauthorized) {
-		s.log.Warn("cryptobot webhook", "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if err != nil {
-		s.log.Error("cryptobot webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("cryptobot webhook ignored")
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleRemnawave(w http.ResponseWriter, r *http.Request) {
 	sig := r.Header.Get("X-Remnawave-Signature")
-	body, err := readAllLimited(r, 256*1024)
-	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-		return
+	if s.webhook(w, r, "remnawave", func(ctx context.Context, body []byte) (bool, error) {
+		return s.handlers.HandleRemnawaveWebhook(ctx, sig, body)
+	}) {
+		w.WriteHeader(http.StatusOK)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	handled, err := s.handlers.HandleRemnawaveWebhook(ctx, sig, body)
-	if err != nil {
-		s.log.Error("remnawave webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("remnawave webhook ignored")
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handlePlatega(w http.ResponseWriter, r *http.Request) {
 	merchantID := r.Header.Get("X-MerchantId")
 	secret := r.Header.Get("X-Secret")
-	body, err := readAllLimited(r, 256*1024)
-	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-		return
+	if s.webhook(w, r, "platega", func(ctx context.Context, body []byte) (bool, error) {
+		return s.handlers.HandlePlategaWebhook(ctx, merchantID, secret, body)
+	}) {
+		w.WriteHeader(http.StatusOK)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	handled, err := s.handlers.HandlePlategaWebhook(ctx, merchantID, secret, body)
-	if errors.Is(err, ErrUnauthorized) {
-		s.log.Warn("platega webhook", "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if err != nil {
-		s.log.Error("platega webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("platega webhook ignored")
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleHeleket(w http.ResponseWriter, r *http.Request) {
-	body, err := readAllLimited(r, 256*1024)
-	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-		return
+	if s.webhook(w, r, "heleket", s.handlers.HandleHeleketWebhook) {
+		w.WriteHeader(http.StatusOK)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	handled, err := s.handlers.HandleHeleketWebhook(ctx, body)
-	if err != nil {
-		s.log.Error("heleket webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("heleket webhook ignored")
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleTribute(w http.ResponseWriter, r *http.Request) {
 	sig := r.Header.Get("trbt-signature")
-	body, err := readAllLimited(r, 256*1024)
-	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+	if !s.webhook(w, r, "tribute", func(ctx context.Context, body []byte) (bool, error) {
+		return s.handlers.HandleTributeWebhook(ctx, sig, body)
+	}) {
 		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	handled, err := s.handlers.HandleTributeWebhook(ctx, sig, body)
-	if errors.Is(err, ErrUnauthorized) {
-		s.log.Warn("tribute webhook", "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if err != nil {
-		s.log.Error("tribute webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("tribute webhook ignored")
 	}
 	// Tribute ждёт в ответ {"status":"ok"}.
 	w.Header().Set("Content-Type", "application/json")

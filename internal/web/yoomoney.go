@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"html"
 	"net/http"
 	"net/url"
@@ -88,25 +87,9 @@ func (s *Server) handleYooMoney(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	handled, err := s.handlers.HandleYooMoneyWebhook(ctx, r.PostForm)
-	if errors.Is(err, ErrUnauthorized) {
-		s.log.Warn("yoomoney webhook", "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+	if s.webhookDone(w, "yoomoney", handled, err) {
+		w.WriteHeader(http.StatusOK)
 	}
-	if errors.Is(err, ErrRetryLater) {
-		s.log.Warn("yoomoney webhook: retry later", "err", err)
-		http.Error(w, "retry later", http.StatusInternalServerError)
-		return
-	}
-	if err != nil {
-		s.log.Error("yoomoney webhook", "err", err)
-		http.Error(w, "internal", http.StatusInternalServerError)
-		return
-	}
-	if !handled {
-		s.log.Info("yoomoney webhook ignored")
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 // handleYooMoneyPay — страница оплаты счёта: форма quickpay с суммой и меткой
