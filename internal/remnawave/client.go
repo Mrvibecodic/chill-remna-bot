@@ -1651,14 +1651,6 @@ func (c *Client) hwidCount(ctx context.Context, ref UserRef) int {
 	return len(env.Response.Devices)
 }
 
-func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, string, bool) {
-	u, err := c.findByTelegram(ctx, telegramID)
-	if err != nil || u == nil || u.SubscriptionURL == "" {
-		return "", "", false
-	}
-	return u.SubscriptionURL, u.ExpireAt, true
-}
-
 // Статусы пользователя в панели. Раньше объявлен был только DISABLED, а
 // EXPIRED и LIMITED не упоминались нигде — поэтому истёкшая подписка и
 // исчерпанный трафик показывались как «активна».

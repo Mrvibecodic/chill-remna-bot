@@ -567,13 +567,6 @@ func (a *App) nextP2PCardIdx(p2p model.P2PConfig) int {
 	return int(n % uint64(len(p2p.Cards)))
 }
 
-// prepareP2PCard picks the next card, creates an awaiting P2P request and
-// returns the card + price + request id, without messaging the user (shared by
-// the chat flow and the web cabinet).
-func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (card, price string, reqID int64, err error) {
-	return a.prepareP2PCardSale(ctx, chatID, baseSale(months))
-}
-
 func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (card, price string, reqID int64, err error) {
 	months := s.Months
 	// Цена продажи считается до захвата замка: saleFiat сам берёт a.mu, когда

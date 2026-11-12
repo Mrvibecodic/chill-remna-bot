@@ -45,10 +45,6 @@ var (
 	errMailNoAddress = errors.New("публичный адрес кабинета не задан")
 )
 
-// waitMail дожидается фоновых отправок. Нужен тестам: без него проверка идёт
-// наперегонки с письмом, которое ушло в фон при регистрации.
-func (a *App) waitMail() { a.mailWG.Wait() }
-
 func (a *App) mailCfg() model.MailConfig {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -367,15 +367,6 @@ func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseInten
 	return in, nil
 }
 
-// buyMonths — выбранный срок в месяцах (0, если выбора нет или он недоступен).
-func (a *App) buyMonths(ctx context.Context, chatID int64) int {
-	in, err := a.buyIntent(ctx, chatID)
-	if err != nil || in == nil {
-		return 0
-	}
-	return in.Months
-}
-
 // forgetBuyIntentFor убирает выбор, по которому только что прошла покупка.
 // Сверка со сроком обязательна: продление автосписанием или добитый
 // реконсилятором старый счёт не должны стирать выбор, который человек делает
