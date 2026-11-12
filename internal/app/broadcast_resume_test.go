@@ -188,8 +188,14 @@ func TestBroadcast_ProgressSavedEachMessage(t *testing.T) {
 		_ = fs.UpsertUser(ctx, id)
 	}
 	var seen bcastPos
+	sends := 0
 	fm.onSendErr = func(id int64) {
-		if id != ids[1] {
+		// Порядок получателей хранилище не обещает: снимок берётся на втором
+		// по счёту сообщении, кому бы оно ни шло.
+		if !slices.Contains(ids, id) {
+			return
+		}
+		if sends++; sends != 2 {
 			return
 		}
 		raw, err := os.ReadFile(a.bcastPath(bcastPosFile))
