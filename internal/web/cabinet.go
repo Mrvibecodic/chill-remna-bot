@@ -163,6 +163,11 @@ func (s *Server) handleCabinetConfig(w http.ResponseWriter, r *http.Request) {
 	if s.mini.CabinetTGLoginNew() {
 		out["client_id"] = tgBotID(s.mini.MiniBotToken())
 	}
+	// Вошедшему чат приходит вместе с меню; сюда он попадает, только когда
+	// его разрешено показывать и на экране входа.
+	if src, all := s.mini.CabinetChat(); src != "" && all {
+		out["chat_src"] = src
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

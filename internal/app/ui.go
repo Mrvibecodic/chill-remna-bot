@@ -886,6 +886,15 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.toggleCabinetTGLogin(ctx, chatID)
 		}
+	case "cabchat":
+		if isAdmin {
+			a.getUI(chatID).adminInput = "cab_chat"
+			a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "cabinet.ask_chat"), "menu:cabinet")
+		}
+	case "cabchatvis":
+		if isAdmin {
+			a.toggleCabinetChatAll(ctx, chatID)
+		}
 	case "cablogout":
 		if isAdmin {
 			a.logoutAllSessions(ctx, chatID)

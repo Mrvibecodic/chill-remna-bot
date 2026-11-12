@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,18 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 	if cab.TGLoginNew {
 		tgLabel = i18n.T(lang, "cabinet.btn_tglogin", i18n.T(lang, "cabinet.tglogin_new"))
 	}
+	chatSrc, chatAll := cabinetChat(cab)
+	chatRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "cabinet.btn_chat"), "menu:cabchat")}
+	if chatSrc == "" {
+		text += "\n" + i18n.T(lang, "cabinet.chat_none")
+	} else {
+		vis := i18n.T(lang, "cabinet.chat_auth")
+		if chatAll {
+			vis = i18n.T(lang, "cabinet.chat_all")
+		}
+		text += "\n" + i18n.T(lang, "cabinet.chat", html.EscapeString(chatSrc), vis)
+		chatRow = append(chatRow, btn(i18n.T(lang, "cabinet.btn_chat_vis", vis), "menu:cabchatvis"))
+	}
 	rows := [][]models.InlineKeyboardButton{
 		{btn(toggle, "menu:cabtoggle")},
 		{btn(i18n.T(lang, "cabinet.btn_appr_tg", mark(apprTG)), "menu:cabapptg"), btn(i18n.T(lang, "cabinet.btn_appr_email", mark(apprEmail)), "menu:cabappem")},
@@ -106,6 +119,7 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "cabinet.btn_title"), "menu:cabtitle"), btn(i18n.T(lang, "cabinet.btn_desc"), "menu:cabdesc")},
 		{btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav"), btn(fpLabel, "menu:cabfp")},
 		{btn(tgLabel, "menu:cabtgl")},
+		chatRow,
 		{btn(i18n.T(lang, "cabinet.btn_logout_all"), "menu:cablogout")},
 		{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}

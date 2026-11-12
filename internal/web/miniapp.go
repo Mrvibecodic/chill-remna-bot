@@ -113,6 +113,8 @@ type MiniProvider interface {
 	CabinetFavicon() string
 	CabinetAntiFP() bool
 	CabinetTGLoginNew() bool
+	// CabinetChat — адрес скрипта стороннего чата и виден ли он до входа.
+	CabinetChat() (src string, all bool)
 	CabinetEnsureUser(ctx context.Context, tgID int64)
 	// CabinetEmailRegister заводит аккаунт по почте; start — параметр ссылки,
 	// по которой открыли кабинет (ref_ привязывает к пригласившему).
@@ -263,6 +265,10 @@ type MiniMeDTO struct {
 	BalanceK int64  `json:"balance_kopecks"`
 	Name     string `json:"name,omitempty"`
 	Email    string `json:"email,omitempty"`
+	// ChatSrc — скрипт стороннего чата; заполняется только для кабинета.
+	// Едет с профилем, а не с меню: профиль читается из базы и отвечает, даже
+	// когда панель недоступна и остальной кабинет не загрузился.
+	ChatSrc string `json:"chat_src,omitempty"`
 }
 
 // CabinetAccountDTO — экран «Аккаунт» веб-кабинета: чем человек входит, что
@@ -646,13 +652,17 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 }
 
 func (s *Server) handleMiniMe(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniMe(ctx, id))
+	me := s.mini.MiniMe(ctx, id)
+	if web {
+		me.ChatSrc, _ = s.mini.CabinetChat()
+	}
+	writeJSON(w, http.StatusOK, me)
 }
 
 // handleMiniAvatar отдаёт фото профиля Telegram владельца пропуска. Ссылка на
