@@ -114,6 +114,8 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 // MiniSubscription mirrors showMySubs: link, expiry, status, and the read-only
 // devices count (only the connected number is sent when no per-user limit).
 func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
+	// Как в чате: один поиск человека в панели на весь экран.
+	ctx = remnawave.WithLookupMemo(ctx)
 	a.mu.Lock()
 	panel := a.panel
 	a.mu.Unlock()

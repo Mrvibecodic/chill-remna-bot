@@ -1099,6 +1099,9 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 }
 
 func (a *App) showMySubs(ctx context.Context, chatID int64) {
+	// Подписка, устройства и доп-подписка — про одного человека: в панели он
+	// ищется один раз на показ экрана.
+	ctx = remnawave.WithLookupMemo(ctx)
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	panel := a.panel

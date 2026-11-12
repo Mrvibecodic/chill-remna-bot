@@ -933,7 +933,7 @@ func (c *Client) createAddSub(ctx context.Context, username string, main PanelUs
 // that would narrow the search to the legacy name and quietly skip a B living
 // under the derived one — leaving a blocked user served or an orphan behind.
 func (c *Client) mainUsernameFor(ctx context.Context, telegramID int64) (string, error) {
-	a, err := c.findByTelegram(ctx, telegramID)
+	a, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil {
 		return "", err
 	}
@@ -1702,7 +1702,7 @@ type SubSnapshot struct {
 // SubscriptionSnapshot — как SubscriptionState, но с трафиком; запрос к
 // панели тот же.
 func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (SubSnapshot, bool, error) {
-	u, err := c.findByTelegram(ctx, telegramID)
+	u, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil {
 		return SubSnapshot{}, false, err
 	}
@@ -1794,7 +1794,7 @@ func devTime(raw string) time.Time {
 // Read-only: it never registers or deletes devices. ok=false when the user
 // is unknown to the panel or HWID data is unavailable.
 func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (DeviceInfo, bool) {
-	u, err := c.findByTelegram(ctx, telegramID)
+	u, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
@@ -1855,6 +1855,52 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 // turn a temporary panel outage into "your subscription is gone", and a renewal
 // into creating a second account.
 var errPanelDialect = errors.New("не удалось определить версию API панели")
+
+type lookupMemoKey struct{}
+
+// lookupMemo — найденные в панели пользователи в пределах одного показа экрана.
+// nil в карте значит «в панели такого нет».
+type lookupMemo struct {
+	mu   sync.Mutex
+	seen map[int64]*panelUser
+}
+
+// WithLookupMemo делает так, что в пределах этого ctx читающие вызовы
+// (подписка, устройства, доп-подписка) ищут пользователя в панели один раз, а
+// не каждый заново. Только для показа экрана: вызовы, меняющие пользователя,
+// памятью не пользуются и всегда спрашивают панель.
+func WithLookupMemo(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(lookupMemoKey{}).(*lookupMemo); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, lookupMemoKey{}, &lookupMemo{seen: map[int64]*panelUser{}})
+}
+
+// findByTelegramOnce — findByTelegram с памятью показа (см. WithLookupMemo).
+// Без памяти в ctx это обычный поиск. Ошибка не запоминается.
+func (c *Client) findByTelegramOnce(ctx context.Context, telegramID int64) (*panelUser, error) {
+	m, _ := ctx.Value(lookupMemoKey{}).(*lookupMemo)
+	if m == nil {
+		return c.findByTelegram(ctx, telegramID)
+	}
+	m.mu.Lock()
+	u, ok := m.seen[telegramID]
+	m.mu.Unlock()
+	if !ok {
+		var err error
+		if u, err = c.findByTelegram(ctx, telegramID); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		m.seen[telegramID] = u
+		m.mu.Unlock()
+	}
+	if u == nil {
+		return nil, nil
+	}
+	cp := *u
+	return &cp, nil
+}
 
 // findByTelegram resolves a user by telegram id in whichever dialect the panel
 // speaks (see panelGen).
