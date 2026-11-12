@@ -45,9 +45,7 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		return
 	}
 	defer a.leaveWork()
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

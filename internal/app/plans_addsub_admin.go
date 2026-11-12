@@ -197,9 +197,7 @@ func (a *App) showPlanAddSubSquads(ctx context.Context, chatID int64, code strin
 	}
 	a.getUI(chatID).planEdit = p.Code
 	back := "pln:as:" + p.Code
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"),
 			[][]models.InlineKeyboardButton{navBack(lang, back)})

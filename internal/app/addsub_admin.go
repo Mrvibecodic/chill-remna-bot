@@ -65,7 +65,7 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 }
 
 func (a *App) onAddSubAdmin(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "toggle":
 		a.mu.Lock()
@@ -237,9 +237,7 @@ func addSubCabinetCandidates(users []remnawave.PanelUser) []remnawave.PanelUser 
 // учётка. Сама учётка здесь не выбирается: её потом находит тот же поиск, что
 // и при покупке, а здесь только решается, за кем в панель стоит идти.
 func (a *App) cabinetAccountIDs(ctx context.Context, candidates []remnawave.PanelUser) ([]int64, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, nil
 	}
@@ -434,9 +432,7 @@ func (a *App) addSubByPlan(ctx context.Context, snap *model.PlanSnapshot) (*mode
 // продление бонусом или разблокировка выключили бы только что созданную
 // доп-подписку. granted — снимок, по которому она создана.
 func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSnapshot) error {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil
 	}
@@ -461,9 +457,7 @@ func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSn
 
 // addSubDeal — снимок последней сделки пользователя и идёт ли у него триал.
 func (a *App) addSubDeal(ctx context.Context, tgID int64) (*model.PlanSnapshot, bool) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, false
 	}
@@ -527,20 +521,7 @@ func (a *App) toggleAddSubInternal(ctx context.Context, chatID int64, uuid strin
 	live := a.liveSquads(ctx)
 	a.mu.Lock()
 	if a.botCfg != nil {
-		cur := a.botCfg.AddSub.InternalSquads
-		idx := -1
-		for i, u := range cur {
-			if u == uuid {
-				idx = i
-				break
-			}
-		}
-		if idx >= 0 {
-			a.botCfg.AddSub.InternalSquads = append(cur[:idx], cur[idx+1:]...)
-		} else {
-			a.botCfg.AddSub.InternalSquads = append(cur, uuid)
-		}
-		a.botCfg.AddSub.InternalSquads, _ = pruneGoneSquads(live, a.botCfg.AddSub.InternalSquads, "")
+		a.botCfg.AddSub.InternalSquads, _ = pruneGoneSquads(live, toggleString(a.botCfg.AddSub.InternalSquads, uuid), "")
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)

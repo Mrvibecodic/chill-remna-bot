@@ -69,7 +69,7 @@ func formatReminderWindows(rc model.RemindersConfig, lang string) string {
 }
 
 func (a *App) onNotifyAdmin(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "trial":
 		a.mu.Lock()

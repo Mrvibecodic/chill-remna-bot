@@ -15,11 +15,7 @@ import (
 const errMaxLen = 300
 
 func escapeErr(err error) string {
-	s := strings.TrimSpace(err.Error())
-	if r := []rune(s); len(r) > errMaxLen {
-		s = string(r[:errMaxLen]) + "…"
-	}
-	return html.EscapeString(s)
+	return html.EscapeString(clipRunes(strings.TrimSpace(err.Error()), errMaxLen, "…"))
 }
 
 // Действия админа по отчёту торрент-блокера. Всё, что тут делается, идёт в
@@ -53,9 +49,7 @@ func (a *App) torrentUnblockIP(ctx context.Context, chatID int64, ip string) {
 // иначе тикер прислал бы «блокировка снята» ещё раз в исходный срок, когда это
 // уже неправда. Решение о самой отправке принимает общий deliverUnblocks.
 func (a *App) closeTorrentBlocks(ctx context.Context, ip string) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

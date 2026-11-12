@@ -226,9 +226,7 @@ func (a *App) switchCreditDays(ctx context.Context, tgID int64, newSnap *model.P
 	if newSnap == nil || newSnap.Code == "" {
 		return 0
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return 0
 	}
@@ -253,9 +251,7 @@ func (a *App) switchCreditFor(ctx context.Context, tgID int64, s *sale) int {
 // пусто, если активной подписки нет или тариф тот же. Гейт для плашки «остаток
 // не сгорает» на карточке тарифа.
 func (a *App) switchingFrom(ctx context.Context, tgID int64, toCode string) string {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -288,9 +284,7 @@ func (a *App) autoPayFollowPurchase(ctx context.Context, tgID int64, applied *mo
 	if ap == nil || planCodeOf(ap.Snapshot) == applied.Code {
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}
@@ -336,9 +330,7 @@ func (a *App) autoPayYield(ctx context.Context, tgID int64, method string, appli
 	if ap == nil {
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

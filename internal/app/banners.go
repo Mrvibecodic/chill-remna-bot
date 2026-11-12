@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 
@@ -25,7 +26,7 @@ func (a *App) showSectionBanners(ctx context.Context, chatID int64) {
 }
 
 func (a *App) onSectionBanner(ctx context.Context, chatID int64, val string) {
-	action, key, _ := cut3(val)
+	action, key, _ := strings.Cut(val, ":")
 	switch action {
 	case "open":
 		a.showSectionBanner(ctx, chatID, key)
@@ -37,15 +38,6 @@ func (a *App) onSectionBanner(ctx context.Context, chatID int64, val string) {
 		a.getUI(chatID).awaitSectionBanner = ""
 		a.showSectionBanner(ctx, chatID, key)
 	}
-}
-
-func cut3(s string) (string, string, bool) {
-	for i := 0; i < len(s); i++ {
-		if s[i] == ':' {
-			return s[:i], s[i+1:], true
-		}
-	}
-	return s, "", false
 }
 
 func (a *App) showSectionBanner(ctx context.Context, chatID int64, section string) {

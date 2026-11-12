@@ -13,9 +13,7 @@ import (
 // liveSquads — свежий список сквадов панели. Без панели ничего не известно,
 // и ни один сквад не считается удалённым.
 func (a *App) liveSquads(ctx context.Context) remnawave.LiveSquads {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return remnawave.LiveSquads{}
 	}

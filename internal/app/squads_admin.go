@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 
@@ -10,9 +11,7 @@ import (
 
 func (a *App) showSquads(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 
 	back := []models.InlineKeyboardButton{
 		btn(i18n.T(lang, "btn.back"), "menu:pay"),
@@ -92,7 +91,7 @@ func display(v, lang string) string {
 }
 
 func (a *App) onSquads(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "int":
 		a.toggleInternalSquad(ctx, chatID, arg)

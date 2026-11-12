@@ -297,3 +297,20 @@ func TestLegacyPriceSquadsScreenShowsGone(t *testing.T) {
 		t.Fatalf("удалённый сквад не показан: %v", fm.buttonLabels())
 	}
 }
+
+// Кнопка сквада на общем экране «Сквады» включает его у «Базового».
+func TestGlobalSquadsButtonTogglesBaseSquad(t *testing.T) {
+	ctx := context.Background()
+	a, _, fs := planAdminApp(t)
+	a.botCfg.Plan.ActiveInternalSquads = []string{"squad-main"}
+	p := &goneSquadsPanel{}
+	a.panel = p.start(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a.handleCallback(ctx, cb(100, "sqd:int:s1"))
+	plan, _ := fs.GetPlan(ctx, model.PlanCodeBase)
+	if plan == nil || strings.Join(plan.IntSquads, ",") != "squad-main,s1" {
+		t.Fatalf("сквады «Базового» после нажатия: %+v, ожидалось squad-main,s1", plan)
+	}
+}

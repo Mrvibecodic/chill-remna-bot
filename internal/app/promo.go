@@ -247,9 +247,7 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 	if gb <= 0 || gb > maxPromoTrafficGB {
 		return false, ""
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false, ""
 	}
@@ -316,9 +314,7 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 // bonusTrafficApplied перечитывает потолок в панели после неудачного ответа:
 // true — прибавка на месте, начисление считать состоявшимся.
 func (a *App) bonusTrafficApplied(tgID int64, want int64) bool {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false
 	}

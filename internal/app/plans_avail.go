@@ -87,9 +87,7 @@ func (a *App) showPlanAvail(ctx context.Context, chatID int64, code string) {
 
 // planAccessList — список допущенных тарифа из хранилища.
 func (a *App) planAccessList(ctx context.Context, code string) ([]model.PlanAccess, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, errStorageUnavailable
 	}
@@ -151,9 +149,7 @@ func (a *App) onPlanAvailMode(ctx context.Context, chatID int64, arg string, con
 			return err
 		}
 		if leavingList {
-			a.mu.Lock()
-			st := a.store
-			a.mu.Unlock()
+			st := a.storeRef()
 			if st != nil {
 				if cerr := st.ClearPlanAccess(ctx, code); cerr != nil {
 					// Режим уже сменён; осиротевший список — не повод врать про
@@ -187,9 +183,7 @@ func (a *App) grantPlanAccessChecked(ctx context.Context, code string, tgID int6
 	if model.NormalizeAvailability(p.Availability) != model.PlanAvailList {
 		return errPlanNotList
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return errStorageUnavailable
 	}
@@ -278,9 +272,7 @@ func (a *App) onPlanAccessRemove(ctx context.Context, chatID int64, arg string) 
 		a.planEditFailed(ctx, chatID, code, err)
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	for i := range list {
 		if planEditHash(planAccessKeyOf(&list[i])) != hash {
 			continue
@@ -330,9 +322,7 @@ func (a *App) userEmail(ctx context.Context, uid int64) string {
 	if uid == 0 {
 		return ""
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -350,9 +340,7 @@ func (a *App) userAccessEmail(ctx context.Context, uid int64) string {
 	if uid == 0 {
 		return ""
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -372,9 +360,7 @@ func (a *App) showUserPlanAccess(ctx context.Context, chatID, uid int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
@@ -418,9 +404,7 @@ func (a *App) toggleUserPlanAccess(ctx context.Context, chatID, uid int64, code 
 		a.showUserPlanAccess(ctx, chatID, uid)
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
@@ -471,9 +455,7 @@ func (a *App) applyPlanAccessInput(ctx context.Context, chatID int64, text strin
 	ui.adminInput = ""
 	ui.planCode = ""
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || code == "" {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return

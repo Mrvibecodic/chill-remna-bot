@@ -37,9 +37,7 @@ import (
 // старте после отката это повод сказать админу, что правки сетки, сделанные
 // старым образом, заменены значениями тарифа.
 func (a *App) syncPlansConfig(ctx context.Context) (bool, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return false, nil
 	}

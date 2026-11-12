@@ -297,9 +297,7 @@ func (a *App) applyPlanImport(ctx context.Context, chatID int64) {
 		a.showPlansAdmin(ctx, chatID, a.plansPage(chatID))
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return

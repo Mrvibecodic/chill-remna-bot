@@ -275,7 +275,7 @@ func (a *App) showTopUp(ctx context.Context, chatID int64) {
 }
 
 func (a *App) onTopUp(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	lang := a.lang(chatID)
 	if !a.topUpEnabled() {
 		// Кнопка могла остаться в старом сообщении: гейтим действие, а не вид.

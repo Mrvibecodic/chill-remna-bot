@@ -11,6 +11,7 @@ import (
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/storage"
 )
 
 const (
@@ -22,6 +23,13 @@ func (a *App) panelClient() *remnawave.Client {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.panel
+}
+
+// storeRef — хранилище под тем же замком, что и панель.
+func (a *App) storeRef() storage.Storage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.store
 }
 
 func (a *App) syncPanelAccount(ctx context.Context, chatID int64) bool {

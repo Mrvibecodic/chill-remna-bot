@@ -594,9 +594,7 @@ func (a *App) applyPendingDB(ctx context.Context, w *wizard) error {
 	if w.pendingDBKind == "" {
 		return nil
 	}
-	a.mu.Lock()
-	cur := a.store
-	a.mu.Unlock()
+	cur := a.storeRef()
 	if cur != nil && cur.Kind() == w.pendingDBKind && a.storeDSN() == w.pendingDSN {
 		return nil
 	}

@@ -14,9 +14,7 @@ const apiLogPageSize = 20
 
 func (a *App) showAPILog(ctx context.Context, chatID int64, page int) {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	back := []models.InlineKeyboardButton{
 		btn(i18n.T(lang, "btn.back"), "menu:system"),
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
@@ -113,9 +111,7 @@ func (a *App) onAPILog(ctx context.Context, chatID int64, val string) {
 	case "refresh":
 		a.showAPILog(ctx, chatID, 0)
 	case "clear":
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
+		panel := a.panelClient()
 		if panel != nil {
 			panel.ClearLogs()
 		}

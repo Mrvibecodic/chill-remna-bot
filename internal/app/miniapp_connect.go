@@ -661,9 +661,7 @@ func acBuildV2(apps []acV2App, subURL, username, lang string) []web.MiniConnectA
 // sourced live from their subscription page's app-config (iOS + Android only).
 func (a *App) MiniConnect(ctx context.Context, tgID int64) web.MiniConnectDTO {
 	var dto web.MiniConnectDTO
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return dto
 	}

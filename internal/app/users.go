@@ -235,9 +235,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 // searchPanelUser — точное совпадение по имени учётки в панели: подстрочного
 // поиска панель не умеет, но по нику она находит и тех, кого бот ещё не видел.
 func (a *App) searchPanelUser(ctx context.Context, q string) *remnawave.PanelUser {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return nil
 	}
@@ -430,9 +428,7 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	}
 	subBlock := i18n.T(lang, "user.no_sub")
 	subExists, subBlocked := false, false
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel != nil {
 		if url, exp, st, ok := panel.SubscriptionFull(ctx, uid); ok {
 			subExists = true
@@ -502,9 +498,7 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 // покупки под текущим именем. "" — тариф неизвестен (подписку выдали
 // вручную или привязали учётку без покупки), строку тогда не показываем.
 func (a *App) clientPlanTitle(ctx context.Context, lang string, uid int64) string {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -579,9 +573,7 @@ func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExi
 			botBlocked = u.Blocked
 		}
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel != nil {
 		if _, _, st, ok := panel.SubscriptionFull(ctx, uid); ok {
 			subExists = true
@@ -760,9 +752,7 @@ func (a *App) applyBlock(ctx context.Context, adminChat, uid int64, mode string,
 		}
 	}
 	if wantSub {
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
+		panel := a.panelClient()
 		if panel != nil {
 			if _, err := panel.DisableByTelegramID(ctx, uid); err != nil {
 				a.notify(ctx, adminChat, "⚠️ "+err.Error())
@@ -797,9 +787,7 @@ func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode strin
 		}
 	}
 	if wantSub {
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
+		panel := a.panelClient()
 		if panel != nil {
 			if _, err := panel.EnableByTelegramID(ctx, uid); err != nil {
 				a.notify(ctx, adminChat, "⚠️ "+err.Error())
@@ -866,9 +854,7 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	if a.store == nil {
 		return
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if deleteSub && panel != nil {
 		// B first: it is resolved through A's username, so deleting A first
 		// would leave an orphan add-on user in the panel.
@@ -1103,9 +1089,7 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	// ищется один раз на показ экрана.
 	ctx = remnawave.WithLookupMemo(ctx)
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 	var snap remnawave.SubSnapshot
 	ok := false
@@ -1192,7 +1176,7 @@ func (a *App) addSubLine(ctx context.Context, chatID int64) string {
 	lang := a.lang(chatID)
 	// Название опции — тарифа пользователя (или общее): у каждого тарифа опция
 	// может называться по-своему.
-	name := html_(a.userAddSubName(ctx, chatID))
+	name := html.EscapeString(a.userAddSubName(ctx, chatID))
 	switch {
 	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
 		return "\n" + i18n.T(lang, "sub.addsub_off", name)

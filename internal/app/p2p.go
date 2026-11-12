@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -1333,9 +1334,7 @@ func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
 // строка — носитель снимка для всех внешних платёжек: payload провайдера мы
 // намеренно не меняем, чтобы предыдущий образ бота продолжал его понимать.
 func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnapshot {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || extID == "" {
 		return nil
 	}
@@ -1365,9 +1364,7 @@ const stageOrphanPaid = "orphan_paid"
 // Пути без счёта (Stars, перевод на карту, баланс) сюда не попадают — там
 // строки счёта нет, а пользователь существует по построению.
 func (a *App) orphanInvoice(ctx context.Context, method, extID string, telegramID int64, amount string) bool {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || extID == "" {
 		return false
 	}
@@ -1631,7 +1628,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
 		if hasChat(req.TelegramID) {
-			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
+			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html.EscapeString(text)))
 		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return

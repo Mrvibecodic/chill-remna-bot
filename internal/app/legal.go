@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html"
 	"regexp"
 	"strings"
 	"time"
@@ -127,7 +128,7 @@ func legalDocParts(lang string, it model.LegalItem) []string {
 		lines = splitLegalLines(legalTelegramHTML(it.Doc.Text))
 	}
 	if it.Doc.URL != "" {
-		lines = append(lines, "", i18n.T(lang, "legal.read_full", html_(it.Doc.URL)))
+		lines = append(lines, "", i18n.T(lang, "legal.read_full", html.EscapeString(it.Doc.URL)))
 	}
 	if len(lines) == 0 {
 		return []string{head}
@@ -315,7 +316,7 @@ func legalInline(lang string, docs []model.LegalItem) (string, bool) {
 			part += "\n" + legalTelegramHTML(it.Doc.Text)
 		}
 		if it.Doc.URL != "" {
-			part += "\n" + i18n.T(lang, "legal.read_full", html_(it.Doc.URL))
+			part += "\n" + i18n.T(lang, "legal.read_full", html.EscapeString(it.Doc.URL))
 		}
 		parts = append(parts, part)
 	}
@@ -379,7 +380,7 @@ func (a *App) legalPayFooter(lang string) string {
 	for _, it := range docs {
 		title := legalDocTitle(lang, it.Kind)
 		if it.Doc.URL != "" {
-			names = append(names, "<a href=\""+html_(it.Doc.URL)+"\">"+title+"</a>")
+			names = append(names, "<a href=\""+html.EscapeString(it.Doc.URL)+"\">"+title+"</a>")
 			continue
 		}
 		names = append(names, title)
@@ -487,7 +488,7 @@ func (a *App) legalNames(lang string) string {
 // чего возвращаем разрешённые теги — так ни скрипт, ни обработчик события из
 // текста документа в страницу не попадут.
 func sanitizeLegalHTML(s string) string {
-	out := html_(s)
+	out := html.EscapeString(s)
 	out = legalTagRe.ReplaceAllString(out, "<$1$2>")
 	out = legalLinkRe.ReplaceAllString(out, `<a href="$1" target="_blank" rel="noopener noreferrer">`)
 	out = legalLinkEndRe.ReplaceAllString(out, "</a>")

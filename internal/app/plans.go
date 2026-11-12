@@ -311,9 +311,7 @@ func (a *App) periodOnSale(months int) bool {
 // на кнопках экрана способов: по ней списание сверяется с тем, что человек
 // видел (см. priceMoved).
 func (a *App) setBuyIntent(ctx context.Context, chatID int64, planCode string, months int, shownPrice string) error {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil
 	}
@@ -339,9 +337,7 @@ const purchaseIntentTTL = 24 * time.Hour
 // путать её с «выбора нет» нельзя: во втором случае человека возвращают в
 // витрину, а в первом это был бы бесконечный круг.
 func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseIntent, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		// Бот без хранилища продать ничего не может, и молчаливый круг
 		// «витрина → способы → витрина» здесь ни к чему.
@@ -372,9 +368,7 @@ func (a *App) buyIntent(ctx context.Context, chatID int64) (*model.PurchaseInten
 // реконсилятором старый счёт не должны стирать выбор, который человек делает
 // прямо сейчас.
 func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || chatID == 0 {
 		return
 	}
@@ -408,9 +402,7 @@ func (a *App) forgetBuyIntentFor(ctx context.Context, chatID int64, months int) 
 // первого счёта применит условия второго, выставленного тем же человеком по
 // той же цене. Осознанный компромисс, а не дыра.
 func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months int, snap *model.PlanSnapshot) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || snap == nil || months <= 0 {
 		return
 	}
@@ -428,9 +420,7 @@ func (a *App) rememberStarsSnapshot(ctx context.Context, chatID int64, months in
 // новый неоплаченный счёт. Строк на человека не больше, чем сроков в витрине,
 // и каждый новый счёт перезаписывает свою — расти этой таблице некуда.
 func (a *App) starsSnapshot(ctx context.Context, chatID int64, months int) *model.PlanSnapshot {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || months <= 0 {
 		return nil
 	}

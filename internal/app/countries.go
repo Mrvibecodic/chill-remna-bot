@@ -34,9 +34,7 @@ func (a *App) infra(ctx context.Context) ([]remnawave.SquadFull, []remnawave.Hos
 	if ce != nil && time.Since(ce.fetchedAt) < infraCacheTTL {
 		return ce.squads, ce.hosts
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		if ce != nil {
 			return ce.squads, ce.hosts

@@ -560,9 +560,7 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 // makeBackup снимает бэкап и запирает его паролем. Вызывающий держит bkMu.
 func (a *App) makeBackup(ctx context.Context, password string) ([]byte, *storage.BackupInfo, error) {
 	lang := a.lang(a.cfg.AdminID)
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, nil, errors.New(i18n.T(lang, "bk.err_no_db"))
 	}
@@ -901,9 +899,7 @@ func (a *App) openBackupFile(ctx context.Context, chatID int64, p *bkPending, pa
 			return
 		}
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		if a.bkPendReplace(chatID, p, nil) {
 			a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.fail", i18n.T(lang, "bk.err_no_db")), back)
@@ -1051,9 +1047,7 @@ func (a *App) runRestore(ctx context.Context, chatID int64, p *bkPending) {
 		return
 	}
 
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	// cfgSaveMu держим всю замену: сохранение конфига, начатое раньше, должно
 	// доехать ДО неё, а не лечь поверх восстановленного.
 	a.cfgSaveMu.Lock()

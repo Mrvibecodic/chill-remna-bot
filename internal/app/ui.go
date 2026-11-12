@@ -156,9 +156,7 @@ func (a *App) userHasSub(ctx context.Context, chatID int64) bool {
 	}
 	a.subMu.Unlock()
 
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false
 	}

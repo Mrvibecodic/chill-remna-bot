@@ -260,7 +260,7 @@ func (a *App) CabinetForgotPassword(ctx context.Context, email string) {
 	if a.store == nil || !a.MailReady() {
 		return
 	}
-	email = normEmail(email)
+	email = model.NormalizeEmail(email)
 	if !mailer.ValidAddress(email) {
 		return
 	}

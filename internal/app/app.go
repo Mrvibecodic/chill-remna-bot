@@ -650,9 +650,7 @@ func (a *App) switchStore(ctx context.Context, kind, dsn string) error {
 		_ = newSt.Close()
 		return err
 	}
-	a.mu.Lock()
-	old := a.store
-	a.mu.Unlock()
+	old := a.storeRef()
 	if old != nil {
 		if err := storage.Transfer(ctx, old, newSt); err != nil {
 			_ = newSt.Close()

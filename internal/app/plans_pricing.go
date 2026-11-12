@@ -96,7 +96,7 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 		squads += " + 1"
 	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.pr_title",
-		planTitleHTML(lang, p), html_(cur), p.Strategy, devlim, squads), rows)
+		planTitleHTML(lang, p), html.EscapeString(cur), p.Strategy, devlim, squads), rows)
 }
 
 // showPlanMonth — экран одной длительности: цены по способам, трафик,
@@ -119,7 +119,7 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 			return "—"
 		}
 		// Валюту тоже вводит человек — экранируется вместе со значением.
-		return html_(v + curSuffix(curSymbol(p.Currency)))
+		return html.EscapeString(v + curSuffix(curSymbol(p.Currency)))
 	}
 	base, p2p, yk := "", "", ""
 	stars := 0
@@ -318,9 +318,7 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 	if mo > 0 {
 		back = "pln:prm:" + strconv.Itoa(mo) + ":" + p.Code
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"),
 			[][]models.InlineKeyboardButton{navBack(lang, back)})
@@ -450,8 +448,6 @@ func (a *App) onPlanSquadToggle(ctx context.Context, chatID int64, val string) {
 
 // html_ — короткий алиас экранирования для экранов тарифов: значения вводит
 // человек, а экраны уходят с разметкой.
-func html_(s string) string { return html.EscapeString(s) }
-
 // showPlanStrategy — выбор стратегии сброса трафика для тарифа.
 func (a *App) showPlanStrategy(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)

@@ -148,8 +148,6 @@ func (a *App) CabinetApproval(ctx context.Context, tgID int64, isEmail bool) err
 	return errors.New("аккаунт ожидает одобрения администратором")
 }
 
-func normEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
-
 var errCabinetOff = errors.New("веб-кабинет выключен")
 
 // errCabinetAuth is the single, uniform error returned for every email
@@ -169,7 +167,7 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password, start s
 	if !a.CabinetEnabled() {
 		return 0, errCabinetOff
 	}
-	email = normEmail(email)
+	email = model.NormalizeEmail(email)
 	// Проверка строже прежней «есть собака и пять символов»: адрес, на который
 	// нельзя отправить письмо, регистрировать незачем — человек застрянет на
 	// «подтвердите почту» навсегда.
@@ -239,7 +237,7 @@ func (a *App) CabinetEmailLogin(ctx context.Context, email, password string) (in
 	if a.store == nil {
 		return 0, errCabinetOff
 	}
-	u, _ := a.store.GetWebUserByEmail(ctx, normEmail(email))
+	u, _ := a.store.GetWebUserByEmail(ctx, model.NormalizeEmail(email))
 	if u == nil {
 		// Spend the same work as a real comparison so timing does not reveal
 		// that the email is unknown.

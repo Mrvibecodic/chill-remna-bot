@@ -116,9 +116,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	// Как в чате: один поиск человека в панели на весь экран.
 	ctx = remnawave.WithLookupMemo(ctx)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	var dto web.MiniSubDTO
 	if panel == nil {
 		return dto

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -84,7 +85,7 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 
 func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "toggle":
 		a.mu.Lock()
@@ -187,9 +188,7 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 
 func (a *App) showTrialSquads(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	back := []models.InlineKeyboardButton{
 		btn(i18n.T(lang, "btn.back"), "menu:trial"),
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
@@ -265,14 +264,7 @@ func (a *App) toggleTrialInternal(uuid string) {
 	if a.botCfg == nil {
 		return
 	}
-	cur := a.botCfg.Trial.InternalSquads
-	for i, u := range cur {
-		if u == uuid {
-			a.botCfg.Trial.InternalSquads = append(cur[:i], cur[i+1:]...)
-			return
-		}
-	}
-	a.botCfg.Trial.InternalSquads = append(cur, uuid)
+	a.botCfg.Trial.InternalSquads = toggleString(a.botCfg.Trial.InternalSquads, uuid)
 }
 
 func (a *App) toggleTrialExternal(uuid string) {

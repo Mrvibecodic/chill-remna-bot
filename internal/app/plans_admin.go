@@ -93,9 +93,7 @@ const (
 // пустой список вместо недоступного хранилища значило бы предложить админу
 // создать тариф заново поверх существующих.
 func (a *App) planList(ctx context.Context) ([]model.Plan, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, errStorageUnavailable
 	}
@@ -103,9 +101,7 @@ func (a *App) planList(ctx context.Context) ([]model.Plan, error) {
 }
 
 func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, errStorageUnavailable
 	}
@@ -117,9 +113,7 @@ func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) 
 // чужую правку — например, цену, которую синхронизация только что привезла из
 // конфига.
 func (a *App) savePlan(ctx context.Context, p *model.Plan) error {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return errStorageUnavailable
 	}
@@ -906,9 +900,7 @@ func (a *App) deletePlan(ctx context.Context, chatID int64, code string) {
 		a.showPlanCard(ctx, chatID, code)
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
