@@ -513,14 +513,9 @@ func (a *App) clientPlanTitle(ctx context.Context, lang string, uid int64) strin
 	if code == "" {
 		return ""
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		p = nil
-	}
-	if p == nil && err == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p != nil {
 		return planTitle(lang, p)
@@ -545,14 +540,9 @@ func (a *App) userPlanLine(ctx context.Context, lang string, u *model.User) stri
 	if code == "" {
 		return ""
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		p = nil
-	}
-	if p == nil && err == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p != nil {
 		return i18n.T(lang, "user.plan", planTitleHTML(lang, p))

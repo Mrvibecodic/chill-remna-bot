@@ -146,15 +146,10 @@ func (a *App) tributePlanRow(ctx context.Context, code string) *model.Plan {
 	if !model.ValidPlanCode(code) {
 		return nil
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.log.Warn("tribute: тариф не прочитан", "err", err, "plan", code)
 		return nil
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	return p
 }

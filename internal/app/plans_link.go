@@ -410,15 +410,10 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	// Тариф «по ссылке» с витрины не открывается: список — не обладание
 	// ссылкой. Несуществующий код и скрытый «по ссылке» похожи на перебор —
@@ -489,18 +484,10 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
-	p, perr := a.planByCode(ctx, code)
+	p, perr := a.planOrBase(ctx, code)
 	if perr != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
-	}
-	if p == nil && code == model.PlanCodeBase {
-		// «Базовый» без строки — сбой стартовой синхронизации: продаёт сетка,
-		// и кнопки его карточки обязаны работать (та же логика, что в
-		// editPlanPricing).
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	// Вторая точка гейта: создание намерения. Кнопка могла пролежать в
 	// переписке сколько угодно — тариф успели выключить, срок снять с продажи,

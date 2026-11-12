@@ -151,15 +151,10 @@ func (a *App) showRenew(ctx context.Context, chatID int64) {
 		a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "renew.no_history"), func() { a.showPlans(ctx, chatID) })
 		return
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
 		// Сценарий 3: тариф удалён, выключен или закрыт для покупателя.

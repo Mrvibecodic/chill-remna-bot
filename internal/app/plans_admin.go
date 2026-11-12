@@ -108,6 +108,19 @@ func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) 
 	return st.GetPlan(ctx, code)
 }
 
+// planOrBase — тариф по коду; «Базовый» без строки собирается из сетки цен.
+// Строки у него может не быть только после сбоя стартовой синхронизации, а
+// продаёт его всё равно сетка — отказывать «тариф не найден» нельзя.
+func (a *App) planOrBase(ctx context.Context, code string) (*model.Plan, error) {
+	p, err := a.planByCode(ctx, code)
+	if err != nil || p != nil || code != model.PlanCodeBase {
+		return p, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return basePlanFrom(a.botCfg, nil), nil
+}
+
 // savePlan пишет тариф. Вызывать ТОЛЬКО под a.plansMu (см. editPlan): запись
 // идёт целой строкой, поэтому «прочитал → изменил → записал» без замка теряет
 // чужую правку — например, цену, которую синхронизация только что привезла из

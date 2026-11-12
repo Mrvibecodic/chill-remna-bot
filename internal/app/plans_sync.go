@@ -223,17 +223,9 @@ func (a *App) editPlanPricing(ctx context.Context, code string, apply func(*mode
 	}
 	a.plansMu.Lock()
 	defer a.plansMu.Unlock()
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		return err
-	}
-	if p == nil && code == model.PlanCodeBase {
-		// «Базового» может не оказаться только из-за сбоя стартовой синхронизации
-		// — собираем его из текущей сетки прямо здесь, а не отказываем админу на
-		// экране цен непонятным «тариф не найден».
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p == nil {
 		return errPlanGone
