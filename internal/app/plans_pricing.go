@@ -350,40 +350,15 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 	} else {
 		inherited = true
 	}
-	isSel := func(uuid string) bool {
-		for _, u := range selInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
 
 	h := planEditHash(p.Code)
 	moStr := strconv.Itoa(mo)
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+3)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isSel(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 🏠 "+sq.Name, "plq:i:"+moStr+":"+h+":"+sq.UUID),
-		})
-	}
-	for _, sq := range extSquads {
-		mark := "⬜"
-		if selExt == sq.UUID {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 📡 "+sq.Name, "plq:e:"+moStr+":"+h+":"+sq.UUID),
-		})
-	}
-	gone := goneSquadRows(lang, live, selInt, selExt,
-		func(u string) string { return "plq:i:" + moStr + ":" + h + ":" + u },
-		func(u string) string { return "plq:e:" + moStr + ":" + h + ":" + u })
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, extSquads, squadPick{
+		selInt: selInt,
+		selExt: selExt,
+		intCB:  func(u string) string { return "plq:i:" + moStr + ":" + h + ":" + u },
+		extCB:  func(u string) string { return "plq:e:" + moStr + ":" + h + ":" + u },
+	})
 	if mo > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "pricing.sq_clear"), "pln:sqc:"+moStr+":"+p.Code),

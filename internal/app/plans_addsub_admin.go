@@ -211,28 +211,11 @@ func (a *App) showPlanAddSubSquads(ctx context.Context, chatID int64, code strin
 	}
 	live := panel.LiveSquads(ctx)
 	sel := p.AddSubSquads
-	isSel := func(uuid string) bool {
-		for _, u := range sel {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
 	h := planEditHash(p.Code)
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+3)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isSel(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 🏠 "+sq.Name, "plq:a:0:"+h+":"+sq.UUID),
-		})
-	}
-	gone := goneSquadRows(lang, live, sel, "",
-		func(u string) string { return "plq:a:0:" + h + ":" + u }, nil)
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, nil, squadPick{
+		selInt: sel,
+		intCB:  func(u string) string { return "plq:a:0:" + h + ":" + u },
+	})
 	if len(sel) > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "plans.btn_addsub_sq_common"), "pln:asqc:"+p.Code),

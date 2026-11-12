@@ -201,40 +201,14 @@ func (a *App) showTrialSquads(ctx context.Context, chatID int64) {
 	extSquads, _ := panel.ListExternalSquads(ctx)
 	live := panel.LiveSquads(ctx)
 	_, _, _, _, activeInt, activeExt := a.trialCfg()
-	isActive := func(uuid string) bool {
-		for _, u := range activeInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+2)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isActive(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 🏠 "+sq.Name, "trial:intsq:"+sq.UUID),
-		})
-	}
-	if len(extSquads) > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{btn("— 📡 External —", "trial:noop")})
-		for _, sq := range extSquads {
-			mark := "⚪"
-			if activeExt == sq.UUID {
-				mark = "🟢"
-			}
-			rows = append(rows, []models.InlineKeyboardButton{
-				btn(mark+" 📡 "+sq.Name, "trial:extsq:"+sq.UUID),
-			})
-		}
-	}
-	gone := goneSquadRows(lang, live, activeInt, activeExt,
-		func(u string) string { return "trial:intsq:" + u },
-		func(u string) string { return "trial:extsq:" + u })
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, extSquads, squadPick{
+		selInt:   activeInt,
+		selExt:   activeExt,
+		intCB:    func(u string) string { return "trial:intsq:" + u },
+		extCB:    func(u string) string { return "trial:extsq:" + u },
+		extHead:  "trial:noop",
+		extRadio: true,
+	})
 	rows = append(rows, back)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "trial.squads_title", len(intSquads), len(extSquads), len(activeInt))+goneSquadsHint(lang, gone), rows)
 }

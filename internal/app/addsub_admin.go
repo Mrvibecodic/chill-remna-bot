@@ -490,25 +490,10 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 	}
 	live := panel.LiveSquads(ctx)
 
-	isActiveInt := func(uuid string) bool {
-		for _, u := range activeInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+2)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isActiveInt(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, "addsub:int:"+sq.UUID)})
-	}
-	gone := goneSquadRows(lang, live, activeInt, "",
-		func(u string) string { return "addsub:int:" + u }, nil)
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, nil, squadPick{
+		selInt: activeInt,
+		intCB:  func(u string) string { return "addsub:int:" + u },
+	})
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "addsub:refresh")})
 	rows = append(rows, back)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt))+goneSquadsHint(lang, gone), rows)
