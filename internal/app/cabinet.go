@@ -103,19 +103,25 @@ var errCabinetAccess = errors.New("доступ к боту ограничен �
 // (and notifies the admin once) when the account still needs approval, or a
 // permanent "denied" error when the admin already rejected the request.
 func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
-	needApproval := a.cabinetNeedsApproval(isEmail)
-	if isEmail {
-		// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
-		// закрытом боте (приглашения/вайтлист) для него обязательна модерация
-		// кабинета: ранее одобренные (WebApproved) проходят как раньше,
-		// остальные попадают в обычную очередь на одобрение к админу.
-		if a.accessMode() != model.AccessPublic {
-			needApproval = true
-		}
-	} else if a.MiniAccessDenied(ctx, tgID) {
+	if !isEmail && a.MiniAccessDenied(ctx, tgID) {
 		// Telegram-аккаунт: закрытый бот не пускает через веб тех, кого он не
 		// пускает в чат.
 		return errCabinetAccess
+	}
+	return a.CabinetApproval(ctx, tgID, isEmail)
+}
+
+// CabinetApproval — только модерация кабинета, без проверки режима доступа
+// бота. Для вызывающих, которые MiniAccessDenied уже спросили сами (страж
+// запросов кабинета): иначе одна проверка шла бы дважды на каждый запрос.
+func (a *App) CabinetApproval(ctx context.Context, tgID int64, isEmail bool) error {
+	needApproval := a.cabinetNeedsApproval(isEmail)
+	// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
+	// закрытом боте (приглашения/вайтлист) для него обязательна модерация
+	// кабинета: ранее одобренные (WebApproved) проходят как раньше,
+	// остальные попадают в обычную очередь на одобрение к админу.
+	if isEmail && a.accessMode() != model.AccessPublic {
+		needApproval = true
 	}
 	if !needApproval {
 		return nil

@@ -121,6 +121,9 @@ type MiniProvider interface {
 	CabinetEmailRegister(ctx context.Context, email, password, start string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
 	CabinetGate(ctx context.Context, tgID int64, isEmail bool) error
+	// CabinetApproval — модерация кабинета без проверки режима доступа бота
+	// (её страж запросов уже сделал через MiniAccessDenied).
+	CabinetApproval(ctx context.Context, tgID int64, isEmail bool) error
 	// CabinetAccount — состояние аккаунта для экрана «Аккаунт».
 	CabinetAccount(ctx context.Context, tgID int64) CabinetAccountDTO
 	// CabinetMoneyBlocked — платные действия закрыты до подтверждения почты.
@@ -620,7 +623,7 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	// пропуск живёт семь суток, и без этого отзыв доступа не действовал бы всю
 	// неделю.
 	if web {
-		if err := s.mini.CabinetGate(r.Context(), id, id < 0); err != nil {
+		if err := s.mini.CabinetApproval(r.Context(), id, id < 0); err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return 0, false, false
 		}

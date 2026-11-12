@@ -307,6 +307,23 @@ func TestClosedBot_EmailCabinetAccounts(t *testing.T) {
 	}
 }
 
+// Telegram-аккаунт в закрытом боте: вход в кабинет отсекает режим доступа, а
+// модерация кабинета его не перепроверяет — это делает страж запросов сам.
+func TestClosedBot_TelegramCabinetGateSplit(t *testing.T) {
+	a, fs := refTestApp(t)
+	ctx := context.Background()
+	a.setAccessMode(ctx, model.AccessWhitelist, false)
+
+	const stranger = int64(1000000007)
+	_ = fs.UpsertUser(ctx, stranger)
+	if err := a.CabinetGate(ctx, stranger, false); !errors.Is(err, errCabinetAccess) {
+		t.Fatalf("чужой Telegram-аккаунт в закрытом боте: ожидался отказ по режиму доступа, получено %v", err)
+	}
+	if err := a.CabinetApproval(ctx, stranger, false); err != nil {
+		t.Fatalf("модерация кабинета выключена — она не должна отказывать: %v", err)
+	}
+}
+
 // Экран админки ЮKassa не должен содержать несовпавших плейсхолдеров
 // (регресс: в шаблоне оставался лишний %s после выпиливания настройки).
 func TestYKAdminScreenPlaceholders(t *testing.T) {
