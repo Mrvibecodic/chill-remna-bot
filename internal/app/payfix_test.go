@@ -104,6 +104,8 @@ func TestParseAmountRubOnly(t *testing.T) {
 		{"150.00 RUB", 150, true},
 		{"150 ₽", 150, true},
 		{"150", 150, true},
+		{"150 руб.", 150, true},
+		{"150 р", 150, true},
 		{"7.00 EUR", 7, false},
 		{"10.5 USD", 10.5, false},
 		{"100 ⭐", 100, false},
