@@ -116,6 +116,52 @@ func TestBroadcast_ResumeStale(t *testing.T) {
 	}
 }
 
+// Прогресс не читается — сколько сообщений ушло, неизвестно: рассылка не
+// продолжается, иначе уже получившие получили бы её второй раз. Без файла
+// прогресса она идёт с начала: до первого сообщения дело не дошло.
+func TestBroadcast_ResumeLostProgress(t *testing.T) {
+	ids := []int64{1000000001, 1000000002, 1000000003}
+	for _, tc := range []struct {
+		name     string
+		pos      string
+		wantSent int
+	}{
+		{"файл прогресса испорчен", "{", 0},
+		{"файл прогресса пуст", "", 0},
+		{"файла прогресса нет", "-", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			a, fm, fs := planAdminApp(t)
+			for _, id := range ids {
+				_ = fs.UpsertUser(ctx, id)
+			}
+			a.saveBcastJob(&bcastJob{Admin: planAdmin, Text: "msg {id}", Label: "Всем", IDs: ids,
+				Started: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)})
+			if tc.pos != "-" {
+				if err := os.WriteFile(a.bcastPath(bcastPosFile), []byte(tc.pos), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			a.resumeBroadcast(ctx)
+			waitFor(t, func() bool { return !a.bcastRunning.Load() })
+
+			if got := bcastSent(fm); len(got) != tc.wantSent {
+				t.Fatalf("ушло %v, ожидалось сообщений: %d", got, tc.wantSent)
+			}
+			if tc.wantSent == 0 {
+				if r := fm.last(); !strings.Contains(r, "не удалось прочитать") || !strings.Contains(r, "Получателей: 3") {
+					t.Fatalf("итог:\n%s", r)
+				}
+			}
+			if bcastFilesExist(a) {
+				t.Fatal("задание осталось висеть")
+			}
+		})
+	}
+}
+
 // Остановка бота посреди рассылки оставляет задание на диске.
 func TestBroadcast_ShutdownKeepsJob(t *testing.T) {
 	a, fm, _ := planAdminApp(t)

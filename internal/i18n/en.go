@@ -1007,6 +1007,7 @@ var en = map[string]string{
 	"bcast.panel_failed":           "❌ Could not check subscriptions with the panel, the broadcast was not started. Try again later.",
 	"bcast.paused":                 "⏸ The database is being restored, the broadcast was not started. Try again after the restore.",
 	"bcast.resumed":                "▶️ <b>Broadcast resumed</b> after the bot restarted.\n\nTo: %s\nLeft to send: %d",
+	"bcast.lost":                   "⚠️ <b>Broadcast interrupted by a bot restart</b> and not resumed: could not read how many messages were already sent.\n\nTo: %s\nRecipients: %d",
 	"bcast.interrupted":            "⚠️ <b>Broadcast interrupted by a bot restart</b> and not resumed: more than a day has passed.\n\nTo: %s\nRecipients: %d\n\nDelivered: %d\nFailed: %d\nUnreachable (blocked the bot or no chat): %d\nNot sent: %d",
 	"btn.promo":                    "🎟 Promo code",
 	"btn.promo_admin":              "🎟 Promo codes",

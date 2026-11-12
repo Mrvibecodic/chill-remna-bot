@@ -375,11 +375,17 @@ func (a *App) resumeBroadcast(ctx context.Context) {
 		a.dropBcastJob()
 		return
 	}
+	// Файла прогресса нет — ни одно сообщение ещё не ушло. Файл есть, но не
+	// читается — сколько ушло, неизвестно: продолжение с начала дало бы
+	// второе сообщение всем, кто уже получил.
 	var pos bcastPos
-	if raw, err := os.ReadFile(a.bcastPath(bcastPosFile)); err == nil {
-		if err := json.Unmarshal(raw, &pos); err != nil {
-			a.log.Warn("рассылка: прогресс не прочитан", "err", err)
-		}
+	raw, err = os.ReadFile(a.bcastPath(bcastPosFile))
+	if err == nil {
+		err = json.Unmarshal(raw, &pos)
+	}
+	lost := err != nil && !errors.Is(err, os.ErrNotExist)
+	if lost {
+		a.log.Warn("рассылка: прогресс не прочитан", "err", err)
 	}
 	pos.Next = max(0, min(pos.Next, len(job.IDs)))
 	if !a.bcastRunning.CompareAndSwap(false, true) {
@@ -387,6 +393,12 @@ func (a *App) resumeBroadcast(ctx context.Context) {
 	}
 	lang := a.lang(job.Admin)
 	to := html.EscapeString(job.Label)
+	if lost {
+		a.bcastRunning.Store(false)
+		job.StatusID = 0
+		a.bcastFinish(ctx, &job, i18n.T(lang, "bcast.lost", to, len(job.IDs)))
+		return
+	}
 	started, perr := time.Parse(time.RFC3339, job.Started)
 	if perr != nil || time.Since(started) > bcastResumeMaxAge {
 		a.bcastRunning.Store(false)
