@@ -1074,70 +1074,15 @@ type UserLimits struct {
 // поправка (обычно отрицательная при апгрейде) сдвигает конец срока; ноль —
 // обычное продление.
 func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months, extraDays int, limits UserLimits) (string, string, error) {
-	existing, err := c.findByTelegram(ctx, telegramID)
-	if err != nil {
-		return "", "", err
-	}
-	expire := nextExpire(existing, months, extraDays)
-
-	if existing != nil && !existing.ref().Empty() {
-		if !ownedByBot(existing, telegramID) {
-			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
-		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		lim, err := c.liveLimits(ctx, limits, false)
-		if err != nil {
-			return "", "", err
-		}
-		applyLimits(patch, lim)
-		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-		if err == nil {
-			_ = c.ResetTraffic(ctx, existing.ref())
-		}
-		return link, expireAt, err
-	}
-
-	lim, err := c.liveLimits(ctx, limits, true)
-	if err != nil {
-		return "", "", err
-	}
-	body := newUserBody(telegramID, expire)
-	applyLimits(body, lim)
-	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	return c.grant(ctx, telegramID, limits, true, func(existing *panelUser) string {
+		return nextExpire(existing, months, extraDays)
+	})
 }
 
 func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, days int, limits UserLimits) (string, string, error) {
-	existing, err := c.findByTelegram(ctx, telegramID)
-	if err != nil {
-		return "", "", err
-	}
-	base := time.Now().UTC()
-	if existing != nil && existing.ExpireAt != "" {
-		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
-			base = t
-		}
-	}
-	expire := base.AddDate(0, 0, days).Format(time.RFC3339)
-
-	if existing != nil && !existing.ref().Empty() {
-		if !ownedByBot(existing, telegramID) {
-			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
-		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		lim, err := c.liveLimits(ctx, limits, false)
-		if err != nil {
-			return "", "", err
-		}
-		applyLimits(patch, lim)
-		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-	}
-	lim, err := c.liveLimits(ctx, limits, true)
-	if err != nil {
-		return "", "", err
-	}
-	body := newUserBody(telegramID, expire)
-	applyLimits(body, lim)
-	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	return c.grant(ctx, telegramID, limits, false, func(existing *panelUser) string {
+		return nextExpireDays(existing, days, 0)
+	})
 }
 
 // ExtendUserDays — покупка срока в днях (недельная подписка Tribute). Поправка
@@ -1146,17 +1091,27 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 // месячного срока тарифа, и сброс на каждом недельном продлении выдавал бы
 // месячный объём каждую неделю. Когда сбрасывать, решает вызывающий.
 func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, extraDays int, limits UserLimits, reset bool) (string, string, error) {
+	return c.grant(ctx, telegramID, limits, reset, func(existing *panelUser) string {
+		return nextExpireDays(existing, days, extraDays)
+	})
+}
+
+// grant — общая выдача срока: учётке бота сдвигает конец срока и применяет
+// лимиты, а если человека в панели нет — заводит его. Новый конец срока
+// считает expire от найденной учётки (nil — её нет). reset — сбросить ли
+// трафик продлённой учётке.
+func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits, reset bool, expire func(existing *panelUser) string) (string, string, error) {
 	existing, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
 		return "", "", err
 	}
-	expire := nextExpireDays(existing, days, extraDays)
+	until := expire(existing)
 
 	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
+		patch := existing.ref().apply(map[string]any{"expireAt": until})
 		lim, err := c.liveLimits(ctx, limits, false)
 		if err != nil {
 			return "", "", err
@@ -1168,11 +1123,12 @@ func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, ext
 		}
 		return link, expireAt, err
 	}
+
 	lim, err := c.liveLimits(ctx, limits, true)
 	if err != nil {
 		return "", "", err
 	}
-	body := newUserBody(telegramID, expire)
+	body := newUserBody(telegramID, until)
 	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
