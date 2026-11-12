@@ -298,13 +298,17 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 		}
 		if msgID := a.msg.SendKB(ctx, target, a.applyPremium(sb.String()), rows); msgID != 0 {
 			a.setUpdNotice(target, msgID)
-			time.AfterFunc(60*time.Second, func() {
-				a.msg.Delete(context.Background(), target, msgID)
-				a.clearUpdNotice(target, msgID)
-			})
+			time.AfterFunc(60*time.Second, func() { a.expireUpdNotice(target, msgID) })
 		}
 	}
 	a.setUpdateSeen(ctx, latest)
+}
+
+// expireUpdNotice убирает уведомление, по которому так и не нажали «Обновить».
+func (a *App) expireUpdNotice(chatID int64, msgID int) {
+	if a.clearUpdNotice(chatID, msgID) {
+		a.msg.Delete(context.Background(), chatID, msgID)
+	}
 }
 
 func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdmin bool) {

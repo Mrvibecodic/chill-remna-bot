@@ -404,7 +404,9 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
-	bkState *model.BackupConfig
+	// screenMsgs — последний экран чата, как его хранит база.
+	screenMsgs map[int64]int
+	bkState    *model.BackupConfig
 
 	// mu защищает ДЕНЕЖНЫЕ пути фейка: реальное хранилище — база, и параллельные
 	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
@@ -665,8 +667,20 @@ func (s *fakeStore) DeleteAutoPay(_ context.Context, id int64) error {
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }
 
-func (s *fakeStore) GetScreenMsg(context.Context, int64) (int, error) { return 0, nil }
-func (s *fakeStore) SetScreenMsg(context.Context, int64, int) error   { return nil }
+func (s *fakeStore) GetScreenMsg(_ context.Context, chatID int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.screenMsgs[chatID], nil
+}
+func (s *fakeStore) SetScreenMsg(_ context.Context, chatID int64, msgID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.screenMsgs == nil {
+		s.screenMsgs = map[int64]int{}
+	}
+	s.screenMsgs[chatID] = msgID
+	return nil
+}
 
 func (s *fakeStore) AddPayLog(_ context.Context, e *model.PayLogEntry) error {
 	s.mu.Lock()

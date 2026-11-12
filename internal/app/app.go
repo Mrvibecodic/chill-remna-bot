@@ -1199,12 +1199,16 @@ func (a *App) takeUpdNotice(chatID int64) int {
 	return id
 }
 
-func (a *App) clearUpdNotice(chatID int64, msgID int) {
+// clearUpdNotice снимает уведомление, если по нему ещё не нажали «Обновить»:
+// нажатое уже стало сообщением о ходе обновления и удалять его нельзя.
+func (a *App) clearUpdNotice(chatID int64, msgID int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.updNoticeMsg[chatID] == msgID {
-		delete(a.updNoticeMsg, chatID)
+	if a.updNoticeMsg[chatID] != msgID {
+		return false
 	}
+	delete(a.updNoticeMsg, chatID)
+	return true
 }
 
 func (a *App) handleUpdate(ctx context.Context, chatID int64) {
@@ -1220,15 +1224,10 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 		}
 	}
 	if a.ctl == nil || !a.ctl.Available() {
-		if src != 0 && a.msg.EditText(ctx, chatID, src, a.applyPremium(i18n.T(lang, "update.not_available")), [][]models.InlineKeyboardButton{homeRow(lang)}) {
-			return
-		}
-		a.sendHome(ctx, chatID, i18n.T(lang, "update.not_available"))
+		a.showUpdateMsg(ctx, chatID, src, i18n.T(lang, "update.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
-	startText := a.applyPremium(i18n.T(lang, "update.starting"))
-	startRows := [][]models.InlineKeyboardButton{backHomeRow(lang)}
-	startMsgID := a.postUpdateStart(ctx, chatID, src, startText, startRows)
+	startMsgID := a.showUpdateMsg(ctx, chatID, src, i18n.T(lang, "update.starting"), [][]models.InlineKeyboardButton{backHomeRow(lang)})
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	// Третьим полем — версия, с которой уходим. После рестарта по нему видно,
 	// обновились мы на самом деле или контейнер просто перезапустился на том
@@ -1242,22 +1241,23 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	go a.runSelfUpdate(chatID, startMsgID, marker)
 }
 
-// postUpdateStart превращает сообщение, с которого нажали «Обновить», в
-// «запускается». Экран с баннером текстом не редактируется — тогда уходит новое
-// сообщение и становится текущим экраном, а старое удаляется: иначе экран
-// оставался в списке текущих и dropScreen его не трогал.
-func (a *App) postUpdateStart(ctx context.Context, chatID int64, src int, text string, rows [][]models.InlineKeyboardButton) int {
-	if src != 0 && a.msg.EditText(ctx, chatID, src, text, rows) {
-		return src
+// showUpdateMsg выводит шаг обновления текущим экраном: правит msgID, а если
+// его не отредактировать (баннер, уже удалено), шлёт новое. Прежний экран и
+// само msgID из чата уходят — нажать «Обновить» могли и на уведомлении под
+// главным меню. Цель правки от последнего нажатия не трогается: часть шагов
+// приходит из фоновой горутины, пока админ нажимает что-то ещё.
+func (a *App) showUpdateMsg(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) int {
+	t := a.applyPremium(text)
+	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, t, rows) {
+		a.adoptScreen(ctx, chatID, msgID)
+		return msgID
 	}
-	id := 0
-	a.emit(ctx, chatID, func() int {
-		id = a.msg.SendKB(ctx, chatID, text, rows)
-		return id
-	})
-	if id != 0 {
-		a.dropScreen(chatID, []int{src})
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableText(t)))
+	id := a.msg.SendKB(pctx, chatID, t, rows)
+	if id == 0 {
+		return 0
 	}
+	a.adoptScreen(ctx, chatID, id, msgID)
 	return id
 }
 
@@ -1300,31 +1300,29 @@ func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
 		fail(err)
 		return
 	}
-	time.AfterFunc(90*time.Second, func() {
-		bg := context.Background()
-		if _, err := os.Stat(marker); err != nil {
-			return
-		}
-		_ = os.Remove(marker)
-		txt := a.applyPremium(i18n.T(a.botLang(), "update.no_restart"))
-		rows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
-		if startMsgID != 0 && a.msg != nil && a.msg.EditText(bg, chatID, startMsgID, txt, rows) {
-			return
-		}
-		a.sendHome(bg, chatID, i18n.T(a.botLang(), "update.no_restart"))
-		a.dropScreen(chatID, []int{startMsgID})
-	})
+	time.AfterFunc(90*time.Second, func() { a.reportNoRestart(chatID, startMsgID, marker) })
+}
+
+// reportNoRestart сообщает, что контейнер так и не перезапустился. Если бот
+// уже останавливается, маркер остаётся: это и есть перезапуск, и новый
+// процесс по маркеру скажет «обновлено».
+func (a *App) reportNoRestart(chatID int64, startMsgID int, marker string) {
+	if a.bgContext().Err() != nil {
+		return
+	}
+	if _, err := os.Stat(marker); err != nil {
+		return
+	}
+	_ = os.Remove(marker)
+	ctx, cancel := context.WithTimeout(a.bgContext(), time.Minute)
+	defer cancel()
+	lang := a.botLang()
+	a.showUpdateMsg(ctx, chatID, startMsgID, i18n.T(lang, "update.no_restart"), [][]models.InlineKeyboardButton{homeRow(lang)})
 }
 
 func (a *App) updateFailMsg(ctx context.Context, chatID int64, msgID int, err error) {
 	lang := a.lang(chatID)
-	text := a.applyPremium(i18n.T(lang, "update.fail", err.Error()))
-	rows := [][]models.InlineKeyboardButton{homeRow(lang)}
-	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, text, rows) {
-		return
-	}
-	a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
-	a.dropScreen(chatID, []int{msgID})
+	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, "update.fail", err.Error()), [][]models.InlineKeyboardButton{homeRow(lang)})
 }
 
 func (a *App) notifyUpdated(ctx context.Context) {
@@ -1356,32 +1354,13 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	if sameVersion {
 		doneKey = "update.same_version"
 	}
-	doneText := a.applyPremium(i18n.T(a.botLang(), doneKey))
-	doneRows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
-	doneID := msgID
-	if msgID == 0 || a.msg == nil || !a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
-		if a.msg != nil {
-			doneID = a.msg.SendKB(ctx, chatID, doneText, doneRows)
-			if doneID != 0 {
-				a.dropScreen(chatID, []int{msgID})
-			}
-		}
+	if a.msg == nil {
+		return
 	}
-	if doneID != 0 && a.msg != nil {
-		// Register as the current screen so the next navigation (e.g. "Главная")
-		// deletes it instead of leaving it stuck.
-		a.scrMu.Lock()
-		if a.screen == nil {
-			a.screen = map[int64][]int{}
-		}
-		a.screen[chatID] = []int{doneID}
-		a.scrMu.Unlock()
-		if a.store != nil {
-			_ = a.store.SetScreenMsg(ctx, chatID, doneID)
-		}
-		id := doneID
-		time.AfterFunc(60*time.Second, func() { a.msg.Delete(context.Background(), chatID, id) })
-	}
+	// «Обновлено» остаётся экраном до следующего перехода: прежний экран уже
+	// убран, и удаление по таймеру оставляло бы чат пустым.
+	lang := a.botLang()
+	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, doneKey), [][]models.InlineKeyboardButton{homeRow(lang)})
 }
 
 func (a *App) setEditTarget(chatID int64, msgID int) {
@@ -1444,19 +1423,36 @@ func (a *App) tryEditScreen(ctx context.Context, chatID int64, text string, rows
 	if !a.msg.EditText(ctx, chatID, target, text, rows) {
 		return false
 	}
+	a.adoptScreen(ctx, chatID, target)
+	return true
+}
+
+// adoptScreen делает уже показанное сообщение текущим экраном и убирает
+// прежний вместе с also. После перезапуска прежний экран известен только из
+// базы. Раздел экрана сбрасывается: вызывающий с баннером ставит свой после.
+func (a *App) adoptScreen(ctx context.Context, chatID int64, id int, also ...int) {
+	a.setScreenSection(chatID, "")
 	a.scrMu.Lock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
 	old := a.screen[chatID]
-	a.screen[chatID] = []int{target}
+	a.screen[chatID] = []int{id}
 	a.scrMu.Unlock()
-	for _, id := range old {
-		if id != target {
-			a.msg.Delete(ctx, chatID, id)
+	if a.store != nil {
+		if len(old) == 0 {
+			if pid, _ := a.store.GetScreenMsg(ctx, chatID); pid != 0 {
+				old = []int{pid}
+			}
+		}
+		_ = a.store.SetScreenMsg(ctx, chatID, id)
+	}
+	for _, x := range also {
+		if x != 0 && !slices.Contains(old, x) {
+			old = append(old, x)
 		}
 	}
-	if a.store != nil {
-		_ = a.store.SetScreenMsg(ctx, chatID, target)
-	}
-	return true
+	a.dropScreen(chatID, old)
 }
 
 func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
@@ -1736,18 +1732,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	// failure falls through to the normal resend below.
 	if target := a.takeEditTarget(chatID); target != 0 && match && a.getScreenSection(chatID) == section {
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
-			a.scrMu.Lock()
-			old := a.screen[chatID]
-			a.screen[chatID] = []int{target}
-			a.scrMu.Unlock()
-			for _, id := range old {
-				if id != target {
-					a.msg.Delete(ctx, chatID, id)
-				}
-			}
-			if a.store != nil {
-				_ = a.store.SetScreenMsg(ctx, chatID, target)
-			}
+			a.adoptScreen(ctx, chatID, target)
 			a.setScreenSection(chatID, section)
 			return
 		}
