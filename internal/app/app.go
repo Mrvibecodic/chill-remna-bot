@@ -1749,12 +1749,28 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		newFileID = nf
 		return id
 	})
-	if a.store != nil && newFileID != "" && newFileID != cached {
-		if err := a.store.SaveMediaFileID(ctx, section, newFileID); err != nil {
-			a.log.Warn("media_cache save", "section", section, "err", err)
-		}
-	}
+	a.keepSectionPhoto(ctx, section, cached, newFileID)
 	a.setScreenSection(chatID, section)
+}
+
+// keepSectionPhoto запоминает file_id картинки раздела, только что ушедшей из
+// сборки. Если в ячейке до этого лежала другая, Telegram её отверг — а это
+// могла быть картинка, загруженная администратором: ему об этом говорим.
+func (a *App) keepSectionPhoto(ctx context.Context, section, cached, newFileID string) {
+	if a.store == nil || newFileID == "" || newFileID == cached {
+		return
+	}
+	if err := a.store.SaveMediaFileID(ctx, section, newFileID); err != nil {
+		a.log.Warn("media_cache save", "section", section, "err", err)
+	}
+	if cached == "" || !assets.IsUserSection(section) || a.cfg == nil || a.cfg.AdminID == 0 {
+		return
+	}
+	a.log.Warn("картинка раздела не принята Telegram, показана встроенная", "section", section)
+	lang := a.botLang()
+	a.msg.SendKB(ctx, a.cfg.AdminID, i18n.T(lang, "banners.dropped", assets.LabelByKey(section, lang)), [][]models.InlineKeyboardButton{
+		{btn(assets.LabelByKey(section, lang), "sec:open:"+section)},
+	})
 }
 
 // hasChat — есть ли у аккаунта чат в Telegram. У аккаунта кабинета,
@@ -2356,19 +2372,30 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 		source string
 		err    error
 	)
+	var idErr error
 	for _, src := range tries {
 		msg, source, err = build(src)
 		if err == nil {
 			break
+		}
+		if src == "id" {
+			idErr = err
 		}
 	}
 	if err != nil {
 		m.log.Error("send photo cacheable", "err", err)
 		return 0, ""
 	}
+	if idErr != nil {
+		m.log.Warn("сохранённая картинка не ушла, отправлена встроенная", "err", idErr)
+	}
 
+	// Сохранённую картинку заменяем, только когда Telegram отверг именно её:
+	// на file_id пришёл 400, а тот же экран с картинкой из сборки ушёл. Сбой
+	// сети или лимит запросов — не повод: в той же ячейке лежит картинка,
+	// загруженная администратором, и она пропала бы без следа.
 	var newFileID string
-	if source != "id" && len(msg.Photo) > 0 {
+	if source != "id" && len(msg.Photo) > 0 && (idErr == nil || errors.Is(idErr, bot.ErrorBadRequest)) {
 		newFileID = msg.Photo[len(msg.Photo)-1].FileID
 	}
 	return msg.ID, newFileID

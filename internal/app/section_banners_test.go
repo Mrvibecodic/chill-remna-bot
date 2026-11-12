@@ -74,3 +74,48 @@ func TestSectionBannerOnClientAndAdminScreens(t *testing.T) {
 		})
 	}
 }
+
+// Telegram отверг сохранённую картинку клиентского раздела, и бот заменил её
+// встроенной: администратор узнаёт об этом. Первая отправка встроенной
+// картинки и разделы без своей картинки проходят молча.
+func TestRejectedSectionBannerIsReported(t *testing.T) {
+	const uid int64 = 1000000001
+	cases := []struct {
+		name    string
+		section string
+		saved   string
+		who     int64
+		action  string
+		report  bool
+	}{
+		{"своя картинка отвергнута", assets.SectionReferral, "own-picture", uid, "menu:ref", true},
+		{"первая отправка", assets.SectionReferral, "", uid, "menu:ref", false},
+		{"раздел без своей картинки", assets.SectionMainMenu, "cached-builtin", planAdmin, "menu:iface", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, fs := planApp(t)
+			fm := a.msg.(*fakeMsg)
+			ctx := context.Background()
+			_ = fs.UpsertUser(ctx, uid)
+			if c.saved != "" {
+				if err := fs.SaveMediaFileID(ctx, c.section, c.saved); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fm.photoNewID = "builtin-id"
+			a.handleCallback(ctx, cb(c.who, c.action))
+
+			if id, _, _ := fs.LoadMediaFileID(ctx, c.section); id != "builtin-id" {
+				t.Fatalf("в ячейке раздела осталась негодная картинка: %q", id)
+			}
+			reported := hasCB(fm.allCallbackData(), "sec:open:"+c.section)
+			if reported != c.report {
+				t.Fatalf("сообщение администратору: %v, ожидалось %v\n%s", reported, c.report, fm.joined())
+			}
+			if c.report && countContains(fm.texts, "не принял сохранённую картинку раздела «🎉 Пригласить друга»") != 1 {
+				t.Fatalf("нет текста о снятой картинке:\n%s", fm.joined())
+			}
+		})
+	}
+}

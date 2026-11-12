@@ -37,6 +37,15 @@ func UserSections() []Section {
 	return append([]Section(nil), userSections...)
 }
 
+func IsUserSection(key string) bool {
+	for _, sec := range userSections {
+		if sec.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 func LabelByKey(key, lang string) string {
 	for _, sec := range userSections {
 		if sec.Key == key {

@@ -70,9 +70,7 @@ func (a *App) showSectionBanner(ctx context.Context, chatID int64, section strin
 		newFileID = nf
 		return id
 	})
-	if a.store != nil && newFileID != "" && newFileID != cached {
-		_ = a.store.SaveMediaFileID(ctx, section, newFileID)
-	}
+	a.keepSectionPhoto(ctx, section, cached, newFileID)
 }
 
 func (a *App) askSectionBanner(ctx context.Context, chatID int64, section string) {

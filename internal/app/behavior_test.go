@@ -51,6 +51,10 @@ type fakeMsg struct {
 	// photoIDs — с каким сохранённым file_id уходил каждый экран с баннером
 	// раздела ("" — картинка из сборки).
 	photoIDs []string
+	// photoNewID — file_id, который вернёт отправка экрана с баннером раздела:
+	// так Telegram отвечает, когда сохранённую картинку пришлось заменить
+	// встроенной.
+	photoNewID string
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
@@ -271,7 +275,7 @@ func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, cached string
 	f.photoIDs = append(f.photoIDs, cached)
 	f.mu.Unlock()
 	f.recordKB(rows)
-	return f.noteProt(ctx, f.add(caption)), ""
+	return f.noteProt(ctx, f.add(caption)), f.photoNewID
 }
 func (f *fakeMsg) SendBanner(ctx context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
 	// failBanner имитирует отказ Telegram на конкретной картинке (битый
