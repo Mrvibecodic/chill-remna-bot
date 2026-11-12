@@ -44,5 +44,6 @@ description: Все переменные окружения бота и свой
 - Своя страница главнее дизайна, выбранного в админке.
 - Правки видны сразу, перезапуск не нужен.
 - Заголовок, описание и favicon кабинета из админки подставляются и в ваш HTML.
+- [Чат поддержки](/admin/system/#chat-podderzhki-v-kabinete) из админки в свою страницу не попадает — вставьте код чата в неё сами.
 
 ⚠️ Вся логика (вход, покупка, оплата) живёт в JS внутри страницы. Начинайте с копии встроенной — [`index.html`](https://github.com/Mrvibecodic/chill-remna-bot/blob/main/internal/web/miniapp_static/index.html) или [`minimal.html`](https://github.com/Mrvibecodic/chill-remna-bot/blob/main/internal/web/miniapp_static/minimal.html) — и меняйте стили и вёрстку. После обновлений бота сверяйте свой файл с новой версией.
