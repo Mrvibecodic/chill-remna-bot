@@ -729,73 +729,61 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 }
 
 func (a *App) applyBlock(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int) {
-	if uid == 0 || a.store == nil {
-		return
-	}
-	alang := a.lang(adminChat)
-	wantBot := mode == "blockboth" || mode == "blockbot"
-	wantSub := mode == "blockboth" || mode == "blocksub"
-	didBot, didSub := false, false
-	if wantBot {
-		if err := a.store.SetBlocked(ctx, uid, true); err == nil {
-			didBot = true
-		}
-	}
-	if wantSub {
-		panel := a.panelClient()
-		if panel != nil {
-			if _, err := panel.DisableByTelegramID(ctx, uid); err != nil {
-				a.notify(ctx, adminChat, "⚠️ "+err.Error())
-			} else {
-				didSub = true
-			}
-			a.setAddSubEnabledPanel(ctx, uid, false)
-		}
-		a.invalidateSubCache(uid)
-	}
-	defer a.dropScreen(adminChat, []int{srcMsgID})
-	if eff := effMode("block", didBot, didSub); eff != "" {
-		a.notifyBlockState(ctx, uid, eff)
-		a.send(ctx, adminChat, i18n.T(alang, "block.done"))
-	} else {
-		a.send(ctx, adminChat, i18n.T(alang, "block.fail"))
-	}
-	a.showUser(ctx, adminChat, uid)
+	a.applyAccess(ctx, adminChat, uid, mode, srcMsgID, true)
 }
 
 func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int) {
+	a.applyAccess(ctx, adminChat, uid, mode, srcMsgID, false)
+}
+
+// applyAccess — блокировка (block) и разблокировка одним ходом: в боте, в
+// панели или там и там, смотря что выбрал администратор (mode). Доп-подписка
+// идёт следом за основной: иначе после разблокировки она осталась бы
+// выключенной навсегда и слияние подписок молча прекратилось бы.
+func (a *App) applyAccess(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int, block bool) {
 	if uid == 0 || a.store == nil {
 		return
 	}
+	prefix, done, fail := "unblock", "unblock.done", "unblock.fail"
+	if block {
+		prefix, done, fail = "block", "block.done", "block.fail"
+	}
 	alang := a.lang(adminChat)
-	wantBot := mode == "unblockboth" || mode == "unblockbot"
-	wantSub := mode == "unblockboth" || mode == "unblocksub"
+	wantBot := mode == prefix+"both" || mode == prefix+"bot"
+	wantSub := mode == prefix+"both" || mode == prefix+"sub"
 	didBot, didSub := false, false
 	if wantBot {
-		if err := a.store.SetBlocked(ctx, uid, false); err == nil {
+		if err := a.store.SetBlocked(ctx, uid, block); err == nil {
 			didBot = true
 		}
 	}
 	if wantSub {
-		panel := a.panelClient()
-		if panel != nil {
-			if _, err := panel.EnableByTelegramID(ctx, uid); err != nil {
+		if panel := a.panelClient(); panel != nil {
+			var err error
+			if block {
+				_, err = panel.DisableByTelegramID(ctx, uid)
+			} else {
+				_, err = panel.EnableByTelegramID(ctx, uid)
+			}
+			if err != nil {
 				a.notify(ctx, adminChat, "⚠️ "+err.Error())
 			} else {
 				didSub = true
 			}
-			// Mirror of applyBlock: without this B stays DISABLED forever and
-			// the subscription merge silently stops for an unblocked user.
-			a.setAddSubEnabledPanel(ctx, uid, true)
+			a.setAddSubEnabledPanel(ctx, uid, !block)
 		}
 		a.invalidateSubCache(uid)
 	}
 	defer a.dropScreen(adminChat, []int{srcMsgID})
-	if eff := effMode("unblock", didBot, didSub); eff != "" {
-		a.notifyUnblockState(ctx, uid, eff)
-		a.send(ctx, adminChat, i18n.T(alang, "unblock.done"))
+	if eff := effMode(prefix, didBot, didSub); eff != "" {
+		if block {
+			a.notifyBlockState(ctx, uid, eff)
+		} else {
+			a.notifyUnblockState(ctx, uid, eff)
+		}
+		a.send(ctx, adminChat, i18n.T(alang, done))
 	} else {
-		a.send(ctx, adminChat, i18n.T(alang, "unblock.fail"))
+		a.send(ctx, adminChat, i18n.T(alang, fail))
 	}
 	a.showUser(ctx, adminChat, uid)
 }
