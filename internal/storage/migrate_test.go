@@ -111,6 +111,32 @@ func TestMigrationsAreSingleStatement(t *testing.T) {
 	}
 }
 
+// В media_cache вместе с кэшем встроенных картинок лежат баннеры разделов,
+// загруженные администратором, и отличить одно от другого нельзя. Миграция,
+// которая чистит таблицу (так делали 0011 и 0013), стирает их у всех.
+func TestMigrationsKeepMediaCache(t *testing.T) {
+	for _, dialect := range []string{"pg", "sqlite"} {
+		for _, n := range migrationNames(t, dialect) {
+			if n <= "0013_clear_media_cache.sql" {
+				continue
+			}
+			body, err := migrationsFS.ReadFile("migrations/" + dialect + "/" + n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sql := strings.ToLower(string(body))
+			if !strings.Contains(sql, "media_cache") {
+				continue
+			}
+			for _, word := range []string{"delete", "truncate", "drop"} {
+				if strings.Contains(sql, word) {
+					t.Errorf("%s/%s: миграция удаляет данные из media_cache — вместе с кэшем пропадут загруженные баннеры разделов", dialect, n)
+				}
+			}
+		}
+	}
+}
+
 // Полный прогон миграций на SQLite: все ложатся, версия совпадает с числом
 // файлов, а индексы журнала платежей реально созданы (а не «первая инструкция
 // применилась, вторая потерялась»).
