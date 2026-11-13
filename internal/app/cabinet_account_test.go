@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -283,5 +284,84 @@ func TestVerifyMailNeedsPublicURL(t *testing.T) {
 	if err := a.sendVerifyMail(ctx, id, "nourl@example.com"); err == nil ||
 		!strings.Contains(err.Error(), "адрес") {
 		t.Fatalf("без публичного адреса отправка обязана отказаться: %v", err)
+	}
+}
+
+// Строка Telegram в «Аккаунте»: @username, без него имя; у аккаунта по почте
+// без привязки её нет.
+func TestCabinetAccountTelegramName(t *testing.T) {
+	a, fs := cabinetApp(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		id              int64
+		username, first string
+		want            string
+	}{
+		{1000000051, "tester", "Тест", "@tester"},
+		{1000000052, "", "Тест", "Тест"},
+		{1000000053, "", "", ""},
+	} {
+		if err := fs.UpsertUser(ctx, c.id); err != nil {
+			t.Fatal(err)
+		}
+		a.rememberUser(ctx, c.id, c.username, c.first)
+		if got := a.CabinetAccount(ctx, c.id); !got.TgLinked || got.TgName != c.want {
+			t.Fatalf("id %d: привязан=%v имя=%q, ждали %q", c.id, got.TgLinked, got.TgName, c.want)
+		}
+	}
+	id, err := a.CabinetEmailRegister(ctx, "noname@example.com", "password1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.waitMail()
+	a.rememberUser(ctx, id, "ghost", "Призрак")
+	if got := a.CabinetAccount(ctx, id); got.TgLinked || got.TgName != "" {
+		t.Fatalf("аккаунт по почте: привязан=%v имя=%q", got.TgLinked, got.TgName)
+	}
+}
+
+// Имя из виджета входа заполняет только пустое: уже известное имя и отметка
+// «чат недоступен» остаются как были.
+func TestCabinetBindNameFillsOnlyEmpty(t *testing.T) {
+	a, _, st := bkTestApp(t)
+	ctx := context.Background()
+	const fresh, known int64 = 1000000054, 1000000055
+	for _, id := range []int64{fresh, known} {
+		if err := st.UpsertUser(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const silent int64 = 1000000056
+	if err := st.UpsertUser(ctx, silent); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetUnreachable(ctx, silent, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	a.CabinetBindName(ctx, fresh, "newbie", "Новичок")
+	a.CabinetBindName(ctx, silent, "quiet", "Тихий")
+	for id, want := range map[int64]string{fresh: "newbie", silent: "quiet"} {
+		if u, _ := st.GetUser(ctx, id); u == nil || u.Username != want {
+			t.Fatalf("имя %d не сохранено: %+v", id, u)
+		}
+	}
+	a.rememberUser(ctx, known, "chatname", "Из чата")
+	if err := st.SetUnreachable(ctx, known, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	a.CabinetBindName(ctx, known, "webname", "С сайта")
+	u, _ := st.GetUser(ctx, known)
+	if u == nil || u.Username != "chatname" || u.FirstName != "Из чата" {
+		t.Fatalf("имя из чата перезаписано: %+v", u)
+	}
+	ids, err := st.AllUserIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(ids, known) || slices.Contains(ids, silent) {
+		t.Fatal("вход на сайт снял отметку «чат недоступен»")
+	}
+	if !slices.Contains(ids, fresh) {
+		t.Fatal("новичок пропал из списка доступных — тест ничего не проверяет")
 	}
 }

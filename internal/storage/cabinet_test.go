@@ -375,3 +375,46 @@ func TestPruneWebUsers(t *testing.T) {
 		}
 	})
 }
+
+// Имя из виджета входа заполняет только пустое и не трогает остальную строку
+// пользователя: отметка «чат недоступен» остаётся.
+func TestFillUserInfo(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const fresh, known int64 = 1000000061, 1000000062
+		for _, id := range []int64{fresh, known} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetUnreachable(ctx, id, "2026-01-01T00:00:00Z"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.SetUserInfo(ctx, known, "", "Из чата"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetUnreachable(ctx, known, "2026-01-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []int64{fresh, known} {
+			if err := st.FillUserInfo(ctx, id, "web", "С сайта"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if u, _ := st.GetUser(ctx, fresh); u == nil || u.Username != "web" || u.FirstName != "С сайта" {
+			t.Fatalf("пустое имя не заполнено: %+v", u)
+		}
+		if u, _ := st.GetUser(ctx, known); u == nil || u.Username != "" || u.FirstName != "Из чата" {
+			t.Fatalf("известное имя перезаписано: %+v", u)
+		}
+		ids, err := st.AllUserIDs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			if id == fresh || id == known {
+				t.Fatalf("отметка «чат недоступен» снята у %d", id)
+			}
+		}
+	})
+}

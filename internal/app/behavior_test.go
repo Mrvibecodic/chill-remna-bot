@@ -1040,6 +1040,13 @@ func (s *fakeStore) SetUserInfo(_ context.Context, id int64, username, firstName
 	return nil
 }
 
+func (s *fakeStore) FillUserInfo(_ context.Context, id int64, username, firstName string) error {
+	if u := s.users[id]; u != nil && u.Username == "" && u.FirstName == "" {
+		u.Username, u.FirstName = username, firstName
+	}
+	return nil
+}
+
 func (s *fakeStore) HasApprovedPurchase(_ context.Context, id int64) (bool, error) {
 	for _, r := range s.reqs {
 		if r.TelegramID == id && r.Status == model.P2PApproved {

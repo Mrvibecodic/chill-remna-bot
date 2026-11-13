@@ -31,6 +31,9 @@ type Storage interface {
 	UpsertUser(ctx context.Context, telegramID int64) error
 
 	SetUserInfo(ctx context.Context, telegramID int64, username, firstName string) error
+	// FillUserInfo записывает имя и @username, только если оба пусты, и
+	// больше в строке пользователя ничего не меняет.
+	FillUserInfo(ctx context.Context, telegramID int64, username, firstName string) error
 	GetUser(ctx context.Context, telegramID int64) (*model.User, error)
 	SetP2PApproved(ctx context.Context, telegramID int64, approved bool) error
 
@@ -425,6 +428,17 @@ func (b *base) SetUserInfo(ctx context.Context, telegramID int64, username, firs
 	// же: отдельного места, где видно «вернулся», в боте нет.
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE users SET username = "+b.ph(1)+", first_name = "+b.ph(2)+", unreachable_at = '' WHERE telegram_id = "+b.ph(3),
+		username, firstName, telegramID)
+	return err
+}
+
+// FillUserInfo — имя из виджета входа на сайте. В отличие от SetUserInfo не
+// снимает отметку «чат недоступен»: вход на сайт не значит, что человек
+// написал боту.
+func (b *base) FillUserInfo(ctx context.Context, telegramID int64, username, firstName string) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE users SET username = "+b.ph(1)+", first_name = "+b.ph(2)+" WHERE telegram_id = "+b.ph(3)+
+			" AND username = '' AND first_name = ''",
 		username, firstName, telegramID)
 	return err
 }

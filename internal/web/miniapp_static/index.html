@@ -1397,7 +1397,7 @@ async function openAccount(){
     h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span style="color:var(--muted)">Почта</span><b style="min-width:0;text-align:right">'+esc(a.email)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Адрес</span><b style="color:'+(a.email_verified?'var(--good)':'var(--bad)')+'">'+(a.email_verified?'подтверждён':'не подтверждён')+'</b></div>';
   }
-  h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Telegram</span><b>'+(a.tg_linked?'привязан':'не привязан')+'</b></div>';
+  h+='<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Telegram</span><b style="min-width:0;text-align:right;overflow-wrap:anywhere">'+(a.tg_linked?esc(a.tg_name||'привязан'):'не привязан')+'</b></div>';
   h+='</div>';
   if(a.email&&!a.email_verified&&a.mail_on){
     h+='<div class="card"><div class="hint">Подтверждение открывает оплату, пополнение и промокоды.</div>'+

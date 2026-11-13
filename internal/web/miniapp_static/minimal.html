@@ -1247,7 +1247,7 @@ SCREENS.account=async function(){
   if(!CUR||CUR.name!=='account')return;
   var h=backBtn()+'<div style="display:flex;align-items:center;gap:12px;margin-top:8px"><div class="ava" data-ava>'+avaHTML(String(STATE.me_email||STATE.me_name||'?').trim().charAt(0).toUpperCase())+'</div><div class="h2" style="min-width:0">'+esc(STATE.me_email||STATE.me_name||T('acct'))+'</div></div><div class="list">';
   if(a.email){h+='<div class="kv"><span class="k">'+esc(T('email'))+'</span><span class="v">'+esc(a.email)+'</span></div><div class="kv"><span class="k">'+esc(T('addr'))+'</span><span class="v" style="color:'+(a.email_verified?'var(--ok)':'var(--bad)')+'">'+esc(a.email_verified?T('verified'):T('not_verified'))+'</span></div>';}
-  h+='<div class="kv"><span class="k">Telegram</span><span class="v">'+esc(a.tg_linked?T('tg_linked'):T('tg_not'))+'</span></div></div>';
+  h+='<div class="kv"><span class="k">Telegram</span><span class="v" style="overflow-wrap:anywhere">'+esc(a.tg_linked?(a.tg_name||T('tg_linked')):T('tg_not'))+'</span></div></div>';
   if(a.email&&!a.email_verified&&a.mail_on)h+='<button class="btn sec" style="margin-top:12px" onclick="resend(this)">'+esc(T('resend'))+'</button>';
   if(!a.tg_linked)h+='<div class="sect">'+esc(T('bind_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="hint" style="margin-top:0">'+esc(T('bind_text'))+'</div><div class="hint">'+esc(T('bind_only'))+'</div><div class="tgw" id="tgbind"></div></div>';
   var hl=h;h='';

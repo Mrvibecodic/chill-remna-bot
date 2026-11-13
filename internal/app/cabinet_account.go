@@ -175,6 +175,12 @@ func (a *App) CabinetAccount(ctx context.Context, tgID int64) web.CabinetAccount
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
 			dto.Name = displayName(a.lang(tgID), u.FirstName, u.Username)
+			if dto.TgLinked {
+				dto.TgName = u.FirstName
+				if u.Username != "" {
+					dto.TgName = "@" + u.Username
+				}
+			}
 		}
 	}
 	return dto

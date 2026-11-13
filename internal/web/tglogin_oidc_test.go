@@ -178,6 +178,9 @@ func TestCabinetTelegramIDToken(t *testing.T) {
 			if c.want == http.StatusOK && m.ensured != 1000000001 {
 				t.Fatalf("вход не на том id: %d", m.ensured)
 			}
+			if c.want == http.StatusOK && m.name != "tester|Тест" {
+				t.Fatalf("имя из токена не сохранено: %q", m.name)
+			}
 			if c.want != http.StatusOK && m.ensured != 0 {
 				t.Fatal("отвергнутый токен не должен заводить пользователя")
 			}

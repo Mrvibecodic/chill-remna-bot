@@ -287,6 +287,9 @@ type CabinetAccountDTO struct {
 	EmailVerified bool `json:"email_verified"`
 	// TgLinked — Telegram привязан (или это изначально телеграм-аккаунт).
 	TgLinked bool `json:"tg_linked"`
+	// TgName — @username привязанного Telegram, без него имя; пусто — бот
+	// его ещё не знает.
+	TgName string `json:"tg_name,omitempty"`
 	// MailOn — отправка писем настроена. Без неё кабинет не предлагает ни
 	// подтверждение, ни восстановление пароля.
 	MailOn bool `json:"mail_on"`
