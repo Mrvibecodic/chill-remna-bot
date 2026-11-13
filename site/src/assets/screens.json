@@ -352,7 +352,7 @@
   {
    "name": "minimal_connect",
    "src": "/screens/dark/minimal/minimal_connect.webp",
-   "caption": "Подключение: приложения, добавление в один тап и QR"
+   "caption": "Подключение: приложения, добавление в один тап, разделы инструкции и QR"
   },
   {
    "name": "minimal_ref",
@@ -411,7 +411,7 @@
   {
    "name": "miniapp_connect",
    "src": "/screens/miniapp/miniapp_connect.webp",
-   "caption": "Подключение: приложения, deeplink и QR"
+   "caption": "Подключение: приложения, разделы инструкции и QR"
   },
   {
    "name": "miniapp_more",
