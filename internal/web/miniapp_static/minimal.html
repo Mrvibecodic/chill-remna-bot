@@ -85,6 +85,15 @@ body.web .top .in{max-width:980px}
 .muted{color:var(--muted)}
 .small{font-size:13px}
 .hint{color:var(--muted);font-size:13.5px;margin-top:8px}
+.xblk{border-top:1px solid var(--line);margin-top:14px}
+.xblk+.xblk{margin-top:0}
+.xblk:last-child{margin-bottom:-10px}
+.xblk summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 2px;font-size:14.5px;font-weight:600;overflow-wrap:anywhere}
+.xblk summary::-webkit-details-marker{display:none}
+.xblk summary::after{content:"";flex:none;width:8px;height:8px;margin:-4px 4px 0;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg)}
+.xblk[open] summary::after{transform:rotate(-135deg);margin-top:4px}
+.xblk .xtext{font-size:13.5px;color:var(--muted);white-space:pre-line;overflow-wrap:anywhere;padding:0 2px 13px}
+.xblk .btn{margin:0 0 13px}
 .center{text-align:center}
 .stack>*+*{margin-top:10px}
 .list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-top:12px;box-shadow:var(--shadow)}
@@ -334,7 +343,7 @@ var POLL=null;
 /* ---------- тексты ---------- */
 var L={ru:{
  cabinet:'Кабинет',account_title:'Личный\u00a0кабинет',loading_fail:'Не удалось загрузить',open_tg:'Откройте через Telegram',
- back:'Назад',copy:'Копировать',opening:'Открываем страницу оплаты…',gb:'ГБ',dev1:'устройство',dev2:'устройства',dev5:'устройств',bind_only:'Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.',choose_file:'Выбрать файл',home:'Главная',copied:'Скопировано',copy_fail:'Не удалось скопировать',error:'Ошибка',done:'Готово',
+ back:'Назад',copy:'Копировать',copy_link:'Скопировать ссылку',open:'Открыть',opening:'Открываем страницу оплаты…',gb:'ГБ',dev1:'устройство',dev2:'устройства',dev5:'устройств',bind_only:'Привязка возможна, только если у этого Telegram ещё нет аккаунта в боте.',choose_file:'Выбрать файл',home:'Главная',copied:'Скопировано',copy_fail:'Не удалось скопировать',error:'Ошибка',done:'Готово',
  sub:'Подписка',sub_active:'Активна',sub_limited:'Трафик исчерпан',sub_expired:'Истекла',sub_disabled:'Отключена',
  days_left:'осталось',until:'до',plan_cur:'Тариф',devices:'Устройства',addsub:'Доп-сервер',addsub_off:'выкл',addsub_out:'исчерпан',unlimited:'безлимит',
  connect:'Подключить',renew:'Продлить',
@@ -388,7 +397,7 @@ var L={ru:{
  plan_link_fail:'Тариф по этой ссылке недоступен',per_month:'%s / мес'
 },en:{
  cabinet:'Account',account_title:'Account',loading_fail:'Failed to load',open_tg:'Open it from Telegram',
- back:'Back',copy:'Copy',opening:'Opening the payment page…',gb:'GB',dev1:'device',dev2:'devices',dev5:'devices',bind_only:'Linking works only if this Telegram has no bot account yet.',choose_file:'Choose file',home:'Home',copied:'Copied',copy_fail:'Could not copy',error:'Error',done:'Done',
+ back:'Back',copy:'Copy',copy_link:'Copy link',open:'Open',opening:'Opening the payment page…',gb:'GB',dev1:'device',dev2:'devices',dev5:'devices',bind_only:'Linking works only if this Telegram has no bot account yet.',choose_file:'Choose file',home:'Home',copied:'Copied',copy_fail:'Could not copy',error:'Error',done:'Done',
  sub:'Subscription',sub_active:'Active',sub_limited:'Traffic used up',sub_expired:'Expired',sub_disabled:'Disabled',
  days_left:'left',until:'until',plan_cur:'Plan',devices:'Devices',addsub:'Add-on',addsub_off:'off',addsub_out:'used up',unlimited:'unlimited',
  connect:'Connect',renew:'Renew',
@@ -471,6 +480,7 @@ function copy(t){var done=function(ok){toast(ok?T('copied'):T('copy_fail'),ok?'o
 function safeURL(u){return !/^\s*(javascript|data|vbscript|file):/i.test(String(u||''));}
 function openL(u){if(!safeURL(u))return;if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank','noopener');}
 function openDeep(u){if(!safeURL(u))return;try{window.location.href=u;}catch(e){}}
+function openAny(u){if(/^https?:\/\//i.test(u))openL(u);else openDeep(u);}
 function guardOn(){try{if(tg&&tg.enableClosingConfirmation)tg.enableClosingConfirmation();}catch(e){}}
 function guardOff(){try{if(tg&&tg.disableClosingConfirmation)tg.disableClosingConfirmation();}catch(e){}}
 function store(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){}}
@@ -1159,7 +1169,14 @@ SCREENS.connect=async function(a){
     h+='<div class="stack" style="margin-top:12px">';
     if(x.deeplink)h+='<button class="btn" onclick="openDeep(\''+jsq(x.deeplink)+'\')">'+IC.plus+esc(T('add_sub'))+'</button>';
     (x.installs||[]).forEach(function(b){h+='<button class="btn sec" onclick="openL(\''+jsq(b.url)+'\')">'+IC.download+esc(b.text||T('install'))+'</button>';});
-    h+='</div></div>';
+    (x.copies||[]).forEach(function(b){h+='<button class="btn sec" onclick="copy(\''+jsq(b.url)+'\')">'+IC.copy+esc(b.text||T('copy_link'))+'</button>';});
+    h+='</div>';
+    (x.more||[]).forEach(function(b){
+      h+='<details class="xblk"><summary>'+esc(b.title)+'</summary>'+(b.text?'<div class="xtext">'+esc(b.text)+'</div>':'');
+      (b.buttons||[]).forEach(function(y){h+='<button class="btn sec" onclick="'+(y.copy?'copy':'openAny')+'(\''+jsq(y.url)+'\')">'+(y.copy?IC.copy:'')+esc(y.text||T(y.copy?'copy_link':'open'))+'</button>';});
+      h+='</details>';
+    });
+    h+='</div>';
   });
   h+='</div>';
   var hApps=h;h='';

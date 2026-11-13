@@ -36,6 +36,13 @@ func TestSubstituteV2(t *testing.T) {
 	}
 }
 
+// Подставленное значение шаблоном не считается.
+func TestSubstituteV2SinglePass(t *testing.T) {
+	if got := substituteV2("x://{{SUBSCRIPTION_LINK}}", "https://s.test/{{USERNAME}}", "bob"); got != "x://https://s.test/{{USERNAME}}" {
+		t.Fatalf("подставленная ссылка разобрана повторно: %q", got)
+	}
+}
+
 func TestAppConfigBase(t *testing.T) {
 	cases := map[string]string{
 		"https://sub.example.com/u/token": "https://sub.example.com",

@@ -216,6 +216,15 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .apphead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}
 .appname{overflow-wrap:anywhere;font-size:16px;font-weight:700;display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
 .appdesc{font-size:12.5px;color:var(--muted);margin:6px 0 2px}
+.xblk{border-top:1px solid var(--stroke);margin-top:12px}
+.xblk+.xblk{margin-top:0}
+.xblk:last-child{margin-bottom:-8px}
+.xblk summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.xblk summary::-webkit-details-marker{display:none}
+.xblk summary::after{content:"";flex:none;width:8px;height:8px;margin:-4px 4px 0;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg)}
+.xblk[open] summary::after{transform:rotate(-135deg);margin-top:4px}
+.xblk .xtext{font-size:13px;color:var(--muted);white-space:pre-line;overflow-wrap:anywhere;padding:0 2px 12px}
+.xblk .btn{margin:0 0 12px}
 .fbadge{white-space:nowrap;font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:999px;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-2))}
 .pass{position:relative;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#26305a,#3c2668 48%,#143a52);box-shadow:0 12px 30px rgba(91,140,255,.22);margin-bottom:14px}
 .pass .sheen{position:absolute;inset:0;background:linear-gradient(115deg,transparent 33%,rgba(255,255,255,.12) 49%,transparent 64%);pointer-events:none}
@@ -539,6 +548,7 @@ function copy(t){
 }
 function openL(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank');}
 function openDeep(u){try{window.location.href=u;}catch(e){}}
+function openAny(u){if(/^https?:\/\//i.test(u))openL(u);else openDeep(u);}
 function openPay(u){if(isTgLink(u)&&tg&&tg.openTelegramLink){try{tg.openTelegramLink(u);return true;}catch(e){}}openL(u);return false;}
 // Ссылку в бота делим через Telegram; ссылку на сайт — системным «Поделиться»,
 // а где его нет — копированием.
@@ -1362,6 +1372,16 @@ function renderConnect(){
     if(ap.deeplink)h+='<button class="btn" onclick="openDeep(\''+jsq(ap.deeplink)+'\')">'+IC.plus+'Добавить подписку</button>';
     (ap.installs||[]).forEach(function(b){
       h+='<button class="btn sec" onclick="openL(\''+jsq(b.url)+'\')">'+IC.download+esc(b.text||'Установить')+'</button>';
+    });
+    (ap.copies||[]).forEach(function(b){
+      h+='<button class="btn sec" onclick="copy(\''+jsq(b.url)+'\')">'+IC.copy+esc(b.text||'Скопировать ссылку')+'</button>';
+    });
+    (ap.more||[]).forEach(function(b){
+      h+='<details class="xblk"><summary>'+esc(b.title)+'</summary>'+(b.text?'<div class="xtext">'+esc(b.text)+'</div>':'');
+      (b.buttons||[]).forEach(function(x){
+        h+='<button class="btn sec" onclick="'+(x.copy?'copy':'openAny')+'(\''+jsq(x.url)+'\')">'+(x.copy?IC.copy:'')+esc(x.text||(x.copy?'Скопировать ссылку':'Открыть'))+'</button>';
+      });
+      h+='</details>';
     });
     h+='</div>';
   });

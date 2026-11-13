@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"remnabot/internal/remnawave"
 	"remnabot/internal/web"
@@ -75,6 +78,7 @@ type acV2Button struct {
 }
 
 type acV2Block struct {
+	Title       acLocalized  `json:"title"`
 	Description acLocalized  `json:"description"`
 	Buttons     []acV2Button `json:"buttons"`
 }
@@ -233,10 +237,9 @@ func buildDeeplink(scheme, subURL string) string {
 
 // substituteV2 fills a v2 link template's placeholders with the user's values,
 // mirroring how the subscription page builds the link (raw substitution).
+// Подстановка идёт одним проходом: подставленное значение шаблоном не считается.
 func substituteV2(tmpl, subURL, username string) string {
-	s := strings.ReplaceAll(tmpl, "{{SUBSCRIPTION_LINK}}", subURL)
-	s = strings.ReplaceAll(s, "{{USERNAME}}", username)
-	return s
+	return strings.NewReplacer("{{SUBSCRIPTION_LINK}}", subURL, "{{USERNAME}}", username).Replace(tmpl)
 }
 
 // appConfigBase returns scheme://host of the subscription URL — the root the
@@ -598,14 +601,13 @@ func acBuildStd(apps []acApp, subURL, lang string) []web.MiniConnectAppDTO {
 		dto := web.MiniConnectAppDTO{
 			Name:     ap.Name,
 			Featured: ap.IsFeatured,
-			Deeplink: buildDeeplink(ap.URLScheme, subURL),
 			AddDesc:  localize(ap.AddSubscriptionStep.Description, lang),
 		}
+		dto.Deeplink, _ = acLink(buildDeeplink(ap.URLScheme, subURL))
 		for _, b := range ap.InstallationStep.Buttons {
-			if b.ButtonLink == "" {
-				continue
+			if link, ok := acLink(b.ButtonLink); ok {
+				dto.Installs = append(dto.Installs, web.MiniConnectButtonDTO{Text: localize(b.ButtonText, lang), URL: link})
 			}
-			dto.Installs = append(dto.Installs, web.MiniConnectButtonDTO{Text: localize(b.ButtonText, lang), URL: b.ButtonLink})
 		}
 		if dto.Deeplink == "" && len(dto.Installs) == 0 {
 			continue
@@ -619,29 +621,180 @@ func acBuildStd(apps []acApp, subURL, lang string) []web.MiniConnectAppDTO {
 	return append(featured, rest...)
 }
 
-// acBuildV2 maps v2-schema apps to DTOs: the subscriptionLink button becomes the
-// deeplink (placeholders substituted), external buttons become install links.
+var (
+	acBreakRe = regexp.MustCompile(`(?i)<br\s*/?>`)
+	acTagRe   = regexp.MustCompile(`</?[a-zA-Z][^<>]*>`)
+)
+
+// acText — текст блока простым текстом. Страница подписки выводит название и
+// описание блока как HTML, поэтому в конфиге встречается разметка: перенос
+// строки остаётся переносом, остальные теги убираются.
+func acText(s string) string {
+	s = acBreakRe.ReplaceAllString(s, "\n")
+	return strings.TrimSpace(html.UnescapeString(acTagRe.ReplaceAllString(s, "")))
+}
+
+// acLink — ссылка кнопки в том виде, в каком её прочтёт браузер: он отбрасывает
+// пробелы и управляющие символы по краям, а табуляцию и переводы строки — в
+// любом месте. Прочие пробельные символы по краям убираются тоже: страница
+// может обрезать ссылку сама. Пустая ссылка и ссылка со схемой, исполняющей
+// код в странице, не годятся.
+func acLink(link string) (string, bool) {
+	s := strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, link)
+	s = strings.TrimFunc(s, func(r rune) bool { return r <= ' ' || r == '\ufeff' || unicode.IsSpace(r) })
+	if s == "" {
+		return "", false
+	}
+	switch strings.ToLower(acScheme(s)) {
+	case "javascript", "data", "vbscript", "file":
+		return "", false
+	}
+	return s, true
+}
+
+// acScheme — схема ссылки: буква, за ней буквы, цифры, «+», «-», «.» до
+// двоеточия. У ссылки без схемы — пусто.
+func acScheme(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == ':':
+			return s[:i]
+		case c|0x20 >= 'a' && c|0x20 <= 'z':
+		case i > 0 && strings.IndexByte("0123456789+-.", c) >= 0:
+		default:
+			return ""
+		}
+	}
+	return ""
+}
+
+// acCryptKeys — шаблоны, которые страница подписки заменяет зашифрованной
+// ссылкой. Бот такие ссылки не строит: кнопка с ними не показывается.
+var acCryptKeys = []string{"{{HAPP_CRYPT3_LINK}}", "{{HAPP_CRYPT4_LINK}}", "{{INCY_CRYPT1_LINK}}"}
+
+// Виды кнопок блока.
+const (
+	acBtnAdd  = iota // добавить подписку в приложение
+	acBtnLink        // внешняя ссылка
+	acBtnCopy        // скопировать ссылку
+)
+
+// acBtnKinds — виды кнопок по их типу в конфиге страницы подписки.
+var acBtnKinds = map[string]int{"subscriptionLink": acBtnAdd, "external": acBtnLink, "copyButton": acBtnCopy}
+
+// acBtn — кнопка блока после разбора: вид известен, ссылка подставлена и
+// проверена.
+type acBtn struct {
+	kind int
+	text string
+	url  string
+}
+
+// acBlk — блок инструкции после разбора. Всё, что решается о блоке дальше,
+// решается по этому виду, а не по исходному конфигу.
+type acBlk struct {
+	title, text string
+	btns        []acBtn
+	// lost — у блока была кнопка, которая в разбор не попала.
+	lost bool
+}
+
+func (b acBlk) has(kind int) bool {
+	for _, x := range b.btns {
+		if x.kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// acParseBlocks разбирает блоки приложения. Название и описание страница
+// подписки выводит как HTML, подпись кнопки — как текст. Кнопка неизвестного
+// вида или с негодной ссылкой в разбор не попадает.
+func acParseBlocks(blocks []acV2Block, subURL, username, lang string) []acBlk {
+	out := make([]acBlk, 0, len(blocks))
+	for _, bl := range blocks {
+		blk := acBlk{title: acText(localize(bl.Title, lang)), text: acText(localize(bl.Description, lang))}
+		for _, b := range bl.Buttons {
+			kind, known := acBtnKinds[b.Type]
+			link, ok := acLink(substituteV2(b.Link, subURL, username))
+			if !known || !ok || acHasCryptKey(b.Link) {
+				blk.lost = true
+				continue
+			}
+			blk.btns = append(blk.btns, acBtn{kind: kind, text: strings.TrimSpace(localize(b.Text, lang)), url: link})
+		}
+		out = append(out, blk)
+	}
+	return out
+}
+
+func acHasCryptKey(link string) bool {
+	for _, k := range acCryptKeys {
+		if strings.Contains(link, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// acIsSection — блок i показывается отдельным разделом («если подписка не
+// добавилась», «подключение и использование» и подобные). Раздел — блок с
+// названием и содержимым. Блок, от которого не осталось ни одной его кнопки,
+// содержимым не считается: его текст говорит о кнопке, которой нет. С кнопкой
+// добавления (блок add) разделы — всё после неё. Без неё кнопки-ссылки
+// приложения остаются на виду, а разделами идут только блоки без таких кнопок
+// после первого: текст и копирование ссылки.
+func acIsSection(bl acBlk, i, add int) bool {
+	if bl.title == "" || (len(bl.btns) == 0 && (bl.text == "" || bl.lost)) {
+		return false
+	}
+	if add >= 0 {
+		return i > add
+	}
+	return i > 0 && !bl.has(acBtnLink)
+}
+
+// acBuildV2 maps v2-schema apps to DTOs: кнопка добавления подписки — deeplink,
+// внешние ссылки — кнопки установки, копирование — отдельные кнопки, блоки
+// после добавления подписки — разделы (More).
 func acBuildV2(apps []acV2App, subURL, username, lang string) []web.MiniConnectAppDTO {
 	var featured, rest []web.MiniConnectAppDTO
 	for _, ap := range apps {
 		dto := web.MiniConnectAppDTO{Name: ap.Name, Featured: ap.Featured}
-		for _, bl := range ap.Blocks {
-			for _, b := range bl.Buttons {
-				switch b.Type {
-				case "subscriptionLink":
-					if dto.Deeplink == "" && b.Link != "" {
-						dto.Deeplink = substituteV2(b.Link, subURL, username)
-						if dto.AddDesc == "" {
-							dto.AddDesc = localize(bl.Description, lang)
-						}
+		blocks := acParseBlocks(ap.Blocks, subURL, username, lang)
+		add := -1
+		for i, bl := range blocks {
+			if bl.has(acBtnAdd) {
+				add = i
+				break
+			}
+		}
+		for i, bl := range blocks {
+			if acIsSection(bl, i, add) {
+				more := web.MiniConnectBlockDTO{Title: bl.title, Text: bl.text}
+				for _, b := range bl.btns {
+					more.Buttons = append(more.Buttons, web.MiniConnectButtonDTO{Text: b.text, URL: b.url, Copy: b.kind == acBtnCopy})
+				}
+				dto.More = append(dto.More, more)
+				continue
+			}
+			for _, b := range bl.btns {
+				switch b.kind {
+				case acBtnAdd:
+					if dto.Deeplink == "" {
+						dto.Deeplink, dto.AddDesc = b.url, bl.text
 					}
-				case "external":
-					if b.Link != "" {
-						dto.Installs = append(dto.Installs, web.MiniConnectButtonDTO{
-							Text: localize(b.Text, lang),
-							URL:  substituteV2(b.Link, subURL, username),
-						})
-					}
+				case acBtnLink:
+					dto.Installs = append(dto.Installs, web.MiniConnectButtonDTO{Text: b.text, URL: b.url})
+				case acBtnCopy:
+					dto.Copies = append(dto.Copies, web.MiniConnectButtonDTO{Text: b.text, URL: b.url, Copy: true})
 				}
 			}
 		}

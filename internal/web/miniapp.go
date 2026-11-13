@@ -476,6 +476,16 @@ type MiniPlansDTO struct {
 type MiniConnectButtonDTO struct {
 	Text string `json:"text"`
 	URL  string `json:"url"`
+	// Copy — кнопка копирует URL, а не открывает его.
+	Copy bool `json:"copy,omitempty"`
+}
+
+// MiniConnectBlockDTO — раздел инструкции приложения после добавления
+// подписки: название, текст и кнопки.
+type MiniConnectBlockDTO struct {
+	Title   string                 `json:"title"`
+	Text    string                 `json:"text,omitempty"`
+	Buttons []MiniConnectButtonDTO `json:"buttons,omitempty"`
 }
 
 // MiniConnectAppDTO is one VPN client app the user can install and import the
@@ -487,6 +497,10 @@ type MiniConnectAppDTO struct {
 	Deeplink string                 `json:"deeplink,omitempty"`
 	AddDesc  string                 `json:"add_desc,omitempty"`
 	Installs []MiniConnectButtonDTO `json:"installs,omitempty"`
+	// Copies — кнопки копирования из блоков установки и добавления подписки.
+	Copies []MiniConnectButtonDTO `json:"copies,omitempty"`
+	// More — остальные разделы инструкции, фронт показывает их свёрнутыми.
+	More []MiniConnectBlockDTO `json:"more,omitempty"`
 }
 
 // MiniConnectDTO carries the subscription URL plus the iOS/Android app lists.
