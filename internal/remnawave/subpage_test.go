@@ -82,3 +82,48 @@ func TestShortUUIDParsedFromPanelUser(t *testing.T) {
 		t.Fatalf("ShortUUID = %+v", u)
 	}
 }
+
+// Список панель отдаёт без содержимого: само оно приходит запросом по uuid.
+func TestSubpageConfigByUUID(t *testing.T) {
+	c := subpageClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/subscription-page-configs/a-1" {
+			t.Errorf("запрос = %s %q", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"response":{"uuid":"a-1","name":"Default","viewPosition":1,"tags":[],"config":{"platforms":{}}}}`)
+	})
+	cfg, err := c.SubpageConfigByUUID(context.Background(), "a-1")
+	if err != nil || cfg == nil {
+		t.Fatalf("cfg = %+v, err = %v", cfg, err)
+	}
+	if cfg.UUID != "a-1" || !cfg.HasBody() {
+		t.Fatalf("конфиг = %+v", cfg)
+	}
+}
+
+func TestSubpageConfigByUUIDRefusals(t *testing.T) {
+	status := http.StatusForbidden
+	c := subpageClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"message":"Forbidden"}`)
+	})
+	if _, err := c.SubpageConfigByUUID(context.Background(), "a"); !ErrSubpageNoScope(err) {
+		t.Fatalf("403: err = %v, want «нет права»", err)
+	}
+	status = http.StatusNotFound
+	if cfg, err := c.SubpageConfigByUUID(context.Background(), "a"); cfg != nil || err != nil {
+		t.Fatalf("404: cfg = %+v, err = %v, want nil, nil", cfg, err)
+	}
+	status = http.StatusInternalServerError
+	if _, err := c.SubpageConfigByUUID(context.Background(), "a"); err == nil || ErrSubpageNoScope(err) {
+		t.Fatalf("500: err = %v", err)
+	}
+}
+
+func TestSubpageConfigHasBody(t *testing.T) {
+	for body, want := range map[string]bool{``: false, `null`: false, ` null `: false, `{}`: true, `{"platforms":{}}`: true} {
+		c := SubpageConfig{Config: []byte(body)}
+		if got := c.HasBody(); got != want {
+			t.Errorf("HasBody(%q) = %v, want %v", body, got, want)
+		}
+	}
+}

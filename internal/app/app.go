@@ -291,12 +291,14 @@ type App struct {
 	// куке конкретной подписки, и один человек с отозванной ссылкой не должен
 	// на минуту выключать «Подключить» всем остальным.
 	connectFail map[string]time.Time
-	// panelCfgs — разобранные конфиги страницы подписки из панели (3.0.0+).
+	// panelCfgs — разобранные конфиги страницы подписки из панели.
 	panelCfgs *panelCfgCache
 	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
 	// на панелях без такого API спрашивать его на каждый заход в «Подключить»
-	// незачем.
+	// незачем. subpageOffOwner — чей это отказ: после смены адреса или токена
+	// клиент панели другой, и пауза прежнего на него не действует.
 	subpageOffUntil time.Time
+	subpageOffOwner *remnawave.Client
 
 	flagMu       sync.RWMutex
 	flags        map[string][]byte

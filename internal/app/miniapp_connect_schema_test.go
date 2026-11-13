@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
@@ -227,6 +229,183 @@ func TestFetchPanelAppConfigPerSubscription(t *testing.T) {
 	}
 	if got := iosName("b"); got != "OnlyB" {
 		t.Fatalf("подписка b получила чужой конфиг: %q", got)
+	}
+}
+
+// panelByUUID — панель, какая она на деле: в списке у конфигов содержимого
+// нет, оно отдаётся запросом по uuid. get решает, чем ответить на такой запрос.
+func panelByUUID(t *testing.T, uuids []string, get func(w http.ResponseWriter, uuid string)) (*remnawave.Client, *int, *int) {
+	t.Helper()
+	var lists, gets int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/subscription-page-configs":
+			lists++
+			items := make([]string, 0, len(uuids))
+			for i, u := range uuids {
+				items = append(items, fmt.Sprintf(`{"uuid":%q,"name":%q,"viewPosition":%d,"tags":[],"config":null}`, u, u, i+1))
+			}
+			_, _ = fmt.Fprintf(w, `{"response":{"total":%d,"configs":[%s]}}`, len(uuids), strings.Join(items, ","))
+		case strings.HasPrefix(r.URL.Path, "/api/subscription-page-configs/"):
+			gets++
+			get(w, strings.TrimPrefix(r.URL.Path, "/api/subscription-page-configs/"))
+		case strings.HasPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"):
+			id := strings.TrimPrefix(r.URL.Path, "/api/subscriptions/subpage-config/")
+			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"`+id+`","webpageAllowed":true}}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"}), &lists, &gets
+}
+
+func panelCfgBody(uuid, iosApp string) string {
+	return `{"response":{"uuid":"` + uuid + `","name":"` + uuid + `","viewPosition":1,"tags":[],"config":` +
+		strings.Replace(currentSchemaBody, `"name":"App One"`, `"name":"`+iosApp+`"`, 1) + `}}`
+}
+
+// Список приходит без содержимого — бот добирает его по uuid и дальше живёт
+// на кэше, не дёргая панель на каждый заход.
+func TestFetchPanelAppConfigBodyByUUID(t *testing.T) {
+	panel, lists, gets := panelByUUID(t, []string{"a", "b"}, func(w http.ResponseWriter, uuid string) {
+		_, _ = io.WriteString(w, panelCfgBody(uuid, "Only-"+uuid))
+	})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for _, short := range []string{"a", "b", "a"} {
+		ce := a.fetchPanelAppConfig(context.Background(), panel, short, "")
+		if ce == nil || ce.v2 == nil {
+			t.Fatalf("%s: конфиг из панели не получен", short)
+		}
+		if got := ce.v2.Platforms["ios"].Apps[0].Name; got != "Only-"+short {
+			t.Fatalf("подписка %s получила %q", short, got)
+		}
+	}
+	if *lists != 1 || *gets != 2 {
+		t.Fatalf("запросов: список %d, по uuid %d; want 1 и 2", *lists, *gets)
+	}
+}
+
+// Подписке ничего не назначено — ей достаётся стандартный конфиг панели, даже
+// если в списке он стоит не первым.
+func TestFetchPanelAppConfigUnassignedGetsDefault(t *testing.T) {
+	var lists int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/subscription-page-configs":
+			lists++
+			_, _ = fmt.Fprintf(w, `{"response":{"total":2,"configs":[`+
+				`{"uuid":"custom","name":"Custom","viewPosition":1,"config":null},`+
+				`{"uuid":%q,"name":"Default","viewPosition":2,"config":null}]}}`, remnawave.SubpageDefaultUUID)
+		case strings.HasPrefix(r.URL.Path, "/api/subscription-page-configs/"):
+			uuid := strings.TrimPrefix(r.URL.Path, "/api/subscription-page-configs/")
+			_, _ = io.WriteString(w, panelCfgBody(uuid, "Only-"+uuid))
+		case r.URL.Path == "/api/subscriptions/subpage-config/ghost":
+			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"ghost","webpageAllowed":true}}`)
+		case r.URL.Path == "/api/subscriptions/subpage-config/assigned":
+			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":"custom","webpageAllowed":true}}`)
+		case strings.HasPrefix(r.URL.Path, "/api/subscriptions/subpage-config/"):
+			_, _ = io.WriteString(w, `{"response":{"subpageConfigUuid":null,"webpageAllowed":true}}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+	panel := remnawave.New(model.PanelConfig{Mode: model.ModeRemote, BaseURL: srv.URL, APIToken: "t"})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	// ghost — назначен конфиг, которого в наборе нет (в нём не оказалось приложений).
+	def := "Only-" + remnawave.SubpageDefaultUUID
+	for short, want := range map[string]string{"plain": def, "assigned": "Only-custom", "ghost": def} {
+		ce := a.fetchPanelAppConfig(context.Background(), panel, short, "")
+		if ce == nil || ce.v2 == nil {
+			t.Fatalf("%s: конфиг не получен", short)
+		}
+		if got := ce.v2.Platforms["ios"].Apps[0].Name; got != want {
+			t.Fatalf("подписка %s получила %q, want %q", short, got, want)
+		}
+	}
+}
+
+// У токена нет права на содержимое: бот уходит на страницу подписки и на
+// время перестаёт спрашивать панель.
+func TestFetchPanelAppConfigNoGetScope(t *testing.T) {
+	panel, lists, gets := panelByUUID(t, []string{"a", "b"}, func(w http.ResponseWriter, uuid string) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"message":"Forbidden","statusCode":403}`)
+	})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for i := 0; i < 3; i++ {
+		if ce := a.fetchPanelAppConfig(context.Background(), panel, "a", ""); ce != nil {
+			t.Fatal("ожидался отказ")
+		}
+	}
+	if *lists != 1 || *gets != 1 {
+		t.Fatalf("запросов: список %d, по uuid %d; want 1 и 1", *lists, *gets)
+	}
+}
+
+// Сменили адрес или токен панели — клиент другой. Пауза и набор, оставшиеся
+// от прежнего, на него не действуют: новый токен срабатывает сразу.
+func TestFetchPanelAppConfigNewClientStartsClean(t *testing.T) {
+	oldPanel, _, _ := panelByUUID(t, []string{"a"}, func(w http.ResponseWriter, uuid string) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	newPanel, lists, _ := panelByUUID(t, []string{"a"}, func(w http.ResponseWriter, uuid string) {
+		_, _ = io.WriteString(w, panelCfgBody(uuid, "Only-new"))
+	})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if ce := a.fetchPanelAppConfig(context.Background(), oldPanel, "a", ""); ce != nil {
+		t.Fatal("прежний токен: ожидался отказ")
+	}
+	ce := a.fetchPanelAppConfig(context.Background(), newPanel, "a", "")
+	if ce == nil || ce.v2 == nil || ce.v2.Platforms["ios"].Apps[0].Name != "Only-new" {
+		t.Fatalf("новый клиент упёрся в паузу прежнего: %+v", ce)
+	}
+	// Запрос, начатый ещё с прежним клиентом, закончился отказом уже после
+	// смены: новому клиенту это не мешает, и его набор не подменяется.
+	if ce := a.fetchPanelAppConfig(context.Background(), oldPanel, "a", ""); ce != nil {
+		t.Fatal("прежний клиент получил чужой набор")
+	}
+	a.pausePanelCfgs(oldPanel, time.Hour)
+	if ce := a.fetchPanelAppConfig(context.Background(), newPanel, "a", ""); ce == nil {
+		t.Fatal("отказ прежнему клиенту поставил паузу новому")
+	}
+	if *lists != 1 {
+		t.Fatalf("новый клиент ходил за списком %d раз, want 1", *lists)
+	}
+}
+
+// Один конфиг не прочитался — не отдаём остальные: иначе человек с этим
+// конфигом увидел бы чужой набор приложений.
+func TestFetchPanelAppConfigAllOrNothing(t *testing.T) {
+	panel, _, _ := panelByUUID(t, []string{"a", "b"}, func(w http.ResponseWriter, uuid string) {
+		if uuid == "b" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = io.WriteString(w, panelCfgBody(uuid, "Only-"+uuid))
+	})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for _, short := range []string{"a", "b"} {
+		if ce := a.fetchPanelAppConfig(context.Background(), panel, short, ""); ce != nil {
+			t.Fatalf("%s: получен неполный набор", short)
+		}
+	}
+}
+
+// Конфиг удалили между списком и запросом по uuid — остальные остаются.
+func TestFetchPanelAppConfigDeletedMeanwhile(t *testing.T) {
+	panel, _, _ := panelByUUID(t, []string{"gone", "b"}, func(w http.ResponseWriter, uuid string) {
+		if uuid == "gone" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, panelCfgBody(uuid, "Only-"+uuid))
+	})
+	a := &App{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ce := a.fetchPanelAppConfig(context.Background(), panel, "b", "")
+	if ce == nil || ce.v2 == nil || ce.v2.Platforms["ios"].Apps[0].Name != "Only-b" {
+		t.Fatalf("оставшийся конфиг не получен: %+v", ce)
 	}
 }
 

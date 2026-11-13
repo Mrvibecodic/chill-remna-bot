@@ -1,18 +1,21 @@
 package remnawave
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 )
 
-// SubpageConfig — конфигурация страницы подписки, как её хранит панель 3.x.
+// SubpageConfig — конфигурация страницы подписки, как её хранит панель.
 // Config — сырой JSON: там лежат platforms → apps → blocks → buttons, то же
 // самое, что страница подписки отдаёт браузеру. Забрать его у панели надёжнее,
 // чем ходить на саму страницу: обычный токен вместо cookie-сессии и защит.
+// В списке панель содержимое не отдаёт — оно приходит запросом по uuid.
 type SubpageConfig struct {
 	UUID         string          `json:"uuid"`
 	Name         string          `json:"name"`
@@ -20,12 +23,32 @@ type SubpageConfig struct {
 	Config       json.RawMessage `json:"config"`
 }
 
+// SubpageDefaultUUID — стандартный конфиг панели: он достаётся подписке,
+// которой свой конфиг не назначен.
+const SubpageDefaultUUID = "00000000-0000-0000-0000-000000000000"
+
+// HasBody сообщает, пришло ли вместе с записью само содержимое конфига.
+func (c *SubpageConfig) HasBody() bool {
+	b := bytes.TrimSpace(c.Config)
+	return len(b) > 0 && !bytes.Equal(b, []byte("null"))
+}
+
 // errNoSubpageAPI сообщает, что панель не умеет отдавать конфиги страницы
-// подписки (до 3.0.0). Не ошибка: вызывающий просто идёт старым путём.
+// подписки. Не ошибка: вызывающий просто идёт старым путём.
 var errNoSubpageAPI = fmt.Errorf("панель не отдаёт конфиги страницы подписки")
 
 // ErrNoSubpageAPI reports whether the panel simply has no subpage-config API.
 func ErrNoSubpageAPI(err error) bool { return err == errNoSubpageAPI }
+
+// SubpageGetScope — право токена, без которого панель 2.8.0+ не отдаёт
+// содержимое конфига.
+const SubpageGetScope = "subscription-page-configs:get"
+
+var errSubpageNoScope = errors.New("у токена нет права " + SubpageGetScope)
+
+// ErrSubpageNoScope reports whether the panel refused the config body because
+// the token lacks the scope for it.
+func ErrSubpageNoScope(err error) bool { return errors.Is(err, errSubpageNoScope) }
 
 // SubpageConfigs returns every subscription-page config the panel holds
 // (GET /api/subscription-page-configs), ordered as the panel shows them.
@@ -53,6 +76,33 @@ func (c *Client) SubpageConfigs(ctx context.Context) ([]SubpageConfig, error) {
 	out := env.Response.Configs
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ViewPosition < out[j].ViewPosition })
 	return out, nil
+}
+
+// SubpageConfigByUUID returns one config together with its body
+// (GET /api/subscription-page-configs/{uuid}). nil without an error means the
+// panel no longer has this config.
+func (c *Client) SubpageConfigByUUID(ctx context.Context, uuid string) (*SubpageConfig, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/api/subscription-page-configs/"+url.PathEscape(uuid), nil)
+	if err != nil {
+		return nil, fmt.Errorf("нет связи с панелью: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, nil
+	case http.StatusForbidden:
+		return nil, fmt.Errorf("%w: %v", errSubpageNoScope, classifyHTTP(resp))
+	default:
+		return nil, classifyHTTP(resp)
+	}
+	var env struct {
+		Response SubpageConfig `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("разбор ответа панели: %w", err)
+	}
+	return &env.Response, nil
 }
 
 // SubpageConfigUUIDFor reports which config is assigned to the subscription
