@@ -121,6 +121,9 @@ type Storage interface {
 	PurgeEmailTokens(ctx context.Context, before string) error
 	AccountFootprint(ctx context.Context, tgID int64) (AccountFootprint, error)
 	MoveAccount(ctx context.Context, from, to int64) error
+	// PruneWebUsers удаляет аккаунты кабинета, заведённые раньше before, у
+	// которых нет пользователя в боте, и возвращает их число.
+	PruneWebUsers(ctx context.Context, before string) (int64, error)
 	GetPromo(ctx context.Context, code string) (*model.PromoCode, error)
 	ListPromos(ctx context.Context) ([]model.PromoCode, error)
 	DeletePromo(ctx context.Context, code string) error

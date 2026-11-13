@@ -1255,6 +1255,17 @@ func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
 	return nil
 }
 
+func (s *fakeStore) PruneWebUsers(_ context.Context, before string) (int64, error) {
+	var n int64
+	for k, u := range s.webUsers {
+		if s.users[u.TgID] == nil && u.CreatedAt < before {
+			delete(s.webUsers, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) DeletePaymentsByUser(_ context.Context, id int64) error {
 	for k, p := range s.pays {
 		if p.TelegramID == id {

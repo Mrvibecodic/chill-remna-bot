@@ -320,3 +320,58 @@ func TestRefOnPayAndPaidSince(t *testing.T) {
 		}
 	})
 }
+
+// Чистка убирает только аккаунт кабинета без пользователя: живой аккаунт,
+// свежая регистрация и чужие ссылки из писем остаются.
+func TestPruneWebUsers(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		now := time.Now().UTC()
+		old := now.Add(-48 * time.Hour).Format(time.RFC3339)
+		cutoff := now.Add(-time.Hour).Format(time.RFC3339)
+		add := func(id int64, email, created string) {
+			t.Helper()
+			if err := st.CreateWebUser(ctx, &model.WebUser{TgID: id, Email: email, PassHash: "h", CreatedAt: created}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.PutEmailToken(ctx, &model.EmailToken{
+				Hash: "tok-" + email, TgID: id, Purpose: model.EmailPurposeVerify, Email: email,
+				CreatedAt: now.Format(time.RFC3339), ExpiresAt: now.Add(time.Hour).Format(time.RFC3339),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		add(-31, "gone@example.com", old)
+		add(-32, "live@example.com", old)
+		add(-33, "fresh@example.com", now.Format(time.RFC3339))
+		// Привязавший Telegram: номер положительный, запись кабинета осталась.
+		add(1000000031, "bound@example.com", old)
+		for _, id := range []int64{-32, 1000000031} {
+			if err := st.UpsertUser(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		n, err := st.PruneWebUsers(ctx, cutoff)
+		if err != nil || n != 1 {
+			t.Fatalf("убрано %d, ошибка %v — ждали один аккаунт", n, err)
+		}
+		if wu, _ := st.GetWebUserByEmail(ctx, "gone@example.com"); wu != nil {
+			t.Fatal("аккаунт без пользователя остался")
+		}
+		for _, email := range []string{"live@example.com", "fresh@example.com", "bound@example.com"} {
+			if wu, _ := st.GetWebUserByEmail(ctx, email); wu == nil {
+				t.Fatalf("%s удалён, хотя трогать его нельзя", email)
+			}
+		}
+		if tok, _ := st.TakeEmailToken(ctx, "tok-gone@example.com", model.EmailPurposeVerify); tok != nil {
+			t.Fatal("ссылка из письма удалённого аккаунта осталась")
+		}
+		if tok, _ := st.TakeEmailToken(ctx, "tok-live@example.com", model.EmailPurposeVerify); tok == nil {
+			t.Fatal("ссылка из письма живого аккаунта удалена")
+		}
+		if n, err := st.PruneWebUsers(ctx, cutoff); err != nil || n != 0 {
+			t.Fatalf("повторная чистка: убрано %d, ошибка %v", n, err)
+		}
+	})
+}

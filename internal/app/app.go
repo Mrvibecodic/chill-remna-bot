@@ -682,6 +682,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.sendHealNotice(ctx)
 	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
+	a.pruneWebUsers(ctx)
 	a.notifyUpdated(ctx)
 	a.noticeRestored(ctx)
 	a.resumeBroadcast(ctx)

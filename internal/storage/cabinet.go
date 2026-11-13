@@ -244,3 +244,33 @@ func (b *base) MoveAccount(ctx context.Context, from, to int64) error {
 	}
 	return tx.Commit()
 }
+
+// PruneWebUsers удаляет аккаунты кабинета без пользователя в боте вместе с их
+// ссылками из писем. Такие записи оставило удаление пользователя в прежних
+// версиях: адрес оставался занятым, а старый пароль — рабочим.
+//
+// Аккаунты моложе before не трогаются: регистрация пишет аккаунт кабинета
+// раньше пользователя, и запись посреди неё выглядит так же.
+func (b *base) PruneWebUsers(ctx context.Context, before string) (int64, error) {
+	orphan := "created_at < " + b.ph(1) + " AND NOT EXISTS (SELECT 1 FROM users u WHERE u.telegram_id = web_users.tg_id)"
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM email_tokens WHERE tg_id IN (SELECT tg_id FROM web_users WHERE "+orphan+")", before); err != nil {
+		return 0, fmt.Errorf("ссылки из писем: %w", err)
+	}
+	// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+	res, err := tx.ExecContext(ctx, "DELETE FROM web_users WHERE "+orphan, before)
+	if err != nil {
+		return 0, fmt.Errorf("аккаунты кабинета: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
@@ -307,4 +308,26 @@ func (a *App) CabinetResetPassword(ctx context.Context, token, newPass string) (
 	a.bumpEpoch(ctx, t.TgID)
 	a.notifyPasswordChanged(ctx, wu.Email)
 	return t.TgID, nil
+}
+
+// webUserGrace — аккаунты кабинета моложе этого срока стартовая чистка не
+// трогает: регистрация заводит аккаунт раньше пользователя.
+const webUserGrace = time.Hour
+
+// pruneWebUsers убирает на старте аккаунты кабинета, чей пользователь удалён.
+// Их оставляли прежние версии бота: адрес оставался занятым, а старый пароль
+// продолжал открывать кабинет.
+func (a *App) pruneWebUsers(ctx context.Context) {
+	st := a.storeRef()
+	if st == nil {
+		return
+	}
+	n, err := st.PruneWebUsers(ctx, time.Now().Add(-webUserGrace).UTC().Format(time.RFC3339))
+	if err != nil {
+		a.log.Warn("чистка аккаунтов кабинета", "err", err)
+		return
+	}
+	if n > 0 {
+		a.log.Info("кабинет: убраны аккаунты удалённых пользователей", "count", n)
+	}
 }
