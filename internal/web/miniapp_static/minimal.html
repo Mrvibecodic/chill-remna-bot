@@ -372,7 +372,7 @@ var L={ru:{
  ap_enabled:'Автопродление включено',ap_disabled:'Автопродление отключено',ap_fail:'Не удалось изменить автопродление',
  theme:'Оформление',th_auto:'Авто',th_light:'Светлая',th_dark:'Тёмная',th_hint:'«Авто» повторяет тему Telegram или системы.',
  acct:'Аккаунт',email:'Почта',addr:'Адрес',verified:'подтверждён',not_verified:'не подтверждён',tg_linked:'привязан',tg_not:'не привязан',
- verify_title:'Подтвердите почту',verify_text:'Письмо со ссылкой отправлено на %s. Пока адрес не подтверждён, оплата и пополнение недоступны.',resend:'Отправить письмо ещё раз',mail_sent:'Письмо отправлено',
+ verify_title:'Подтвердите почту',verify_trial:'После подтверждения откроется пробный период.',verify_text:'Письмо со ссылкой отправлено на %s. Пока адрес не подтверждён, оплата и пополнение недоступны.',resend:'Отправить письмо ещё раз',mail_sent:'Письмо отправлено',
  bind_tg:'Привязать Telegram',bind_text:'После привязки в кабинет можно входить кнопкой Telegram, а бот в чате покажет эту же подписку. Ссылка подписки не изменится.',bind_ok:'Telegram привязан',bind_fail:'Не удалось привязать',
  pass_change:'Сменить пароль',pass_old:'Текущий пароль',pass_new:'Новый пароль (мин. 8)',pass_new2:'Новый пароль ещё раз',pass_note:'Все остальные входы в аккаунт будут завершены.',
  pass_fill:'Заполните все поля',pass_mismatch:'Пароли не совпадают',pass_short:'Пароль слишком короткий',pass_ok:'Пароль изменён',
@@ -426,7 +426,7 @@ var L={ru:{
  ap_enabled:'Auto-renewal is on',ap_disabled:'Auto-renewal is off',ap_fail:'Could not change auto-renewal',
  theme:'Appearance',th_auto:'Auto',th_light:'Light',th_dark:'Dark',th_hint:'“Auto” follows Telegram or the system theme.',
  acct:'Account',email:'Email',addr:'Address',verified:'verified',not_verified:'not verified',tg_linked:'linked',tg_not:'not linked',
- verify_title:'Confirm your email',verify_text:'A link was sent to %s. Until the address is confirmed, payments and top-ups are unavailable.',resend:'Send again',mail_sent:'Email sent',
+ verify_title:'Confirm your email',verify_trial:'After that a free trial becomes available.',verify_text:'A link was sent to %s. Until the address is confirmed, payments and top-ups are unavailable.',resend:'Send again',mail_sent:'Email sent',
  bind_tg:'Link Telegram',bind_text:'After linking you can sign in with Telegram, and the bot chat shows the same subscription. The subscription link stays the same.',bind_ok:'Telegram linked',bind_fail:'Could not link',
  pass_change:'Change password',pass_old:'Current password',pass_new:'New password (min. 8)',pass_new2:'Repeat new password',pass_note:'All other sign-ins will be ended.',
  pass_fill:'Fill in all fields',pass_mismatch:'Passwords do not match',pass_short:'Password is too short',pass_ok:'Password changed',
@@ -717,7 +717,7 @@ function homeList(){
 }
 function verifyBanner(){
   if(!WEB)return '';var a=STATE.acct;if(!a||!a.money_blocked)return '';
-  return '<div class="note"><b>'+esc(T('verify_title'))+'</b><div style="margin-top:4px">'+esc(T('verify_text',a.email||''))+'</div><button class="btn sec" style="margin-top:10px" onclick="resend(this)">'+esc(T('resend'))+'</button></div>';
+  return '<div class="note"><b>'+esc(T('verify_title'))+'</b><div style="margin-top:4px">'+esc(T('verify_text',a.email||'')+(a.trial_after_verify?' '+T('verify_trial'):''))+'</div><button class="btn sec" style="margin-top:10px" onclick="resend(this)">'+esc(T('resend'))+'</button></div>';
 }
 SCREENS.home=function(){
   var m=STATE.menu||{};

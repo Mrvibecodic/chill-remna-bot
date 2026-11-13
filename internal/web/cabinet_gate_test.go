@@ -27,6 +27,9 @@ type fakeMini struct {
 	payURL  string
 	since   int64
 
+	trialOK bool
+	trials  int
+
 	accessAsked   int
 	approvalAsked int
 }
@@ -67,6 +70,11 @@ func (f *fakeMini) CabinetApproval(context.Context, int64, bool) error {
 	return nil
 }
 func (f *fakeMini) CabinetMoneyBlocked(context.Context, int64) bool { return f.blocked }
+func (f *fakeMini) CabinetTrialAllowed(context.Context, int64) bool { return f.trialOK }
+func (f *fakeMini) MiniTrial(context.Context, int64) MiniActionDTO {
+	f.trials++
+	return MiniActionDTO{OK: true}
+}
 func (f *fakeMini) CabinetForgotPassword(_ context.Context, e string) {
 	f.forgot = append(f.forgot, e)
 }
@@ -316,5 +324,27 @@ func TestCabinetGuardAsksAccessOnce(t *testing.T) {
 	}
 	if f.accessAsked != 1 || f.approvalAsked != 1 {
 		t.Fatalf("допуск спрошен %d раз, модерация %d — ожидалось по одному", f.accessAsked, f.approvalAsked)
+	}
+}
+
+// Пробный период в кабинете: аккаунту, которому он не положен, — отказ без
+// выдачи; тому, кому положен, гейт подтверждения почты не мешает (одобренному
+// администратором подтверждение не требуется).
+func TestTrialGate(t *testing.T) {
+	f := &fakeMini{blocked: true}
+	h := gateServer(t, f)
+	tok := webToken(f, -7, 0)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/trial", "", tok, "203.0.113.70"))
+	if w.Code != http.StatusForbidden || f.trials != 0 {
+		t.Fatalf("триал без допуска: код %d, выдач %d", w.Code, f.trials)
+	}
+
+	f.trialOK = true
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/trial", "", tok, "203.0.113.71"))
+	if w.Code != http.StatusOK || f.trials != 1 {
+		t.Fatalf("триал с допуском: код %d, выдач %d: %s", w.Code, f.trials, w.Body.String())
 	}
 }

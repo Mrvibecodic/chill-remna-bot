@@ -62,8 +62,12 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	if reset.ResetUnused && reset.ResetUnusedMax > 0 {
 		resetStr = i18n.T(lang, "trial.reset_on", reset.ResetUnusedMax, reset.ResetUnusedPct)
 	}
+	emailStr, emailBtnKey := i18n.T(lang, "trial.email_off"), "trial.btn_email_off"
+	if reset.Email {
+		emailStr, emailBtnKey = i18n.T(lang, "trial.email_on"), "trial.btn_email_on"
+	}
 	body := i18n.T(lang, "trial.title",
-		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), resetStr, internalCSV, externalName)
+		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), resetStr, emailStr, internalCSV, externalName)
 
 	// У возврата своя подпись, а не общий «✅ Включено»: на экране два
 	// переключателя, и одинаковые подписи не давали понять, какой что включает.
@@ -77,7 +81,7 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
 		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
 		{btn(i18n.T(lang, resetToggleKey), "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
-		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct")},
+		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct"), btn(i18n.T(lang, emailBtnKey), "trial:email")},
 		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
@@ -99,6 +103,14 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		a.mu.Lock()
 		if a.botCfg != nil {
 			a.botCfg.Trial.AllowBuy = !a.botCfg.Trial.AllowBuy
+		}
+		a.mu.Unlock()
+		_ = a.saveBotConfig(ctx)
+		a.showTrialAdmin(ctx, chatID)
+	case "email":
+		a.mu.Lock()
+		if a.botCfg != nil {
+			a.botCfg.Trial.Email = !a.botCfg.Trial.Email
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)

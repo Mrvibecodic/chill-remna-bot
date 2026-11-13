@@ -128,6 +128,8 @@ type MiniProvider interface {
 	CabinetAccount(ctx context.Context, tgID int64) CabinetAccountDTO
 	// CabinetMoneyBlocked — платные действия закрыты до подтверждения почты.
 	CabinetMoneyBlocked(ctx context.Context, tgID int64) bool
+	// CabinetTrialAllowed — аккаунту можно взять пробный период.
+	CabinetTrialAllowed(ctx context.Context, tgID int64) bool
 	// MailReady — отправка писем настроена.
 	MailReady() bool
 	CabinetSendVerify(ctx context.Context, tgID int64) error
@@ -295,6 +297,9 @@ type CabinetAccountDTO struct {
 	MailOn bool `json:"mail_on"`
 	// MoneyBlocked — платные действия закрыты до подтверждения адреса.
 	MoneyBlocked bool `json:"money_blocked"`
+	// TrialAfterVerify — после подтверждения адреса аккаунту станет доступен
+	// пробный период.
+	TrialAfterVerify bool `json:"trial_after_verify,omitempty"`
 }
 
 // MiniMenuDTO mirrors navRow predicates so the front-end shows exactly the
@@ -582,10 +587,11 @@ func legalFreePaths(path string) bool {
 // moneyPath — ручки, за которыми стоят деньги или выдача дней. Ровно этот
 // список закрыт до подтверждения почты; чтение подписки, ссылок и документов
 // остаётся доступным, иначе человек не увидел бы даже того, за что уже платил.
+// Пробного периода здесь нет: у него свой гейт (handleMiniTrial).
 func moneyPath(path string) bool {
 	switch path {
 	case "/api/miniapp/checkout", "/api/miniapp/topup", "/api/miniapp/promo",
-		"/api/miniapp/trial", "/api/miniapp/autopay", "/api/cabinet/p2p/screenshot":
+		"/api/miniapp/autopay", "/api/cabinet/p2p/screenshot":
 		return true
 	}
 	return false
@@ -738,19 +744,21 @@ func (s *Server) handleMiniPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMiniTrial(w http.ResponseWriter, r *http.Request) {
-	id, web, ok := s.miniGuard(w, r)
+	id, _, ok := s.miniGuard(w, r)
 	if !ok {
-		return
-	}
-	// В кабинете пробный период доступен только тем, кто вошёл через
-	// Telegram: это тот же проверенный аккаунт, что и в чате. Аккаунт по почте
-	// заводится на любой ящик — ему триал не выдаётся никогда.
-	if web && id < 0 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "триал недоступен в веб-кабинете"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	// Вошедший через Telegram — тот же проверенный аккаунт, что и в чате.
+	// Аккаунт по почте заводится на любой ящик: ему триал выдаётся, только
+	// если это включено и почта подтверждена либо аккаунт одобрен
+	// администратором. Общий гейт подтверждения почты этот путь не закрывает:
+	// одобренному подтверждение не требуется.
+	if !s.mini.CabinetTrialAllowed(ctx, id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "пробный период недоступен"})
+		return
+	}
 	writeJSON(w, http.StatusOK, s.mini.MiniTrial(ctx, id))
 }
 

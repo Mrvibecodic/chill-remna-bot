@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,17 +119,81 @@ func TestMiniStart_Referral(t *testing.T) {
 	}
 }
 
-// Триал в кабинете: вошедшим через Telegram — да, аккаунтам по почте — нет.
+// Триал в кабинете: вошедшим через Telegram — да; аккаунтам по почте — только
+// когда это включено и почта подтверждена либо аккаунт одобрен администратором.
 func TestMiniMenu_TrialInCabinet(t *testing.T) {
 	ctx := context.Background()
-	a, _ := planApp(t)
+	a, fs := planApp(t)
 	a.botCfg.Trial.Enabled = true
 	a.botCfg.Trial.Days = 3
 	if !a.MiniMenu(ctx, 1000000020, true).TrialAvailable {
 		t.Fatal("триал вошедшему через Telegram в кабинете не предложен")
 	}
-	if a.MiniMenu(ctx, -1000000020, true).TrialAvailable {
-		t.Fatal("триал предложен аккаунту по почте")
+	const plain, verified, approved int64 = -1000000020, -1000000021, -1000000022
+	for id, email := range map[int64]string{plain: "plain@example.com", verified: "verified@example.com", approved: "approved@example.com"} {
+		if err := fs.CreateWebUser(ctx, &model.WebUser{TgID: id, Email: email, PassHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.UpsertUser(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fs.SetWebUserVerified(ctx, verified, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.SetWebApproved(ctx, approved, true); err != nil {
+		t.Fatal(err)
+	}
+	offered := func(id int64) bool { return a.MiniMenu(ctx, id, true).TrialAvailable }
+
+	for _, id := range []int64{plain, verified, approved} {
+		if offered(id) || a.CabinetTrialAllowed(ctx, id) {
+			t.Fatalf("настройка выключена, а аккаунту по почте %d триал предложен", id)
+		}
+	}
+	a.botCfg.Trial.Email = true
+	if offered(plain) || a.CabinetTrialAllowed(ctx, plain) {
+		t.Fatal("триал предложен аккаунту без подтверждённой почты и без одобрения")
+	}
+	if !offered(verified) {
+		t.Fatal("триал не предложен аккаунту с подтверждённой почтой")
+	}
+	if !offered(approved) {
+		t.Fatal("триал не предложен аккаунту, одобренному администратором")
+	}
+	if a.CabinetTrialAllowed(ctx, -1000000029) {
+		t.Fatal("триал разрешён номеру без аккаунта кабинета")
+	}
+	// Взявшему триал он второй раз не предлагается, как и в чате.
+	if err := fs.SetTrialUsed(ctx, verified, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if offered(verified) {
+		t.Fatal("триал предложен повторно")
+	}
+}
+
+// Тумблер «по почте» в настройках триала: нажатие переключает настройку, экран
+// показывает её состояние.
+func TestTrialAdminEmailToggle(t *testing.T) {
+	ctx := context.Background()
+	a, _ := planApp(t)
+	fm := a.msg.(*fakeMsg)
+	a.handleCallback(ctx, cb(100, "trial:email"))
+	if !a.botCfg.Trial.Email {
+		t.Fatal("нажатие не включило триал по почте")
+	}
+	if !strings.Contains(fm.last(), "Аккаунтам по почте: включён") || !hasCB(fm.allCallbackData(), "trial:email") {
+		t.Fatalf("экран после включения: %q", fm.last())
+	}
+	a.handleCallback(ctx, cb(100, "trial:email"))
+	if a.botCfg.Trial.Email || !strings.Contains(fm.last(), "Аккаунтам по почте: выключен") {
+		t.Fatalf("экран после выключения: %q", fm.last())
+	}
+	// Не админу настройка недоступна.
+	a.handleCallback(ctx, cb(1000000023, "trial:email"))
+	if a.botCfg.Trial.Email {
+		t.Fatal("настройку переключил не администратор")
 	}
 }
 

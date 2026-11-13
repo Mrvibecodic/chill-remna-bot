@@ -1373,7 +1373,7 @@ function verifyBanner(){
   if(!a||!a.money_blocked)return '';
   return '<div class="card" style="border-color:var(--warn)">'+
     '<div style="font-weight:600">Подтвердите почту</div>'+
-    '<div class="hint" style="margin-top:6px">Письмо со ссылкой отправлено на '+esc(a.email||'')+'. Пока адрес не подтверждён, оплата и пополнение недоступны.</div>'+
+    '<div class="hint" style="margin-top:6px">Письмо со ссылкой отправлено на '+esc(a.email||'')+'. Пока адрес не подтверждён, оплата и пополнение недоступны.'+(a.trial_after_verify?' После подтверждения откроется пробный период.':'')+'</div>'+
     '<button class="btn sec" style="margin-top:10px" onclick="resendVerify(this)">Отправить письмо ещё раз</button></div>';
 }
 async function resendVerify(el){

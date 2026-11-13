@@ -172,6 +172,7 @@ func (a *App) CabinetAccount(ctx context.Context, tgID int64) web.CabinetAccount
 	}
 	dto.TgLinked = tgID > 0
 	dto.MoneyBlocked = a.CabinetMoneyBlocked(ctx, tgID)
+	dto.TrialAfterVerify = dto.MoneyBlocked && a.trialEmailOn() && a.trialAvailable(ctx, tgID) && !a.CabinetTrialAllowed(ctx, tgID)
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
 			dto.Name = displayName(a.lang(tgID), u.FirstName, u.Username)
@@ -336,4 +337,34 @@ func (a *App) pruneWebUsers(ctx context.Context) {
 	if n > 0 {
 		a.log.Info("кабинет: убраны аккаунты удалённых пользователей", "count", n)
 	}
+}
+
+// CabinetTrialAllowed — аккаунту можно взять пробный период в кабинете.
+//
+// Аккаунт по почте заводится на любой ящик, поэтому триал ему положен, только
+// когда это включено в настройках и за аккаунтом стоит хоть что-то, кроме
+// введённого адреса: подтверждённая почта или одобрение администратора.
+func (a *App) CabinetTrialAllowed(ctx context.Context, tgID int64) bool {
+	if tgID >= 0 {
+		return true
+	}
+	if !a.trialEmailOn() {
+		return false
+	}
+	wu := a.webAccount(ctx, tgID)
+	if wu == nil {
+		return false
+	}
+	if wu.VerifiedAt != "" {
+		return true
+	}
+	u, _ := a.store.GetUser(ctx, tgID)
+	return u != nil && u.WebApproved
+}
+
+// trialEmailOn — пробный период аккаунтам по почте включён в настройках.
+func (a *App) trialEmailOn() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.botCfg != nil && a.botCfg.Trial.Email
 }

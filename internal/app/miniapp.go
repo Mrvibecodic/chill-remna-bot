@@ -56,9 +56,8 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 	if dto.HasSub {
 		dto.CanRenew = a.renewEligible(ctx, tgID)
 	}
-	// Аккаунту по почте триал не выдаётся (см. handleMiniTrial) — и не
-	// предлагается.
-	if web_ && tgID < 0 {
+	// Кому триал не выдаётся (см. handleMiniTrial), тому и не предлагается.
+	if dto.TrialAvailable && !a.CabinetTrialAllowed(ctx, tgID) {
 		dto.TrialAvailable = false
 	}
 	dto.OwnPlan, dto.RenewNote, dto.RenewGone = a.ownPlanView(ctx, tgID, a.lang(tgID))

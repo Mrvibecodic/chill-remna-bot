@@ -365,3 +365,55 @@ func TestCabinetBindNameFillsOnlyEmpty(t *testing.T) {
 		t.Fatal("новичок пропал из списка доступных — тест ничего не проверяет")
 	}
 }
+
+// Плашка подтверждения обещает пробный период только тому, кому он
+// действительно откроется после подтверждения адреса.
+func TestCabinetAccountTrialAfterVerify(t *testing.T) {
+	a, fs := cabinetApp(t)
+	ctx := context.Background()
+	a.botCfg.Trial.Enabled = true
+	a.botCfg.Trial.Days = 3
+	id, err := a.CabinetEmailRegister(ctx, "wait@example.com", "password1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.waitMail()
+	promised := func() bool { return a.CabinetAccount(ctx, id).TrialAfterVerify }
+
+	if promised() {
+		t.Fatal("триал обещан при выключенной настройке")
+	}
+	a.botCfg.Trial.Email = true
+	if !promised() {
+		t.Fatal("триал не обещан аккаунту с неподтверждённой почтой")
+	}
+	a.botCfg.Trial.Enabled = false
+	if promised() {
+		t.Fatal("триал обещан при выключенном триале")
+	}
+	a.botCfg.Trial.Enabled = true
+	if err := fs.SetTrialUsed(ctx, id, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if promised() {
+		t.Fatal("триал обещан тому, кто его уже брал")
+	}
+	_ = fs.SetTrialUsed(ctx, id, "")
+	// Одобренному администратором триал доступен уже сейчас — обещать нечего.
+	if err := fs.SetWebApproved(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if promised() {
+		t.Fatal("триал обещан одобренному аккаунту — он ему уже доступен")
+	}
+	_ = fs.SetWebApproved(ctx, id, false)
+	if !promised() {
+		t.Fatal("обещание пропало после снятия одобрения — проверка выше ничего не доказывает")
+	}
+	if err := fs.SetWebUserVerified(ctx, id, ""); err != nil {
+		t.Fatal(err)
+	}
+	if promised() {
+		t.Fatal("триал обещан после подтверждения — он уже доступен")
+	}
+}
