@@ -270,7 +270,9 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 	if tgID > 0 {
 		url, terms := a.tributeOffer(lang, p, p.Code)
 		pd.Tribute = url != ""
-		pd.TributeTerms = terms
+		if len(terms) > 0 {
+			pd.TributeHint = stripHTMLTags(i18n.T(lang, "trb.pay_terms", strings.Join(terms, ", ")))
+		}
 	}
 	cur := planCurrencyOr(p, pc.fallbackCur)
 	// Лучшая цена за месяц — подсветка «выгодного» (раньше фронт жёстко

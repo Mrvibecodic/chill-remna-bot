@@ -475,8 +475,8 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "plan", Ru: "тариф", Desc: [2]string{"название тарифа со значком (если задан)", "plan name with its badge (if set)"}, Example: [2]string{"💎 Премиум", "💎 Premium"}},
 		}},
-	{Key: "trb.pay_terms", Section: "pay", Kind: KindHTML,
-		Where: [2]string{"Оплата через Tribute — какие сроки подходят (под пояснением)", "Tribute payment — which terms are valid (below the explanation)"},
+	{Key: "trb.pay_terms", Section: "pay", Kind: KindHTML, Hideable: true,
+		Where: [2]string{"Оплата через Tribute — какие сроки подходят (чат, мини-апп и ЛК)", "Tribute payment — which terms are valid (chat, mini-app and web cabinet)"},
 		Vars: []EditVar{
 			{Name: "terms", Ru: "сроки", Desc: [2]string{"сроки, на которые выдаётся доступ по подписке Tribute, через запятую", "terms the Tribute subscription grants access for, comma-separated"}, Example: [2]string{"1 месяц, 3 месяца, 12 месяцев", "1 month, 3 months, 12 months"}},
 		}},

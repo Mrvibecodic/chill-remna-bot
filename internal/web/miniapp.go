@@ -409,9 +409,9 @@ type MiniPlanDTO struct {
 	// Tribute — тариф продаётся через Tribute (привязана подписка). Способ
 	// общий в списке, но кнопка есть только у таких тарифов.
 	Tribute bool `json:"tribute,omitempty"`
-	// TributeTerms — сроки, которые бот выдаёт по подписке Tribute тарифа
-	// (пусто — периоды подписки неизвестны).
-	TributeTerms []string `json:"tribute_terms,omitempty"`
+	// TributeHint — какие сроки подписки Tribute выдают доступ: тот же текст,
+	// что в чате (пусто — периоды неизвестны или текст убран).
+	TributeHint string `json:"tribute_hint,omitempty"`
 	// Durations — продаваемые сроки тарифа.
 	Durations []MiniDurationDTO `json:"durations"`
 	// Own — тариф последней покупки человека (показывается и тогда, когда
