@@ -81,7 +81,7 @@ func TestPanelExpiryWarningNotDuplicated(t *testing.T) {
 	ctx := context.Background()
 	hook := func(t *testing.T, a *App, body []byte) {
 		t.Helper()
-		if handled, err := a.HandleRemnawaveWebhook(ctx, "", body); err != nil || !handled {
+		if handled, err := rwPost(t, a, body); err != nil || !handled {
 			t.Fatalf("handled=%v err=%v", handled, err)
 		}
 	}

@@ -43,7 +43,7 @@ func (a *App) showTorrentAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.back"), "menu:users"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	text := i18n.T(lang, "torj.home", total, last30)
-	// Без секрета отчёты панели отбрасываются (см. pushTorrentReport): иначе
+	// Без секрета отчёты панели отбрасываются (см. HandleRemnawaveWebhook): иначе
 	// админ видел бы замерший журнал и молчащие тумблеры без единого намёка.
 	if a.rwSecret() == "" {
 		text += "\n\n" + i18n.T(lang, "torj.no_secret")

@@ -170,6 +170,11 @@ type App struct {
 
 	rwSeen    map[string]time.Time
 	rwSweptAt time.Time
+	// rwNoSecretTold — администратору уже сказано, что события панели
+	// отклоняются из-за незаданного секрета; rwNoSecretTried — когда была
+	// последняя попытка это сказать.
+	rwNoSecretTold  bool
+	rwNoSecretTried time.Time
 	// remindFails — сколько раз подряд не удалось доставить напоминание по
 	// ключу «человек:окно». Без потолка заблокировавший бота крутился бы в
 	// очереди до самого истечения подписки.
@@ -678,7 +683,11 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		up = nil
 	}
+	// Под замком: веб-сервер уже принимает запросы, и AlertAdmin с вебхуком
+	// панели читают msg из своих горутин.
+	a.mu.Lock()
 	a.msg = botMessenger{b: b, log: a.log, up: up}
+	a.mu.Unlock()
 	a.sendHealNotice(ctx)
 	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)

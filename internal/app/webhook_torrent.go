@@ -102,7 +102,7 @@ func (a *App) toggleTorrentNotify(admin bool) {
 	}
 }
 
-// rwSecret — секрет вебхука панели (пустой = подпись не проверяется).
+// rwSecret — секрет вебхука панели (пустой = события панели не принимаются).
 func (a *App) rwSecret() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -113,15 +113,6 @@ func (a *App) rwSecret() string {
 }
 
 func (a *App) pushTorrentReport(ctx context.Context, data json.RawMessage) {
-	// Без секрета подпись вебхука не проверяется, а этот обработчик пишет строки
-	// в БД и шлёт сообщения на telegramId ИЗ ТЕЛА ЗАПРОСА — то есть кто угодно,
-	// зная адрес бота, рассылал бы «ваш IP заблокирован» произвольным людям и
-	// раздувал журнал. Остальные события панели ничего такого не делают.
-	if a.rwSecret() == "" {
-		a.log.Warn("торрент-блокер: отчёт отброшен — не задан секрет вебхука панели")
-		return
-	}
-
 	var r rwTorrentReport
 	if err := json.Unmarshal(data, &r); err != nil {
 		a.log.Warn("торрент-блокер: не разобран payload", "err", err)

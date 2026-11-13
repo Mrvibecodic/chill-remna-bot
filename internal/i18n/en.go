@@ -1368,6 +1368,7 @@ var en = map[string]string{
 	"wh.port_manual":        "Port %d saved. Docker self-management unavailable — map 127.0.0.1:%[1]d:%[1]d in compose and restart the container manually.",
 	"wh.ask_addr":           "Enter a port for the bot (e.g. <code>18080</code>); default is 8080. The bot opens it on the server's 127.0.0.1 and restarts — a proxy on this server reaches it at <code>127.0.0.1:port</code>.",
 	"wh.btn_base":           "🔗 A: address behind proxy",
+	"wh.no_secret_event":    "⚠️ An event arrived at the panel webhook address, but the secret is not set in the bot — the bot does not accept such events.\n\nSet the secret: «System → 🔗 Webhooks → 🔑 Panel secret».",
 	"wh.torrent_line":       "🚫 <b>Torrent blocker</b>: with the torrent-blocker node plugin enabled, the panel posts reports to <code>/webhook/remnawave</code> — same webhook, same signature.",
 	"wh.btn_tor_admin":      "🚫 Torrent → admin",
 	"wh.btn_tor_user":       "🚫 Torrent → user",

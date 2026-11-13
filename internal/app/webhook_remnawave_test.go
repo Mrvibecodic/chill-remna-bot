@@ -5,7 +5,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"testing"
+	"time"
+
+	"remnabot/internal/model"
+	"remnabot/internal/web"
 )
 
 func TestVerifyRemnawaveSignature_OK(t *testing.T) {
@@ -38,9 +43,120 @@ func TestVerifyRemnawaveSignature_Bad(t *testing.T) {
 }
 
 func TestVerifyRemnawaveSignature_EmptySecret(t *testing.T) {
-	if err := verifyRemnawaveSignature("", "", []byte("anything")); err != nil {
-		t.Fatalf("при пустом секрете ошибок быть не должно: %v", err)
+	if err := verifyRemnawaveSignature("", "", []byte("anything")); !errors.Is(err, errRWNoSecret) {
+		t.Fatalf("без секрета запрос должен быть отклонён, получили: %v", err)
 	}
+}
+
+// rwPost доставляет событие панели с верной подписью. Секрет задаёт сам,
+// если в приложении его ещё нет.
+func rwPost(t *testing.T, a *App, body []byte) (bool, error) {
+	t.Helper()
+	a.mu.Lock()
+	if a.botCfg == nil {
+		a.botCfg = &model.BotConfig{}
+	}
+	if a.botCfg.Webhook.RemnawaveSecret == "" {
+		a.botCfg.Webhook.RemnawaveSecret = "s"
+	}
+	secret := a.botCfg.Webhook.RemnawaveSecret
+	a.mu.Unlock()
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write(body)
+	return a.HandleRemnawaveWebhook(context.Background(), hex.EncodeToString(m.Sum(nil)), body)
+}
+
+// rwDeliver — то же, но доставка обязана пройти.
+func rwDeliver(t *testing.T, a *App, body string) {
+	t.Helper()
+	if _, err := rwPost(t, a, []byte(body)); err != nil {
+		t.Fatalf("доставка события: %v", err)
+	}
+}
+
+// Непрошедшая проверка подписи — отказ 401, а не сбой: событие не
+// обрабатывается и человеку ничего не уходит.
+func TestRemnawaveWebhook_BadSignatureUnauthorized(t *testing.T) {
+	body := []byte(`{"scope":"user","event":"user.expired","data":{"telegramId":42}}`)
+	for _, tc := range []struct{ name, sig string }{
+		{"подписи нет", ""},
+		{"подпись не hex", "zz"},
+		{"подпись чужая", "00"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, fm, _ := newTestApp(t)
+			a.botCfg = &model.BotConfig{}
+			a.botCfg.Webhook.RemnawaveSecret = "s"
+			handled, err := a.HandleRemnawaveWebhook(context.Background(), tc.sig, body)
+			if handled || !errors.Is(err, web.ErrUnauthorized) {
+				t.Fatalf("handled=%v err=%v", handled, err)
+			}
+			if len(fm.texts) != 0 {
+				t.Fatalf("сообщений быть не должно: %v", fm.texts)
+			}
+		})
+	}
+}
+
+// Без секрета событие не обрабатывается: человеку ничего не уходит, а
+// администратор один раз узнаёт причину.
+func TestRemnawaveWebhook_NoSecretRejected(t *testing.T) {
+	body := []byte(`{"scope":"user","event":"user.expired","data":{"telegramId":42}}`)
+	post := func(t *testing.T, a *App, sig string) {
+		t.Helper()
+		handled, err := a.HandleRemnawaveWebhook(context.Background(), sig, body)
+		if handled || !errors.Is(err, web.ErrUnauthorized) {
+			t.Fatalf("handled=%v err=%v", handled, err)
+		}
+	}
+	const notice = "секрет в боте не задан"
+
+	t.Run("одно сообщение администратору", func(t *testing.T) {
+		a, fm, _ := newTestApp(t)
+		post(t, a, "00")
+		post(t, a, "00")
+		if countContains(fm.texts, "Подписка истекла") != 0 {
+			t.Fatalf("без секрета человеку писать нельзя: %v", fm.texts)
+		}
+		if len(fm.texts) != 1 || countContains(fm.texts, notice) != 1 {
+			t.Fatalf("ожидалось одно сообщение администратору, тексты: %v", fm.texts)
+		}
+	})
+	t.Run("запрос без подписи — не панель", func(t *testing.T) {
+		a, fm, _ := newTestApp(t)
+		post(t, a, "")
+		if len(fm.texts) != 0 {
+			t.Fatalf("о запросе без подписи сообщать нечего: %v", fm.texts)
+		}
+	})
+	t.Run("мессенджер ещё не поднят", func(t *testing.T) {
+		a, fm, _ := newTestApp(t)
+		a.msg = nil
+		post(t, a, "00")
+		a.msg = fm
+		post(t, a, "00")
+		if countContains(fm.texts, notice) != 1 {
+			t.Fatalf("сообщение должно дойти, когда мессенджер поднимется: %v", fm.texts)
+		}
+	})
+	t.Run("отказ Telegram не закрывает сообщение", func(t *testing.T) {
+		a, fm, _ := newTestApp(t)
+		fm.kbFail = true
+		post(t, a, "00")
+		fm.kbFail = false
+		post(t, a, "00")
+		if countContains(fm.texts, notice) != 1 {
+			t.Fatalf("повтор раньше паузы: %v", fm.texts)
+		}
+		a.thrMu.Lock()
+		a.rwNoSecretTried = time.Now().Add(-rwNoSecretRetry - time.Second)
+		a.thrMu.Unlock()
+		post(t, a, "00")
+		post(t, a, "00")
+		if countContains(fm.texts, notice) != 2 {
+			t.Fatalf("после паузы сообщение должно дойти ровно один раз: %v", fm.texts)
+		}
+	})
 }
 
 func TestVerifyRemnawaveSignature_MissingHeader(t *testing.T) {
@@ -56,7 +172,7 @@ func TestRemnawaveWebhook_ExpirationBefore(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expiration","data":{"telegramId":42},"meta":{"expiration":-72}}`)
 
-	handled, err := a.HandleRemnawaveWebhook(context.Background(), "", body)
+	handled, err := rwPost(t, a, body)
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
@@ -70,7 +186,7 @@ func TestRemnawaveWebhook_ExpirationBeforeHours(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expiration","data":{"telegramId":42},"meta":{"expiration":-5}}`)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", body); err != nil {
+	if _, err := rwPost(t, a, body); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if countContains(fm.texts, "Осталось меньше 5 ч.") != 1 {
@@ -84,7 +200,7 @@ func TestRemnawaveWebhook_ExpirationAfter(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expiration","data":{"telegramId":42},"meta":{"expiration":24}}`)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", body); err != nil {
+	if _, err := rwPost(t, a, body); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if countContains(fm.texts, "Подписка истекла") != 1 {
@@ -98,7 +214,7 @@ func TestRemnawaveWebhook_ExpirationNoMeta(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expiration","data":{"telegramId":42}}`)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", body); err != nil {
+	if _, err := rwPost(t, a, body); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if countContains(fm.texts, "Подписка скоро истечёт") != 1 || countContains(fm.texts, "Осталось") != 0 {
@@ -111,7 +227,7 @@ func TestRemnawaveWebhook_LegacyExpiresIn(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"event":"user.expires_in_48_hours","data":{"telegramId":42}}`)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", body); err != nil {
+	if _, err := rwPost(t, a, body); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if countContains(fm.texts, "Осталось меньше 2 дн.") != 1 {
@@ -125,7 +241,7 @@ func TestRemnawaveWebhook_ExpirationOneDayStaysHours(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expiration","data":{"telegramId":42},"meta":{"expiration":-24}}`)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", body); err != nil {
+	if _, err := rwPost(t, a, body); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if countContains(fm.texts, "Осталось меньше 24 ч.") != 1 {
@@ -139,7 +255,7 @@ func TestRemnawaveWebhook_BadMetaDoesNotBreakEvent(t *testing.T) {
 	a, fm, _ := newTestApp(t)
 	body := []byte(`{"scope":"user","event":"user.expired","data":{"telegramId":42},"meta":{"expiration":"-72"}}`)
 
-	handled, err := a.HandleRemnawaveWebhook(context.Background(), "", body)
+	handled, err := rwPost(t, a, body)
 	if err != nil || !handled {
 		t.Fatalf("событие должно быть обработано: handled=%v err=%v", handled, err)
 	}
@@ -164,7 +280,7 @@ func TestRemnawaveWebhook_TrafficThreshold(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fm, _ := newTestApp(t)
-			handled, err := a.HandleRemnawaveWebhook(context.Background(), "", []byte(tc.body))
+			handled, err := rwPost(t, a, []byte(tc.body))
 			if err != nil || !handled {
 				t.Fatalf("handled=%v err=%v", handled, err)
 			}

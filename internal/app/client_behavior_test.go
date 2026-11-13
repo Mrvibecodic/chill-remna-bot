@@ -173,22 +173,13 @@ func TestReminders_TrustsPanelExpiry(t *testing.T) {
 	}
 }
 
-func rwSigned(t *testing.T, a *App, body string) {
-	t.Helper()
-	m := hmac.New(sha256.New, []byte(a.botCfg.Webhook.RemnawaveSecret))
-	m.Write([]byte(body))
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), hex.EncodeToString(m.Sum(nil)), []byte(body)); err != nil {
-		t.Fatalf("доставка события: %v", err)
-	}
-}
-
 // Панель переотправляет событие, не дождавшись ответа. Три доставки —
 // одно сообщение человеку.
 func TestRemnawaveWebhook_RetryDoesNotDuplicate(t *testing.T) {
 	a, fm, _ := torrentApp(t)
 	body := `{"scope":"user","event":"user.expired","timestamp":"2026-09-06T10:00:00.000Z","data":{"telegramId":42}}`
 	for i := 0; i < 3; i++ {
-		rwSigned(t, a, body)
+		rwDeliver(t, a, body)
 	}
 	if n := countContains(fm.texts, "Подписка истекла"); n != 1 {
 		t.Fatalf("повторы дали %d сообщений вместо одного: %v", n, fm.texts)
@@ -199,15 +190,15 @@ func TestRemnawaveWebhook_RetryDoesNotDuplicate(t *testing.T) {
 	a2, _, _ := torrentApp(t)
 	a2.msg = fm2
 	dead := `{"scope":"user","event":"user.expired","timestamp":"2026-09-06T09:00:00.000Z","data":{"telegramId":42}}`
-	rwSigned(t, a2, dead)
+	rwDeliver(t, a2, dead)
 	fm2.kbFail = false
-	rwSigned(t, a2, dead)
+	rwDeliver(t, a2, dead)
 	if n := countContains(fm2.texts, "Подписка истекла"); n != 2 {
 		t.Fatalf("повтор после отказа Telegram проглочен: %v", fm2.texts)
 	}
 
 	// Другое событие того же человека (другой timestamp) не глотается.
-	rwSigned(t, a, strings.Replace(body, "10:00:00", "12:00:00", 1))
+	rwDeliver(t, a, strings.Replace(body, "10:00:00", "12:00:00", 1))
 	if n := countContains(fm.texts, "Подписка истекла"); n != 2 {
 		t.Fatalf("новое событие проглочено дедупликацией: %v", fm.texts)
 	}
@@ -221,7 +212,7 @@ func TestRemnawaveWebhook_DisabledEnabled(t *testing.T) {
 	a.subCache = map[int64]subCacheEntry{42: {has: true, expireAt: time.Now().Add(time.Hour)}}
 	a.subMu.Unlock()
 
-	rwSigned(t, a, `{"scope":"user","event":"user.disabled","timestamp":"2026-09-06T10:00:00.000Z","data":{"telegramId":42}}`)
+	rwDeliver(t, a, `{"scope":"user","event":"user.disabled","timestamp":"2026-09-06T10:00:00.000Z","data":{"telegramId":42}}`)
 	if countContains(fm.texts, "Доступ приостановлен") != 1 {
 		t.Fatalf("об отключении не сообщили: %v", fm.texts)
 	}
@@ -232,7 +223,7 @@ func TestRemnawaveWebhook_DisabledEnabled(t *testing.T) {
 		t.Fatalf("кэш подписки не сброшен — бот полминуты врёт, что доступ есть")
 	}
 
-	rwSigned(t, a, `{"scope":"user","event":"user.enabled","timestamp":"2026-09-06T11:00:00.000Z","data":{"telegramId":42}}`)
+	rwDeliver(t, a, `{"scope":"user","event":"user.enabled","timestamp":"2026-09-06T11:00:00.000Z","data":{"telegramId":42}}`)
 	if countContains(fm.texts, "Доступ восстановлен") != 1 {
 		t.Fatalf("о включении не сообщили: %v", fm.texts)
 	}
