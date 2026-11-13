@@ -895,6 +895,8 @@ var en = map[string]string{
 	"rw.disabled":                  "🚫 <b>Access suspended</b>\n\nThe subscription was disabled by an administrator, so the connection will not work. Contact support for details.",
 	"rw.enabled":                   "✅ <b>Access restored</b>\n\nThe subscription is active again — the connection works.",
 	"rw.limited":                   "📊 <b>Traffic exhausted</b>\n\nYour subscription traffic limit is used up. Renew below — the counter resets and access is restored.",
+	"rw.traffic_low":               "📊 <b>Traffic is running low</b>\n\nWhen the limit runs out, the connection will stop working.",
+	"rw.traffic_pct":               "📊 <b>%d%% of traffic used</b>\n\nWhen the limit runs out, the connection will stop working.",
 	"rw.torrent_user":              "⛔️ <b>Torrent traffic detected</b>\n\nDownloading torrents through the service is prohibited. Your IP address is blocked for %s (until %s).\n\nTurn off the torrent client, otherwise the block will be applied again after it is lifted. Repeated violations may lead to subscription suspension.",
 	"rw.torrent_admin":             "🚫 <b>Torrent blocker: panel report</b>\n\n👤 %s\n🔁 Violation: <b>%s</b>\n🖥 Node: %s\n🌐 IP: <code>%s</code>\n⏳ Block: %s (until %s)\n📡 Protocol: %s · inbound <code>%s</code>\n➡️ <code>%s</code> → <code>%s</code>",
 	"rw.torrent_admin_repeat":      "#%d in 30 days",

@@ -47,6 +47,8 @@ type rwUserPayload struct {
 	ExpireAt   string          `json:"expireAt"`
 	ExpireTime string          `json:"expireTime"`
 	Status     string          `json:"status"`
+	// Порог расхода трафика в процентах, который панель отметила последним.
+	LastTriggeredThreshold int `json:"lastTriggeredThreshold"`
 }
 
 func verifyRemnawaveSignature(signatureHex, secret string, body []byte) error {
@@ -151,8 +153,11 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	case ev.Event == "user.enabled":
 		delivered = a.pushAccessChanged(ctx, u, true)
 		return true, nil
-	case ev.Event == "user.limited" || ev.Event == "user.bandwidth_usage_threshold_reached":
+	case ev.Event == "user.limited":
 		delivered = a.pushTrafficLimited(ctx, u)
+		return true, nil
+	case ev.Event == "user.bandwidth_usage_threshold_reached":
+		delivered = a.pushTrafficThreshold(ctx, u)
 		return true, nil
 	case ev.Event == "torrent_blocker.report":
 		a.pushTorrentReport(ctx, ev.Data)
@@ -220,6 +225,25 @@ func (a *App) pushTrafficLimited(ctx context.Context, u rwUserPayload) bool {
 		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
 	}) != 0
 	a.log.Info("remnawave webhook: limit notified", "tg_id", u.TelegramID, "ok", ok)
+	return ok
+}
+
+// pushTrafficThreshold — расход трафика дошёл до порога из настроек панели
+// (BANDWIDTH_USAGE_NOTIFICATIONS_THRESHOLD). Лимит ещё не исчерпан, доступ
+// работает.
+func (a *App) pushTrafficThreshold(ctx context.Context, u rwUserPayload) bool {
+	if u.TelegramID == 0 {
+		return true
+	}
+	lang := a.lang(u.TelegramID)
+	text := i18n.T(lang, "rw.traffic_low")
+	if pct := u.LastTriggeredThreshold; pct > 0 && pct < 100 {
+		text = i18n.T(lang, "rw.traffic_pct", pct)
+	}
+	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")},
+	}) != 0
+	a.log.Info("remnawave webhook: traffic threshold notified", "tg_id", u.TelegramID, "pct", u.LastTriggeredThreshold, "ok", ok)
 	return ok
 }
 

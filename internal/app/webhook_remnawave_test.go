@@ -147,3 +147,30 @@ func TestRemnawaveWebhook_BadMetaDoesNotBreakEvent(t *testing.T) {
 		t.Fatalf("тексты: %v", fm.texts)
 	}
 }
+
+// Порог расхода трафика — предупреждение, а не «трафик исчерпан»: лимит ещё
+// не выбран и доступ работает.
+func TestRemnawaveWebhook_TrafficThreshold(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"порог с процентом", `{"scope":"user","event":"user.bandwidth_usage_threshold_reached","data":{"telegramId":42,"lastTriggeredThreshold":80}}`, "Израсходовано 80% трафика"},
+		{"порог без процента", `{"scope":"user","event":"user.bandwidth_usage_threshold_reached","data":{"telegramId":42}}`, "Трафик заканчивается"},
+		{"процент вне диапазона", `{"scope":"user","event":"user.bandwidth_usage_threshold_reached","data":{"telegramId":42,"lastTriggeredThreshold":250}}`, "Трафик заканчивается"},
+		{"лимит исчерпан", `{"scope":"user","event":"user.limited","data":{"telegramId":42,"lastTriggeredThreshold":80}}`, "Трафик исчерпан"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, fm, _ := newTestApp(t)
+			handled, err := a.HandleRemnawaveWebhook(context.Background(), "", []byte(tc.body))
+			if err != nil || !handled {
+				t.Fatalf("handled=%v err=%v", handled, err)
+			}
+			if len(fm.texts) != 1 || countContains(fm.texts, tc.want) != 1 {
+				t.Fatalf("ожидалось одно сообщение с %q, тексты: %v", tc.want, fm.texts)
+			}
+		})
+	}
+}

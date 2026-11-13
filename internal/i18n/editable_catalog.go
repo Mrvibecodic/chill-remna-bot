@@ -661,6 +661,13 @@ var editableList = []Editable{
 		Where: [2]string{"Уведомление в момент окончания подписки", "Notice sent when the subscription expires"}},
 	{Key: "rw.limited", Section: "sub", Kind: KindHTML,
 		Where: [2]string{"Уведомление: трафик подписки исчерпан", "Notice: subscription traffic is used up"}},
+	{Key: "rw.traffic_low", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Предупреждение: трафик подписки заканчивается (без процента)", "Warning: subscription traffic is running low (no percentage)"}},
+	{Key: "rw.traffic_pct", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Предупреждение: израсходовано N% трафика подписки", "Warning: N% of the subscription traffic is used"},
+		Vars: []EditVar{
+			{Name: "traffic_percent", Ru: "процент_трафика", Desc: [2]string{"сколько процентов лимита трафика израсходовано — целое число; знак % уже в тексте", "percentage of the traffic limit used — integer; the % sign is already in the text"}, Example: [2]string{"80", "80"}},
+		}},
 	{Key: "rw.warn_expiring", Section: "sub", Kind: KindHTML,
 		Where: [2]string{"Предупреждение панели о скором окончании подписки (без срока)", "Panel warning that the subscription ends soon (no time given)"}},
 	{Key: "rw.warn_expiring_days", Section: "sub", Kind: KindHTML,
