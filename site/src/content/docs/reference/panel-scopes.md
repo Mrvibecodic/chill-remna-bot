@@ -33,6 +33,7 @@ description: Права API-токена Remnawave, которые нужны б
   "node-plugins:update",
   "node-plugins:executor",
   "subscription-page-configs:list",
+  "subscription-page-configs:get",
   "subscriptions:subpage-config",
   "subscription-settings:get"
 ]
@@ -72,8 +73,7 @@ description: Права API-токена Remnawave, которые нужны б
 | Лимит устройств по умолчанию панели в тарифе и в подписке | `subscription-settings:get` | У тарифов без своего лимита нет строки устройств, в подписке — только число подключённых. |
 | «Мои устройства»: список и сброс | `hwid-user-devices:list-by-user`, `hwid-user-devices:delete-all` | Список пуст, сброс отвечает ошибкой. |
 | Торрент-блокер: «Снять блокировку IP» и «В исключения» | `node-plugins:list`, `node-plugins:update`, `node-plugins:executor` | Кнопки отвечают `403`. |
-
-Права `subscription-page-configs:list` и `subscriptions:subpage-config` — для запроса настроек страницы подписки у панели. Приложений в ответе панели нет, поэтому список приложений и разделы инструкции на экране «Подключить» бот берёт с самой страницы подписки версии 8.0.1 и новее. Она должна открываться с сервера бота. Если не открывается — показывается встроенный список приложений.
+| Экран «Подключить»: приложения и разделы инструкции из настроек страницы подписки | `subscription-page-configs:list`, `subscription-page-configs:get`, `subscriptions:subpage-config` | Бот берёт их с самой страницы подписки — она должна открываться с его сервера. Если не открывается — списка приложений на экране нет, остаётся ссылка подписки. |
 
 ## Короткий вариант
 
@@ -89,6 +89,7 @@ description: Права API-токена Remnawave, которые нужны б
   "hwid-user-devices:*",
   "node-plugins:*",
   "subscription-page-configs:list",
+  "subscription-page-configs:get",
   "subscriptions:subpage-config",
   "subscription-settings:get"
 ]
