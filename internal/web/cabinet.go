@@ -354,6 +354,13 @@ func randToken(n int) string {
 	return string(b)
 }
 
+// cabinetTitleHTML — заголовок в виде, пригодном и для разметки, и для строки
+// скрипта в кавычках: классическая страница держит его и там, и там. Всё, что
+// значимо в разметке или в такой строке, записано HTML-сущностями.
+func cabinetTitleHTML(title string) string {
+	return strings.ReplaceAll(html.EscapeString(title), `\`, "&#92;")
+}
+
 // serveCabinetHTML serves the SPA with the configured title/description/favicon
 // injected, and (in anti-fingerprint mode) randomized markers so the page is
 // harder to identify as this bot's cabinet.
@@ -364,36 +371,18 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		http.Error(w, "internal", http.StatusInternalServerError)
 		return
 	}
-	out := string(data)
 	antifp := s.mini.CabinetAntiFP()
 	branded := hasBrandMarker(data)
 
-	// Title drives BOTH the browser tab (<title>) and the visible page heading.
-	// Description is ONLY a <meta> tag — it never alters a page element.
-	title := s.mini.CabinetTitle()
-	tabTitle := title // <title> text
-	heading := title  // visible "Личный кабинет" heading text
-	if title == "" {
+	// Заголовок кабинета — и название вкладки (<title>), и видимый заголовок
+	// страницы. Описание — только тег <meta>.
+	title := strings.Join(strings.Fields(s.mini.CabinetTitle()), " ")
+	own := title != ""
+	if !own {
+		title = "Личный кабинет"
 		if antifp {
-			r := randToken(6)
-			tabTitle, heading = r, r
-		} else {
-			tabTitle = "Кабинет"
-			heading = "Личный кабинет"
+			title = randToken(6)
 		}
-	}
-	out = strings.Replace(out, "<title>Кабинет</title>", "<title>"+html.EscapeString(tabTitle)+"</title>", 1)
-	if branded {
-		// Страница нового образца берёт заголовок из подставленных настроек:
-		// замена текста по всей разметке задела бы строки внутри скрипта.
-		if title != "" || antifp {
-			ui.Title = heading
-		}
-		out = string(injectBrand([]byte(out), ui))
-	} else {
-		// Always reflect the configured title in the visible heading (login
-		// screen + header), regardless of anti-fingerprint mode.
-		out = strings.ReplaceAll(out, "Личный кабинет", html.EscapeString(heading))
 	}
 
 	head := ""
@@ -412,9 +401,37 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		// vary the served bytes per request to avoid a static byte-for-byte fingerprint
 		head += "<!-- " + randToken(16) + " -->\n"
 	}
-	if head != "" {
-		out = strings.Replace(out, "<title>", head+"<title>", 1)
+
+	// Места подстановки сначала отмечаются в исходной странице, потом все
+	// значения ставятся одним проходом. Подставленное повторно не
+	// просматривается: свой заголовок со словами «Личный кабинет» не
+	// задваивается, а текст из настроек не принимается за метку страницы.
+	// Метки — с нулевым байтом: в странице его нет.
+	const markHead, markTitle, markHeading, markBrand = "\x00head\x00", "\x00title\x00", "\x00heading\x00", "\x00brand\x00"
+	out := strings.ReplaceAll(string(data), "\x00", "")
+	out = strings.Replace(out, "<title>", markHead+"<title>", 1)
+	// «Кабинет» — прежняя метка: она в своих страницах операторов, сделанных
+	// из старой копии встроенной.
+	for _, name := range []string{"Личный кабинет", "Кабинет"} {
+		out = strings.Replace(out, "<title>"+name+"</title>", "<title>"+markTitle+"</title>", 1)
 	}
+	values := []string{markHead, head, markTitle, cabinetTitleHTML(title)}
+	if branded {
+		// Страница нового образца берёт заголовок из подставленных настроек:
+		// замена текста по всей разметке задела бы строки внутри скрипта.
+		if own || antifp {
+			ui.Title = title
+		}
+		if js, err := json.Marshal(ui); err == nil {
+			out = strings.Replace(out, brandMarker, markBrand, 1)
+			values = append(values, markBrand, string(js))
+		}
+	} else {
+		// Видимый заголовок (экран входа и шапка) — всегда из настроек.
+		out = strings.ReplaceAll(out, "Личный кабинет", markHeading)
+		values = append(values, markHeading, cabinetTitleHTML(title))
+	}
+	out = strings.NewReplacer(values...).Replace(out)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if antifp {

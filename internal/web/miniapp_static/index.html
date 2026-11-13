@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Кабинет</title>
+<title>Личный кабинет</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="qrcode.min.js"></script>
 <style>
@@ -460,9 +460,11 @@ function view(html,back){
 function renderSide(){
   var side=document.getElementById('side'),h1=document.querySelector('.head h1');
   if(!side)return;
-  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.textContent='Личный кабинет';return;}
+  // Заголовок кабинета сервер подставляет в виде для разметки — он ставится
+  // через innerHTML, а не textContent.
+  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.innerHTML='Личный кабинет';return;}
   document.body.classList.remove('noside');
-  if(h1)h1.textContent=PAGE_TITLES[PAGE]||'Личный кабинет';
+  if(h1){if(PAGE_TITLES[PAGE])h1.textContent=PAGE_TITLES[PAGE];else h1.innerHTML='Личный кабинет';}
   // Данные ещё грузятся — заготовка меню, чтобы раскладка не прыгала.
   if(!STATE.menu){
     var sk='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
