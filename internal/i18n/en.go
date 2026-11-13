@@ -423,7 +423,7 @@ var en = map[string]string{
 	"cabinet.btn_path":         "✏️ Change path",
 	"cabinet.url":              "🔗 URL: %s\n\nOpen it in a browser. You can also put a dedicated subdomain in front via a reverse proxy to the bot's port.",
 	"cabinet.no_url":           "⚠️ No public URL set. Configure the domain/public URL in the Webhooks section.",
-	"cabinet.steps":            "📋 <b>How to launch:</b>\n1. Enable the cabinet below.\n2. Set the domain/public URL in Webhooks.\n3. Open the URL in a browser.\n4. Sign in via Telegram or email+password. On the web, the trial is available only with Telegram sign-in.",
+	"cabinet.steps":            "📋 <b>How to launch:</b>\n1. Enable the cabinet below.\n2. Set the domain/public URL in Webhooks.\n3. Open the URL in a browser.\n4. Sign in via Telegram or email+password. On the web, the trial is available with Telegram sign-in; for email accounts — when “Email accounts” is on in the trial settings.",
 	"cabinet.ask_path":         "Enter the web cabinet path (e.g. /cabinet/):",
 	"cabinet.approval":         "🛡 Manual check of new users: Telegram — <b>%s</b>, email — <b>%s</b>",
 	"cabinet.appr_yes":         "yes",
