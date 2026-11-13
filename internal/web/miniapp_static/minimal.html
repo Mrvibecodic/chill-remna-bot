@@ -853,10 +853,10 @@ SCREENS.checkout=function(a){
   methods(p).forEach(function(m){
     var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
     if(m==='tribute'&&p.tribute_hint)sub=(sub?sub+'\n':'')+p.tribute_hint;
+    if(m==='yookassa'&&STATE.ap&&STATE.ap.available)sub=(sub?sub+'\n':'')+T('ap_hint',apWhen());
     h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
   });
   h+='</div>';
-  if(STATE.ap&&STATE.ap.available&&methods(p).indexOf('yookassa')>=0)h+='<div class="hint">'+esc(T('ap_hint',apWhen()))+'</div>';
   if(STATE.menu.legal_on_pay&&legalDocs().length)h+='<div class="hint">'+esc(T('legal_pay'))+' '+legalLinks()+'.</div>';
   h=dsplit(hl,h);
   view(h);
