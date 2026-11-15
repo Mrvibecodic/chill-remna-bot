@@ -60,12 +60,43 @@ type Client struct {
 	// emailFor — подтверждённая почта аккаунта кабинета ("" — искать по почте
 	// нельзя). Задаётся один раз при создании клиента.
 	emailFor func(ctx context.Context, telegramID int64) string
+	// accountEmail — подтверждённая почта аккаунта для поля email учётки, в том
+	// числе после привязки Telegram ("" — писать нечего). Отдельно от emailFor:
+	// искать по почте можно только аккаунты без Telegram, а вписывать — всем.
+	accountEmail func(ctx context.Context, telegramID int64) string
 }
 
 // SetEmailResolver подключает поиск учётки по почте для аккаунтов кабинета.
 // Вызывать до первого запроса.
 func (c *Client) SetEmailResolver(f func(ctx context.Context, telegramID int64) string) {
 	c.emailFor = f
+}
+
+// SetAccountEmail подключает почту, которую бот вписывает в учётку аккаунта
+// кабинета. Вызывать до первого запроса.
+func (c *Client) SetAccountEmail(f func(ctx context.Context, telegramID int64) string) {
+	c.accountEmail = f
+}
+
+// emailToWrite — почта для поля email учётки ("" — не писать). Панель
+// проверяет формат строже бота (контракт: z.email()), и адрес, который она не
+// примет, сорвал бы вместе с собой создание учётки и продление.
+func (c *Client) emailToWrite(ctx context.Context, telegramID int64) string {
+	if c.accountEmail == nil {
+		return ""
+	}
+	if e := c.accountEmail(ctx, telegramID); PanelEmailOK(e) {
+		return e
+	}
+	return ""
+}
+
+// panelEmailRe — проверка почты из контракта панели (zod 4, z.email()).
+var panelEmailRe = regexp.MustCompile(`^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$`)
+
+// PanelEmailOK — примет ли панель этот адрес в поле email.
+func PanelEmailOK(email string) bool {
+	return email != "" && panelEmailRe.MatchString(email)
 }
 
 // hwidSyncAttempts is how many times ResetDevicesByTelegramID tries the HWID
@@ -892,6 +923,9 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		// Unlike A, B's traffic allowance is fully bot-owned, so "unlimited"
 		// (0) must be written explicitly instead of being left as-is.
 		patch["trafficLimitBytes"] = opt.TrafficBytes
+		if addSubEmail(main.Email) != "" && existing.Email == "" {
+			patch["email"] = main.Email
+		}
 		if _, _, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch); err != nil {
 			return res, err
 		}
@@ -909,6 +943,16 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 	return res, nil
 }
 
+// addSubEmail — почта, которую доп-подписка берёт у основной учётки ("" —
+// никакой). Поиск по почте доп-подписки пропускает (тег CHILLBOT_ADD), так что
+// общая почта двух учёток одного человека его не путает.
+func addSubEmail(mainEmail string) string {
+	if PanelEmailOK(mainEmail) {
+		return mainEmail
+	}
+	return ""
+}
+
 func (c *Client) createAddSub(ctx context.Context, username string, main PanelUser, limits UserLimits, trafficBytes int64, disabled bool) error {
 	body := map[string]any{
 		"username": username,
@@ -917,6 +961,9 @@ func (c *Client) createAddSub(ctx context.Context, username string, main PanelUs
 	}
 	if disabled {
 		body["status"] = StatusDisabled
+	}
+	if e := addSubEmail(main.Email); e != "" {
+		body["email"] = e
 	}
 	lim, err := c.liveLimits(ctx, limits, true)
 	if err != nil {
@@ -1106,12 +1153,18 @@ func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits,
 		return "", "", err
 	}
 	until := expire(existing)
+	email := c.emailToWrite(ctx, telegramID)
 
 	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
 		patch := existing.ref().apply(map[string]any{"expireAt": until})
+		// Учётке, заведённой до того, как бот стал вписывать почту, — при
+		// продлении. Чужую почту в поле не трогаем.
+		if email != "" && existing.Email == "" {
+			patch["email"] = email
+		}
 		lim, err := c.liveLimits(ctx, limits, false)
 		if err != nil {
 			return "", "", err
@@ -1129,6 +1182,9 @@ func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits,
 		return "", "", err
 	}
 	body := newUserBody(telegramID, until)
+	if email != "" {
+		body["email"] = email
+	}
 	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }

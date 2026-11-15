@@ -540,7 +540,39 @@ func (a *App) foldLegacyP2PSquad(ctx context.Context) {
 func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
 	c := remnawave.New(a.panelWithEnv(pc))
 	c.SetEmailResolver(a.panelEmailFor)
+	c.SetAccountEmail(a.accountEmailFor)
 	return c
+}
+
+// accountEmailFor — подтверждённая почта аккаунта кабинета для поля email его
+// учётки в панели, в том числе после привязки Telegram. a.mu не берётся: как и
+// поиск, запись идёт и из-под него.
+func (a *App) accountEmailFor(ctx context.Context, tgID int64) string {
+	st := a.store
+	if tgID == 0 || st == nil {
+		return ""
+	}
+	wu, err := st.GetWebUserByTgID(ctx, tgID)
+	if err != nil || wu == nil || wu.VerifiedAt == "" {
+		return ""
+	}
+	return model.NormalizeEmail(wu.Email)
+}
+
+// fillPanelEmail дописывает только что подтверждённую почту в учётку панели и
+// доп-подписку — в фоне, чтобы подтверждение не ждало панель. Ошибка не
+// мешает: почта впишется при следующем продлении.
+func (a *App) fillPanelEmail(tgID int64) {
+	panel, _, suffix, _, _ := a.addSubParams()
+	if panel == nil {
+		return
+	}
+	ctx := a.bgContext()
+	a.spawn(func() {
+		if err := panel.FillEmail(ctx, tgID, suffix); err != nil {
+			a.log.Warn("почта в учётку панели", "tg_id", tgID, "err", err)
+		}
+	})
 }
 
 // panelEmailFor — почта, по которой аккаунт кабинета ищет свою учётку в панели.

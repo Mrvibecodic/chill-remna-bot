@@ -219,7 +219,8 @@ func addSubCabinetCandidates(users []remnawave.PanelUser) []remnawave.PanelUser 
 	var out []remnawave.PanelUser
 	for i := range users {
 		u := users[i]
-		if u.TelegramID > 0 {
+		// Доп-подписка несёт почту основной учётки, но аккаунту не учётка.
+		if u.TelegramID > 0 || u.Tag == remnawave.BotTagAdd {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, u.ExpireAt); err == nil && !t.After(time.Now().UTC()) {

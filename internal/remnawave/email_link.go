@@ -215,6 +215,40 @@ func (c *Client) UnlinkUser(ctx context.Context, ref UserRef, clearTelegram, cle
 	return c.patchUser(ctx, body)
 }
 
+// FillEmail вписывает почту аккаунта в его учётку и доп-подписку (addSubSuffix)
+// там, где поле email пустое: почту подтвердили уже после того, как учётки
+// завели. Доп-подписка получает почту основной учётки, как и при продлении.
+// Чужие учётки, заполненное поле и адреса, которые панель не примет, не
+// трогаются.
+func (c *Client) FillEmail(ctx context.Context, telegramID int64, addSubSuffix string) error {
+	email := c.emailToWrite(ctx, telegramID)
+	if email == "" {
+		return nil
+	}
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return err
+	}
+	if u == nil || u.ref().Empty() || !ownedByBot(u, telegramID) {
+		return nil
+	}
+	if u.Email == "" {
+		if err := c.patchUser(ctx, u.ref().apply(map[string]any{"email": email})); err != nil {
+			return err
+		}
+		u.Email = email
+	}
+	b, _, err := c.findAddSub(ctx, u.Username, telegramID, addSubSuffix)
+	if err != nil {
+		return err
+	}
+	e := addSubEmail(u.Email)
+	if b == nil || b.Email != "" || e == "" {
+		return nil
+	}
+	return c.patchUser(ctx, b.Ref.apply(map[string]any{"email": e}))
+}
+
 func (c *Client) patchUser(ctx context.Context, body map[string]any) error {
 	resp, err := c.do(ctx, http.MethodPatch, "/api/users", body)
 	if err != nil {

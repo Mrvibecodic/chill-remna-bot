@@ -222,7 +222,11 @@ func (a *App) CabinetVerifyEmail(ctx context.Context, token string) error {
 	if wu.VerifiedAt != "" {
 		return nil
 	}
-	return a.store.SetWebUserVerified(ctx, t.TgID, "")
+	if err := a.store.SetWebUserVerified(ctx, t.TgID, ""); err != nil {
+		return err
+	}
+	a.fillPanelEmail(t.TgID)
+	return nil
 }
 
 // CabinetChangePassword меняет пароль по старому.
@@ -310,7 +314,9 @@ func (a *App) CabinetResetPassword(ctx context.Context, token, newPass string) (
 		return 0, err
 	}
 	if wu.VerifiedAt == "" {
-		_ = a.store.SetWebUserVerified(ctx, t.TgID, "")
+		if err := a.store.SetWebUserVerified(ctx, t.TgID, ""); err == nil {
+			a.fillPanelEmail(t.TgID)
+		}
 	}
 	a.bumpEpoch(ctx, t.TgID)
 	a.notifyPasswordChanged(ctx, wu.Email)
