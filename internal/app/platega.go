@@ -270,7 +270,7 @@ func (a *App) showPlategaAdmin(ctx context.Context, chatID int64) {
 		{toggleBtn(lang, cfg.Enabled, "pl:toggle"), btn(i18n.T(lang, "pl.btn_method"), "pl:method")},
 		{btn(i18n.T(lang, "pl.btn_merchant"), "pl:merchant"), btn(i18n.T(lang, "pl.btn_secret"), "pl:secret")},
 		{btn(i18n.T(lang, "pl.btn_return"), "pl:return")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

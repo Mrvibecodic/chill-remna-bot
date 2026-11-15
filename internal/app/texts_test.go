@@ -541,13 +541,13 @@ func TestOptionalNoteEditAndClear(t *testing.T) {
 func TestPayMethodsScreen(t *testing.T) {
 	a, fm, _ := newTextsApp(t)
 	ctx := context.Background()
-	a.handleCallback(ctx, cb(100, "menu:pay"))
+	a.handleCallback(ctx, cb(100, "menu:paymethods"))
 	if !hasCB(fm.allCallbackData(), "tx:pm") {
-		t.Fatal("в продажах нет входа в названия способов")
+		t.Fatal("в способах оплаты нет входа в названия способов")
 	}
 	a.handleCallback(ctx, cb(100, "tx:pm"))
 	cbs := fm.allCallbackData()
-	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.yk_note", "tx:k:method.trb_name", "menu:pay"} {
+	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.yk_note", "tx:k:method.trb_name", "menu:paymethods"} {
 		if !hasCB(cbs, want) {
 			t.Fatalf("на экране нет %s", want)
 		}

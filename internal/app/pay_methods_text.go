@@ -148,7 +148,7 @@ func (a *App) methodEnabled(method string) bool {
 func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string) {
 	lang := a.lang(chatID)
 	bl := a.botLang()
-	back := "menu:pay"
+	back := "menu:paymethods"
 	if from == "t" {
 		back = "tx:home"
 	}

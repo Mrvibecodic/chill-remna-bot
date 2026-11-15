@@ -40,19 +40,30 @@ func copyableEnts(text string, ents []models.MessageEntity) bool {
 	return copyableText(text)
 }
 
-// screenProtect — закрыть ли экран от пересылки. Только чаты пользователей:
-// у экранов админки свой набор того, что нужно копировать.
+// screenProtect — закрыть ли экран от пересылки. Экраны пользователя — все,
+// где нечего копировать; экраны админки — только помеченные withAdminClosed.
 func (a *App) screenProtect(ctx context.Context, chatID int64, copyable bool) bool {
-	if copyable || ctx.Value(keepCopyKey{}) != nil {
+	if copyable || ctx.Value(keepCopyKey{}) != nil || !hasChat(chatID) || a.cfg == nil {
 		return false
 	}
-	return hasChat(chatID) && a.cfg != nil && chatID != a.cfg.AdminID
+	if chatID == a.cfg.AdminID {
+		return ctx.Value(adminClosedKey{}) != nil
+	}
+	return true
 }
 
 type (
-	protectKey  struct{}
-	keepCopyKey struct{}
+	protectKey     struct{}
+	keepCopyKey    struct{}
+	adminClosedKey struct{}
 )
+
+// withAdminClosed — экран админки, который закрывается от пересылки, если в
+// нём нечего копировать. Экраны админки закрываются по одному, после
+// проверки, что копировать там нечего: у админа это реквизиты, ID и тексты.
+func withAdminClosed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, adminClosedKey{}, true)
+}
 
 // withKeepCopy — экран в этом контексте не закрывать, даже если детектор не
 // нашёл в нём ничего для копирования (текст документов).

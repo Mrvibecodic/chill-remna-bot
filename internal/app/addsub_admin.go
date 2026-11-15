@@ -59,7 +59,7 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "addsub.btn_sync"), "addsub:sync")})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home"),
+		btn(i18n.T(lang, "btn.back"), "menu:payplans"), btn(i18n.T(lang, "btn.home"), "menu:home"),
 	})
 	a.sendPayKB(ctx, chatID, title, rows)
 }

@@ -82,7 +82,7 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
 		{btn(i18n.T(lang, resetToggleKey), "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
 		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct"), btn(i18n.T(lang, emailBtnKey), "trial:email")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:payplans"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
 }

@@ -131,9 +131,8 @@ func TestHeleketScreenPlaceholders(t *testing.T) {
 		bad(t, "method.hl_btn", i18n.T(lang, "method.hl_btn", "Heleket", "199 ₽"))
 		bad(t, "hl.admin_underpaid", i18n.T(lang, "hl.admin_underpaid", "u-1", "199.00 RUB"))
 		bad(t, "hl.admin_locked", i18n.T(lang, "hl.admin_locked", "u-1", "199.00 RUB"))
-		// Экран «Продажи» получил седьмую метку метода.
-		bad(t, "subsetup.title", i18n.T(lang, "subsetup.title",
-			"✅", "✅", "✅", "✅", "✅", "✅", "✅", "✅", "—", "—", "MONTH", "—", "—"))
+		bad(t, "sales.title", i18n.T(lang, "sales.title", "P2P", 1))
+		bad(t, "sales.plans_title", i18n.T(lang, "sales.plans_title", "—", "—", "MONTH", "—", "—"))
 		// Экран «Вебхуки» получил пятый адрес.
 		bad(t, "wh.urls", i18n.T(lang, "wh.urls", "a", "b", "c", "d", "e", "f"))
 	}

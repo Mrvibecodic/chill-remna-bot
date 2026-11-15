@@ -14,7 +14,7 @@ func (a *App) showSquads(ctx context.Context, chatID int64) {
 	panel := a.panelClient()
 
 	back := []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.back"), "menu:pay"),
+		btn(i18n.T(lang, "btn.back"), "menu:payplans"),
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	}
 	if panel == nil {

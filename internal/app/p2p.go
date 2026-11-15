@@ -1005,7 +1005,7 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
 		{btn(i18n.T(lang, "admin.btn_pending"), "adm:pending")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

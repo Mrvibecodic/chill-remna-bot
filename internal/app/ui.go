@@ -377,39 +377,50 @@ func (a *App) setBotLang(ctx context.Context, chatID int64, code string) {
 	a.showBotLang(ctx, chatID)
 }
 
+// showPay — «Продажи»: история и аналитика, вход в тарифы и в способы оплаты.
+// Настройки разнесены по двум подменю: одним полотном из двадцати кнопок на
+// телефоне не пользоваться.
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
+	var on []string
+	for _, m := range a.payMethodsMenu() {
+		if m.on {
+			on = append(on, i18n.T(lang, m.short))
+		}
+	}
+	methods := i18n.T(lang, "sales.methods_none")
+	if len(on) > 0 {
+		methods = strings.Join(on, ", ")
+	}
+	plans := 0
+	if list, err := a.plansOnSale(ctx); err == nil {
+		plans = len(list)
+	}
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.title", methods, plans), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
+		{btn(i18n.T(lang, "btn.sales_plans"), "menu:payplans")},
+		{btn(i18n.T(lang, "btn.sales_methods"), "menu:paymethods")},
+		homeRow(lang),
+	})
+}
+
+// showPayPlans — «Продажи → Тарифы и триал»: лимиты тарифов, сквады,
+// доп-подписка.
+func (a *App) showPayPlans(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
 	a.mu.Lock()
-	p2pOn, starsOn, ykOn, cbOn, plOn, hlOn, trbOn, ymOn := false, false, false, false, false, false, false, false
 	strat := "MONTH"
 	addsubOn, addsubGB, addsubInt := false, 0, 0
 	if a.botCfg != nil {
-		p2pOn = a.botCfg.P2P.Enabled
-		starsOn = a.botCfg.Stars.Enabled
-		ykOn = a.botCfg.YooKassa.Enabled
-		cbOn = a.botCfg.CryptoBot.Enabled
-		plOn = a.botCfg.Platega.Enabled
-		hlOn = a.botCfg.Heleket.Enabled
-		trbOn = a.botCfg.Tribute.Enabled
-		ymOn = a.botCfg.YooMoney.Enabled
 		strat = a.botCfg.Pricing.ResetStrategy()
 		addsubOn = a.botCfg.AddSub.Enabled
 		addsubGB = a.botCfg.AddSub.TrafficGB
 		addsubInt = len(a.botCfg.AddSub.InternalSquads)
 	}
 	a.mu.Unlock()
-	mark := func(on bool) string {
-		if on {
-			return "✅"
-		}
-		return "❌"
-	}
 	internalCSV, externalName := a.squadDisplay(ctx)
-	title := i18n.T(lang, "subsetup.title",
-		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn), mark(ymOn),
-		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat,
-		internalCSV, externalName,
-	)
+	title := i18n.T(lang, "sales.plans_title",
+		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat, internalCSV, externalName)
 	if addsubOn {
 		traffic := i18n.T(lang, "addsub.unlimited")
 		if addsubGB > 0 {
@@ -417,21 +428,69 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		}
 		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick"), btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
+	// Лимиты и сквады — сводка, копировать из неё нечего.
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
+		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick")},
+		{btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
 		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
-		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
-		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
-		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
-		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute"), btn(i18n.T(lang, "btn.yoomoney"), "menu:yoomoney")},
-		{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
-		{btn(i18n.T(lang, "btn.wallet"), "menu:wallet")},
-		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
-		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
-		homeRow(lang),
+		navBack(lang, "menu:pay"),
 	})
+}
+
+// payMethodItem — способ оплаты в меню «Способы оплаты».
+type payMethodItem struct {
+	short, cb string
+	on        bool
+}
+
+// payMethodsMenu — способы оплаты по порядку, с включённостью.
+func (a *App) payMethodsMenu() []payMethodItem {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := a.botCfg
+	if c == nil {
+		c = &model.BotConfig{}
+	}
+	return []payMethodItem{
+		{"paym.p2p", "menu:p2p", c.P2P.Enabled},
+		{"paym.stars", "menu:stars", c.Stars.Enabled},
+		{"paym.yookassa", "menu:yookassa", c.YooKassa.Enabled},
+		{"paym.cryptobot", "menu:cryptobot", c.CryptoBot.Enabled},
+		{"paym.platega", "menu:platega", c.Platega.Enabled},
+		{"paym.heleket", "menu:heleket", c.Heleket.Enabled},
+		{"paym.tribute", "menu:tribute", c.Tribute.Enabled},
+		{"paym.yoomoney", "menu:yoomoney", c.YooMoney.Enabled},
+	}
+}
+
+// showPayMethods — «Продажи → Способы оплаты»: включён способ или нет, видно
+// на кнопке.
+func (a *App) showPayMethods(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	var rows [][]models.InlineKeyboardButton
+	var row []models.InlineKeyboardButton
+	for _, m := range a.payMethodsMenu() {
+		mark := "❌ "
+		if m.on {
+			mark = "✅ "
+		}
+		row = append(row, btn(mark+i18n.T(lang, m.short), m.cb))
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
+		navBack(lang, "menu:pay"),
+	)
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.methods_title"), rows)
 }
 
 func (a *App) showMarketing(ctx context.Context, chatID int64) {
@@ -610,6 +669,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		ents = nil
 		rows = a.adminMenuRows(lang)
 		photo = bannerInputFor(assets.SectionAdminStats)
+		ctx = withAdminClosed(ctx)
 	} else {
 		rows = append(rows, a.navRow(ctx, chatID))
 		if row := a.miniAppButtonRow(lang); row != nil {
@@ -811,6 +871,14 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "pay":
 		if isAdmin {
 			a.showPay(ctx, chatID)
+		}
+	case "payplans":
+		if isAdmin {
+			a.showPayPlans(ctx, chatID)
+		}
+	case "paymethods":
+		if isAdmin {
+			a.showPayMethods(ctx, chatID)
 		}
 	case "manage":
 		if isAdmin {

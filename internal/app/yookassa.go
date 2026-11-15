@@ -295,7 +295,7 @@ func (a *App) showYooKassaAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "admin.yk_btn_shop"), "yk:shop"), btn(i18n.T(lang, "admin.yk_btn_secret"), "yk:secret")},
 		{btn(i18n.T(lang, "admin.yk_btn_return"), "yk:return")},
 		{btn(i18n.T(lang, "admin.yk_btn_auto"), "yk:auto"), btn(i18n.T(lang, "admin.yk_btn_autodays"), "yk:autodays")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

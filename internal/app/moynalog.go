@@ -104,7 +104,7 @@ func (a *App) showMoyNalogAdmin(ctx context.Context, chatID int64) {
 		{toggleBtn(lang, cfg.Enabled, "mn:toggle")},
 		{btn(i18n.T(lang, "mn.btn_login"), "mn:login"), btn(i18n.T(lang, "mn.btn_pass"), "mn:pass")},
 		{btn(i18n.T(lang, "mn.btn_name"), "mn:name")},
-		navBack(lang, "menu:pay"),
+		navBack(lang, "menu:paymethods"),
 	})
 }
 

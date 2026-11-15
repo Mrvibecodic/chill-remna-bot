@@ -41,7 +41,7 @@ func (a *App) showTributeAdmin(ctx context.Context, chatID int64) {
 		{toggleBtn(lang, cfg.Enabled, "trb:toggle")},
 		{btn(i18n.T(lang, "trb.btn_key"), "trb:key"), btn(i18n.T(lang, "trb.btn_url"), "trb:url")},
 		{btn(i18n.T(lang, "trb.btn_plans"), "trb:plans")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

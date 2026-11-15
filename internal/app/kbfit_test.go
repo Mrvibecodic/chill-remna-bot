@@ -163,3 +163,29 @@ func TestPayMethodTextsStackUniformly(t *testing.T) {
 		t.Fatalf("за названием не идёт его описание: %v", kbLabels(rows))
 	}
 }
+
+// Экраны «Продаж» разложены так, чтобы на телефоне шириной 360dp каждая
+// подпись влезала в свой ряд как есть, без переразбивки на выходе, на обоих
+// языках и со всеми способами оплаты включёнными.
+func TestSalesScreensFitPhone(t *testing.T) {
+	for _, lang := range []string{"ru", "en"} {
+		a, fm, _ := newTextsApp(t)
+		a.botCfg.Language = lang
+		a.botCfg.P2P.Enabled, a.botCfg.YooKassa.Enabled, a.botCfg.CryptoBot.Enabled = true, true, true
+		ctx := context.Background()
+		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods"} {
+			a.handleCallback(ctx, cb(100, data))
+			fm.mu.Lock()
+			rows := fm.lastKB
+			fm.mu.Unlock()
+			if len(rows) == 0 {
+				t.Fatalf("%s/%s: нет клавиатуры", lang, data)
+			}
+			for _, r := range rows {
+				if !rowFits(r) {
+					t.Errorf("%s/%s: ряд %v не влезает в телефон", lang, data, kbLabels([][]models.InlineKeyboardButton{r}))
+				}
+			}
+		}
+	}
+}

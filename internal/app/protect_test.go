@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,8 +97,15 @@ func TestUserScreensProtect(t *testing.T) {
 	if id := tap(protUser, "menu:ref"); fm.isProt(id) {
 		t.Fatal("реферальный экран закрыт: ссылку не скопировать")
 	}
-	if id := tap(100, "menu:home"); fm.isProt(id) {
-		t.Fatal("меню админа закрыто, а его чат не трогаем")
+	// Экраны админки закрываются по одному: меню и «Продажи» — да, карточка
+	// пользователя с его ID — нет.
+	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods"} {
+		if id := tap(100, data); !fm.isProt(id) {
+			t.Fatalf("%s у админа ушёл без запрета пересылки", data)
+		}
+	}
+	if id := tap(100, "usr:view:"+strconv.FormatInt(protUser, 10)); fm.isProt(id) {
+		t.Fatal("карточка пользователя у админа закрыта: ID не скопировать")
 	}
 	n := fm.seq
 	a.notify(ctx, protUser, "уведомление без ссылок")

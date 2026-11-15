@@ -296,7 +296,7 @@ func (a *App) showCryptoBotAdmin(ctx context.Context, chatID int64) {
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "admin.cb_title", status, tok, asset), [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, cfg.Enabled, "cb:toggle")},
 		{btn(i18n.T(lang, "admin.cb_btn_token"), "cb:token"), btn(i18n.T(lang, "admin.cb_btn_asset"), "cb:asset")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

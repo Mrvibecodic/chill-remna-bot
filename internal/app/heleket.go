@@ -484,7 +484,7 @@ func (a *App) showHeleketAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "hl.btn_merchant"), "hl:merchant"), btn(i18n.T(lang, "hl.btn_key"), "hl:key")},
 		{btn(i18n.T(lang, "hl.btn_tocur"), "hl:tocur"), btn(i18n.T(lang, "hl.btn_subtract"), "hl:subtract")},
 		{btn(i18n.T(lang, "hl.btn_lifetime"), "hl:lifetime"), btn(i18n.T(lang, "hl.btn_return"), "hl:return")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

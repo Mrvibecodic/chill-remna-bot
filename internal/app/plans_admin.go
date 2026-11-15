@@ -192,7 +192,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	plans, err := a.planList(ctx)
 	if err != nil {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "err.storage"),
-			[][]models.InlineKeyboardButton{navBack(lang, "menu:pay")})
+			[][]models.InlineKeyboardButton{navBack(lang, "menu:payplans")})
 		return
 	}
 	if page < 0 {
@@ -220,7 +220,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_new"), "pln:new"), btn(i18n.T(lang, "plans.btn_import"), "pln:imp")},
-		navBack(lang, "menu:pay"),
+		navBack(lang, "menu:payplans"),
 	)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.title", len(plans), page+1, pages), rows)
 }

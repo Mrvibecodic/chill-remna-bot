@@ -62,9 +62,9 @@ func (a *App) grantRefusal(ctx context.Context, lang string, uid int64) string {
 	return ""
 }
 
-// grantPlans — тарифы, которые можно выдать: включённые и с продаваемыми
-// сроками, в любом режиме доступности.
-func (a *App) grantPlans(ctx context.Context) ([]model.Plan, error) {
+// plansOnSale — тарифы в продаже: включённые и с продаваемыми сроками, в
+// любом режиме доступности. Их же можно выдать.
+func (a *App) plansOnSale(ctx context.Context) ([]model.Plan, error) {
 	list, err := a.planList(ctx)
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func (a *App) showGrantPlans(ctx context.Context, chatID, uid int64) {
 		a.showUsers(ctx, chatID, 0)
 		return
 	}
-	plans, err := a.grantPlans(ctx)
+	plans, err := a.plansOnSale(ctx)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
@@ -259,7 +259,7 @@ func (a *App) grantNowLine(ctx context.Context, lang string, u *model.User) stri
 func (a *App) pickGrantPlan(ctx context.Context, chatID int64, arg string) {
 	uidStr, hash, _ := strings.Cut(arg, ":")
 	uid, _ := strconv.ParseInt(uidStr, 10, 64)
-	plans, err := a.grantPlans(ctx)
+	plans, err := a.plansOnSale(ctx)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "err.storage"))
 		return
