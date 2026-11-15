@@ -48,8 +48,8 @@
   Wikimedia Commons; сервис бесплатный, обратная ссылка на https://flagpedia.net
   приветствуется его авторами.
 - **Базовый образ Docker.** `Dockerfile` собирает бинарник в `golang:alpine` и
-  кладёт его в `alpine` с пакетами `ca-certificates`, `tzdata`, `docker-cli`,
-  `docker-cli-compose`. Это отдельные программы внутри образа со своими лицензиями
+  кладёт его в `alpine` с пакетами `ca-certificates` и `docker-cli`.
+  Это отдельные программы внутри образа со своими лицензиями
   (Alpine/busybox — GPL-2.0, musl — MIT, docker-cli — Apache-2.0, ca-certificates —
   MPL-2.0); они не линкуются с кодом бота и никаких требований на него не переносят.
   Их уведомления живут в самих пакетах внутри образа.

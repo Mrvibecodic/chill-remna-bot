@@ -15,6 +15,8 @@ import (
 	"remnabot/internal/web"
 
 	_ "remnabot/internal/storage/drivers"
+	// В образе нет пакета tzdata: пояса из переменной TZ берутся отсюда.
+	_ "time/tzdata"
 )
 
 var (
