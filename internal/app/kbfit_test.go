@@ -164,16 +164,16 @@ func TestPayMethodTextsStackUniformly(t *testing.T) {
 	}
 }
 
-// Экраны «Продаж» разложены так, чтобы на телефоне шириной 360dp каждая
-// подпись влезала в свой ряд как есть, без переразбивки на выходе, на обоих
-// языках и со всеми способами оплаты включёнными.
-func TestSalesScreensFitPhone(t *testing.T) {
+// Переделанные экраны админки разложены так, чтобы на телефоне шириной 360dp
+// каждая подпись влезала в свой ряд как есть, без переразбивки на выходе, на
+// обоих языках и со всеми способами оплаты включёнными.
+func TestAdminScreensFitPhone(t *testing.T) {
 	for _, lang := range []string{"ru", "en"} {
 		a, fm, _ := newTextsApp(t)
 		a.botCfg.Language = lang
 		a.botCfg.P2P.Enabled, a.botCfg.YooKassa.Enabled, a.botCfg.CryptoBot.Enabled = true, true, true
 		ctx := context.Background()
-		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods"} {
+		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods", "menu:system", "menu:updates", "upd:toggle"} {
 			a.handleCallback(ctx, cb(100, data))
 			fm.mu.Lock()
 			rows := fm.lastKB
@@ -188,4 +188,37 @@ func TestSalesScreensFitPhone(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Обновление живёт в подменю «Системы»: тумблер уведомлений возвращает туда
+// же, выбор канала ведёт обратно в подменю.
+func TestSystemUpdatesSubmenu(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "menu:system"))
+	cbs := fm.allCallbackData()
+	if !hasCB(cbs, "menu:updates") || hasCB(cbs, "menu:update") || hasCB(cbs, "upd:toggle") {
+		t.Fatalf("в «Системе» обновление не в подменю: %v", cbs)
+	}
+	a.handleCallback(ctx, cb(100, "upd:toggle"))
+	if !strings.Contains(fm.last(), "Обновление") || !hasCB(fm.allCallbackData(), "upd:check") {
+		t.Fatalf("после тумблера не вернулись в подменю обновления:\n%s", fm.last())
+	}
+	a.handleCallback(ctx, cb(100, "upd:chan"))
+	fm.mu.Lock()
+	rows := fm.lastKB
+	fm.mu.Unlock()
+	if !hasCB(cbsOf(rows), "menu:updates") {
+		t.Fatalf("из выбора канала нет пути назад: %v", kbLabels(rows))
+	}
+}
+
+func cbsOf(rows [][]models.InlineKeyboardButton) []string {
+	var out []string
+	for _, r := range rows {
+		for _, b := range r {
+			out = append(out, b.CallbackData)
+		}
+	}
+	return out
 }

@@ -268,14 +268,12 @@ var en = map[string]string{
 		"• 👥 Referrals — bonus for invited users.\n" +
 		"• 📣 Broadcast — message to all bot users.\n" +
 		"• 🔔 Notifications — auto-reminders about expiring subscriptions and trials.",
-	"menu.system_title": "🏠 Home › 🛠 <b>System</b>\n\n" +
-		"Utility functions:\n" +
-		"• 📊 Status — panel connectivity and summary.\n" +
-		"• ⬆️ Update — pull new image and restart.\n" +
-		"• 🔗 Webhooks — receive panel and payment events.\n" +
-		"• 🔌 Panel connection — address, API token, proxy key and cookie, subscription domain.\n" +
-		"• 📡 API log — last 200 bot→panel requests.\n" +
-		"• 🔧 Reconfigure — restart DB and panel wizard.",
+	"menu.system_title": "🛠 <b>System</b>\n\nUpdates, panel connection, web cabinet, e-mail and the bot's database.",
+	"btn.updates":       "⬆️ Updates",
+	"updates.title":     "⬆️ <b>Updates</b>\n\nChannel: <b>%s</b> · new version notifications: %s.\n\n«Update» pulls the new bot image and restarts the bot.",
+	"updates.on":        "on",
+	"updates.off":       "off",
+
 	"btn.users":        "👥 Users",
 	"btn.back":         "⬅️ Back",
 	"btn.block":        "🚫 Block",

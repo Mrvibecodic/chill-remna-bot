@@ -99,7 +99,7 @@ func TestUserScreensProtect(t *testing.T) {
 	}
 	// Экраны админки закрываются по одному: меню и «Продажи» — да, карточка
 	// пользователя с его ID — нет.
-	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods"} {
+	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods", "menu:system", "menu:updates"} {
 		if id := tap(100, data); !fm.isProt(id) {
 			t.Fatalf("%s у админа ушёл без запрета пересылки", data)
 		}

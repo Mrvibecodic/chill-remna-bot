@@ -238,7 +238,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	latest, err := a.latestBuiltSHA(ctx, branch)
 	if err != nil || latest == "" {
 		if manual {
-			a.sendSysKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{homeRow(lang)})
+			a.sendSysKB(ctx, target, i18n.T(lang, "update.check_fail"), [][]models.InlineKeyboardButton{navBack(lang, "menu:updates")})
 		}
 		return
 	}
@@ -258,7 +258,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 		return
 	}
 	if upToDate {
-		a.sendSysKB(ctx, target, i18n.T(lang, "update.uptodate", shortSHA(latest)), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendSysKB(ctx, target, i18n.T(lang, "update.uptodate", shortSHA(latest)), [][]models.InlineKeyboardButton{navBack(lang, "menu:updates")})
 		a.setUpdateSeen(ctx, latest)
 		return
 	}
@@ -289,7 +289,7 @@ func (a *App) checkUpdateOnce(ctx context.Context, adminChat int64, manual bool)
 	if manual {
 		a.sendSysKB(ctx, target, sb.String(), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "update.btn_now"), "upd:now")},
-			homeRow(lang),
+			navBack(lang, "menu:updates"),
 		})
 	} else {
 		rows := [][]models.InlineKeyboardButton{
@@ -332,7 +332,7 @@ func (a *App) onUpdateCheck(ctx context.Context, chatID int64, val string, isAdm
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.showSystem(ctx, chatID)
+		a.showUpdates(ctx, chatID)
 	case "check":
 		// Transitional migration: oblige picking a channel before the update check.
 		if !a.channelChosen() {
@@ -352,7 +352,7 @@ func (a *App) showChannelChooser(ctx context.Context, chatID int64) {
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "update.chan_title", a.channelName(lang)), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "update.chan_stable"), "upd:setchan:stable")},
 		{btn(i18n.T(lang, "update.chan_dev"), "upd:setchan:dev")},
-		backHomeRow(lang),
+		navBack(lang, "menu:updates"),
 	})
 }
 
@@ -369,5 +369,5 @@ func (a *App) setChannel(ctx context.Context, chatID int64, ch string) {
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)
 	lang := a.lang(chatID)
-	a.sendKB(ctx, chatID, i18n.T(lang, "update.chan_set", a.channelName(lang)), [][]models.InlineKeyboardButton{homeRow(lang)})
+	a.sendKB(ctx, chatID, i18n.T(lang, "update.chan_set", a.channelName(lang)), [][]models.InlineKeyboardButton{navBack(lang, "menu:updates")})
 }

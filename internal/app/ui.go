@@ -502,28 +502,39 @@ func (a *App) showMarketing(ctx context.Context, chatID int64) {
 	})
 }
 
+// showSystem — «Система». Обновление вынесено в подменю: «Обновить» там
+// запускается сразу, без подтверждения, и первой кнопкой раздела ему не место.
 func (a *App) showSystem(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
+		{btn(i18n.T(lang, "btn.updates"), "menu:updates"), btn(i18n.T(lang, "btn.backup"), "menu:backup")},
+		{btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
+		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.mail"), "menu:mail")},
+		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
+		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
+		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+		homeRow(lang),
+	})
+}
+
+// showUpdates — «Система → Обновление»: обновить, проверить, уведомления о
+// новых версиях и канал.
+func (a *App) showUpdates(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	updOn := a.botCfg != nil && a.botCfg.UpdateCheck.Enabled
 	a.mu.Unlock()
-	updLabel := i18n.T(lang, "btn.upd_notify_off")
+	updLabel, updState := i18n.T(lang, "btn.upd_notify_off"), i18n.T(lang, "updates.off")
 	if updOn {
-		updLabel = i18n.T(lang, "btn.upd_notify_on")
+		updLabel, updState = i18n.T(lang, "btn.upd_notify_on"), i18n.T(lang, "updates.on")
 	}
-	rows := [][]models.InlineKeyboardButton{
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionAdminStats, i18n.T(lang, "updates.title", a.channelName(lang), updState), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
-		{btn(updLabel, "upd:toggle"), btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
-		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
-		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
-		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
-		{btn(i18n.T(lang, "btn.mail"), "menu:mail")},
-		{btn(i18n.T(lang, "btn.backup"), "menu:backup"), btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
-	}
-	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
-		homeRow(lang))
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), rows)
+		{btn(updLabel, "upd:toggle")},
+		{btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
+		navBack(lang, "menu:system"),
+	})
 }
 
 func (a *App) squadDisplay(ctx context.Context) (string, string) {
@@ -895,6 +906,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "system":
 		if isAdmin {
 			a.showSystem(ctx, chatID)
+		}
+	case "updates":
+		if isAdmin {
+			a.showUpdates(ctx, chatID)
 		}
 	case "devices":
 		if isAdmin {
