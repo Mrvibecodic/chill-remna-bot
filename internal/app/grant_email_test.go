@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,19 @@ func (p *mailGrantPanel) start(t *testing.T) string {
 		switch {
 		case strings.Contains(path, "/by-telegram-id/-") || strings.HasPrefix(r.URL.Query().Get("telegramId"), "-"):
 			w.WriteHeader(http.StatusBadRequest)
+		case strings.Contains(path, "/by-telegram-id/"):
+			found := []any{}
+			for _, u := range p.users {
+				if tg, _ := u["telegramId"].(float64); tg != 0 && strconv.FormatInt(int64(tg), 10) == path[strings.LastIndex(path, "/")+1:] {
+					found = append(found, u)
+				}
+			}
+			if len(found) == 0 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"User not found","errorCode":"A063"}`))
+				return
+			}
+			reply(found)
 		case strings.HasSuffix(path, "/internal-squads"):
 			reply(map[string]any{"internalSquads": []any{map[string]any{"uuid": "sq-vip", "name": "VIP"}, map[string]any{"uuid": "g1", "name": "Доп"}}})
 		case strings.HasSuffix(path, "/external-squads"):
@@ -272,4 +286,67 @@ func grantMailOn(a *App) {
 	a.botCfg.Mail = model.MailConfig{Enabled: true, Mode: model.MailModeSMTP,
 		From: "noreply@example.com", Host: "127.0.0.1", Port: 1}
 	a.botCfg.NormalizeMail()
+}
+
+// Подписка, взятая на почтовый аккаунт, переживает привязку Telegram: в
+// панели остаётся та же учётка — то же имя, та же ссылка, — ей лишь
+// проставляется telegramId, и следующее продление идёт в неё же.
+func TestEmailAccountKeepsPanelUserAfterTelegramBind(t *testing.T) {
+	const (
+		uid  int64 = -1000000061
+		tg   int64 = 1000000062
+		name       = "tg_-1000000061"
+	)
+	p := &mailGrantPanel{users: map[string]map[string]any{}}
+	a, fm, fs := grantApp(t, "")
+	a.panel = a.newPanel(model.PanelConfig{Mode: model.ModeRemote, BaseURL: p.start(t), APIToken: "t"})
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	ctx := context.Background()
+	_ = fs.UpsertUser(ctx, uid)
+	_ = fs.CreateWebUser(ctx, &model.WebUser{TgID: uid, Email: "client@example.com", VerifiedAt: "2026-01-01T00:00:00Z"})
+
+	grant := func(id int64) {
+		s := strconv.FormatInt(id, 10)
+		a.handleCallback(ctx, cb(100, "usr:gr:"+s))
+		a.handleCallback(ctx, cb(100, "usr:grp:"+s+":"+planEditHash("vip")))
+		a.handleCallback(ctx, cb(100, "usr:grt:"+s+":1"))
+		a.handleCallback(ctx, cb(100, "usr:grok:"+s+":"+grantNonceFor(t, fm, s)))
+	}
+	snapshot := func() (n int, uuid, url, exp string, tgID any) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		u := p.users[name]
+		if u == nil {
+			return len(p.users), "", "", "", nil
+		}
+		uuid, _ = u["uuid"].(string)
+		url, _ = u["subscriptionUrl"].(string)
+		exp, _ = u["expireAt"].(string)
+		return len(p.users), uuid, url, exp, u["telegramId"]
+	}
+
+	grant(uid)
+	n0, uuid0, url0, exp0, _ := snapshot()
+	if n0 != 1 || uuid0 == "" {
+		t.Fatalf("после покупки по почте в панели %d учёток, учётки %s нет", n0, name)
+	}
+	if got, err := a.CabinetBindTelegram(ctx, uid, tg); err != nil || got != tg {
+		t.Fatalf("привязка Telegram: %d, %v", got, err)
+	}
+	n1, uuid1, url1, _, tg1 := snapshot()
+	if n1 != 1 || uuid1 != uuid0 || url1 != url0 || tg1 != float64(tg) {
+		t.Fatalf("после привязки: учёток %d, uuid %s→%s, ссылка %s→%s, telegramId %v", n1, uuid0, uuid1, url0, url1, tg1)
+	}
+	grant(tg)
+	n2, uuid2, url2, exp2, _ := snapshot()
+	if n2 != 1 || uuid2 != uuid0 || url2 != url0 {
+		t.Fatalf("продление после привязки завело другую учётку: учёток %d, uuid %s→%s, ссылка %s→%s", n2, uuid0, uuid2, url0, url2)
+	}
+	if exp2 <= exp0 {
+		t.Fatalf("продление не легло в ту же учётку: срок %s → %s", exp0, exp2)
+	}
+	if p.email(name) != "client@example.com" {
+		t.Fatalf("почта учётки после привязки: %v", p.email(name))
+	}
 }
