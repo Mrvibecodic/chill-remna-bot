@@ -932,7 +932,7 @@ var en = map[string]string{
 	"btn.trial_user":               "🎁 Trial",
 	"trial.title":                  "🎁 <b>Trial</b>\n\nFree one-time subscription activation for a new user.\n\n⚡ Status: %s\n🗓 Duration: %d days\n📊 Traffic: %s\n🖥 Devices (HWID): %s\n♻️ Traffic reset: %s\n🛒 Buying during trial: %s\n🔁 Return if unused: %s\n📧 Email accounts: %s\n\n📡 Squads:\n🏠 Internal: %s\n📡 External: %s",
 	"trial.reset_off":              "off",
-	"trial.reset_on":               "up to %d times, threshold %d%%",
+	"trial.reset_on":               "returns: %d, threshold %d%%",
 	"trial.btn_reset":              "🔁 How many times",
 	"trial.btn_reset_pct":          "📉 Traffic threshold",
 	"trial.email_off":              "off",

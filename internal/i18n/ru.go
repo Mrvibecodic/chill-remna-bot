@@ -932,7 +932,7 @@ var ru = map[string]string{
 	"btn.trial_user":               "🎁 Триал",
 	"trial.title":                  "🎁 <b>Триал</b>\n\nБесплатная разовая активация подписки для нового пользователя.\n\n⚡ Статус: %s\n🗓 Срок: %d дн.\n📊 Трафик: %s\n🖥 Устройства (HWID): %s\n♻️ Сброс трафика: %s\n🛒 Покупка во время триала: %s\n🔁 Возврат неиспользованного: %s\n📧 Аккаунтам по почте: %s\n\n📡 Сквады:\n🏠 Internal: %s\n📡 External: %s",
 	"trial.reset_off":              "выключен",
-	"trial.reset_on":               "до %d раз, порог %d%%",
+	"trial.reset_on":               "повторов: %d, порог %d%%",
 	"trial.btn_reset":              "🔁 Сколько раз",
 	"trial.btn_reset_pct":          "📉 Порог трафика",
 	"trial.email_off":              "выключен",
