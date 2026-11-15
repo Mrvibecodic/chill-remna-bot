@@ -197,7 +197,7 @@ func TestUserSearch_PanelHint(t *testing.T) {
 	}{
 		{"freeacc", model.AccessPublic, "Telegram ID у неё не указан", ""},
 		{"newacc", model.AccessPublic, "ещё не заходил в бота", ""},
-		{"newacc", model.AccessWhitelist, "Добавить ID в вайтлист", ""},
+		{"newacc", model.AccessWhitelist, "ID в вайтлист", ""},
 		{"knownacc", model.AccessPublic, "по кнопке ниже", "usr:view:1000000002"},
 		{"knownacc_addsub", model.AccessPublic, "доп-подписка", ""},
 	}

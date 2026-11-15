@@ -85,10 +85,9 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 
 	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.user_search"), "usr:find")},
+		{btn(i18n.T(lang, "btn.user_search"), "usr:find"), btn(i18n.T(lang, "btn.torrents"), "torj:home")},
+		// Вайтлист — в «Доступе»: здесь кнопки дублировали его.
 		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
-		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
-		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
 	}
 	now := time.Now().UTC()
 	for _, u := range users {
@@ -309,14 +308,15 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"),
-		btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids"),
-	})
+	// Подпись предзаполненных длинная: по кнопке в ряд, а не неровная пара.
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids")})
 	if total > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_clear"), "usr:wlclear")})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	// Вайтлист открывается из «Доступа» — туда и назад.
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:access")})
 
 	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1)) + "\n\n" + i18n.T(lang, "users.legend")
 	if total == 0 {
@@ -652,7 +652,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.showAccess(ctx, chatID)
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:access")
 	case "find":
 		a.startUserSearch(ctx, chatID)
 	case "fpage":
