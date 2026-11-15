@@ -8,7 +8,7 @@ import (
 
 var allSectionKeys = []string{
 	SectionBuySubscription, SectionMySubscription, SectionReferral, SectionPromoCode,
-	SectionMainMenu, SectionAdminStats,
+	SectionAdminIface, SectionAdminStats,
 }
 
 func TestEverySectionHasImage(t *testing.T) {

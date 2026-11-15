@@ -90,7 +90,7 @@ func TestRejectedSectionBannerIsReported(t *testing.T) {
 	}{
 		{"своя картинка отвергнута", assets.SectionReferral, "own-picture", uid, "menu:ref", true},
 		{"первая отправка", assets.SectionReferral, "", uid, "menu:ref", false},
-		{"раздел без своей картинки", assets.SectionMainMenu, "cached-builtin", planAdmin, "menu:iface", false},
+		{"раздел без своей картинки", assets.SectionAdminIface, "cached-builtin", planAdmin, "menu:iface", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

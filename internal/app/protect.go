@@ -85,23 +85,22 @@ func withProtect(ctx context.Context, on bool) context.Context {
 
 // adminClosedData — нажатие ведёт в раздел админки, закрытый от пересылки
 // целиком, со всеми вложенными экранами: тарифы и триал (тарифы, цены,
-// быстрая настройка, триал, сквады, доп-подписка), названия и описания
-// способов оплаты, обновление, бэкап базы и сводка ошибок оплат. Копировать
+// быстрая настройка, триал, сквады, доп-подписка), обновление, бэкап базы и
+// сводка ошибок оплат. Копировать
 // там нечего: пароль бэкапа бот не показывает, а адреса и ключи живут в
 // других разделах.
 func adminClosedData(data string) bool {
 	switch data {
-	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub", "tx:pm",
+	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub",
 		"menu:update", "menu:backup":
 		return true
 	}
-	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:", "upd:", "bk:", "pay:err"} {
+	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "upd:", "bk:", "pay:err"} {
 		if strings.HasPrefix(data, p) {
 			return true
 		}
 	}
-	// Экраны текста способа оплаты, открытые из «Названий и описаний».
-	return strings.HasPrefix(data, "tx:") && strings.Contains(data, ":method.")
+	return false
 }
 
 // adminClosedInput — ответ админа на вопрос из тех же разделов.
@@ -120,7 +119,7 @@ func adminClosedInput(ui *uiState) bool {
 	case "baseprice", "traffic_gb", "device_per", "device_limit", "currency":
 		return true
 	}
-	return strings.HasPrefix(ui.txtKey, "method.")
+	return false
 }
 
 func protectedCtx(ctx context.Context) bool {

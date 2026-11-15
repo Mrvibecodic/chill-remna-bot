@@ -144,11 +144,11 @@ func (a *App) methodEnabled(method string) bool {
 
 // showPayMethodTexts — экран «Способы оплаты: названия и описания». Включённые
 // способы сверху.
-// from == "t" — пришли из «Тексты бота», иначе — из настроек продаж.
+// from == "t" — пришли из «Тексты бота», иначе — из «Интерфейса».
 func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string) {
 	lang := a.lang(chatID)
 	bl := a.botLang()
-	back := "menu:paymethods"
+	back := "menu:iface"
 	if from == "t" {
 		back = "tx:home"
 	}

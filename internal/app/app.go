@@ -203,6 +203,9 @@ type App struct {
 	editTarget      map[int64]int
 	editProt        map[int64]bool
 	screenSection   map[int64]string
+	// screenProt — текущий экран ушёл с запретом пересылки. По нему ответ
+	// админа на вопрос правит экран на месте (см. adminInputEditsScreen).
+	screenProt map[int64]bool
 	// notices — уведомления с одной кнопкой «Главная» (notify): они не экран,
 	// и без учёта оставались висеть после ухода с них. noticeHit — уведомление,
 	// на кнопку которого нажали: уходит вместе со старым экраном.
@@ -1100,6 +1103,9 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	if adminClosedInput(ui) {
 		ctx = withAdminClosed(ctx)
 	}
+	if isAdmin {
+		a.adminInputEditsScreen(chatID)
+	}
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
 		return
@@ -1302,7 +1308,9 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 // приходит из фоновой горутины, пока админ нажимает что-то ещё.
 func (a *App) showUpdateMsg(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) int {
 	t := a.applyPremium(text)
-	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, t, rows) {
+	// Экран, с которого запустили, бывает и с картинкой раздела — тогда
+	// правится подпись.
+	if msgID != 0 && (a.msg.EditText(ctx, chatID, msgID, t, rows) || a.msg.EditCaption(ctx, chatID, msgID, t, rows)) {
 		a.adoptScreen(ctx, chatID, msgID)
 		return msgID
 	}
@@ -1595,15 +1603,63 @@ func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{homeRow(a.lang(chatID))})
 }
 
+// sendKB — экран текстом. В админке на экране с картинкой раздела (вопрос
+// «введите значение», короткий итог) он уходит подписью под той же
+// картинкой: так экран правится на месте, а не удаляется и не приходит
+// заново — картинку в текст Telegram править не даёт.
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	if a.cfg != nil && chatID == a.cfg.AdminID {
+		if sec := a.getScreenSection(chatID); sec != "" {
+			a.sendKBSection(ctx, chatID, sec, text, rows)
+			return
+		}
+	}
+	a.sendKBText(ctx, chatID, text, rows)
+}
+
+// sendKBText — экран обычным текстовым сообщением.
+func (a *App) sendKBText(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
 	t := a.applyPremium(text)
 	prot := a.screenProtect(ctx, chatID, copyableText(t))
 	a.setScreenSection(chatID, "")
 	if a.editMatches(chatID, prot) && a.tryEditScreen(ctx, chatID, t, rows) {
+		a.noteScreenProt(chatID, prot)
 		return
 	}
 	pctx := withProtect(ctx, prot)
-	a.emit(ctx, chatID, func() int { return a.msg.SendKB(pctx, chatID, t, rows) })
+	a.emit(ctx, chatID, func() int {
+		id := a.msg.SendKB(pctx, chatID, t, rows)
+		if id != 0 {
+			a.noteScreenProt(chatID, prot)
+		}
+		return id
+	})
+}
+
+// noteScreenProt запоминает, закрыт ли текущий экран от пересылки.
+func (a *App) noteScreenProt(chatID int64, prot bool) {
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.screenProt == nil {
+		a.screenProt = map[int64]bool{}
+	}
+	a.screenProt[chatID] = prot
+}
+
+// adminInputEditsScreen — ответ админа на вопрос: следующий экран правит
+// текущий (вопрос) на месте, а не удаляет его и не приходит заново.
+func (a *App) adminInputEditsScreen(chatID int64) {
+	a.scrMu.Lock()
+	ids := a.screen[chatID]
+	prot := a.screenProt[chatID]
+	a.scrMu.Unlock()
+	if len(ids) != 1 {
+		return
+	}
+	a.setEditTarget(chatID, ids[0])
+	if prot {
+		a.markEditProt(chatID)
+	}
 }
 
 // sendKBParts отправляет экран, не влезающий в одно сообщение Telegram.
@@ -1650,11 +1706,13 @@ func (a *App) sendKBParts(ctx context.Context, chatID int64, parts []string, row
 // приходит. На отказе пробуем встроенный баннер, а негодную настройку снимаем
 // — иначе бот остаётся «мёртвым» до вмешательства администратора.
 func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
-	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableEnts(caption, ents)))
+	prot := a.screenProtect(ctx, chatID, copyableEnts(caption, ents))
+	pctx := withProtect(ctx, prot)
 	a.emit(ctx, chatID, func() int {
 		id, err := a.msg.SendBanner(pctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
 			a.noteBannerOK(photo)
+			a.noteScreenProt(chatID, prot)
 			return id
 		}
 		// Настройку снимаем ТОЛЬКО когда Telegram отверг саму картинку:
@@ -1775,7 +1833,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	// Предел подписи Telegram (1024) считается в единицах UTF-16 видимого
 	// текста: эмодзи — по две. Длинная подпись уходит обычным сообщением.
 	if !assets.Has(section) || len([]rune(caption)) > 1000 || len(utf16.Encode([]rune(stripHTMLTags(caption)))) > 1000 {
-		a.sendKB(ctx, chatID, caption, rows)
+		a.sendKBText(ctx, chatID, caption, rows)
 		return
 	}
 	t := a.applyPremium(caption)
@@ -1788,6 +1846,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
 			a.adoptScreen(ctx, chatID, target)
 			a.setScreenSection(chatID, section)
+			a.noteScreenProt(chatID, prot)
 			return
 		}
 	}
@@ -1803,6 +1862,9 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	a.emit(ctx, chatID, func() int {
 		id, nf := a.msg.SendPhotoCacheable(pctx, chatID, cached, embed, t, rows)
 		newFileID = nf
+		if id != 0 {
+			a.noteScreenProt(chatID, prot)
+		}
 		return id
 	})
 	a.keepSectionPhoto(ctx, section, cached, newFileID)

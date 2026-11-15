@@ -280,7 +280,7 @@ func (a *App) sendSysKB(ctx context.Context, chatID int64, text string, rows [][
 }
 
 func (a *App) sendIfaceKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, text, rows)
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, text, rows)
 }
 
 func (a *App) sendMktKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
@@ -338,12 +338,12 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 
 func (a *App) showIface(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, i18n.T(lang, "menu.iface_title"), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, i18n.T(lang, "menu.iface_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
+		{btn(i18n.T(lang, "btn.texts"), "tx:home"), btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
+		{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
-		{btn(i18n.T(lang, "btn.texts"), "tx:home")},
-		{btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
 		{btn(i18n.T(lang, "btn.webui"), "menu:webui")},
 		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
 		homeRow(lang),
@@ -357,7 +357,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 // выбора базы, а обработчик языка живёт только при активном мастере.
 func (a *App) showBotLang(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, i18n.T(lang, "lang.title"), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, i18n.T(lang, "lang.title"), [][]models.InlineKeyboardButton{
 		{btn("🇷🇺 "+i18n.T(lang, "lang.name_ru"), "botlang:ru"), btn("🇬🇧 "+i18n.T(lang, "lang.name_en"), "botlang:en")},
 		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
@@ -486,7 +486,6 @@ func (a *App) showPayMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		navBack(lang, "menu:pay"),
 	)

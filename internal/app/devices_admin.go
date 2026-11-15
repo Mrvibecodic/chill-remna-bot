@@ -38,7 +38,7 @@ func (a *App) showDevicesAdmin(ctx context.Context, chatID int64) {
 		{btn(fieldMark(lang, "devadm.f_dates", cfg.Dates), "devadm:dates")},
 		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, text, rows)
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, text, rows)
 }
 
 // fieldMark — подпись тумблера поля с отметкой включённости.

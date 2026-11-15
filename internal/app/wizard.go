@@ -143,7 +143,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 		return
 	}
-	if isAdmin && adminClosedData(cq.Data) {
+	// «Отмена» вопроса возвращает на экран, с которого спросили: режим у
+	// него тот же, что у раздела этого экрана.
+	if isAdmin && (adminClosedData(cq.Data) || cq.Data == "inp:cancel" && adminClosedData(a.getUI(chatID).inputBack)) {
 		ctx = withAdminClosed(ctx)
 	}
 	key, val, _ := strings.Cut(cq.Data, ":")

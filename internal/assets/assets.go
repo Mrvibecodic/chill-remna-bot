@@ -10,7 +10,7 @@ import (
 var sectionsFS embed.FS
 
 const (
-	SectionMainMenu        = "main_menu"
+	SectionAdminIface      = "admin_iface"
 	SectionBuySubscription = "buy_subscription"
 	SectionMySubscription  = "my_subscription"
 	SectionReferral        = "referral"

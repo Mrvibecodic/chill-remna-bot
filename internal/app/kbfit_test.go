@@ -173,7 +173,7 @@ func TestAdminScreensFitPhone(t *testing.T) {
 		a.botCfg.Language = lang
 		a.botCfg.P2P.Enabled, a.botCfg.YooKassa.Enabled, a.botCfg.CryptoBot.Enabled = true, true, true
 		ctx := context.Background()
-		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods", "menu:system", "menu:updates", "upd:toggle"} {
+		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods", "menu:system", "menu:updates", "upd:toggle", "menu:iface"} {
 			a.handleCallback(ctx, cb(100, data))
 			fm.mu.Lock()
 			rows := fm.lastKB

@@ -211,8 +211,8 @@ var en = map[string]string{
 	"menu.welcome":            "👋 <b>Welcome, %s!</b>\n\nThis bot gives you VPN access: pick a plan, pay and get a connection key in a couple of minutes.\n\nChoose an action below.",
 	"btn.buy":                 "💳 Buy",
 	"btn.status":              "🩺 Status",
-	"btn.emoji":               "🎨 Emoji",
-	"btn.banner":              "🖼 Banner",
+	"btn.emoji":               "😀 Emoji",
+	"btn.banner":              "🖼 Banner /start",
 	"btn.update":              "⬆️ Update",
 	"btn.check_update":        "🔍 Check",
 	"btn.upd_notify_on":       "🔔 Notifications: on",
@@ -252,16 +252,10 @@ var en = map[string]string{
 	"welcome.bad_image":       "⚠️ That does not look like an image. Send a photo (upload or file) or a link like <code>https://example.com/banner.jpg</code>. «-» restores the built-in one.",
 	"welcome.image_dropped":   "⚠️ Telegram rejected your main banner image — it has been cleared and the bot shows the built-in one. Upload the image again (photo or a direct link).",
 	"welcome.ask_text":        "Send a message with exactly the formatting and line breaks you want — I'll keep it 1:1.",
-	"emoji.title":             "🎨 <b>Premium emoji</b>\n\nReplace plain bot emoji with your premium animated ones (custom_emoji). Works if your or the bot account has Telegram Premium.\n\n<b>How to use:</b> tap an emoji below — the bot will ask you to send your premium version of the same emoji (one message). ✅ means already set.\n\nHere is where each emoji appears for the user:",
+	"emoji.title":             "😀 <b>Premium emoji</b>\n\nReplace plain bot emoji with your premium animated ones (custom_emoji). Works if your or the bot account has Telegram Premium.\n\n<b>How to use:</b> tap an emoji below — the bot will ask you to send your premium version of the same emoji (one message). ✅ means already set.\n\nHere is where each emoji appears for the user:",
 	"emoji.ask_one":           "Send the animated version for %s as a single emoji.",
 
-	"menu.iface_title": "🎨 <b>Interface</b>\n\n" +
-		"How the bot looks to your customer:\n" +
-		"• 🖼 /start banner — main image + welcome text.\n" +
-		"• 🖼 Section banners — replace the image for any bot screen.\n" +
-		"• 🎨 Emoji — replace plain emoji with your premium ones.\n" +
-		"• 🛟 Contacts &amp; documents — channel/support links, user agreement and privacy policy.\n" +
-		"• ✏️ Bot texts — change the messages, buttons and e-mails your users see.",
+	"menu.iface_title": "🎨 <b>Interface</b>\n\nHow the bot looks to buyers: pictures, emoji, texts, payment method names, contacts, mini app and cabinet.",
 	"menu.marketing_title": "📣 <b>Marketing</b>\n\n" +
 		"Attract and retain customers:\n" +
 		"• 🎟 Promo codes — balance, subscription-day or traffic bonuses.\n" +
@@ -657,8 +651,8 @@ var en = map[string]string{
 	"admin.ask_base_price":     "Enter the base price for %d mo (e.g. 150):",
 	"admin.ask_currency":       "Enter the currency symbol for money methods (e.g. RUB, ₽, USD):",
 
-	"btn.section_banners":          "🖼 Section banners",
-	"banners.title":                "🖼 <b>Section banners</b>\n\nPick a section to see its current image and replace it with your own. The purchase, invite and promo code images are also used in the admin area: in «Sales», «Users» and «Marketing». «Reset» restores the default image.",
+	"btn.section_banners":          "🗃 Section banners",
+	"banners.title":                "🗃 <b>Section banners</b>\n\nPick a section to see its current image and replace it with your own. The purchase, invite and promo code images are also used in the admin area: in «Sales», «Users» and «Marketing». «Reset» restores the default image.",
 	"banners.section_caption":      "<b>%s</b>\n\nThis is the current banner for this section (what users see). Tap «Upload new» and send a photo to change it. «Reset» restores the default.",
 	"banners.ask_upload":           "📤 Send a photo — it will become the banner for «%s».\n\n💡 <b>To avoid heavy compression:</b>\n• Exactly <b>1280×640</b> px (2:1).\n• JPEG, quality 90–95%%.\n• File size <b>60–200 KB</b> (under 40 KB — artifacts already there; over 500 KB — Telegram compresses harder).\n• No transparency; PNG is pointless — Telegram converts to JPEG anyway.",
 	"banners.dropped":              "⚠️ Telegram rejected the saved image of the «%s» section — the bot shows the default one. If you had uploaded your own, upload it again.",
@@ -1614,8 +1608,8 @@ var en = map[string]string{
 	"panelauth.check_ok":         "✅ Panel is reachable! Users in panel: %d.",
 	"panelauth.check_fail":       "❌ Panel does not answer: %s",
 	"panelauth.save_fail":        "❌ Could not save: %s",
-	"btn.webui":                  "🎨 Mini app & cabinet design",
-	"webui.title":                "🎨 <b>Mini app and web cabinet design</b>\n\nDesign: <b>%s</b>\nDefault theme: <b>%s</b>\nHeader name: <b>%s</b>\nBrand color: <b>%s</b>\nLogo: %s\nDark theme logo: %s\n\nThe new design is minimalist, with light and dark themes: people switch the theme themselves, and the one chosen here is the default. The logo and name sit in the page header, the color is used on buttons. The «Best value» badge marks the term with the lowest price per month. Everything applies instantly, no restart needed.",
+	"btn.webui":                  "🖌 Mini app & cabinet design",
+	"webui.title":                "🖌 <b>Mini app and web cabinet design</b>\n\nDesign: <b>%s</b>\nDefault theme: <b>%s</b>\nHeader name: <b>%s</b>\nBrand color: <b>%s</b>\nLogo: %s\nDark theme logo: %s\n\nThe new design is minimalist, with light and dark themes: people switch the theme themselves, and the one chosen here is the default. The logo and name sit in the page header, the color is used on buttons. The «Best value» badge marks the term with the lowest price per month. Everything applies instantly, no restart needed.",
 	"webui.classic_note":         "ℹ️ The classic design is on: the name, color and logos take effect after switching to the new one.",
 	"webui.design_classic":       "classic",
 	"webui.design_minimal":       "new (minimalist)",
@@ -1757,9 +1751,9 @@ var en = map[string]string{
 	"method.ym_note":             "",
 	"method.hl_note":             "",
 	"method.trb_note":            "",
-	"btn.pay_names":              "✏️ Payment method names and notes",
-	"tx.btn_methods":             "💳 Payment methods",
-	"tx.methods_title":           "💳 <b>Payment methods: names and notes</b>\n\nThe <b>name</b> is shown on the method button in the chat and in the method list of the mini-app and web cabinet.\nThe <b>note</b> is optional: in the chat it is added to the payment screen after the method is chosen, in the mini-app and cabinet — as a caption under the method.\nThe <b>icon</b> (🎁, 💳…) and the price on the chat button live in the button template: tap the name → «🔘 Chat button (icon)».\n\nTap a name or «📝» to change it. ✅ — the method is on.",
+	"btn.pay_names":              "🪧 Payment method names and notes",
+	"tx.btn_methods":             "🪧 Payment method names",
+	"tx.methods_title":           "🪧 <b>Payment method names and notes</b>\n\nThe <b>name</b> is shown on the method button in the chat and in the method list of the mini-app and web cabinet.\nThe <b>note</b> is optional: in the chat it is added to the payment screen after the method is chosen, in the mini-app and cabinet — as a caption under the method.\nThe <b>icon</b> (🎁, 💳…) and the price on the chat button live in the button template: tap the name → «🔘 Chat button (icon)».\n\nTap a name or «📝» to change it. ✅ — the method is on.",
 	"tx.btn_note":                "📝 Note",
 	"tx.btn_method_btn":          "🔘 Chat button (icon)",
 	"tx.btn_note_set":            "📝 Note ✏️",

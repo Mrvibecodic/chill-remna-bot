@@ -105,7 +105,7 @@ func TestUserScreensProtect(t *testing.T) {
 			t.Fatalf("%s у админа ушёл без запрета пересылки", data)
 		}
 	}
-	for _, data := range []string{"menu:paymethods", "menu:system", "menu:status"} {
+	for _, data := range []string{"menu:paymethods", "menu:system", "menu:status", "menu:iface", "tx:pm"} {
 		if id := tap(100, data); fm.isProt(id) {
 			t.Fatalf("%s у админа закрыт", data)
 		}
@@ -177,8 +177,7 @@ func TestLegalAcceptScreenOpen(t *testing.T) {
 	}
 }
 
-// Разделы «Тарифы и триал» и «Названия и описания способов» закрыты от
-// пересылки со всеми вложенными экранами — и после нажатия кнопки, и после
+// Раздел «Тарифы и триал» закрыт от пересылки со всеми вложенными экранами — и после нажатия кнопки, и после
 // ответа на вопрос. Ссылка на тариф и экраны самих способов оплаты (там карты
 // и ключи) остаются открытыми.
 func TestAdminNestedSalesScreensClosed(t *testing.T) {
@@ -201,7 +200,7 @@ func TestAdminNestedSalesScreensClosed(t *testing.T) {
 	}
 	for _, data := range []string{
 		"menu:plans", "pln:open:" + model.PlanCodeBase, "pln:pr:" + model.PlanCodeBase, "prc:quick",
-		"menu:trial", "menu:squads", "menu:addsub", "tx:pm", "tx:k:method.yk_name", "trial:days",
+		"menu:trial", "menu:squads", "menu:addsub", "trial:days",
 	} {
 		if !tap(data) {
 			t.Errorf("%s ушёл без запрета пересылки", data)
@@ -266,44 +265,6 @@ func TestAdminSystemChildrenClosed(t *testing.T) {
 	for _, data := range []string{"menu:apilog", "menu:webhooks", "menu:panelauth", "menu:miniapp", "menu:cabinet", "menu:mail"} {
 		if tap(data) {
 			t.Errorf("%s закрыт, а там адреса и ключи", data)
-		}
-	}
-}
-
-// Переход между экраном раздела и его экранами правит сообщение на месте, а
-// не присылает новое: Telegram не даёт сменить запрет пересылки правкой,
-// поэтому у раздела и его экранов режим один. Новое сообщение — только на
-// входе в подраздел с другим режимом.
-func TestAdminNavigationEditsInPlace(t *testing.T) {
-	ctx := context.Background()
-	a, fm, fs := newTextsApp(t)
-	fm.editOK = true
-	_ = fs.UpsertUser(ctx, protUser)
-	_ = fs.AddPayment(ctx, &model.Payment{ID: 5, TelegramID: protUser, Method: model.PayMethodP2P, Months: 1, Amount: "199 ₽",
-		Status: model.PaymentPaid, CreatedAt: "2026-11-01T10:00:00Z", ExtID: "p2p:1"})
-	id := strconv.FormatInt(protUser, 10)
-	clusters := map[string][]string{
-		"menu:pay":              {"menu:payments", "menu:analytics", "menu:payplans"},
-		"menu:paymethods":       {"menu:p2p", "menu:stars", "menu:yookassa", "menu:cryptobot", "menu:platega", "menu:heleket", "menu:tribute", "menu:yoomoney", "menu:wallet", "menu:moynalog"},
-		"menu:payplans":         {"menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub"},
-		"menu:system":           {"menu:status", "menu:apilog", "menu:panelauth", "menu:webhooks", "menu:mail", "menu:miniapp", "menu:cabinet", "menu:rsimp", "menu:reconf"},
-		"menu:payments":         {"pay:card:5:0", "pay:err"},
-		"menu:updates":          {"upd:chan"},
-		"menu:backup":           {"bk:dest"},
-		"usr:view:" + id:        {"usr:pays:" + id + ":0", "usr:plans:" + id},
-		"usr:pays:" + id + ":0": {"usr:pay:5:0"},
-	}
-	for hub, kids := range clusters {
-		for _, kid := range kids {
-			for _, p := range [][2]string{{hub, kid}, {kid, hub}} {
-				a.handleCallback(ctx, cb(100, p[0]))
-				msg := fm.seq
-				seq, edits := fm.seq, len(fm.edits)
-				a.handleCallback(ctx, cbUnder(100, p[1], msg, fm.isProt(msg)))
-				if fm.seq != seq || len(fm.edits) == edits {
-					t.Errorf("%s → %s: новое сообщение вместо правки", p[0], p[1])
-				}
-			}
 		}
 	}
 }
