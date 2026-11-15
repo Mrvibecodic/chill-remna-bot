@@ -94,15 +94,17 @@ func (a *App) userLabelByID(ctx context.Context, id int64) string {
 	return strconv.FormatInt(id, 10)
 }
 
-// userLabelFor — подпись пользователя. У аккаунта кабинета нет ни имени, ни
-// @username — подписываем почтой. Проверяется не знак идентификатора, а наличие
-// имени: после привязки Telegram аккаунт положительный, и подписывать его
-// почтой вместо имени уже неправильно.
+// userLabelFor — подпись пользователя в текстах админки (карточки,
+// уведомления): «почта / @ник (ID)», если у аккаунта оба способа входа, иначе
+// тот, что есть. Почта бывает только у аккаунтов, заведённых в кабинете; после
+// привязки Telegram такой аккаунт положительный, и у него оба способа.
 func (a *App) userLabelFor(ctx context.Context, u *model.User) string {
-	if u.Username == "" && u.FirstName == "" {
-		if l := a.emailLabel(ctx, u.TelegramID); l != "" {
-			return l
-		}
+	email := a.emailLabel(ctx, u.TelegramID)
+	switch {
+	case email != "" && u.TelegramID > 0:
+		return email + " / " + userLabel(u)
+	case email != "":
+		return email
 	}
 	return userLabel(u)
 }
@@ -118,20 +120,27 @@ func (a *App) emailLabelWith(ctx context.Context, id int64, name func(string) st
 	if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
 		// Эскейп обязателен: e-mail — свободный ввод при регистрации в
 		// кабинете и попадает в сообщения с ParseModeHTML.
-		return "📧 " + name(wu.Email)
+		return name(wu.Email)
 	}
 	return ""
 }
 
-// userButtonLabel — подпись пользователя для кнопки: без HTML-экранирования.
+// userButtonLabel — подпись пользователя на кнопке списка, без
+// HTML-экранирования. Подпись — по способу регистрации (почта или @ник), а
+// второй способ входа показывает только значок: 💬 после почты — к аккаунту
+// привязан Telegram. Один способ — без значков.
 func (a *App) userButtonLabel(ctx context.Context, u *model.User) string {
-	if u.Username == "" && u.FirstName == "" {
-		if l := a.emailLabelWith(ctx, u.TelegramID, plainName); l != "" {
-			return l
+	if email := a.emailLabelWith(ctx, u.TelegramID, plainName); email != "" {
+		if u.TelegramID > 0 {
+			return email + " " + tgLinkedMark
 		}
+		return email
 	}
 	return userLabelWith(u, plainName)
 }
+
+// tgLinkedMark — значок «к почтовому аккаунту привязан Telegram».
+const tgLinkedMark = "💬"
 
 // plainName — имя для подписи кнопки: та же обрезка, что у escapeName, без
 // экранирования.

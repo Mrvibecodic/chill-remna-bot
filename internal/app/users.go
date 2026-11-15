@@ -100,7 +100,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows, homeRow(lang))
 
-	a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "users.title", total, page+1, pages), rows)
+	a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "users.title", total, page+1, pages, i18n.T(lang, "users.legend")), rows)
 }
 
 // userListBtn — строка пользователя в списке: значок и цвет кнопки по статусу
@@ -183,7 +183,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 	var rows [][]models.InlineKeyboardButton
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userLabelByID(ctx, u.TelegramID), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	if nav := paginationRow("usr:fpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
@@ -191,7 +191,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 
 	// Запрос уходит в HTML-сообщение: без экранирования «R&D» или «<тест»
 	// роняют отправку целиком, и экран просто не появляется.
-	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1))
+	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1), i18n.T(lang, "users.legend"))
 	if total == 0 {
 		title = i18n.T(lang, "users.search_empty", escapeName(q))
 		// В боте пусто — может, человек есть в панели, но не связан с чатом.
@@ -318,7 +318,7 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
 
-	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1))
+	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1)) + "\n\n" + i18n.T(lang, "users.legend")
 	if total == 0 {
 		title = i18n.T(lang, "wl.granted_empty")
 	}

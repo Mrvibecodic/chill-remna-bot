@@ -288,10 +288,11 @@ var en = map[string]string{
 	"btn.prev":         "‹ Prev",
 	"btn.next":         "Next ›",
 
-	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\n" +
+	"users.title": "👥 <b>Bot users</b>\nTotal: %d · page %d/%d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\n%s\n\n" +
 		"People registered in the bot. On block and delete the bot asks " +
 		"whether to touch the panel subscription too.\n\nChoose a user:",
-	"users.empty": "👥 No users yet.",
+	"users.empty":  "👥 No users yet.",
+	"users.legend": "Each user is shown by how they signed up: email or @username. 💬 after an email — Telegram is linked too, so both ways to sign in work.",
 	"user.card": "👤 <b>%s</b>\nRegistered: %s\nP2P access: %s\nStatus: %s\n\n%s\n\n" +
 		"🗑 «Delete» will ask whether to remove from the bot only or together with the panel subscription (only this user's account is deleted).",
 	"user.active":             "active ✅",
@@ -1238,7 +1239,7 @@ var en = map[string]string{
 	"topup.disabled":        "Balance top-up is disabled.",
 	"btn.user_search":       "🔍 Find a user",
 	"users.search_ask":      "Who are you looking for? Send a Telegram ID, @handle, name or web account e-mail — a part is enough.",
-	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription",
+	"users.search_title":    "🔍 <b>Search: %s</b>\nFound: %d\nPage %d of %d\n🟢 active · 🔵 trial · 🔴 expired · ⚪ no subscription\n\n%s",
 	"users.search_empty":    "🔍 Nothing found for «%s».\nSearch covers Telegram ID, handle, name and web account e-mail.",
 	"users.search_panel":    "ℹ️ The panel has an account «%s» with Telegram ID <code>%d</code>. Open this person's card with the button below.",
 	"users.panel_new":       "ℹ️ The panel has an account «%s» with Telegram ID <code>%d</code>. This person has not opened the bot yet — the bot links the account by itself on their first visit.",

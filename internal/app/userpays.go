@@ -354,7 +354,7 @@ func (a *App) applyPayUserSearch(ctx context.Context, chatID int64, text string)
 		var rows [][]models.InlineKeyboardButton
 		for _, u := range users {
 			rows = append(rows, []models.InlineKeyboardButton{
-				btn("👤 "+userLabelWith(&u, func(s string) string { return s }), "usr:pays:"+strconv.FormatInt(u.TelegramID, 10)+":0"),
+				btn("👤 "+a.userButtonLabel(ctx, &u), "usr:pays:"+strconv.FormatInt(u.TelegramID, 10)+":0"),
 			})
 		}
 		rows = append(rows, back)
