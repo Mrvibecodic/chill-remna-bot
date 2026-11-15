@@ -706,7 +706,7 @@ var en = map[string]string{
 	"legal.and":                    " and ",
 	"legal.start_declined":         "🚪 The bot cannot be used without accepting the documents. Open them again whenever you are ready.",
 	"legal.btn_show_again":         "📜 Show documents",
-	"legal.title":                  "📜 <b>Documents</b>\\n\\nUser agreement: %s\\nPrivacy policy: %s\\n\\nA document can have text inside the bot and/or a link to a page. Where users see them:\\n🏠 Menu — the «📜 Documents» button in the main menu\\n💳 Purchase — consent before the first payment\\n🚪 Start — consent on the first start\\n🧾 Checkout — links on the payment screen",
+	"legal.title":                  "📜 <b>Documents</b>\n\nUser agreement: %s\nPrivacy policy: %s\n\nA document can have text inside the bot and/or a link to a page. Where users see them:\n🏠 Menu — the «📜 Documents» button in the main menu\n💳 Purchase — consent before the first payment\n🚪 Start — consent on the first start\n🧾 Checkout — links on the payment screen",
 	"legal.title_empty":            "\n\n<i>Nothing is set yet — users see no documents.</i>",
 	"legal.state_none":             "not set ❌",
 	"legal.state_text":             "text ✅",
