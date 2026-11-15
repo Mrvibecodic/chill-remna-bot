@@ -194,8 +194,6 @@ input[type=file].field{padding:12px;height:auto}
 .empty{padding:26px 16px;text-align:center;color:var(--muted)}
 .ava{width:40px;height:40px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
 .ava img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
-.hero-logo{display:flex;justify-content:center;margin:26px 0 6px}
-.hero-logo img{height:48px;max-width:220px;object-fit:contain}
 .tgw{display:flex;justify-content:center;min-height:48px;margin-top:12px}
 
 /* скелетоны, всплывашки, диалог */
@@ -528,17 +526,16 @@ function applyAccent(dark){
   s.setProperty('--accent',rgbHex(c));s.setProperty('--on-accent',on);
   s.setProperty('--acc-ink',rgbHex(ink));s.setProperty('--acc-soft',rgbHex(soft));
 }
-function brandHTML(big){
+function brandHTML(){
   var h='',cls=BRAND.logo_dark?' class="has-dark"':'';
   if(BRAND.logo){
     h+='<img class="logo-l" alt="" src="'+esc(BRAND.logo)+'" onerror="this.remove()">';
     if(BRAND.logo_dark)h+='<img class="logo-d" alt="" src="'+esc(BRAND.logo_dark)+'" onerror="this.remove()">';
   }
   var name=BRAND.name||(!BRAND.logo?(BRAND.title||T('account_title')):'');
-  if(big)return BRAND.logo?'<div class="hero-logo"'+cls+'>'+h+'</div>':'';
   return '<span'+cls+' style="display:flex;align-items:center;gap:10px;min-width:0">'+h+(name?'<span class="nm">'+esc(name)+'</span>':'')+'</span>';
 }
-function paintBrand(){document.getElementById('brand').innerHTML=brandHTML(false);}
+function paintBrand(){document.getElementById('brand').innerHTML=brandHTML();}
 // walletShown — кошелёк в меню, как в чате: пока его можно пополнить или на
 // нём есть деньги.
 function walletShown(){return !!(STATE.menu&&STATE.menu.topup_on)||STATE.balanceK>0;}
@@ -599,7 +596,7 @@ function renderSide(on){
   document.body.classList.toggle('noside',!on);
   if(!on){side.innerHTML='';return;}
   if(!STATE.me){
-    var sk='<div class="sbrand">'+brandHTML(false)+'</div>';
+    var sk='<div class="sbrand">'+brandHTML()+'</div>';
     [76,96,108,84,70].forEach(function(w){sk+='<div class="snav"><span class="sk" style="margin:0;border:0;background:var(--soft);width:18px;height:18px;border-radius:6px;flex:none"></span><span class="sk" style="margin:0;border:0;background:var(--soft);height:12px;border-radius:6px;width:'+w+'px"></span></div>';});
     side.innerHTML=sk+'<div class="sfoot"><span class="sk" style="margin:0;border:0;background:var(--soft);width:36px;height:36px;border-radius:50%;flex:none"></span><span class="sk" style="margin:0;border:0;background:var(--soft);height:12px;border-radius:6px;width:96px"></span></div>';
     return;
@@ -607,7 +604,7 @@ function renderSide(on){
   if(CUR.name==='p2p')SECT=CUR.arg&&CUR.arg.topup?'wallet':'plans';else if(SECTS[CUR.name])SECT=SECTS[CUR.name];
   var m=STATE.menu||{},s=STATE.sub||{};
   function it(key,ic,label,fn,bdg){return '<button class="snav'+(SECT===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+esc(label)+'</span>'+(bdg?'<span class="bdg">'+esc(bdg)+'</span>':'')+'</button>';}
-  var h='<div class="sbrand" onclick="goHome()">'+brandHTML(false)+'</div>';
+  var h='<div class="sbrand" onclick="goHome()">'+brandHTML()+'</div>';
   h+=it('home',IC.bolt,T('home'),'goHome()');
   // «Тарифы» есть всегда, как в чате: на триале внутри — почему купить пока нельзя.
   if(STATE.plans.length||STATE.plansNotice)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
@@ -1331,9 +1328,8 @@ async function renderLogin(){
   // страницы не снять, поэтому она загружается заново.
   if(CHAT_ON&&!cfg.chat_src){location.reload();return;}
   mountChat(cfg.chat_src);
-  if(BRAND.logo)document.getElementById('brand').innerHTML='';
   TG_CFG=cfg;
-  var h='<div class="narrow">'+brandHTML(true)+'<div class="h1 center" style="margin-top:'+(BRAND.logo?'8':'28')+'px">'+esc(T('login'))+'</div><div class="hint center">'+esc(T('login_text'))+'</div>';
+  var h='<div class="narrow"><div class="h1 center" style="margin-top:28px">'+esc(T('login'))+'</div><div class="hint center">'+esc(T('login_text'))+'</div>';
   if(cfg.client_id||cfg.bot_username)h+='<div class="sect">'+esc(T('via_tg'))+'</div><div class="card flat" style="margin-top:0"><div class="tgw" id="tglogin" style="margin-top:0"></div></div>';
   h+='<div class="sect">'+esc(T('via_email'))+'</div><div class="card flat stack" style="margin-top:0"><input id="le" class="field" type="email" autocomplete="email" placeholder="'+esc(T('email'))+'"><input id="lp" class="field" type="password" autocomplete="current-password" placeholder="'+esc(T('password'))+'">'+
     '<button class="btn" onclick="cabAuth(\'login\',this)">'+esc(T('sign_in'))+'</button><button class="btn sec" onclick="cabAuth(\'register\',this)">'+esc(T('register'))+'</button>';
@@ -1365,7 +1361,7 @@ SCREENS.forgot=function(){
 async function doForgot(el){var e=document.getElementById('fe');var v=e?e.value.trim():'';if(!v)return;busy(el,true);try{await post('/api/cabinet/password/forgot',{email:v});}catch(x){}busy(el,false);toast(T('restore_sent'),'ok');}
 function openReset(tok){
   STACK=[];CUR={name:'reset',arg:tok};setBack(false);guestChat();
-  view('<div class="narrow">'+brandHTML(true)+'<div class="h1" style="margin-top:18px">'+esc(T('new_pass'))+'</div><div class="hint">'+esc(T('new_pass_text'))+'</div><div class="card flat stack"><input id="r1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="r2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="doReset2(this,\''+jsq(tok)+'\')">'+esc(T('save'))+'</button><button class="btn ghost" onclick="renderLogin()">'+esc(T('to_login'))+'</button></div></div>');
+  view('<div class="narrow"><div class="h1" style="margin-top:18px">'+esc(T('new_pass'))+'</div><div class="hint">'+esc(T('new_pass_text'))+'</div><div class="card flat stack"><input id="r1" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new'))+'"><input id="r2" class="field" type="password" autocomplete="new-password" placeholder="'+esc(T('pass_new2'))+'"><button class="btn" onclick="doReset2(this,\''+jsq(tok)+'\')">'+esc(T('save'))+'</button><button class="btn ghost" onclick="renderLogin()">'+esc(T('to_login'))+'</button></div></div>');
 }
 SCREENS.reset=function(t){openReset(t);};
 async function doReset2(el,tok){
