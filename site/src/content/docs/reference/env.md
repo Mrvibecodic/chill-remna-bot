@@ -37,7 +37,7 @@ description: Переменные окружения бота и свой диз
 |---|---|---|
 | `COMPOSE_FILE_PATH` | `/compose/docker-compose.yml` | Где внутри контейнера лежит compose-файл. Нужен для `/update`, PostgreSQL и портов. |
 | `COMPOSE_PROJECT` | `remnachillbot` | Имя проекта docker compose. |
-| `COMPOSE_HOST_DIR` | `/opt/remnachillbot` | Папка бота **на сервере**. |
+| `COMPOSE_HOST_DIR` | `/opt/remnachillbot` | Папка бота **на сервере**. Нужна для `/update`, PostgreSQL и портов. |
 | `PANEL_CONTAINER` | `remnawave` | Имя контейнера панели. К её сети бот подключается в режиме «Локально». |
 | `PANEL_NETWORK` | `remnawave-network` | Сеть панели — на случай, если контейнер панели не найден. |
 | `SELF_CONTAINER` | `remnabot` | Имя контейнера бота. По нему прокси панели находит бота. |
