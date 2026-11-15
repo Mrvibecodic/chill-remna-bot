@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -373,6 +374,7 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 	}
 	antifp := s.mini.CabinetAntiFP()
 	branded := hasBrandMarker(data)
+	classic := bytes.Contains(data, []byte(classicBrandMarker))
 
 	// Заголовок кабинета — и название вкладки (<title>), и видимый заголовок
 	// страницы. Описание — только тег <meta>.
@@ -390,7 +392,7 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		head += "<meta name=\"description\" content=\"" + html.EscapeString(d) + "\">\n"
 	}
 	fav := s.mini.CabinetFavicon()
-	if fav == "" && branded {
+	if fav == "" && (branded || classic) {
 		// Без отдельного фавикона вкладку подписывает логотип сервиса.
 		fav = ui.Logo
 	}
@@ -430,6 +432,10 @@ func (s *Server) serveCabinetHTML(w http.ResponseWriter) {
 		// Видимый заголовок (экран входа и шапка) — всегда из настроек.
 		out = strings.ReplaceAll(out, "Личный кабинет", markHeading)
 		values = append(values, markHeading, cabinetTitleHTML(title))
+		if js, err := brandJSON(ui, true); classic && err == nil {
+			out = strings.Replace(out, classicBrandMarker, markBrand, 1)
+			values = append(values, markBrand, string(js))
+		}
 	}
 	out = strings.NewReplacer(values...).Replace(out)
 

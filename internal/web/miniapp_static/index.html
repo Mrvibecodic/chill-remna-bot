@@ -5,6 +5,7 @@
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Личный кабинет</title>
+<script>window.BRAND=/*BRAND_CLASSIC*/{};</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="qrcode.min.js"></script>
 <style>
@@ -77,7 +78,11 @@ svg{width:18px;height:18px;flex:none;vertical-align:middle}
 
 /* header */
 .head{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 18px}
-.head h1{font-size:19px;font-weight:700;letter-spacing:-.2px}
+.head h1{font-size:19px;font-weight:700;letter-spacing:-.2px;min-width:0}
+.hbrand{display:flex;align-items:center;gap:10px;min-width:0}
+.hbrand img{height:28px;max-width:150px;width:auto;object-fit:contain;display:block;flex:none}
+.hbrand span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.head .chip{flex:none;white-space:nowrap}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
   padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(12px)}
 .chip svg{width:15px;height:15px;opacity:.9}
@@ -304,6 +309,8 @@ body.web .authwrap{max-width:480px;margin:0 auto}
   .sbrand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:-.2px;padding:2px 10px 18px}
   .sbrand .lg{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff}
   .sbrand .lg svg{width:17px;height:17px}
+  .sbrand img{height:30px;max-width:150px;width:auto;object-fit:contain;display:block;flex:none}
+  .sbrand .nm{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .snav{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:0;border-radius:12px;background:transparent;
     color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s}
   .snav:hover{background:var(--surface-2);color:var(--text)}
@@ -457,24 +464,35 @@ function view(html,back){
   }else{app.style.animation='none'; void app.offsetWidth; app.style.animation='';}
   renderSide();
 }
+// Название и логотип сервиса из настроек оформления. Классический дизайн
+// всегда тёмный, поэтому логотип для тёмной темы, если он задан. Без своего
+// названия рядом с логотипом ничего не пишется, без обоих — заголовок кабинета
+// (сервер подставляет его в виде для разметки).
+var BRAND=window.BRAND||{};
+function brandLogo(){var u=BRAND.logo_dark||BRAND.logo;return u?'<img alt="" src="'+esc(u)+'" onerror="this.remove()">':'';}
+function brandName(){return BRAND.name?esc(BRAND.name):(BRAND.logo||BRAND.logo_dark?'':'Личный кабинет');}
+function headBrand(){var l=brandLogo(),n=brandName();return l?'<span class="hbrand">'+l+(n?'<span>'+n+'</span>':'')+'</span>':n;}
+function sideBrand(){var n=brandName();return '<div class="sbrand">'+(brandLogo()||'<span class="lg">'+IC.bolt+'</span>')+(n?'<span class="nm">'+n+'</span>':'')+'</div>';}
+// Шапка из разметки — до первого экрана, чтобы название не сменялось на глазах.
+(function(){var h1=document.querySelector('.head h1');if(h1&&(BRAND.name||BRAND.logo||BRAND.logo_dark))h1.innerHTML=headBrand();})();
 function renderSide(){
   var side=document.getElementById('side'),h1=document.querySelector('.head h1');
   if(!side)return;
   // Заголовок кабинета сервер подставляет в виде для разметки — он ставится
   // через innerHTML, а не textContent.
-  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.innerHTML='Личный кабинет';return;}
+  if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.innerHTML=headBrand();return;}
   document.body.classList.remove('noside');
-  if(h1){if(PAGE_TITLES[PAGE])h1.textContent=(PAGE==='wallet'&&STATE.menu&&!walletShown())?'Ещё':PAGE_TITLES[PAGE];else h1.innerHTML='Личный кабинет';}
+  if(h1){if(PAGE_TITLES[PAGE])h1.textContent=(PAGE==='wallet'&&STATE.menu&&!walletShown())?'Ещё':PAGE_TITLES[PAGE];else h1.innerHTML=headBrand();}
   // Данные ещё грузятся — заготовка меню, чтобы раскладка не прыгала.
   if(!STATE.menu){
-    var sk='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+    var sk=sideBrand();
     [76,96,108,84].forEach(function(w){sk+='<div class="snav"><span class="sk-line" style="width:18px;height:18px;border-radius:6px;flex:none"></span><span class="sk-line" style="width:'+w+'px"></span></div>';});
     side.innerHTML=sk+'<div class="sfoot"><span class="sk-line" style="width:36px;height:36px;border-radius:50%;flex:none"></span><span class="sk-line" style="width:96px"></span></div>';
     return;
   }
   var m=STATE.menu||{},sub=STATE.sub||{};
   function item(key,ic,label,fn,bdg){return '<button class="snav'+(PAGE===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+label+'</span>'+(bdg?'<span class="bdg">'+bdg+'</span>':'')+'</button>';}
-  var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
+  var h=sideBrand();
   h+=item('home',IC.layers,'Главная','boot()');
   if((STATE.plans&&STATE.plans.length)||STATE.plansNotice)h+=item('plans',IC.tag,'Тарифы','openPlans()');
   // Кошелёк — пока его можно пополнить или на нём есть деньги, как в чате;

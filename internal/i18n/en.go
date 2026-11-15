@@ -1611,7 +1611,7 @@ var en = map[string]string{
 	"panelauth.save_fail":        "❌ Could not save: %s",
 	"btn.webui":                  "🖌 Mini app & cabinet design",
 	"webui.title":                "🖌 <b>Mini app and web cabinet design</b>\n\nDesign: <b>%s</b>\nDefault theme: <b>%s</b>\nHeader name: <b>%s</b>\nBrand color: <b>%s</b>\nLogo: %s\nDark theme logo: %s\n\nThe new design is minimalist, with light and dark themes: people switch the theme themselves, and the one chosen here is the default. The logo and name sit in the page header, the color is used on buttons. The «Best value» badge marks the term with the lowest price per month. Everything applies instantly, no restart needed.",
-	"webui.classic_note":         "ℹ️ The classic design is on: the name, color and logos take effect after switching to the new one.",
+	"webui.classic_note":         "ℹ️ The classic design is on: the name and logo already apply, the theme and color take effect after switching to the new one. The classic design is dark, so it shows the dark theme logo if one is set.",
 	"webui.design_classic":       "classic",
 	"webui.design_minimal":       "new (minimalist)",
 	"webui.theme_auto":           "follow Telegram / system",

@@ -65,9 +65,40 @@ func TestDesignSelection(t *testing.T) {
 	f.ui.Design = "classic"
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/miniapp/", nil))
+	body = w.Body.String()
 	classic, _ := miniStaticFS.ReadFile("miniapp_static/index.html")
-	if w.Body.String() != string(injectShared(classic)) {
-		t.Fatal("классический дизайн обязан отдаваться без изменений, кроме вставки общего скрипта")
+	ui := f.ui
+	ui.Surface = "miniapp"
+	if body != string(injectBrand(injectShared(classic), ui)) {
+		t.Fatal("классический дизайн обязан отдаваться без изменений, кроме вставки общего скрипта и настроек оформления")
+	}
+	if strings.Contains(body, classicBrandMarker) || strings.Contains(body, "</script><b>") || !strings.Contains(body, `"name":"Acme \u003c/script\u003e\u003cb\u003e"`) {
+		t.Fatal("классический дизайн: настройки оформления не подставлены или подставлены без экранирования")
+	}
+	if strings.Contains(body, `"design":`) || strings.Contains(body, `"accent":`) || strings.Contains(body, `"surface":`) {
+		t.Fatal("классической странице отданы лишние настройки")
+	}
+}
+
+// Кабинет классического дизайна: название и логотип приходят в настройках,
+// заголовок кабинета по-прежнему подставляется в разметку, а подставленное
+// повторно не разбирается.
+func TestCabinetClassicBranding(t *testing.T) {
+	f := &brandMini{ui: WebUIDTO{Design: "classic", Name: "Личный кабинет Acme", Logo: "/brand/logo?v=1"}, title: "Zeta"}
+	w := httptest.NewRecorder()
+	brandServer(f).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/cabinet/", nil))
+	body := w.Body.String()
+	if strings.Contains(body, classicBrandMarker) || strings.ContainsRune(body, 0) {
+		t.Fatal("метка осталась в странице")
+	}
+	if !strings.Contains(body, `"name":"Личный кабинет Acme"`) || !strings.Contains(body, `"logo":"/brand/logo?v=1"`) {
+		t.Fatal("настройки оформления не подставлены или разобраны повторно")
+	}
+	if !strings.Contains(body, "<title>Zeta</title>") || !strings.Contains(body, "<h1>Zeta</h1>") {
+		t.Fatal("заголовок кабинета не подставлен")
+	}
+	if !strings.Contains(body, `<link rel="icon" href="/brand/logo?v=1">`) {
+		t.Fatal("логотип не стал фавиконом")
 	}
 }
 
@@ -267,14 +298,14 @@ func TestCabinetTitleSafeInScript(t *testing.T) {
 	w := httptest.NewRecorder()
 	brandServer(f).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/cabinet/", nil))
 	body := w.Body.String()
-	for _, part := range []string{"<title>" + want + "</title>", "<h1>" + want + "</h1>", "h1.innerHTML='" + want + "'", `class="title">` + want + "</div>"} {
+	for _, part := range []string{"<title>" + want + "</title>", "<h1>" + want + "</h1>", "?'':'" + want + "');}", `class="title">` + want + "</div>"} {
 		if !strings.Contains(body, part) {
 			t.Fatalf("в классической странице нет %s", part)
 		}
 	}
-	// Шапку страница ставит в двух местах, оба — разметкой.
-	if n := strings.Count(body, "h1.innerHTML='"+want+"'"); n != 2 {
-		t.Fatalf("шапка ставится разметкой в %d местах из 2", n)
+	// Шапку и меню страница ставит разметкой.
+	if strings.Count(body, "h1.innerHTML=headBrand()") != 3 {
+		t.Fatal("шапка ставится не разметкой")
 	}
 	if strings.Contains(body, "textContent='"+want) || strings.Contains(body, "O'Neil") || strings.Contains(body, "вторая\\") {
 		t.Fatal("заголовок попал в страницу в виде, ломающем скрипт")
