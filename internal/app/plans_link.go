@@ -138,6 +138,8 @@ type offerView struct {
 	backToList bool
 	// switchPlan — кнопка «выбрать другой тариф» (продление).
 	switchPlan bool
+	// promo — кнопка промокода: тариф один, и карточка заменяет витрину.
+	promo bool
 }
 
 // offerMemo — карточка тарифа и то, как она была показана.
@@ -189,6 +191,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	}
 	if view.switchPlan {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "buy.btn_switch_plan"), "menu:buy")})
+	}
+	if view.promo {
+		rows = append(rows, promoRow(lang))
 	}
 	if view.backToList {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:buy"), btn(i18n.T(lang, "btn.home"), "menu:home")})
@@ -415,10 +420,10 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	// Тариф «по ссылке» с витрины не открывается: список — не обладание
-	// ссылкой. Несуществующий код и скрытый «по ссылке» похожи на перебор —
-	// считаются в лимит.
-	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
+	// Тариф «по ссылке» с витрины открывается только свой: список — не
+	// обладание ссылкой. Несуществующий код и чужой скрытый «по ссылке»
+	// похожи на перебор — считаются в лимит.
+	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink && a.userPlanCode(ctx, chatID) != p.Code {
 		a.planLinkFail(chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return

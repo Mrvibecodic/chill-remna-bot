@@ -259,3 +259,42 @@ func TestPlanMinPriceTerm(t *testing.T) {
 		t.Fatalf("got %q %d %q", from, months, termSuffix("ru", months))
 	}
 }
+
+// Свой тариф «по ссылке» есть в витрине бота и открывается из неё, как в
+// мини-аппе; чужой — нет.
+func TestStorefrontOwnLinkPlan(t *testing.T) {
+	a, fm, fs := planAdminApp(t)
+	a.botCfg.CryptoBot.Enabled = true
+	a.botCfg.CryptoBot.Token = "t"
+	ctx := context.Background()
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p := vipPlan(t, fs, model.PlanAvailLink)
+	const own, other int64 = 1000000001, 1000000002
+	_ = fs.UpsertUser(ctx, own)
+	_ = fs.UpsertUser(ctx, other)
+	fs.users[own].Snapshot = &model.PlanSnapshot{Code: p.Code, Months: 1, Price: "990"}
+
+	n := len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(own, "menu:buy"))
+	if !hasCB(fm.allCallbackData()[n:], "plo:"+p.Code) {
+		t.Fatalf("своего тарифа нет в витрине: %v", fm.allCallbackData()[n:])
+	}
+	n = len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(own, "plo:"+p.Code))
+	if !hasCB(fm.allCallbackData()[n:], "plb:"+p.Code+":1") {
+		t.Fatalf("свой тариф не открылся из витрины: %q", fm.last())
+	}
+
+	n = len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(other, "menu:buy"))
+	if hasCB(fm.allCallbackData()[n:], "plo:"+p.Code) || hasCB(fm.allCallbackData()[n:], "plb:"+p.Code+":1") {
+		t.Fatal("чужой тариф по ссылке в витрине")
+	}
+	n = len(fm.allCallbackData())
+	a.handleCallback(ctx, cb(other, "plo:"+p.Code))
+	if hasCB(fm.allCallbackData()[n:], "plb:"+p.Code+":1") {
+		t.Fatal("чужой тариф по ссылке открылся из витрины")
+	}
+}

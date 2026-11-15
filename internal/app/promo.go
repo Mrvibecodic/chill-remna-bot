@@ -23,6 +23,12 @@ func (a *App) showPromoUser(ctx context.Context, chatID int64) {
 	})
 }
 
+// promoRow — ввод промокода на экранах витрины: кошелька в меню может не
+// быть, и тогда промокод вводится только здесь.
+func promoRow(lang string) []models.InlineKeyboardButton {
+	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.promo"), "pr:enterp")}
+}
+
 // promoUserData — кнопка ввода промокода покупателем (витрина, кошелёк,
 // экран промокода).
 func promoUserData(val string) bool {

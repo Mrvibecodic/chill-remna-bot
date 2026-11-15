@@ -219,7 +219,7 @@ func (a *App) trialLockNotice(ctx context.Context, chatID int64) bool {
 	}
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(expireAt, lang)),
-		[][]models.InlineKeyboardButton{homeRow(lang)})
+		[][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 	return true
 }
 

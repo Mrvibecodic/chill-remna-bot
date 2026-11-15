@@ -149,7 +149,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		ctx = withAdminClosed(ctx)
 	}
 	if isAdmin {
-		if clientData(cq.Data) {
+		if clientData(cq.Data) || cq.Data == "inp:cancel" && clientData(a.getUI(chatID).inputBack) {
 			ctx = withClientFlow(ctx)
 		} else {
 			ctx = withAdminFlow(ctx)

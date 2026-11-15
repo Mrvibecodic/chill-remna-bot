@@ -151,16 +151,21 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
+	// Свой тариф в режиме «по ссылке» витрина прячет, но продлевать его
+	// человек вправе в любой день — как в мини-аппе.
+	if own := a.ownLinkPlan(ctx, a.userPlanCode(ctx, chatID)); own != nil {
+		plans = append(plans, *own)
+	}
 	switch {
 	case len(plans) == 1:
-		a.showPlanOfferView(ctx, chatID, &plans[0], offerView{})
+		a.showPlanOfferView(ctx, chatID, &plans[0], offerView{promo: true})
 		return
 	case len(plans) == 0 && anySellable:
 		// Продаваемые тарифы есть, но все закрыты от этого покупателя.
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 		return
 	case len(plans) == 0:
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 		return
 	}
 
@@ -179,9 +184,7 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "plo:"+p.Code)})
 	}
-	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.promo"), "pr:enterp")},
-		homeRow(lang))
+	rows = append(rows, promoRow(lang), homeRow(lang))
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "buy.choose_tariff"), rows)
 }
 
