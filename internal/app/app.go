@@ -544,16 +544,23 @@ func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
 	return c
 }
 
-// accountEmailFor — подтверждённая почта аккаунта кабинета для поля email его
-// учётки в панели, в том числе после привязки Telegram. a.mu не берётся: как и
-// поиск, запись идёт и из-под него.
+// accountEmailFor — почта аккаунта кабинета для поля email его учётки в
+// панели, в том числе после привязки Telegram.
+//
+// Неподтверждённая пишется, только пока письма выключены: подтвердить её
+// нечем, а ждать подтверждения значило бы не писать почту никогда. Чужую
+// подписку по такой записи не забрать — учётку по почте ищут только по
+// подтверждённой (panelEmailFor).
+//
+// Зовётся из создания и продления учётки и из fillPanelEmail — ни один из этих
+// путей не держит a.mu, который берёт MailReady.
 func (a *App) accountEmailFor(ctx context.Context, tgID int64) string {
-	st := a.store
+	st := a.storeRef()
 	if tgID == 0 || st == nil {
 		return ""
 	}
 	wu, err := st.GetWebUserByTgID(ctx, tgID)
-	if err != nil || wu == nil || wu.VerifiedAt == "" {
+	if err != nil || wu == nil || (wu.VerifiedAt == "" && a.MailReady()) {
 		return ""
 	}
 	return model.NormalizeEmail(wu.Email)

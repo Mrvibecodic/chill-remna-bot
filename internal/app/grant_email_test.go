@@ -110,8 +110,9 @@ func (p *mailGrantPanel) email(name string) any {
 }
 
 // Выдача почтовому аккаунту кабинета через экраны админа: учётка и
-// доп-подписка заводятся в панели с почтой аккаунта, а если почта ещё не
-// подтверждена — получают её при подтверждении.
+// доп-подписка заводятся в панели с почтой аккаунта. Неподтверждённая почта
+// при включённых письмах впишется при подтверждении, а при выключенных —
+// сразу: подтвердить её нечем.
 func TestGrant_EmailAccountPanelEmail(t *testing.T) {
 	const (
 		uid   int64 = -1000000041
@@ -119,9 +120,13 @@ func TestGrant_EmailAccountPanelEmail(t *testing.T) {
 		name        = "tg_-1000000041"
 		email       = "client@example.com"
 	)
-	for _, verified := range []bool{true, false} {
+	for _, tc := range []struct{ verified, mail bool }{{true, true}, {false, true}, {false, false}} {
+		verified := tc.verified
 		p := &mailGrantPanel{users: map[string]map[string]any{}}
 		a, fm, fs := grantApp(t, "")
+		if tc.mail {
+			grantMailOn(a)
+		}
 		a.panel = a.newPanel(model.PanelConfig{Mode: model.ModeRemote, BaseURL: p.start(t), APIToken: "t"})
 		a.botCfg.AddSub = model.AddSubConfig{Enabled: true, Init: true, UsernameSuffix: "_addsub",
 			TrafficGB: 10, InternalSquads: []string{"g1"}}
@@ -141,7 +146,7 @@ func TestGrant_EmailAccountPanelEmail(t *testing.T) {
 			t.Fatalf("подтверждена=%v: выдача не прошла:\n%s", verified, fm.joined())
 		}
 		want := any(email)
-		if !verified {
+		if !verified && tc.mail {
 			want = nil
 		}
 		if got := p.email(name); got != want {
@@ -150,7 +155,7 @@ func TestGrant_EmailAccountPanelEmail(t *testing.T) {
 		if got := p.email(name + "_addsub"); got != want {
 			t.Fatalf("подтверждена=%v: почта доп-подписки %v, ждали %v", verified, got, want)
 		}
-		if verified {
+		if want != nil {
 			continue
 		}
 		tok, err := a.newEmailToken(ctx, uid, email, model.EmailPurposeVerify, verifyTTL)
@@ -164,4 +169,107 @@ func TestGrant_EmailAccountPanelEmail(t *testing.T) {
 			t.Fatalf("после подтверждения: учётка %v, доп-подписка %v", p.email(name), p.email(name+"_addsub"))
 		}
 	}
+}
+
+// Экран подтверждения и итог выдачи аккаунту по почте называют то, что
+// помешает человеку воспользоваться подпиской: кабинет и неподтверждённую
+// почту. Проверка модерации при этом не шлёт админу заявку на вход.
+func TestGrant_EmailAccountWarnings(t *testing.T) {
+	const (
+		uid int64 = -1000000051
+		id        = "-1000000051"
+	)
+	listNoMail := "письма выключены: подтвердить её нечем"
+	cabOff := "Веб-кабинет выключен"
+	pending := "ещё не одобрен"
+	denied := "отклонён: подписку"
+	unverified := "Почта аккаунта не подтверждена"
+	renew := "Продлевать подписку человек сможет тоже только после подтверждения"
+	cases := []struct {
+		name            string
+		cabinet, mail   bool
+		approval        string
+		approved, deny  bool
+		verified, list  bool
+		want, notWanted []string
+	}{
+		{"кабинет выключен", false, false, model.CabinetApprovalOff, false, false, true, false,
+			[]string{cabOff}, []string{pending, denied, unverified}},
+		{"всё в порядке", true, false, model.CabinetApprovalOff, false, false, true, false,
+			nil, []string{cabOff, pending, denied, unverified}},
+		{"ждёт одобрения", true, false, model.CabinetApprovalEmail, false, false, true, false,
+			[]string{pending}, []string{cabOff, denied}},
+		{"одобрен", true, false, model.CabinetApprovalEmail, true, false, true, false,
+			nil, []string{cabOff, pending, denied}},
+		{"отклонён", true, false, model.CabinetApprovalEmail, false, true, true, false,
+			[]string{denied}, []string{cabOff, pending}},
+		{"почта не подтверждена, письма выключены", true, false, model.CabinetApprovalOff, false, false, false, false,
+			nil, []string{unverified, renew, listNoMail}},
+		{"почта не подтверждена, письма выключены, тариф по списку", true, false, model.CabinetApprovalOff, false, false, false, true,
+			[]string{listNoMail}, []string{unverified, renew}},
+		{"почта не подтверждена, письма включены", true, true, model.CabinetApprovalOff, false, false, false, false,
+			[]string{unverified, renew}, []string{listNoMail}},
+		{"почта не подтверждена, письма включены, тариф по списку", true, true, model.CabinetApprovalOff, false, false, false, true,
+			[]string{unverified, renew}, []string{listNoMail}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &mailGrantPanel{users: map[string]map[string]any{}}
+			a, fm, fs := grantApp(t, "")
+			a.panel = a.newPanel(model.PanelConfig{Mode: model.ModeRemote, BaseURL: p.start(t), APIToken: "t"})
+			a.botCfg.NormalizeCabinet()
+			a.botCfg.Cabinet.Enabled = tc.cabinet
+			a.botCfg.Cabinet.Approval = tc.approval
+			if tc.mail {
+				grantMailOn(a)
+			}
+			ctx := context.Background()
+			if tc.list {
+				pl, _ := fs.GetPlan(ctx, "vip")
+				pl.Availability = model.PlanAvailList
+				_ = fs.SavePlan(ctx, pl)
+			}
+			_ = fs.UpsertUser(ctx, uid)
+			_ = fs.SetWebApproved(ctx, uid, tc.approved)
+			_ = fs.SetWebDenied(ctx, uid, tc.deny)
+			wu := &model.WebUser{TgID: uid, Email: "client@example.com"}
+			if tc.verified {
+				wu.VerifiedAt = "2026-01-01T00:00:00Z"
+			}
+			_ = fs.CreateWebUser(ctx, wu)
+
+			a.handleCallback(ctx, cb(100, "usr:gr:"+id))
+			a.handleCallback(ctx, cb(100, "usr:grp:"+id+":"+planEditHash("vip")))
+			a.handleCallback(ctx, cb(100, "usr:grt:"+id+":1"))
+			confirm := fm.last()
+			a.handleCallback(ctx, cb(100, "usr:grok:"+id+":"+grantNonceFor(t, fm, id)))
+			all := fm.joined()
+			report := all[strings.LastIndex(all, "Подписка выдана"):]
+			for _, screen := range []struct{ name, text string }{{"подтверждение", confirm}, {"итог", report}} {
+				for _, w := range tc.want {
+					if !strings.Contains(screen.text, w) {
+						t.Errorf("%s: нет «%s»:\n%s", screen.name, w, screen.text)
+					}
+				}
+				for _, w := range tc.notWanted {
+					if strings.Contains(screen.text, w) {
+						t.Errorf("%s: лишнее «%s»:\n%s", screen.name, w, screen.text)
+					}
+				}
+			}
+			for _, d := range fm.allCallbackData() {
+				if strings.HasPrefix(d, "adm:wok:") {
+					t.Fatal("проверка модерации отправила админу заявку на вход")
+				}
+			}
+		})
+	}
+}
+
+// grantMailOn включает письма кабинета: без них почту подтвердить нечем.
+func grantMailOn(a *App) {
+	a.botCfg.Webhook.PublicBaseURL = "https://example.com"
+	a.botCfg.Mail = model.MailConfig{Enabled: true, Mode: model.MailModeSMTP,
+		From: "noreply@example.com", Host: "127.0.0.1", Port: 1}
+	a.botCfg.NormalizeMail()
 }

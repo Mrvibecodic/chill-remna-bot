@@ -487,7 +487,65 @@ func (a *App) grantWarnings(ctx context.Context, lang string, u *model.User, p *
 			out = append(out, i18n.T(lang, "grant.warn_tribute"))
 		}
 	}
+	acc := a.grantAccountOf(ctx, u.TelegramID, p)
+	if acc.cabinet != "" {
+		out = append(out, i18n.T(lang, acc.cabinet))
+	}
+	if line := acc.unverifiedLine(lang); line != "" {
+		out = append(out, line)
+	}
 	return out
+}
+
+// grantAccount — что мешает аккаунту по почте без Telegram воспользоваться
+// выданной подпиской. У аккаунта с Telegram всё это не действует: подписка
+// видна в боте.
+type grantAccount struct {
+	// cabinet — ключ предупреждения «в кабинет не войти» ("" — войти можно).
+	cabinet string
+	// emailPending — почта не подтверждена, а письма включены: в поле email
+	// учётки панели она впишется после подтверждения (см. accountEmailFor).
+	emailPending bool
+	// renewLocked — с неподтверждённой почтой человек не продлит подписку сам:
+	// оплата в кабинете закрыта или тариф «по списку» (список сверяется с
+	// подтверждённой почтой).
+	renewLocked bool
+}
+
+// grantAccountOf считает grantAccount теми же проверками, которыми их потом
+// применяют кабинет, панель и гейт тарифа.
+func (a *App) grantAccountOf(ctx context.Context, uid int64, p *model.Plan) grantAccount {
+	var acc grantAccount
+	if uid >= 0 {
+		return acc
+	}
+	switch err := a.cabinetAdmission(ctx, uid, true); {
+	case !a.CabinetEnabled():
+		acc.cabinet = "grant.warn_cab_off"
+	case errors.Is(err, errCabinetDenied):
+		acc.cabinet = "grant.warn_cab_denied"
+	case errors.Is(err, errCabinetPending):
+		acc.cabinet = "grant.warn_cab_pending"
+	}
+	if a.userEmail(ctx, uid) != "" && a.userAccessEmail(ctx, uid) == "" {
+		acc.emailPending = a.MailReady()
+		acc.renewLocked = model.NormalizeAvailability(p.Availability) == model.PlanAvailList || a.CabinetMoneyBlocked(ctx, uid)
+	}
+	return acc
+}
+
+// unverifiedLine — строка про неподтверждённую почту ("" — сказать нечего).
+func (acc grantAccount) unverifiedLine(lang string) string {
+	switch {
+	case acc.emailPending && acc.renewLocked:
+		return i18n.T(lang, "grant.warn_unverified") + " " + i18n.T(lang, "grant.warn_renew")
+	case acc.emailPending:
+		return i18n.T(lang, "grant.warn_unverified")
+	case acc.renewLocked:
+		// Письма выключены, а тариф «по списку»: подтвердить почту нечем.
+		return i18n.T(lang, "grant.warn_list_nomail")
+	}
+	return ""
 }
 
 func newGrantNonce() string {
@@ -570,6 +628,7 @@ type grantResult struct {
 	autoPayMoved bool
 	list         grantListState
 	client       grantClientState
+	account      grantAccount
 }
 
 type grantClientState int
@@ -595,6 +654,7 @@ func (a *App) runGrant(ctx context.Context, sel grantSel, snap *model.PlanSnapsh
 		r.list = a.grantListAccess(ctx, sel.uid, p.Code)
 	}
 	r.client = a.grantNotifyClient(ctx, sel, p, d.expireAt)
+	r.account = a.grantAccountOf(ctx, sel.uid, p)
 	return r, nil
 }
 
@@ -638,6 +698,12 @@ func grantReport(lang string, p *model.Plan, sel grantSel, r grantResult) string
 	}
 	if r.autoPayMoved {
 		lines = append(lines, i18n.T(lang, "grant.res_autopay"))
+	}
+	if r.account.cabinet != "" {
+		lines = append(lines, i18n.T(lang, r.account.cabinet))
+	}
+	if line := r.account.unverifiedLine(lang); line != "" {
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
