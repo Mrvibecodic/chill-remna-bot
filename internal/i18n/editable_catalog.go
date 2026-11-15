@@ -835,6 +835,13 @@ var editableList = []Editable{
 			{Name: "period", Ru: "срок", Desc: [2]string{"срок продления словами с правильным склонением: «1 месяц», «3 месяца», «12 месяцев»", "renewal term in words: «1 month», «3 months»"}, Example: [2]string{"3 месяца", "3 months"}},
 			{Name: "charge_time", Ru: "момент_списания", Desc: [2]string{"когда спишутся деньги — готовая фраза вроде «за 3 дн. до окончания подписки» (меняется в текстах «ap.when_days» и «ap.when_expiry»)", "when the charge happens — a ready phrase like «3 days before the subscription ends» (edited in «ap.when_days» and «ap.when_expiry»)"}, Example: [2]string{"за 3 дн. до окончания подписки", "3 day(s) before the subscription expires"}},
 		}},
+	{Key: "grant.client", Section: "sub", Kind: KindHTML,
+		Where: [2]string{"Сообщение после того, как администратор выдал подписку из карточки пользователя", "Message after the administrator granted a subscription from the user card"},
+		Vars: []EditVar{
+			{Name: "plan", Ru: "тариф", Desc: [2]string{"название тарифа без значка; если названия нет — код тарифа", "plan name without badge; plan code if it has no name"}, Example: [2]string{"Премиум", "Premium"}},
+			{Name: "period", Ru: "срок", Desc: [2]string{"выданный срок словами: «3 месяца» или «10 дней»", "granted term in words: «3 months» or «10 days»"}, Example: [2]string{"3 месяца", "3 months"}},
+			{Name: "expire_date", Ru: "дата_окончания", Desc: [2]string{"дата и время окончания подписки по Москве: «ДД.ММ.ГГГГ ЧЧ:ММ МСК (московское время)»", "subscription end date and time, Moscow time: «DD.MM.YYYY HH:MM MSK (Moscow time)»"}, Example: [2]string{"15.02.2027 18:00 МСК (московское время)", "15.02.2027 18:00 MSK (Moscow time)"}},
+		}},
 	{Key: "ap.plan_changed", Section: "autopay", Kind: KindHTML,
 		Where: [2]string{"Уведомление после покупки другого тарифа: автопродление перешло на него", "Notice after buying another plan: auto-renewal now follows it"},
 		Vars: []EditVar{

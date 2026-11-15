@@ -11,6 +11,7 @@ import (
 
 	"remnabot/internal/assets"
 	"remnabot/internal/i18n"
+	"remnabot/internal/model"
 )
 
 var methodLabels = map[string]string{
@@ -23,6 +24,7 @@ var methodLabels = map[string]string{
 	"yoomoney":  "ЮMoney",
 	"tribute":   "Tribute",
 	"balance":   "Balance",
+	"grant":     "🎁",
 }
 
 func methodLabel(m string) string {
@@ -62,7 +64,8 @@ func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 		// «⭐» (Stars) складывать с рублями нельзя. Счётчик способов оплаты ниже
 		// учитывает их как раньше.
 		amt, isRub := parseAmountRubOnly(p.Amount)
-		if !isRub {
+		// Оплата с баланса — не новые деньги: они уже пришли пополнением.
+		if !isRub || p.Method == model.PayMethodBalance {
 			amt = 0
 		}
 		revAll += amt

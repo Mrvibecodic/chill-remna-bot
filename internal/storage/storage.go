@@ -181,6 +181,10 @@ type Storage interface {
 	AddPaymentAndBalance(ctx context.Context, p *model.Payment, kopecks int64) error
 	SetPaymentStatus(ctx context.Context, extID, status string) error
 	ListPayments(ctx context.Context, limit, offset int) ([]model.Payment, int, error)
+	// ListUserPayments — платежи одного пользователя, новые сверху, и их число.
+	ListUserPayments(ctx context.Context, telegramID int64, limit, offset int) ([]model.Payment, int, error)
+	// GetPayment — платёж по номеру; nil — такого нет.
+	GetPayment(ctx context.Context, id int64) (*model.Payment, error)
 	HasPaidPayment(ctx context.Context, telegramID int64) (bool, error)
 	SetUserSnapshot(ctx context.Context, telegramID int64, snap *model.PlanSnapshot) error
 	ListSubRepairTargets(ctx context.Context) ([]SubRepairTarget, error)
@@ -1048,6 +1052,49 @@ func (b *base) ListPayments(ctx context.Context, limit, offset int) ([]model.Pay
 	return out, total, rows.Err()
 }
 
+func (b *base) ListUserPayments(ctx context.Context, telegramID int64, limit, offset int) ([]model.Payment, int, error) {
+	var total int
+	if err := b.db.QueryRowContext(ctx,
+		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1), telegramID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+paymentCols+" FROM payments WHERE telegram_id = "+b.ph(1)+
+			" ORDER BY created_at DESC, id DESC LIMIT "+b.ph(2)+" OFFSET "+b.ph(3),
+		telegramID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []model.Payment
+	for rows.Next() {
+		var p model.Payment
+		var snapRaw string
+		if err := rows.Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw); err != nil {
+			return nil, 0, err
+		}
+		p.Snapshot = model.DecodePlanSnapshot(snapRaw)
+		out = append(out, p)
+	}
+	return out, total, rows.Err()
+}
+
+func (b *base) GetPayment(ctx context.Context, id int64) (*model.Payment, error) {
+	p := &model.Payment{}
+	var snapRaw string
+	err := b.db.QueryRowContext(ctx,
+		"SELECT "+paymentCols+" FROM payments WHERE id = "+b.ph(1), id).
+		Scan(&p.ID, &p.TelegramID, &p.Method, &p.Months, &p.Amount, &p.Status, &p.Comment, &p.ExtID, &p.CreatedAt, &snapRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.Snapshot = model.DecodePlanSnapshot(snapRaw)
+	return p, nil
+}
+
 // subPaymentCond отбирает платежи, которые действительно являются покупкой
 // подписки. Триал (`method='trial'`) и пополнения баланса пишутся в ту же
 // таблицу с months = 0 — без этого условия они попадали и в «популярный
@@ -1057,8 +1104,8 @@ const subPaymentCond = " AND months > 0"
 func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 	var total int
 	if err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1)+subPaymentCond,
-		model.PaymentPaid).Scan(&total); err != nil {
+		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1)+subPaymentCond+" AND method <> "+b.ph(2),
+		model.PaymentPaid, model.PayMethodGrant).Scan(&total); err != nil {
 		return 0, 0, err
 	}
 	if total == 0 {
@@ -1066,9 +1113,9 @@ func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 	}
 	var months int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT months FROM payments WHERE status = "+b.ph(1)+subPaymentCond+
+		"SELECT months FROM payments WHERE status = "+b.ph(1)+subPaymentCond+" AND method <> "+b.ph(2)+
 			" GROUP BY months ORDER BY COUNT(1) DESC, months ASC LIMIT 1",
-		model.PaymentPaid).Scan(&months)
+		model.PaymentPaid, model.PayMethodGrant).Scan(&months)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, total, nil
 	}
@@ -1081,16 +1128,19 @@ func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 func (b *base) HasPaidPayment(ctx context.Context, telegramID int64) (bool, error) {
 	var n int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+subPaymentCond,
-		telegramID, model.PaymentPaid).Scan(&n)
+		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+subPaymentCond+
+			" AND method <> "+b.ph(3),
+		telegramID, model.PaymentPaid, model.PayMethodGrant).Scan(&n)
 	return n > 0, err
 }
 
+// PaidPayments — оплаты, которые принесли деньги: без записей о триале и без
+// выданных администратором подписок.
 func (b *base) PaidPayments(ctx context.Context) ([]model.Payment, error) {
 	rows, err := b.db.QueryContext(ctx,
 		"SELECT "+paymentCols+" FROM payments "+
-			"WHERE status = "+b.ph(1)+" ORDER BY created_at DESC",
-		model.PaymentPaid)
+			"WHERE status = "+b.ph(1)+" AND method <> "+b.ph(2)+" AND method <> "+b.ph(3)+" ORDER BY created_at DESC",
+		model.PaymentPaid, model.PayMethodTrial, model.PayMethodGrant)
 	if err != nil {
 		return nil, err
 	}
@@ -2325,8 +2375,9 @@ func (b *base) SetRefOnPay(ctx context.Context, telegramID int64) error {
 func (b *base) HasPaidPaymentSince(ctx context.Context, telegramID int64, since string) (bool, error) {
 	var n int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+" AND created_at >= "+b.ph(3),
-		telegramID, model.PaymentPaid, since).Scan(&n)
+		"SELECT COUNT(1) FROM payments WHERE telegram_id = "+b.ph(1)+" AND status = "+b.ph(2)+" AND created_at >= "+b.ph(3)+
+			" AND method <> "+b.ph(4)+" AND method <> "+b.ph(5),
+		telegramID, model.PaymentPaid, since, model.PayMethodTrial, model.PayMethodGrant).Scan(&n)
 	return n > 0, err
 }
 

@@ -1109,6 +1109,12 @@ func (s *fakeStore) ListPayments(_ context.Context, limit, offset int) ([]model.
 	for _, p := range s.pays {
 		all = append(all, *p)
 	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].CreatedAt != all[j].CreatedAt {
+			return all[i].CreatedAt > all[j].CreatedAt
+		}
+		return all[i].ID > all[j].ID
+	})
 	total := len(all)
 	if offset > total {
 		offset = total
@@ -1119,9 +1125,40 @@ func (s *fakeStore) ListPayments(_ context.Context, limit, offset int) ([]model.
 	}
 	return all[offset:end], total, nil
 }
+func (s *fakeStore) ListUserPayments(_ context.Context, id int64, limit, offset int) ([]model.Payment, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var all []model.Payment
+	for _, p := range s.pays {
+		if p.TelegramID == id {
+			all = append(all, *p)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].CreatedAt != all[j].CreatedAt {
+			return all[i].CreatedAt > all[j].CreatedAt
+		}
+		return all[i].ID > all[j].ID
+	})
+	total := len(all)
+	offset = min(offset, total)
+	end := min(offset+limit, total)
+	return all[offset:end], total, nil
+}
+
+func (s *fakeStore) GetPayment(_ context.Context, id int64) (*model.Payment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.pays[id]; p != nil {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, nil
+}
+
 func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 	for _, p := range s.pays {
-		if p.TelegramID == id && p.Status == model.PaymentPaid {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant {
 			return true, nil
 		}
 	}
@@ -1130,7 +1167,7 @@ func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 func (s *fakeStore) PaidPayments(_ context.Context) ([]model.Payment, error) {
 	var out []model.Payment
 	for _, p := range s.pays {
-		if p.Status == model.PaymentPaid {
+		if p.Status == model.PaymentPaid && p.Method != model.PayMethodTrial && p.Method != model.PayMethodGrant {
 			out = append(out, *p)
 		}
 	}
@@ -1141,7 +1178,7 @@ func (s *fakeStore) MostPopularPlan(_ context.Context) (int, int, error) {
 	counts := map[int]int{}
 	total := 0
 	for _, p := range s.pays {
-		if p.Status == model.PaymentPaid {
+		if p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant {
 			counts[p.Months]++
 			total++
 		}
@@ -1384,7 +1421,8 @@ func (s *fakeStore) SetRefOnPay(_ context.Context, id int64) error {
 }
 func (s *fakeStore) HasPaidPaymentSince(_ context.Context, id int64, since string) (bool, error) {
 	for _, p := range s.pays {
-		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since &&
+			p.Method != model.PayMethodTrial && p.Method != model.PayMethodGrant {
 			return true, nil
 		}
 	}

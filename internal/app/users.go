@@ -430,7 +430,13 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	subExists, subBlocked := false, false
 	panel := a.panelClient()
 	if panel != nil {
-		if url, exp, st, ok := panel.SubscriptionFull(ctx, uid); ok {
+		url, exp, st, ok, perr := panel.SubscriptionState(ctx, uid)
+		if perr != nil {
+			// «Панель не ответила» — не «подписки нет»: по второму админ
+			// решил бы, что выдача не прошла, и выдал бы срок ещё раз.
+			subBlock = i18n.T(lang, "user.sub_unknown")
+		}
+		if ok {
 			subExists = true
 			subBlocked = st == remnawave.StatusDisabled
 			if subBlocked {
@@ -464,7 +470,11 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	if botBlocked || (subExists && subBlocked) {
 		actions = append(actions, btn(i18n.T(lang, "btn.unblock"), "usr:unblock:"+id))
 	}
-	rows := [][]models.InlineKeyboardButton{{p2pBtn, wlBtn}}
+	grantRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.user_grant"), "usr:gr:"+id)}
+	if n := a.userPayCount(ctx, uid); n > 0 {
+		grantRow = append(grantRow, btn(i18n.T(lang, "btn.user_pays", n), "usr:pays:"+id+":0"))
+	}
+	rows := [][]models.InlineKeyboardButton{grantRow, {p2pBtn, wlBtn}}
 	if len(actions) > 0 {
 		rows = append(rows, actions)
 	}
@@ -684,6 +694,34 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "plans":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		a.showUserPlanAccess(ctx, chatID, uid)
+	case "gr":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.showGrantPlans(ctx, chatID, uid)
+	case "grp":
+		a.pickGrantPlan(ctx, chatID, arg)
+	case "grt":
+		a.pickGrantTerm(ctx, chatID, arg)
+	case "grd":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.askGrantDays(ctx, chatID, uid)
+	case "grok":
+		a.confirmGrant(ctx, chatID, arg)
+	case "pays":
+		uidStr, pageStr, _ := strings.Cut(arg, ":")
+		uid, _ := strconv.ParseInt(uidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		if uid == 0 {
+			return
+		}
+		a.showUserPayments(ctx, chatID, uid, page)
+	case "pay":
+		pidStr, pageStr, _ := strings.Cut(arg, ":")
+		pid, _ := strconv.ParseInt(pidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		a.showUserPayment(ctx, chatID, pid, page)
 	case "pg":
 		uidStr, code, _ := strings.Cut(arg, ":")
 		uid, _ := strconv.ParseInt(uidStr, 10, 64)
@@ -859,11 +897,11 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 
 func payMethodLabel(method string) string {
 	switch method {
-	case "stars":
-		return "⭐"
 	case "p2p":
 		return "P2P"
 	}
+	// Эмодзи здесь не годятся: таблица моноширинная, ширина колонок
+	// считается по символам, а эмодзи занимает две позиции.
 	return method
 }
 
@@ -936,6 +974,9 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		}
 		user := strconv.FormatInt(p.TelegramID, 10)
 		term := strconv.Itoa(p.Months) + "m"
+		if p.Snapshot != nil && p.Snapshot.Days > 0 {
+			term = strconv.Itoa(p.Snapshot.Days) + "d"
+		}
 		// Голое «Nm» с тарифами стало неинформативным: одинаковые сроки у
 		// разных тарифов стоят по-разному. Тариф — из снимка сделки; сделки
 		// «Базового» и старые (без снимка) остаются как были.
@@ -977,7 +1018,15 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "payments.title", total, page+1, pages))
 	if paid, err := a.store.PaidPayments(ctx); err == nil {
-		users, sums := paymentTotals(paid)
+		users, _ := paymentTotals(paid)
+		// Оплата с баланса в сумму не идёт: эти деньги уже посчитаны пополнением.
+		money := make([]model.Payment, 0, len(paid))
+		for _, p := range paid {
+			if p.Method != model.PayMethodBalance {
+				money = append(money, p)
+			}
+		}
+		_, sums := paymentTotals(money)
 		if sums == "" {
 			sums = "—"
 		}
@@ -1012,7 +1061,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		kbRows = append(kbRows, nav)
 	}
 	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")})
-	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
+	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_user"), "pay:user"), btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
 	kbRows = append(kbRows, back)
 	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
 }
@@ -1054,6 +1103,8 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "paylog.ask"), "menu:payments")
 	case "csv":
 		a.exportPayLogCSV(ctx, chatID)
+	case "user":
+		a.startPayUserSearch(ctx, chatID)
 	case "err":
 		a.showPayErrors(ctx, chatID, 7)
 	case "errf":

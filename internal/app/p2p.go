@@ -1400,14 +1400,35 @@ func (a *App) orphanInvoice(ctx context.Context, method, extID string, telegramI
 // текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
 // созданные до появления снимков).
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
+	d, err := a.closeDeal(ctx, telegramID, months, method, amount, extID, snap, false)
+	return d.link, d.expireAt, err
+}
+
+// dealDone — итог сделки для вызывающего.
+type dealDone struct {
+	link, expireAt string
+	applied        *model.PlanSnapshot
+	// autoPayMoved — включённое автосписание перешло на тариф этой сделки.
+	autoPayMoved bool
+}
+
+// closeDeal — сделка целиком: ядро выдачи и шаги после него, общие для
+// покупки и выдачи администратором. grant — выдача: гейты доступности тарифа
+// не проверяются (тариф выбрал администратор), остальное — как у покупки.
+func (a *App) closeDeal(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot, grant bool) (dealDone, error) {
+	var d dealDone
 	if a.orphanInvoice(ctx, method, extID, telegramID, amount) {
-		return "", "", errOrphanPayment
+		return d, errOrphanPayment
 	}
 	// Доступность тарифа оценивается по состоянию ДО покупки: после неё
 	// человек уже «платил» и уже «на этом тарифе», и гейты «только новым» /
 	// «только действующим» задним числом всегда сходились бы.
-	breach := a.planGateBreach(ctx, telegramID, snapCodeOr(snap, model.PlanCodeBase))
-	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap)
+	breach := ""
+	if !grant {
+		breach = a.planGateBreach(ctx, telegramID, snapCodeOr(snap, model.PlanCodeBase))
+	}
+	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap, grant)
+	d.link, d.expireAt, d.applied = link, expireAt, applied
 	if err == nil {
 		// Доп-подписка применяется ПОСЛЕ ядра: это ещё один поход в панель, а
 		// ядро держит шардовый замок финализации — лишний HTTP-раунд под ним
@@ -1422,19 +1443,24 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		if method == model.PayMethodTribute {
 			a.autoPayYield(ctx, telegramID, method, applied)
 		} else {
-			a.autoPayFollowPurchase(ctx, telegramID, applied)
+			d.autoPayMoved = a.autoPayFollowPurchase(ctx, telegramID, applied)
 		}
 		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
 		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
 		// владельца: деньги приняты — клиент получает то, за что платил), админ
 		// узнаёт и разбирается. Вызов ПОСЛЕ ядра — по той же причине, что и
 		// доп-подписка: чтения базы и поход в Telegram под замком не живут.
-		a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
+		if !grant {
+			a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
+		}
 	}
-	return link, expireAt, err
+	return d, err
 }
 
-func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, *model.PlanSnapshot, error) {
+// finalizePurchaseCore — ядро выдачи по сделке. grant — подписку выдаёт
+// администратор без оплаты: та же выдача, зачёт и снимок, но без начислений
+// рефереру, без чека и без чужого выбора срока.
+func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot, grant bool) (string, string, *model.PlanSnapshot, error) {
 	// Serialize duplicate deliveries of the same payment and bail before we touch
 	// the panel if it's already been finalized (the panel extend happens below,
 	// before the AddPayment idempotency barrier, so without this two concurrent
@@ -1519,6 +1545,7 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 		}
 	}
 	extraDays := switchCredit(prevSnap, prevExpire, snap)
+	snap.SwitchDays = extraDays
 	if extraDays != 0 {
 		a.payLog(ctx, method, extID, telegramID, "switch_credit", "plan=%s days=%+d", snap.Code, extraDays)
 	}
@@ -1585,6 +1612,9 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 		_ = a.store.SetUserSnapshot(ctx, telegramID, snap)
 	}
 	a.payLog(ctx, method, extID, telegramID, "done", "подписка выдана, ссылка отправляется")
+	if grant {
+		return link, expireAt, snap, nil
+	}
 	// Выбор срока отработал — убираем его, иначе кнопка способа оплаты на
 	// старом экране продаст тот же срок ещё раз, минуя витрину.
 	a.forgetBuyIntentFor(ctx, telegramID, months)
@@ -1965,6 +1995,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.adminInput = ""
 		ui.linkUID = 0
 		a.adminLinkPanel(ctx, chatID, uid, text)
+	case "grant_days":
+		a.applyGrantDays(ctx, chatID, text)
+	case "pay_user":
+		a.applyPayUserSearch(ctx, chatID, text)
 	case "user_find":
 		a.applyUserSearch(ctx, chatID, text)
 	case "wl_add":

@@ -12,6 +12,7 @@ import (
 	"remnabot/internal/model"
 
 	_ "remnabot/internal/storage/drivers"
+	"strconv"
 	"time"
 )
 
@@ -555,6 +556,83 @@ func TestPaidPaymentIgnoresTrialAndTopUp(t *testing.T) {
 		}
 		if months, total, _ := st.MostPopularPlan(ctx); months != 3 || total != 1 {
 			t.Fatalf("популярный тариф: months=%d total=%d (ожидалось 3/1)", months, total)
+		}
+	})
+}
+
+// Выдача администратором — сделка, но не деньги: последняя покупка (по ней
+// сверяются лимиты) её видит, а выручка, «платил», популярный срок и «оплата
+// пришла» — нет. Записи о триале в выручку тоже не идут.
+func TestGrantPaymentIsDealNotMoney(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const u int64 = 1000000021
+		since := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+		for _, p := range []*model.Payment{
+			{TelegramID: u, Method: model.PayMethodTrial, Months: 0, Amount: "—", Status: model.PaymentPaid},
+			{TelegramID: u, Method: model.PayMethodGrant, Months: 3, Amount: "—", Status: model.PaymentPaid, ExtID: "grant:1000000021:aa",
+				Snapshot: &model.PlanSnapshot{Code: "vip", Months: 3, Days: 10, SwitchDays: -4}},
+		} {
+			if err := st.AddPayment(ctx, p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ok, _ := st.HasPaidPayment(ctx, u); ok {
+			t.Fatal("выдача сделала человека платящим")
+		}
+		if ok, _ := st.HasPaidPaymentSince(ctx, u, since); ok {
+			t.Fatal("выдача или триал засчитаны как пришедшая оплата")
+		}
+		if list, _ := st.PaidPayments(ctx); len(list) != 0 {
+			t.Fatalf("выдача или триал в выручке: %+v", list)
+		}
+		if m, total, _ := st.MostPopularPlan(ctx); m != 0 || total != 0 {
+			t.Fatalf("выдача в популярном сроке: %d/%d", m, total)
+		}
+		last, err := st.LastPaidSubPayment(ctx, u)
+		if err != nil || last == nil || last.Method != model.PayMethodGrant {
+			t.Fatalf("последняя сделка — не выдача: %+v %v", last, err)
+		}
+		if last.Snapshot == nil || last.Snapshot.Days != 10 || last.Snapshot.SwitchDays != -4 {
+			t.Fatalf("снимок выдачи не сохранился: %+v", last.Snapshot)
+		}
+	})
+}
+
+// Платежи одного человека: только его, новые сверху, постранично; платёж
+// по номеру — со снимком.
+func TestListUserPaymentsAndGetPayment(t *testing.T) {
+	eachStore(t, func(t *testing.T, st Storage) {
+		ctx := context.Background()
+		const u, other int64 = 1000000022, 1000000023
+		base := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+		for i := 0; i < 5; i++ {
+			if err := st.AddPayment(ctx, &model.Payment{
+				TelegramID: u, Method: model.PayMethodYooKassa, Months: 1, Amount: strconv.Itoa(i) + " ₽", Status: model.PaymentPaid,
+				ExtID: "yk_u_" + strconv.Itoa(i), CreatedAt: base.AddDate(0, 0, i).Format(time.RFC3339),
+				Snapshot: &model.PlanSnapshot{Code: "vip", Months: 1},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.AddPayment(ctx, &model.Payment{TelegramID: other, Method: model.PayMethodStars, Months: 1,
+			Amount: "100 ⭐", Status: model.PaymentPaid, ExtID: "st_o"}); err != nil {
+			t.Fatal(err)
+		}
+		page, total, err := st.ListUserPayments(ctx, u, 2, 0)
+		if err != nil || total != 5 || len(page) != 2 || page[0].Amount != "4 ₽" || page[1].Amount != "3 ₽" {
+			t.Fatalf("первая страница: total=%d %+v %v", total, page, err)
+		}
+		tail, _, _ := st.ListUserPayments(ctx, u, 2, 4)
+		if len(tail) != 1 || tail[0].Amount != "0 ₽" {
+			t.Fatalf("последняя страница: %+v", tail)
+		}
+		got, err := st.GetPayment(ctx, page[0].ID)
+		if err != nil || got == nil || got.TelegramID != u || got.Snapshot == nil || got.Snapshot.Code != "vip" {
+			t.Fatalf("платёж по номеру: %+v %v", got, err)
+		}
+		if none, err := st.GetPayment(ctx, 42); err != nil || none != nil {
+			t.Fatalf("несуществующий платёж: %+v %v", none, err)
 		}
 	})
 }
