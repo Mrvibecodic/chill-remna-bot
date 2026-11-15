@@ -679,6 +679,11 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 }
 
 func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name string) {
+	a.showMenuNote(ctx, chatID, isAdmin, name, "")
+}
+
+// showMenuNote — главное меню со строкой note над ним (итог обновления).
+func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name, note string) {
 	a.ensureHomeKey(ctx, chatID)
 	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
 	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
@@ -708,6 +713,9 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 			rows = append(rows, row)
 		}
 		rows = append(rows, a.contactRows()...)
+	}
+	if note != "" && len(ents) == 0 {
+		caption = note + "\n\n" + caption
 	}
 	if len(ents) == 0 {
 		caption = a.applyPremium(caption)

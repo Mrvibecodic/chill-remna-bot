@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
@@ -88,8 +89,8 @@ func TestUpdateStartFromNoticeRemovesMenu(t *testing.T) {
 	}
 }
 
-// После перезапуска «обновлено» встаёт на место экрана, открытого во время
-// скачивания, а тот экран удаляется, а не теряется.
+// После перезапуска итог приходит главной админки со строкой сверху, а
+// стартовое сообщение и экран, открытый во время скачивания, удаляются.
 func TestUpdatedRemovesScreenOpenedDuringPull(t *testing.T) {
 	a, fm, fs := newTestApp(t)
 	a.store = fs
@@ -105,13 +106,17 @@ func TestUpdatedRemovesScreenOpenedDuringPull(t *testing.T) {
 	}
 	a.notifyUpdated(ctx)
 	fm.mu.Lock()
-	gone := slices.Contains(fm.deleted, menu)
+	menuGone, startGone := slices.Contains(fm.deleted, menu), slices.Contains(fm.deleted, start)
 	fm.mu.Unlock()
-	if !gone {
-		t.Fatal("экран, открытый во время скачивания, остался в чате")
+	if !menuGone || !startGone {
+		t.Fatalf("в чате остались: экран во время скачивания=%v, стартовое=%v", !menuGone, !startGone)
 	}
-	if pid, _ := fs.GetScreenMsg(ctx, chat); pid != start {
-		t.Fatalf("в базе экран %d, ждали %d", pid, start)
+	home := a.screenMsgID(chat)
+	if pid, _ := fs.GetScreenMsg(ctx, chat); pid != home || home == start || home == menu {
+		t.Fatalf("в базе экран %d, текущий %d", pid, home)
+	}
+	if !strings.HasPrefix(fm.last(), "✅") || !hasCB(fm.allCallbackData(), "menu:system") {
+		t.Fatalf("не главная с итогом сверху: %q", fm.last())
 	}
 }
 

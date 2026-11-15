@@ -1429,10 +1429,39 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	if a.msg == nil {
 		return
 	}
+	lang := a.botLang()
+	if a.cfg != nil && chatID == a.cfg.AdminID {
+		// Итог — сразу на главной админки строкой сверху: отдельный экран
+		// «обновлено» требовал лишнего нажатия «Домой». Главная закрыта от
+		// пересылки, поэтому приходит новым сообщением, а стартовое сообщение
+		// и экран, открытый во время скачивания, уходят вместе с прежним.
+		a.queueOldScreens(ctx, chatID, msgID)
+		a.showMenuNote(withAdminFlow(ctx), chatID, true, "", i18n.T(lang, doneKey))
+		return
+	}
 	// «Обновлено» остаётся экраном до следующего перехода: прежний экран уже
 	// убран, и удаление по таймеру оставляло бы чат пустым.
-	lang := a.botLang()
 	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, doneKey), [][]models.InlineKeyboardButton{homeRow(lang)})
+}
+
+// queueOldScreens — после перезапуска прежний экран известен только из базы:
+// он и msgID уйдут, когда придёт следующий экран.
+func (a *App) queueOldScreens(ctx context.Context, chatID int64, msgID int) {
+	var ids []int
+	if a.store != nil {
+		if pid, _ := a.store.GetScreenMsg(ctx, chatID); pid != 0 {
+			ids = append(ids, pid)
+		}
+	}
+	if msgID != 0 && !slices.Contains(ids, msgID) {
+		ids = append(ids, msgID)
+	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
+	a.screen[chatID] = append(a.screen[chatID], ids...)
 }
 
 func (a *App) setEditTarget(chatID int64, msgID int) {
