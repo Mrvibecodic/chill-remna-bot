@@ -955,7 +955,7 @@ var en = map[string]string{
 	"trial.reset_notice":           "🎁 <b>Your trial went unused</b>\n\nYou started a trial but never actually used it. We gave it back — you can take it again for %d days.",
 	"trial.unlimited":              "unlimited",
 	"trial.strat_inherit":          "same as plan",
-		"trial.btn_strategy":           "♻️ Traffic reset",
+	"trial.btn_strategy":           "♻️ Traffic reset",
 	"trial.strat_btn_inherit":      "🔗 Same as plan",
 	"trial.ask_strategy":           "Pick the traffic reset strategy for the trial. \"Same as plan\" uses the Base plan's strategy, as before.",
 	"trial.btn_quick":              "🪄 Quick setup",
