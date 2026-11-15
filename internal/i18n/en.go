@@ -443,6 +443,7 @@ var en = map[string]string{
 	"btn.p2p_deny":             "🚫 Revoke P2P",
 	"btn.mysubs":               "📲 My subscriptions",
 	"btn.renew":                "🔄 Renew",
+	"btn.tariffs":              "📦 Plans",
 	"subs.none":                "📭 You don't have an active subscription yet. Tap «Buy» — within a couple of minutes you will get a working link.",
 	"subs.unavailable":         "⏳ The subscription service is temporarily unavailable — we could not check. Your subscription is untouched, try again in a couple of minutes.",
 	"subs.expired":             "⌛ Your subscription ended %s. The link no longer works — renew and access comes back right away.",

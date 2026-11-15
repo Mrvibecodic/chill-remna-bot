@@ -179,7 +179,9 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "plo:"+p.Code)})
 	}
-	rows = append(rows, homeRow(lang))
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.promo"), "pr:enterp")},
+		homeRow(lang))
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "buy.choose_tariff"), rows)
 }
 

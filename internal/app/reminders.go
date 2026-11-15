@@ -287,7 +287,13 @@ func (a *App) panelExpiry(ctx context.Context, tgID int64) (exp time.Time, ok, r
 
 func (a *App) sendReminder(ctx context.Context, chatID int64, key string, daysLeft int) bool {
 	lang := a.lang(chatID)
-	text, rows := a.expiryNotice(ctx, chatID, lang, i18n.T(lang, key, daysLeft), "menu:renew")
+	// Продление — тому, у кого есть сделка; триалу и подписке из панели —
+	// витрина, как в предупреждении по вебхуку панели.
+	buy := "menu:buy"
+	if planCodeOf(a.userSnapshot(ctx, chatID)) != "" {
+		buy = "menu:renew"
+	}
+	text, rows := a.expiryNotice(ctx, chatID, lang, i18n.T(lang, key, daysLeft), buy)
 	return a.notifyKB(ctx, chatID, text, rows) != 0
 }
 

@@ -208,17 +208,39 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 	var row []models.InlineKeyboardButton
 	if a.userHasSub(ctx, chatID) {
 		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
-		if a.renewEligible(ctx, chatID) {
+		// Продлевается платная подписка: триал не продлевают, с него
+		// переходят на тариф через «Тарифы».
+		if !a.userOnTrial(ctx, chatID) && a.renewEligible(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.renew"), "menu:renew"))
 		}
+		// Витрина: продлить свой тариф или сменить его можно в любой день.
+		row = append(row, btn(i18n.T(lang, "btn.tariffs"), "menu:buy"))
 	} else {
 		if a.trialAvailable(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.trial_user"), "menu:trial"))
 		}
 		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
 	}
-	row = append(row, btn(i18n.T(lang, "btn.balance"), "menu:balance"))
+	if a.walletInMenu(ctx, chatID) {
+		row = append(row, btn(i18n.T(lang, "btn.balance"), "menu:balance"))
+	}
 	return row
+}
+
+// userOnTrial — сейчас идёт триал, а не платная подписка.
+func (a *App) userOnTrial(ctx context.Context, chatID int64) bool {
+	if a.store == nil {
+		return false
+	}
+	u, _ := a.store.GetUser(ctx, chatID)
+	return u != nil && u.NotifyKind == "trial"
+}
+
+// walletInMenu — кошелёк в главном меню: пока его можно пополнить или на
+// нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
+// пополнения в меню не нужен — промокод вводится и в витрине.
+func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
+	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
 }
 
 func (a *App) renewEligible(ctx context.Context, chatID int64) bool {

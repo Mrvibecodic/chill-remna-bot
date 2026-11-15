@@ -2663,7 +2663,7 @@ func TestNavRow(t *testing.T) {
 
 	hasSub = true
 	a.invalidateSubCache(user)
-	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
 		t.Fatalf("юзер с подпиской: %s", btnData(row))
 	}
 }
@@ -2755,7 +2755,7 @@ func TestStarsFlow(t *testing.T) {
 		t.Fatal("оплата не записана в лог")
 	}
 
-	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
 		t.Fatalf("после Stars-оплаты ожидались Мои подписки: %s", btnData(row))
 	}
 }

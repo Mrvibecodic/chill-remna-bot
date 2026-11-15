@@ -30,6 +30,8 @@ func (a *App) onPromoUser(ctx context.Context, chatID int64, val string) {
 	case "enterw":
 		// Ввод открыт из кошелька — «Отмена» возвращает туда же.
 		back = "menu:balance"
+	case "enterp":
+		back = "menu:buy"
 	default:
 		return
 	}
