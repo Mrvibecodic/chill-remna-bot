@@ -62,35 +62,76 @@ func (a *App) showTrialAdmin(ctx context.Context, chatID int64) {
 	if reset.ResetUnused && reset.ResetUnusedMax > 0 {
 		resetStr = i18n.T(lang, "trial.reset_on", reset.ResetUnusedMax, reset.ResetUnusedPct)
 	}
-	emailStr, emailBtnKey := i18n.T(lang, "trial.email_off"), "trial.btn_email_off"
+	emailStr := i18n.T(lang, "trial.email_off")
 	if reset.Email {
-		emailStr, emailBtnKey = i18n.T(lang, "trial.email_on"), "trial.btn_email_on"
+		emailStr = i18n.T(lang, "trial.email_on")
 	}
 	body := i18n.T(lang, "trial.title",
 		i18n.T(lang, statusKey), days, gbStr, hwidStr, stratStr, i18n.T(lang, buyKey), resetStr, emailStr, internalCSV, externalName)
 
-	// У возврата своя подпись, а не общий «✅ Включено»: на экране два
-	// переключателя, и одинаковые подписи не давали понять, какой что включает.
-	resetToggleKey := "trial.btn_reset_off"
-	if reset.ResetUnused {
-		resetToggleKey = "trial.btn_reset_on"
+	// Переключатель называет, что включает: на экране правил свои тумблеры.
+	onKey := "trial.btn_off"
+	if enabled {
+		onKey = "trial.btn_on"
 	}
 	rows := [][]models.InlineKeyboardButton{
-		{toggleBtn(lang, enabled, "trial:toggle"), btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
+		{btn(i18n.T(lang, onKey), "trial:toggle")},
+		{btn(i18n.T(lang, "trial.btn_quick"), "trial:quick")},
 		{btn(i18n.T(lang, "trial.btn_days"), "trial:days"), btn(i18n.T(lang, "trial.btn_gb"), "trial:gb")},
 		{btn(i18n.T(lang, "trial.btn_hwid"), "trial:hwid"), btn(i18n.T(lang, "trial.btn_squads"), "trial:squads")},
-		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_allow_buy"), "trial:allowbuy")},
-		{btn(i18n.T(lang, resetToggleKey), "trial:resettoggle"), btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax")},
-		{btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct"), btn(i18n.T(lang, emailBtnKey), "trial:email")},
+		{btn(i18n.T(lang, "trial.btn_strategy"), "trial:strategy"), btn(i18n.T(lang, "trial.btn_rules"), "trial:rules")},
 		{btn(i18n.T(lang, "btn.back"), "menu:payplans"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	a.sendPayKB(ctx, chatID, body, rows)
+}
+
+// showTrialRules — «Триал → Правила»: покупка во время триала, триал
+// аккаунтам по почте и возврат неиспользованного.
+func (a *App) showTrialRules(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	a.mu.Lock()
+	var tr model.TrialConfig
+	if a.botCfg != nil {
+		tr = a.botCfg.Trial
+	}
+	a.mu.Unlock()
+	buyStr, buyBtn := i18n.T(lang, "trial.buy_off"), "trial.btn_buy_off"
+	if tr.AllowBuy {
+		buyStr, buyBtn = i18n.T(lang, "trial.buy_on"), "trial.btn_buy_on"
+	}
+	emailStr, emailBtn := i18n.T(lang, "trial.email_off"), "trial.btn_email_off"
+	if tr.Email {
+		emailStr, emailBtn = i18n.T(lang, "trial.email_short_on"), "trial.btn_email_on"
+	}
+	resetStr, resetBtn := i18n.T(lang, "trial.reset_off"), "trial.btn_reset_off"
+	if tr.ResetUnused {
+		resetBtn = "trial.btn_reset_on"
+		if tr.ResetUnusedMax > 0 {
+			resetStr = i18n.T(lang, "trial.reset_on", tr.ResetUnusedMax, tr.ResetUnusedPct)
+		}
+	}
+	rows := [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, buyBtn), "trial:allowbuy")},
+		{btn(i18n.T(lang, emailBtn), "trial:email")},
+		{btn(i18n.T(lang, resetBtn), "trial:resettoggle")},
+	}
+	// Сколько раз и порог нужны только включённому возврату.
+	if tr.ResetUnused {
+		rows = append(rows, []models.InlineKeyboardButton{
+			btn(i18n.T(lang, "trial.btn_reset"), "trial:resetmax"),
+			btn(i18n.T(lang, "trial.btn_reset_pct"), "trial:resetpct"),
+		})
+	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:trial"), btn(i18n.T(lang, "btn.home"), "menu:home")})
+	a.sendPayKB(ctx, chatID, i18n.T(lang, "trial.rules_title", buyStr, emailStr, resetStr), rows)
 }
 
 func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
 	action, arg, _ := strings.Cut(val, ":")
 	switch action {
+	case "rules":
+		a.showTrialRules(ctx, chatID)
 	case "toggle":
 		a.mu.Lock()
 		if a.botCfg != nil {
@@ -106,7 +147,7 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.showTrialAdmin(ctx, chatID)
+		a.showTrialRules(ctx, chatID)
 	case "email":
 		a.mu.Lock()
 		if a.botCfg != nil {
@@ -114,7 +155,7 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.showTrialAdmin(ctx, chatID)
+		a.showTrialRules(ctx, chatID)
 	case "resettoggle":
 		a.mu.Lock()
 		if a.botCfg != nil {
@@ -127,13 +168,13 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		}
 		a.mu.Unlock()
 		_ = a.saveBotConfig(ctx)
-		a.showTrialAdmin(ctx, chatID)
+		a.showTrialRules(ctx, chatID)
 	case "resetpct":
 		a.getUI(chatID).adminInput = "trial_reset_pct"
-		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_pct"), "menu:trial")
+		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_pct"), "trial:rules")
 	case "resetmax":
 		a.getUI(chatID).adminInput = "trial_reset_max"
-		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_max"), "menu:trial")
+		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_reset_max"), "trial:rules")
 	case "days":
 		a.getUI(chatID).adminInput = "trial_days"
 		a.askInput(ctx, chatID, i18n.T(lang, "trial.ask_days"), "menu:trial")
@@ -143,8 +184,8 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 	case "hwid":
 		a.sendKB(ctx, chatID, i18n.T(lang, "trial.ask_hwid"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "pricing.dev_1"), "trial:hwidset:1"),
-				btn(i18n.T(lang, "pricing.dev_3"), "trial:hwidset:3"),
-				btn(i18n.T(lang, "pricing.dev_custom"), "trial:hwidset:custom")},
+				btn(i18n.T(lang, "pricing.dev_3"), "trial:hwidset:3")},
+			{btn(i18n.T(lang, "pricing.dev_custom"), "trial:hwidset:custom")},
 			{btn(i18n.T(lang, "pricing.dev_default"), "trial:hwidset:0")},
 			{btn(i18n.T(lang, "btn.back"), "menu:trial"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 		})

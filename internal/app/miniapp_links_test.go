@@ -183,11 +183,11 @@ func TestTrialAdminEmailToggle(t *testing.T) {
 	if !a.botCfg.Trial.Email {
 		t.Fatal("нажатие не включило триал по почте")
 	}
-	if !strings.Contains(fm.last(), "Аккаунтам по почте: включён") || !hasCB(fm.allCallbackData(), "trial:email") {
+	if !strings.Contains(fm.last(), "Триал аккаунтам по почте</b>: включён") || !hasCB(fm.allCallbackData(), "trial:email") {
 		t.Fatalf("экран после включения: %q", fm.last())
 	}
 	a.handleCallback(ctx, cb(100, "trial:email"))
-	if a.botCfg.Trial.Email || !strings.Contains(fm.last(), "Аккаунтам по почте: выключен") {
+	if a.botCfg.Trial.Email || !strings.Contains(fm.last(), "Триал аккаунтам по почте</b>: выключен") {
 		t.Fatalf("экран после выключения: %q", fm.last())
 	}
 	// Не админу настройка недоступна.

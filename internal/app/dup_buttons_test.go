@@ -59,10 +59,11 @@ func TestOutdatedButtonSingleHome(t *testing.T) {
 	}
 }
 
-// На экране триала два переключателя — подписи у них разные.
+// На экране правил триала три переключателя — подписи у них разные.
 func TestTrialTogglesDistinct(t *testing.T) {
 	a, fm, _ := newTextsApp(t)
-	a.handleCallback(context.Background(), cb(100, "menu:trial"))
+	a.handleCallback(context.Background(), cb(100, "trial:rules"))
+	a.handleCallback(context.Background(), cb(100, "trial:resettoggle"))
 	seen := map[string]bool{}
 	for _, r := range fm.lastKB {
 		for _, b := range r {
@@ -70,12 +71,11 @@ func TestTrialTogglesDistinct(t *testing.T) {
 				t.Fatalf("две кнопки «%s»: %v", b.Text, kbLabels(fm.lastKB))
 			}
 			seen[b.Text] = true
-			if b.CallbackData == "trial:resetpct" && b.Text != "📉 Порог трафика (%)" {
-				t.Fatalf("подпись порога: %q", b.Text)
-			}
 		}
 	}
-	if countCB(fm.lastKB, "trial:resettoggle") != 1 {
-		t.Fatalf("экран триала не отрисован: %v", kbLabels(fm.lastKB))
+	for _, d := range []string{"trial:allowbuy", "trial:email", "trial:resettoggle", "trial:resetmax", "trial:resetpct"} {
+		if countCB(fm.lastKB, d) != 1 {
+			t.Fatalf("на экране правил нет %s: %v", d, kbLabels(fm.lastKB))
+		}
 	}
 }
