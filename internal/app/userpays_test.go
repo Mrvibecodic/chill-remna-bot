@@ -4,12 +4,18 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/model"
 )
 
 func seedUserPays(t *testing.T, fs *fakeStore, uid int64) {
 	t.Helper()
+	// Записи 2026 года: год в подписи не пишется, только пока он текущий.
+	payNow = func() time.Time { return time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { payNow = time.Now })
 	ctx := context.Background()
 	_ = fs.UpsertUser(ctx, uid)
 	for _, p := range []*model.Payment{
@@ -63,19 +69,19 @@ func TestUserPayments_List(t *testing.T) {
 	}
 	all := strings.Join(labels, "\n")
 	for _, want := range []string{
-		"🎁 15.11.26 · Премиум · 3 мес · выдано",
-		"✅ 01.11.26 · Летний <old> · 1 мес · 199 ₽",
-		"💳 25.10.26 · Пополнение баланса · 500 ₽",
-		"✅ 01.10.26 · Базовый · 1 мес · с баланса",
-		"↩️ 01.09.26 · Базовый · 1 мес · 199 ₽",
-		"✅ 01.08.26 · 1 мес · 199 ₽",
-		"🆓 14.07.26 · Пробный период",
+		"🎁 15.11 · Премиум 3 мес · выдано",
+		"✅ 01.11 · Летний <o… · ЮKassa 199 ₽",
+		"💳 25.10 · Пополнение · CryptoBot 500 ₽",
+		"✅ 01.10 · Базовый 1 мес · с баланса",
+		"↩️ 01.09 · Базовый 1 мес · Stars 199 ₽",
+		"✅ 01.08 · 1 мес · P2P 199 ₽",
+		"🆓 14.07 · Пробный период",
 	} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("нет строки %q среди:\n%s", want, all)
 		}
 	}
-	if strings.Index(all, "15.11.26") > strings.Index(all, "14.07.26") {
+	if strings.Index(all, "15.11") > strings.Index(all, "14.07") {
 		t.Fatalf("новые не сверху:\n%s", all)
 	}
 }
@@ -149,23 +155,57 @@ func TestRevenueSkipsBalancePurchases(t *testing.T) {
 	}
 }
 
-// Моноширинная таблица общей истории: способы — текстом, без эмодзи, иначе
-// колонки съезжают.
-func TestPaymentsTableNoEmojiMethods(t *testing.T) {
+// Общая история платежей: платёж — кнопка с тем, кто платил, тарифом, сроком
+// и суммой; каждая подпись влезает в телефон, даже с длинной почтой и именем
+// тарифа. Экран закрыт от пересылки, карточка ведёт обратно в историю.
+func TestPaymentsHistoryButtons(t *testing.T) {
 	_, srv := newGrantPanel(t, "2030-01-01T00:00:00Z")
 	a, fm, fs := grantApp(t, srv.URL)
 	ctx := context.Background()
 	seedUserPays(t, fs, grantUser)
+	const mailAcc int64 = -1000000071
+	_ = fs.UpsertUser(ctx, mailAcc)
+	_ = fs.CreateWebUser(ctx, &model.WebUser{TgID: mailAcc, Email: "very.long.address.for.testing@subdomain.example.com"})
+	_ = fs.AddPayment(ctx, &model.Payment{ID: 18, TelegramID: mailAcc, Method: model.PayMethodYooKassa, Months: 12, Amount: "12 990 ₽",
+		Status: model.PaymentPaid, CreatedAt: "2026-11-15T12:00:00Z", ExtID: "yk-long",
+		Snapshot: &model.PlanSnapshot{Code: "longplan", Name: "Очень длинное название тарифа для семьи", Months: 12}})
 
 	a.handleCallback(ctx, cb(100, "menu:payments"))
-	table := fm.last()
-	if i := strings.Index(table, "<pre>"); i >= 0 {
-		table = table[i:]
+	if strings.Contains(fm.last(), "<pre>") {
+		t.Fatalf("в истории осталась таблица:\n%s", fm.last())
 	}
-	if strings.Contains(table, "⭐") || strings.Contains(table, "🎁") {
-		t.Fatalf("эмодзи в таблице:\n%s", table)
+	if !fm.isProt(fm.seq) {
+		t.Fatal("история платежей ушла без запрета пересылки")
 	}
-	if !strings.Contains(table, "stars") || !strings.Contains(table, "grant") {
-		t.Fatalf("способы не подписаны:\n%s", table)
+	fm.mu.Lock()
+	rows := fm.lastKB
+	fm.mu.Unlock()
+	var mail string
+	for _, r := range rows {
+		if !rowFits(r) {
+			t.Errorf("ряд не влезает в телефон: %v", kbLabels([][]models.InlineKeyboardButton{r}))
+		}
+		if strings.Contains(r[0].Text, "very.long") {
+			mail = r[0].Text
+		}
+	}
+	if !strings.Contains(mail, "…") || !strings.Contains(mail, "12 990 ₽") {
+		t.Fatalf("длинная строка не укорочена или потеряла срок и сумму: %q", mail)
+	}
+	if !hasCB(fm.allCallbackData(), "pay:card:18:0") {
+		t.Fatal("платёж не открывается")
+	}
+	a.handleCallback(ctx, cb(100, "pay:card:18:0"))
+	cbs := fm.allCallbackData()
+	if !strings.Contains(fm.last(), "yk-long") || !hasCB(cbs, "pay:page:0") || !hasCB(cbs, "usr:pays:-1000000071:0") {
+		t.Fatalf("карточка платежа из истории: %s\n%v", fm.last(), cbs)
+	}
+	fm.mu.Lock()
+	card := fm.lastKB
+	fm.mu.Unlock()
+	for _, r := range card {
+		if !rowFits(r) {
+			t.Errorf("ряд карточки не влезает в телефон: %v", kbLabels([][]models.InlineKeyboardButton{r}))
+		}
 	}
 }

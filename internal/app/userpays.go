@@ -24,6 +24,9 @@ const userPaysPageSize = 10
 // итоги. У живого человека их десятки; потолок — от записи, раздутой ошибкой.
 const userPaysTotalsLimit = 5000
 
+// payNow — текущее время для подписей платежей (тесты подменяют).
+var payNow = time.Now
+
 // payKind — что это за строка платежей.
 type payKind int
 
@@ -98,38 +101,135 @@ func payStatusIcon(status string) string {
 }
 
 // userPayLabel — подпись кнопки платежа в списке (обычный текст, без разметки).
-func (a *App) userPayLabel(ctx context.Context, lang string, p *model.Payment, cache map[string]string) string {
+// who — кто платил, для общей истории ("" — список одного человека). Подпись
+// всегда влезает в кнопку на телефоне: длинные имя и тариф укорачиваются.
+func (a *App) userPayLabel(ctx context.Context, lang string, p *model.Payment, cache map[string]string, who ...string) string {
 	date := "—"
 	if t, ok := payStamp(p.CreatedAt); ok {
-		date = t.Format("02.01.06")
+		// Год — только у прошлых лет: на телефоне каждый знак на счету.
+		date = t.Format("02.01")
+		if t.Year() != payNow().In(displayTZ).Year() {
+			date = t.Format("02.01.06")
+		}
 	}
-	parts := []string{date}
 	icon := payStatusIcon(p.Status)
+	l := payLine{icon: icon, date: date, who: who}
 	switch payKindOf(p) {
 	case payKindTrial:
-		return "🆓 " + date + " · " + i18n.T(lang, "upay.row_trial")
+		l.icon, l.kind = "🆓", i18n.T(lang, "upay.row_trial")
 	case payKindTopUp:
 		if p.Status == model.PaymentPaid {
-			icon = "💳"
+			l.icon = "💳"
 		}
-		parts = append(parts, i18n.T(lang, "upay.row_topup"), p.Amount)
-		return icon + " " + strings.Join(parts, " · ")
-	case payKindGrant:
-		icon = "🎁"
-	}
-	if name := a.payPlanName(ctx, lang, p.Snapshot, cache); name != "" {
-		parts = append(parts, name)
-	}
-	parts = append(parts, payTermLabel(lang, p))
-	switch payKindOf(p) {
-	case payKindGrant:
-		parts = append(parts, i18n.T(lang, "upay.row_grant"))
-	case payKindBalance:
-		parts = append(parts, i18n.T(lang, "upay.row_balance"))
+		l.kind, l.method, l.money = i18n.T(lang, "upay.row_topup"), methodLabel(p.Method), p.Amount
 	default:
-		parts = append(parts, p.Amount)
+		l.plan = a.payPlanName(ctx, lang, p.Snapshot, cache)
+		l.term = payTermLabel(lang, p)
+		switch payKindOf(p) {
+		case payKindGrant:
+			l.icon, l.money = "🎁", i18n.T(lang, "upay.row_grant")
+		case payKindBalance:
+			l.money = i18n.T(lang, "upay.row_balance")
+		default:
+			l.method, l.money = methodLabel(p.Method), p.Amount
+		}
 	}
-	return icon + " " + strings.Join(parts, " · ")
+	return l.fit()
+}
+
+// payLine — части подписи платежа в списке.
+type payLine struct {
+	icon, date string
+	who        []string // подписи человека, от полной к короткой ("" — список одного человека)
+	plan, term string
+	kind       string // «Пробный период», «Пополнение»
+	method     string // способ оплаты
+	money      string // сумма, «выдано», «с баланса»
+}
+
+// fit собирает подпись так, чтобы она влезла в кнопку на телефоне. По
+// очереди: полная подпись человека, короткая; затем укорачиваются имя и
+// тариф, уходит срок, затем способ оплаты. Дата, значок и сумма остаются
+// всегда; срок и способ есть в карточке платежа.
+func (l payLine) fit() string {
+	build := func(w, pl, term string, method bool) string {
+		parts := []string{l.date}
+		if w != "" {
+			parts = append(parts, w)
+		}
+		if pt := strings.TrimSpace(pl + " " + term); pt != "" {
+			parts = append(parts, pt)
+		}
+		if l.kind != "" {
+			parts = append(parts, l.kind)
+		}
+		if m := l.money; m != "" {
+			if method && l.method != "" {
+				m = l.method + " " + m
+			}
+			parts = append(parts, m)
+		}
+		return l.icon + " " + strings.Join(parts, " · ")
+	}
+	fits := func(s string) bool { return btnWidth(btn(s, "")) <= rowCap(1) }
+	cut := func(s string, n int) string {
+		r := []rune(s)
+		if len(r) <= n {
+			return s
+		}
+		return string(r[:n-1]) + "…"
+	}
+	var w string
+	for _, c := range l.who {
+		w = c
+		if s := build(w, l.plan, l.term, true); fits(s) {
+			return s
+		}
+	}
+	steps := []func() string{
+		func() string { return build(cut(w, 14), l.plan, l.term, true) },
+		func() string { return build(cut(w, 14), cut(l.plan, 10), l.term, true) },
+		func() string { return build(cut(w, 14), cut(l.plan, 10), "", true) },
+		func() string { return build(cut(w, 10), cut(l.plan, 8), "", true) },
+		func() string { return build(cut(w, 10), cut(l.plan, 8), "", false) },
+		func() string { return build(cut(w, 6), cut(l.plan, 6), "", false) },
+	}
+	s := build(w, l.plan, l.term, true)
+	for _, step := range steps {
+		if fits(s) {
+			return s
+		}
+		s = step()
+	}
+	return s
+}
+
+// payWho — кто платил, для строки общей истории: полная подпись кнопки, если
+// влезет, иначе короткая — без ID.
+func (a *App) payWho(ctx context.Context, id int64, cache map[int64][]string) []string {
+	if w, ok := cache[id]; ok {
+		return w
+	}
+	var w []string
+	if st := a.storeRef(); st != nil {
+		if u, _ := st.GetUser(ctx, id); u != nil {
+			full := a.userButtonLabel(ctx, u)
+			short := full
+			if e := a.emailLabelWith(ctx, id, plainName); e != "" {
+				short = e
+			} else if u.Username != "" {
+				short = "@" + plainName(u.Username)
+			} else if u.FirstName != "" {
+				short = plainName(u.FirstName)
+			}
+			w = []string{full, short}
+		}
+	}
+	if w == nil {
+		w = []string{strconv.FormatInt(id, 10)}
+	}
+	cache[id] = w
+	return w
 }
 
 // userPayTotals — сколько человек заплатил и сколько ему вернули. Оплата с
@@ -187,7 +287,7 @@ func (a *App) showUserPayments(ctx context.Context, chatID, uid int64, page int)
 		return
 	}
 	if total == 0 {
-		a.sendUsrKB(ctx, chatID, i18n.T(lang, "upay.empty", label), [][]models.InlineKeyboardButton{back})
+		a.sendUsrKB(withAdminClosed(ctx), chatID, i18n.T(lang, "upay.empty", label), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	pages := (total + userPaysPageSize - 1) / userPaysPageSize
@@ -229,11 +329,13 @@ func (a *App) showUserPayments(ctx context.Context, chatID, uid int64, page int)
 		rows = append(rows, nav)
 	}
 	rows = append(rows, back)
-	a.sendUsrKB(ctx, chatID, b.String(), rows)
+	// Список — сводка и кнопки, копировать нечего; номер платежа — в карточке.
+	a.sendUsrKB(withAdminClosed(ctx), chatID, b.String(), rows)
 }
 
 // showUserPayment — карточка платежа: usr:pay:<id платежа>:<стр списка>.
-func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int) {
+// all — открыта из общей истории платежей: «Назад» ведёт туда.
+func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int, all bool) {
 	lang := a.lang(chatID)
 	st := a.storeRef()
 	if st == nil {
@@ -298,9 +400,16 @@ func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int) 
 		lines = append(lines, "", i18n.T(lang, "upay.ext", html.EscapeString(p.ExtID)))
 	}
 	uid := strconv.FormatInt(p.TelegramID, 10)
-	a.sendUsrKB(ctx, chatID, strings.Join(lines, "\n"), [][]models.InlineKeyboardButton{
+	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "upay.btn_list"), "usr:pays:"+uid+":"+strconv.Itoa(page)), btn(i18n.T(lang, "btn.home"), "menu:home")},
-	})
+	}
+	if all {
+		rows = [][]models.InlineKeyboardButton{
+			{btn(i18n.T(lang, "paylog.btn_user"), "usr:pays:"+uid+":0")},
+			{btn(i18n.T(lang, "upay.btn_history"), "pay:page:"+strconv.Itoa(page)), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		}
+	}
+	a.sendUsrKB(ctx, chatID, strings.Join(lines, "\n"), rows)
 }
 
 func payStatusKey(status string) string {

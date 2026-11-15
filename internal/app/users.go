@@ -721,7 +721,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		pidStr, pageStr, _ := strings.Cut(arg, ":")
 		pid, _ := strconv.ParseInt(pidStr, 10, 64)
 		page, _ := strconv.Atoi(pageStr)
-		a.showUserPayment(ctx, chatID, pid, page)
+		a.showUserPayment(ctx, chatID, pid, page, false)
 	case "pg":
 		uidStr, code, _ := strings.Cut(arg, ":")
 		uid, _ := strconv.ParseInt(uidStr, 10, 64)
@@ -895,16 +895,6 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	cabNotifyMu.Unlock()
 }
 
-func payMethodLabel(method string) string {
-	switch method {
-	case "p2p":
-		return "P2P"
-	}
-	// Эмодзи здесь не годятся: таблица моноширинная, ширина колонок
-	// считается по символам, а эмодзи занимает две позиции.
-	return method
-}
-
 func paymentTotals(ps []model.Payment) (users int, sums string) {
 	seen := map[int64]struct{}{}
 	byUnit := map[string]float64{}
@@ -957,64 +947,6 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
 
-	type row struct{ date, method, user, term, amount, status string }
-	rows := make([]row, 0, len(items))
-	wMethod, wUser, wAmount, wTerm := len("Method"), len("User"), len("Amount"), len("Term")
-	for _, p := range items {
-		date := p.CreatedAt
-		if len(date) >= 10 {
-			date = date[:10]
-		}
-		statusKey := "payments.st_paid"
-		switch p.Status {
-		case model.PaymentRejected:
-			statusKey = "payments.st_rejected"
-		case model.PaymentRefunded:
-			statusKey = "payments.st_refunded"
-		}
-		user := strconv.FormatInt(p.TelegramID, 10)
-		term := strconv.Itoa(p.Months) + "m"
-		if p.Snapshot != nil && p.Snapshot.Days > 0 {
-			term = strconv.Itoa(p.Snapshot.Days) + "d"
-		}
-		// Голое «Nm» с тарифами стало неинформативным: одинаковые сроки у
-		// разных тарифов стоят по-разному. Тариф — из снимка сделки; сделки
-		// «Базового» и старые (без снимка) остаются как были.
-		if code := planCodeOf(p.Snapshot); code != "" && code != model.PlanCodeBase {
-			name := p.Snapshot.Name
-			if name == "" {
-				name = code
-			}
-			// Имя тарифа — свободный текст админа, а сообщение уходит с
-			// parse_mode=HTML (и внутри <pre> тоже): спецсимволы не
-			// экранируем сущностями — они ломали бы моноширинное выравнивание
-			// (&amp; — 5 рун вместо одной), — а просто выбрасываем.
-			name = strings.Map(func(r rune) rune {
-				switch r {
-				case '<', '>', '&':
-					return -1
-				}
-				return r
-			}, name)
-			term += "·" + truncRunes(name, 12)
-		}
-		method := payMethodLabel(p.Method)
-		amount := p.Amount
-		rows = append(rows, row{date, method, user, term, amount, i18n.T(lang, statusKey)})
-		if l := visualWidth(method); l > wMethod {
-			wMethod = l
-		}
-		if l := visualWidth(user); l > wUser {
-			wUser = l
-		}
-		if l := visualWidth(amount); l > wAmount {
-			wAmount = l
-		}
-		if l := visualWidth(term); l > wTerm {
-			wTerm = l
-		}
-	}
-
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "payments.title", total, page+1, pages))
 	if paid, err := a.store.PaidPayments(ctx); err == nil {
@@ -1030,40 +962,31 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 		if sums == "" {
 			sums = "—"
 		}
-		sb.WriteString("\n" + i18n.T(lang, "payments.totals", users, sums))
+		sb.WriteString("\n" + i18n.T(lang, "payments.totals", users, html.EscapeString(sums)))
 	}
-	sb.WriteString("\n<pre>")
-	header := padRight("Date", 10) + "  " + padRight("Method", wMethod) + "  " +
-		padRight("User", wUser) + "  " + padRight("Term", wTerm) + "  " +
-		padRight("Amount", wAmount) + "  " + "Status"
-	sb.WriteString(header)
-	sb.WriteString("\n")
-	sb.WriteString(strings.Repeat("─", visualWidth(header)))
-	for _, r := range rows {
-		sb.WriteString("\n")
-		sb.WriteString(padRight(r.date, 10))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.method, wMethod))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.user, wUser))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.term, wTerm))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.amount, wAmount))
-		sb.WriteString("  ")
-		sb.WriteString(r.status)
-	}
-	sb.WriteString("</pre>")
+	sb.WriteString("\n\n" + i18n.T(lang, "upay.hint"))
 
+	// Платёж — кнопка, как в платежах пользователя: таблица в моноширинном
+	// блоке на телефоне не читалась, а подробности всё равно в карточке.
 	var kbRows [][]models.InlineKeyboardButton
-	nav := paginationRow("pay:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
-	if len(nav) > 0 {
+	plans := map[string]string{}
+	who := map[int64][]string{}
+	for i := range items {
+		p := &items[i]
+		kbRows = append(kbRows, []models.InlineKeyboardButton{
+			btn(a.userPayLabel(ctx, lang, p, plans, a.payWho(ctx, p.TelegramID, who)...), "pay:card:"+strconv.FormatInt(p.ID, 10)+":"+strconv.Itoa(page)),
+		})
+	}
+	if nav := paginationRow("pay:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		kbRows = append(kbRows, nav)
 	}
-	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")})
-	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_user"), "pay:user"), btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
-	kbRows = append(kbRows, back)
-	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
+	kbRows = append(kbRows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_user"), "pay:user")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")},
+		back)
+	// Сводка и кнопки — копировать нечего.
+	a.sendPayKB(withAdminClosed(ctx), chatID, sb.String(), kbRows)
 }
 
 // truncRunes обрезает строку до n рун с «…»: имена тарифов в таблице платежей
@@ -1098,6 +1021,11 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 	case "page":
 		page, _ := strconv.Atoi(arg)
 		a.showPayments(ctx, chatID, page)
+	case "card":
+		pidStr, pageStr, _ := strings.Cut(arg, ":")
+		pid, _ := strconv.ParseInt(pidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		a.showUserPayment(ctx, chatID, pid, page, true)
 	case "log":
 		a.getUI(chatID).adminInput = "paylog"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "paylog.ask"), "menu:payments")
