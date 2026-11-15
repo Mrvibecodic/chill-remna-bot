@@ -432,9 +432,9 @@ func (a *App) showPlanStrategy(ctx context.Context, chatID int64, code string) {
 	}
 	a.getUI(chatID).planEdit = p.Code
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.ask_strategy"), [][]models.InlineKeyboardButton{
-		{btn("📅 MONTH", "pln:sts:MONTH:"+p.Code), btn("🔁 MONTH_ROLLING", "pln:sts:MONTH_ROLLING:"+p.Code)},
-		{btn("🗓 WEEK", "pln:sts:WEEK:"+p.Code), btn("📆 DAY", "pln:sts:DAY:"+p.Code)},
-		{btn("♾ NO_RESET", "pln:sts:NO_RESET:"+p.Code)},
+		{btn("📅 MONTH", "pln:sts:MONTH:"+p.Code), btn("🗓 WEEK", "pln:sts:WEEK:"+p.Code)},
+		{btn("🔁 MONTH_ROLLING", "pln:sts:MONTH_ROLLING:"+p.Code)},
+		{btn("📆 DAY", "pln:sts:DAY:"+p.Code), btn("♾ NO_RESET", "pln:sts:NO_RESET:"+p.Code)},
 		navBack(lang, "pln:pr:"+p.Code),
 	})
 }

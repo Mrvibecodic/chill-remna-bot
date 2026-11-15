@@ -278,7 +278,9 @@ func (a *App) showBackupNote(ctx context.Context, chatID int64, note string) {
 	var r2 []models.InlineKeyboardButton
 	for i, h := range model.BackupIntervals {
 		b := btn(mark(h)+i18n.T(lang, "bk.btn_hours", h), "bk:h:"+strconv.Itoa(h))
-		if i < 3 {
+		// Выкл и два первых — в первом ряду, четыре остальных — во втором: с
+		// отметкой «✅ Выкл» ряд из четырёх не влезает.
+		if i < 2 {
 			r1 = append(r1, b)
 		} else {
 			r2 = append(r2, b)

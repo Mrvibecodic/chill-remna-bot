@@ -180,7 +180,7 @@ func (a *App) showTextsHomeNote(ctx context.Context, chatID int64, note string) 
 	}
 	top := []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_search"), "tx:q")}
 	if len(own) > 0 {
-		top = append(top, btn(i18n.T(lang, "tx.btn_changed", len(own)), "tx:ch:0"))
+		top = append(top, btn(i18n.T(lang, "tx.btn_changed"), "tx:ch:0"))
 	}
 	rows := [][]models.InlineKeyboardButton{top}
 	// Разделы по два в ряд: у раздела с правками значок сменяется на ✏️, а

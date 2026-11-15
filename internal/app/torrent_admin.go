@@ -36,8 +36,8 @@ func (a *App) showTorrentAdmin(ctx context.Context, chatID int64) {
 		return "⬜"
 	}
 	rows := [][]models.InlineKeyboardButton{
-		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "torj:tadm"),
-			btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "torj:tusr")},
+		{btn(mark(tc.NotifyAdmin)+" "+i18n.T(lang, "wh.btn_tor_admin"), "torj:tadm")},
+		{btn(mark(tc.NotifyUser)+" "+i18n.T(lang, "wh.btn_tor_user"), "torj:tusr")},
 		{btn(i18n.T(lang, "wh.btn_tor_strike", strikeLabel(lang, tc.StrikeLimit)), "torj:strike")},
 		{btn(i18n.T(lang, "wh.btn_tor_log"), "torj:log"), btn(i18n.T(lang, "wh.btn_tor_text"), "torj:text")},
 		{btn(i18n.T(lang, "btn.back"), "menu:users"), btn(i18n.T(lang, "btn.home"), "menu:home")},

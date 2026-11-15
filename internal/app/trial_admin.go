@@ -217,9 +217,9 @@ func (a *App) onTrialAdmin(ctx context.Context, chatID int64, val string) {
 		a.startTrialQuick(ctx, chatID)
 	case "strategy":
 		a.sendKB(ctx, chatID, i18n.T(lang, "trial.ask_strategy"), [][]models.InlineKeyboardButton{
-			{btn("📅 MONTH", "trial:setstrat:MONTH"), btn("🔁 MONTH_ROLLING", "trial:setstrat:MONTH_ROLLING")},
-			{btn("🗓 WEEK", "trial:setstrat:WEEK"), btn("📆 DAY", "trial:setstrat:DAY")},
-			{btn("♾ NO_RESET", "trial:setstrat:NO_RESET")},
+			{btn("📅 MONTH", "trial:setstrat:MONTH"), btn("🗓 WEEK", "trial:setstrat:WEEK")},
+			{btn("🔁 MONTH_ROLLING", "trial:setstrat:MONTH_ROLLING")},
+			{btn("📆 DAY", "trial:setstrat:DAY"), btn("♾ NO_RESET", "trial:setstrat:NO_RESET")},
 			{btn(i18n.T(lang, "trial.strat_btn_inherit"), "trial:setstrat:-")},
 			{btn(i18n.T(lang, "btn.back"), "menu:trial"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 		})

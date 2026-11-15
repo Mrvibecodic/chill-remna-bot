@@ -115,9 +115,10 @@ func (a *App) showCabinetAdmin(ctx context.Context, chatID int64) {
 	rows := [][]models.InlineKeyboardButton{
 		{btn(toggle, "menu:cabtoggle")},
 		{btn(i18n.T(lang, "cabinet.btn_appr_tg", mark(apprTG)), "menu:cabapptg"), btn(i18n.T(lang, "cabinet.btn_appr_email", mark(apprEmail)), "menu:cabappem")},
-		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath")},
+		{btn(i18n.T(lang, "cabinet.btn_path"), "menu:cabpath"), btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav")},
 		{btn(i18n.T(lang, "cabinet.btn_title"), "menu:cabtitle"), btn(i18n.T(lang, "cabinet.btn_desc"), "menu:cabdesc")},
-		{btn(i18n.T(lang, "cabinet.btn_favicon"), "menu:cabfav"), btn(fpLabel, "menu:cabfp")},
+		// Подпись анти-фингерпринта с состоянием длинная — ряд целиком.
+		{btn(fpLabel, "menu:cabfp")},
 		{btn(tgLabel, "menu:cabtgl")},
 		chatRow,
 		{btn(i18n.T(lang, "cabinet.btn_logout_all"), "menu:cablogout")},

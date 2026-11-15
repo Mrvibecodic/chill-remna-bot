@@ -191,9 +191,9 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_devices", mo), "menu:pricing")
 	case "strategy":
 		a.sendKB(ctx, chatID, i18n.T(lang, "pricing.ask_strategy"), [][]models.InlineKeyboardButton{
-			{btn("📅 MONTH", "prc:setstrat:MONTH"), btn("🔁 MONTH_ROLLING", "prc:setstrat:MONTH_ROLLING")},
-			{btn("🗓 WEEK", "prc:setstrat:WEEK"), btn("📆 DAY", "prc:setstrat:DAY")},
-			{btn("♾ NO_RESET", "prc:setstrat:NO_RESET")},
+			{btn("📅 MONTH", "prc:setstrat:MONTH"), btn("🗓 WEEK", "prc:setstrat:WEEK")},
+			{btn("🔁 MONTH_ROLLING", "prc:setstrat:MONTH_ROLLING")},
+			{btn("📆 DAY", "prc:setstrat:DAY"), btn("♾ NO_RESET", "prc:setstrat:NO_RESET")},
 			navBack(lang, "menu:pricing"),
 		})
 	case "setstrat":
