@@ -547,12 +547,16 @@ func TestPayMethodsScreen(t *testing.T) {
 	}
 	a.handleCallback(ctx, cb(100, "tx:pm"))
 	cbs := fm.allCallbackData()
-	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.yk_note", "tx:k:method.trb_name", "menu:iface"} {
+	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.trb_name", "menu:iface"} {
 		if !hasCB(cbs, want) {
 			t.Fatalf("на экране нет %s", want)
 		}
 	}
 	a.handleCallback(ctx, cb(100, "tx:k:method.yk_name"))
+	// Описание способа открывается из карточки его названия.
+	if !hasCB(fm.allCallbackData(), "tx:k:method.yk_note") {
+		t.Fatal("из карточки названия не открыть описание")
+	}
 	if !hasCB(fm.allCallbackData(), "tx:pm:") {
 		t.Fatal("из карточки не вернуться к способам оплаты")
 	}

@@ -301,14 +301,13 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	}
 
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code)},
-		{btn(toggleLabel, "pln:toggle:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code), btn(toggleLabel, "pln:toggle:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_avail", availModeName(lang, p.Availability)), "pln:av:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_addsub", addSubModeName(lang, p.AddSub)), "pln:as:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code), btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code),
+			btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code), btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
 	}
 	// «Базовый» удалить нельзя: он мост к старой сетке цен, по которой продаёт
 	// предыдущий образ бота после откатa, и единственный тариф, который бот
