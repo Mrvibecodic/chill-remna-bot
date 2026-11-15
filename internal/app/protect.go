@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"regexp"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -43,13 +44,13 @@ func copyableEnts(text string, ents []models.MessageEntity) bool {
 // screenProtect — закрыть ли экран от пересылки. Экраны пользователя — все,
 // где нечего копировать; экраны админки — только помеченные withAdminClosed.
 func (a *App) screenProtect(ctx context.Context, chatID int64, copyable bool) bool {
-	if copyable || ctx.Value(keepCopyKey{}) != nil || !hasChat(chatID) || a.cfg == nil {
+	if ctx.Value(keepCopyKey{}) != nil || !hasChat(chatID) || a.cfg == nil {
 		return false
 	}
 	if chatID == a.cfg.AdminID {
 		return ctx.Value(adminClosedKey{}) != nil
 	}
-	return true
+	return !copyable
 }
 
 type (
@@ -58,9 +59,10 @@ type (
 	adminClosedKey struct{}
 )
 
-// withAdminClosed — экран админки, который закрывается от пересылки, если в
-// нём нечего копировать. Экраны админки закрываются по одному, после
-// проверки, что копировать там нечего: у админа это реквизиты, ID и тексты.
+// withAdminClosed — экран админки, закрытый от пересылки. Экраны админки
+// закрываются по одному, после проверки, что копировать там нечего: у админа
+// это реквизиты, ID и тексты. Детектор здесь не спрашивается — в сводках
+// бывают суммы, похожие для него на номера.
 func withAdminClosed(ctx context.Context) context.Context {
 	return context.WithValue(ctx, adminClosedKey{}, true)
 }
@@ -79,6 +81,42 @@ func withProtect(ctx context.Context, on bool) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, protectKey{}, true)
+}
+
+// adminClosedData — нажатие ведёт в раздел админки, закрытый от пересылки
+// целиком, со всеми вложенными экранами: тарифы и триал (тарифы, цены,
+// быстрая настройка, триал, сквады, доп-подписка) и названия и описания
+// способов оплаты.
+func adminClosedData(data string) bool {
+	switch data {
+	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub", "tx:pm":
+		return true
+	}
+	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:"} {
+		if strings.HasPrefix(data, p) {
+			return true
+		}
+	}
+	// Экраны текста способа оплаты, открытые из «Названий и описаний».
+	return strings.HasPrefix(data, "tx:") && strings.Contains(data, ":method.")
+}
+
+// adminClosedInput — ответ админа на вопрос из тех же разделов.
+func adminClosedInput(ui *uiState) bool {
+	in := ui.adminInput
+	switch {
+	case strings.HasPrefix(in, "plan_"), strings.HasPrefix(in, "trial_"), strings.HasPrefix(in, "addsub_"):
+		return true
+	case in == "price", in == "ykprice", in == "starprice":
+		// Те же вопросы задают экраны P2P, ЮKassa и Stars — там тариф не
+		// выбран, и экран способа оплаты остаётся открытым.
+		return ui.planCode != ""
+	}
+	switch in {
+	case "baseprice", "traffic_gb", "device_per", "device_limit", "currency":
+		return true
+	}
+	return strings.HasPrefix(ui.txtKey, "method.")
 }
 
 func protectedCtx(ctx context.Context) bool {

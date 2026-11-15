@@ -64,6 +64,8 @@ func (a *App) showPlanAvail(ctx context.Context, chatID int64, code string) {
 		if link := a.planLink(ctx, code); link != "" {
 			b.WriteString("\n\n")
 			b.WriteString(i18n.T(lang, "plans.avail_link_line", link))
+			// Ссылку на тариф раздают покупателям — экран остаётся открытым.
+			ctx = withKeepCopy(ctx)
 		}
 	}
 

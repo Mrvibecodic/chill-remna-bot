@@ -143,6 +143,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 		return
 	}
+	if isAdmin && adminClosedData(cq.Data) {
+		ctx = withAdminClosed(ctx)
+	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 	// Любая кнопка вне редактора текстов снимает ожидание нового текста:
 	// иначе ответ на вопрос другого раздела ушёл бы в текст бота.

@@ -1097,6 +1097,9 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 
 	a.msg.Delete(ctx, chatID, m.ID)
 	ui := a.getUI(chatID)
+	if adminClosedInput(ui) {
+		ctx = withAdminClosed(ctx)
+	}
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
 		return
