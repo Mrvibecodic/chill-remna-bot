@@ -86,15 +86,16 @@ func withProtect(ctx context.Context, on bool) context.Context {
 // adminClosedData — нажатие ведёт в раздел админки, закрытый от пересылки
 // целиком, со всеми вложенными экранами: тарифы и триал (тарифы, цены,
 // быстрая настройка, триал, сквады, доп-подписка), названия и описания
-// способов оплаты, обновление и бэкап базы. Копировать там нечего: пароль
-// бэкапа бот не показывает, а адреса и ключи живут в других разделах.
+// способов оплаты, обновление, бэкап базы и сводка ошибок оплат. Копировать
+// там нечего: пароль бэкапа бот не показывает, а адреса и ключи живут в
+// других разделах.
 func adminClosedData(data string) bool {
 	switch data {
 	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub", "tx:pm",
 		"menu:update", "menu:backup":
 		return true
 	}
-	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:", "upd:", "bk:"} {
+	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:", "upd:", "bk:", "pay:err"} {
 		if strings.HasPrefix(data, p) {
 			return true
 		}

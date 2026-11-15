@@ -490,7 +490,9 @@ func (a *App) showPayMethods(ctx context.Context, chatID int64) {
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		navBack(lang, "menu:pay"),
 	)
-	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.methods_title"), rows)
+	// Открыт, как и экраны способов (там карты и ключи): между открытыми и
+	// закрытыми экранами Telegram не даёт править сообщение на месте.
+	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.methods_title"), rows)
 }
 
 func (a *App) showMarketing(ctx context.Context, chatID int64) {
@@ -506,7 +508,9 @@ func (a *App) showMarketing(ctx context.Context, chatID int64) {
 // запускается сразу, без подтверждения, и первой кнопкой раздела ему не место.
 func (a *App) showSystem(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
+	// Открыт, как и большинство его экранов (адреса, ключи, журнал): между
+	// открытыми и закрытыми экранами сообщение не правится на месте.
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
 		{btn(i18n.T(lang, "btn.updates"), "menu:updates"), btn(i18n.T(lang, "btn.backup"), "menu:backup")},
 		{btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},

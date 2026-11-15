@@ -112,7 +112,9 @@ func (a *App) showAnalytics(ctx context.Context, chatID int64) {
 		revToday, rev7, rev30, revAll,
 		len(pays), len(payers), totalUsers, conv,
 		popMonths, popCount, methodsStr)
-	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, text, [][]models.InlineKeyboardButton{
+	// Цифры сводки копировать незачем; закрыта, как и «Продажи», чтобы
+	// переход между ними правил сообщение на месте.
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, text, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "stats.btn_reload"), "menu:analytics")},
 		navBack(lang, "menu:pay"),
 	})

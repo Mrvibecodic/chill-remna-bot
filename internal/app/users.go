@@ -942,7 +942,7 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	back := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")}
 	if total == 0 {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(withAdminClosed(ctx), chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize

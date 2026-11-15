@@ -1176,8 +1176,6 @@ func (a *App) handleSupportCmd(ctx context.Context, chatID int64) {
 }
 
 func (a *App) handleStatus(ctx context.Context, chatID int64) {
-	// Сводка — копировать нечего (действует только в чате админа).
-	ctx = withAdminClosed(ctx)
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	installed := a.installed()

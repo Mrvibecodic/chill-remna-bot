@@ -287,7 +287,7 @@ func (a *App) showUserPayments(ctx context.Context, chatID, uid int64, page int)
 		return
 	}
 	if total == 0 {
-		a.sendUsrKB(withAdminClosed(ctx), chatID, i18n.T(lang, "upay.empty", label), [][]models.InlineKeyboardButton{back})
+		a.sendUsrKB(ctx, chatID, i18n.T(lang, "upay.empty", label), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	pages := (total + userPaysPageSize - 1) / userPaysPageSize
@@ -329,8 +329,9 @@ func (a *App) showUserPayments(ctx context.Context, chatID, uid int64, page int)
 		rows = append(rows, nav)
 	}
 	rows = append(rows, back)
-	// Список — сводка и кнопки, копировать нечего; номер платежа — в карточке.
-	a.sendUsrKB(withAdminClosed(ctx), chatID, b.String(), rows)
+	// Открыт, как карточка пользователя, из которой его открывают: между
+	// открытыми и закрытыми экранами сообщение не правится на месте.
+	a.sendUsrKB(ctx, chatID, b.String(), rows)
 }
 
 // showUserPayment — карточка платежа: usr:pay:<id платежа>:<стр списка>.
@@ -404,10 +405,14 @@ func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int, 
 		{btn(i18n.T(lang, "upay.btn_list"), "usr:pays:"+uid+":"+strconv.Itoa(page)), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	}
 	if all {
-		rows = [][]models.InlineKeyboardButton{
+		// Из общей истории — тем же видом, что и история: закрытой и с
+		// картинкой «Продаж», чтобы переход правил сообщение на месте. Номер
+		// платежа для копирования — в карточке из платежей пользователя.
+		a.sendPayKB(withAdminClosed(ctx), chatID, strings.Join(lines, "\n"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "paylog.btn_user"), "usr:pays:"+uid+":0")},
 			{btn(i18n.T(lang, "upay.btn_history"), "pay:page:"+strconv.Itoa(page)), btn(i18n.T(lang, "btn.home"), "menu:home")},
-		}
+		})
+		return
 	}
 	a.sendUsrKB(ctx, chatID, strings.Join(lines, "\n"), rows)
 }
