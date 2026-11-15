@@ -124,3 +124,57 @@ func TestAdminAskAndAnswerEditInPlace(t *testing.T) {
 		}
 	}
 }
+
+// Витрина у админа выглядит как у покупателя: текстовый экран покупателя не
+// уходит подписью под картинкой. Экран админки — уходит.
+func TestAdminStorefrontScreensStayClient(t *testing.T) {
+	ctx := context.Background()
+	a, fm := editApp(t)
+	a.handleCallback(ctx, cb(100, "menu:system"))
+	screen := fm.seq
+	// Витрина без тарифов отвечает текстом — как покупателю.
+	a.handleCallback(ctx, cbUnder(100, "menu:buy", screen, fm.isProt(screen)))
+	if a.msg.(*tgMsg).photo[fm.seq] {
+		t.Error("текстовый экран витрины ушёл подписью под картинкой")
+	}
+	// Фоновый экран того же пути — тоже.
+	a.sendKB(ctx, 100, "счёт", nil)
+	if a.msg.(*tgMsg).photo[fm.seq] {
+		t.Error("фоновый экран витрины ушёл подписью под картинкой")
+	}
+	a, fm = editApp(t)
+	a.handleCallback(ctx, cb(100, "menu:system"))
+	a.sendKB(ctx, 100, "итог", nil)
+	if !a.msg.(*tgMsg).photo[fm.seq] {
+		t.Error("текстовый экран «Системы» ушёл без картинки раздела")
+	}
+}
+
+// Ответ на вопрос под пришедшим уведомлением встаёт внизу чата новым
+// сообщением, а не правит экран выше уведомления.
+func TestAdminAnswerBelowNoticeComesNew(t *testing.T) {
+	ctx := context.Background()
+	a, fm := editApp(t)
+	a.handleCallback(ctx, cb(100, "menu:trial"))
+	screen := fm.seq
+	a.handleCallback(ctx, cbUnder(100, "trial:days", screen, fm.isProt(screen)))
+	a.notify(ctx, 100, "уведомление")
+	notice := fm.seq
+	a.handleMessage(ctx, msgText(100, "5"))
+	if fm.seq == notice {
+		t.Error("ответ правит экран над уведомлением")
+	}
+}
+
+// После шага обновления подписью «Обновление» правится на месте.
+func TestUpdateStepKeepsSection(t *testing.T) {
+	ctx := context.Background()
+	a, fm := editApp(t)
+	a.handleCallback(ctx, cb(100, "menu:updates"))
+	screen := fm.seq
+	a.showUpdateMsg(ctx, 100, screen, "обновляемся", nil)
+	a.handleCallback(ctx, cbUnder(100, "menu:updates", screen, fm.isProt(screen)))
+	if fm.seq != screen {
+		t.Error("после шага обновления экран раздела пришёл новым сообщением")
+	}
+}

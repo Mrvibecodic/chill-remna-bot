@@ -67,6 +67,41 @@ func withAdminClosed(ctx context.Context) context.Context {
 	return context.WithValue(ctx, adminClosedKey{}, true)
 }
 
+type flowKey struct{}
+
+// withClientFlow — админ нажал кнопку покупателя (витрина, оплата, свои
+// подписки): экран строится так же, как у покупателя.
+func withClientFlow(ctx context.Context) context.Context {
+	return context.WithValue(ctx, flowKey{}, "client")
+}
+
+// withAdminFlow — нажатие или команда админки. Без пометки (фоновая работа,
+// ответ на вопрос) экран остаётся того же вида, что и текущий.
+func withAdminFlow(ctx context.Context) context.Context {
+	return context.WithValue(ctx, flowKey{}, "admin")
+}
+
+func flowOf(ctx context.Context) string {
+	s, _ := ctx.Value(flowKey{}).(string)
+	return s
+}
+
+// clientData — кнопка ведёт на экран покупателя.
+func clientData(data string) bool {
+	key, val, _ := strings.Cut(data, ":")
+	switch key {
+	case cbBuy, cbPlanBuy, cbPlanView, cbPlanBack, cbMethod, cbTop, cbP2P, cbYKCheck, cbAutoPay,
+		cbCBCheck, cbPLCheck, cbYMCheck, cbHLCheck, cbDevices, cbTerms:
+		return true
+	case cbMenu:
+		switch val {
+		case "buy", "renew", "topup", "balance", "ref", "promo", "mysubs", "autopay", "register":
+			return true
+		}
+	}
+	return false
+}
+
 // withKeepCopy — экран в этом контексте не закрывать, даже если детектор не
 // нашёл в нём ничего для копирования (текст документов).
 func withKeepCopy(ctx context.Context) context.Context {

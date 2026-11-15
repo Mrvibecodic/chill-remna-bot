@@ -206,6 +206,8 @@ type App struct {
 	// screenProt — текущий экран ушёл с запретом пересылки. По нему ответ
 	// админа на вопрос правит экран на месте (см. adminInputEditsScreen).
 	screenProt map[int64]bool
+	// screenClient — текущий экран админа — экран покупателя (витрина).
+	screenClient map[int64]bool
 	// notices — уведомления с одной кнопкой «Главная» (notify): они не экран,
 	// и без учёта оставались висеть после ухода с них. noticeHit — уведомление,
 	// на кнопку которого нажали: уходит вместе со старым экраном.
@@ -917,8 +919,9 @@ func (a *App) isRestoreApply(u *models.Update) bool {
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
-	// A text message/command is not an inline-button action — drop any stale
-	// edit target from a previous callback so we never edit the wrong message.
+	// Текст или команда — не нажатие: прежнюю цель правки снимаем, чтобы не
+	// править чужое сообщение. Ответ админа на вопрос ставит её заново (см.
+	// adminInputEditsScreen).
 	a.setEditTarget(chatID, 0)
 	userID := int64(0)
 	firstName, username := "", ""
@@ -945,6 +948,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	if a.denyAccess(ctx, chatID, isAdmin) {
 		return
+	}
+	// Команда админа ведёт в админку, даже если сейчас открыта витрина.
+	if isAdmin && strings.HasPrefix(text, "/") {
+		ctx = withAdminFlow(ctx)
 	}
 
 	// Новый текст бота может начинаться с «/» (например, подсказка про
@@ -1103,9 +1110,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	if adminClosedInput(ui) {
 		ctx = withAdminClosed(ctx)
 	}
-	if isAdmin {
-		a.adminInputEditsScreen(chatID)
-	}
+	a.adminInputEditsScreen(chatID)
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
 		return
@@ -1306,10 +1311,17 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 // приходит из фоновой горутины, пока админ нажимает что-то ещё.
 func (a *App) showUpdateMsg(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) int {
 	t := a.applyPremium(text)
-	// Экран, с которого запустили, бывает и с картинкой раздела — тогда
-	// правится подпись.
-	if msgID != 0 && (a.msg.EditText(ctx, chatID, msgID, t, rows) || a.msg.EditCaption(ctx, chatID, msgID, t, rows)) {
+	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, t, rows) {
 		a.adoptScreen(ctx, chatID, msgID)
+		return msgID
+	}
+	// Экран, с которого запустили, бывает и с картинкой раздела — тогда
+	// правится подпись, а раздел экрана остаётся: следующий экран раздела
+	// тоже правится на месте.
+	sec := a.sectionOf(chatID, msgID)
+	if msgID != 0 && a.msg.EditCaption(ctx, chatID, msgID, t, rows) {
+		a.adoptScreen(ctx, chatID, msgID)
+		a.setScreenSection(chatID, sec)
 		return msgID
 	}
 	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableText(t)))
@@ -1466,6 +1478,16 @@ func (a *App) setScreenSection(chatID int64, section string) {
 	a.screenSection[chatID] = section
 }
 
+// sectionOf — раздел экрана msgID, если он сейчас текущий.
+func (a *App) sectionOf(chatID int64, msgID int) string {
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if ids := a.screen[chatID]; len(ids) != 1 || ids[0] != msgID {
+		return ""
+	}
+	return a.screenSection[chatID]
+}
+
 func (a *App) getScreenSection(chatID int64) string {
 	a.scrMu.Lock()
 	defer a.scrMu.Unlock()
@@ -1604,9 +1626,10 @@ func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
 // sendKB — экран текстом. В админке на экране с картинкой раздела (вопрос
 // «введите значение», короткий итог) он уходит подписью под той же
 // картинкой: так экран правится на месте, а не удаляется и не приходит
-// заново — картинку в текст Telegram править не даёт.
+// заново — картинку в текст Telegram править не даёт. Экраны покупателя,
+// которые админ видит через витрину, остаются как у покупателя.
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	if a.cfg != nil && chatID == a.cfg.AdminID {
+	if a.adminScreenNow(ctx, chatID) {
 		if sec := a.getScreenSection(chatID); sec != "" {
 			a.sendKBSection(ctx, chatID, sec, text, rows)
 			return
@@ -1621,37 +1644,70 @@ func (a *App) sendKBText(ctx context.Context, chatID int64, text string, rows []
 	prot := a.screenProtect(ctx, chatID, copyableText(t))
 	a.setScreenSection(chatID, "")
 	if a.editMatches(chatID, prot) && a.tryEditScreen(ctx, chatID, t, rows) {
-		a.noteScreenProt(chatID, prot)
+		a.noteScreen(ctx, chatID, prot)
 		return
 	}
 	pctx := withProtect(ctx, prot)
 	a.emit(ctx, chatID, func() int {
 		id := a.msg.SendKB(pctx, chatID, t, rows)
 		if id != 0 {
-			a.noteScreenProt(chatID, prot)
+			a.noteScreen(ctx, chatID, prot)
 		}
 		return id
 	})
 }
 
-// noteScreenProt запоминает, закрыт ли текущий экран от пересылки.
-func (a *App) noteScreenProt(chatID int64, prot bool) {
+// noteScreen запоминает, закрыт ли текущий экран от пересылки и экран ли он
+// покупателя.
+func (a *App) noteScreen(ctx context.Context, chatID int64, prot bool) {
 	a.scrMu.Lock()
 	defer a.scrMu.Unlock()
 	if a.screenProt == nil {
 		a.screenProt = map[int64]bool{}
 	}
 	a.screenProt[chatID] = prot
+	if a.screenClient == nil {
+		a.screenClient = map[int64]bool{}
+	}
+	switch flowOf(ctx) {
+	case "client":
+		a.screenClient[chatID] = true
+	case "admin":
+		a.screenClient[chatID] = false
+	}
+}
+
+// adminScreenNow — в чате админа показывается экран админки, а не экран
+// покупателя из витрины.
+func (a *App) adminScreenNow(ctx context.Context, chatID int64) bool {
+	if a.cfg == nil || chatID != a.cfg.AdminID {
+		return false
+	}
+	switch flowOf(ctx) {
+	case "client":
+		return false
+	case "admin":
+		return true
+	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	return !a.screenClient[chatID]
 }
 
 // adminInputEditsScreen — ответ админа на вопрос: следующий экран правит
-// текущий (вопрос) на месте, а не удаляет его и не приходит заново.
+// текущий (вопрос) на месте, а не удаляет его и не приходит заново. Только
+// когда экран — последнее сообщение бота: под уведомлением итог ушёл бы
+// вверх, а не встал внизу чата.
 func (a *App) adminInputEditsScreen(chatID int64) {
+	if !a.adminScreenNow(context.Background(), chatID) {
+		return
+	}
 	a.scrMu.Lock()
 	ids := a.screen[chatID]
 	prot := a.screenProt[chatID]
+	below := len(ids) == 1 && slices.ContainsFunc(a.notices[chatID], func(n int) bool { return n > ids[0] })
 	a.scrMu.Unlock()
-	if len(ids) != 1 {
+	if len(ids) != 1 || below {
 		return
 	}
 	a.setEditTarget(chatID, ids[0])
@@ -1710,7 +1766,7 @@ func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFi
 		id, err := a.msg.SendBanner(pctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
 			a.noteBannerOK(photo)
-			a.noteScreenProt(chatID, prot)
+			a.noteScreen(ctx, chatID, prot)
 			return id
 		}
 		// Настройку снимаем ТОЛЬКО когда Telegram отверг саму картинку:
@@ -1844,7 +1900,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
 			a.adoptScreen(ctx, chatID, target)
 			a.setScreenSection(chatID, section)
-			a.noteScreenProt(chatID, prot)
+			a.noteScreen(ctx, chatID, prot)
 			return
 		}
 	}
@@ -1861,7 +1917,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 		id, nf := a.msg.SendPhotoCacheable(pctx, chatID, cached, embed, t, rows)
 		newFileID = nf
 		if id != 0 {
-			a.noteScreenProt(chatID, prot)
+			a.noteScreen(ctx, chatID, prot)
 		}
 		return id
 	})

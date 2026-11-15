@@ -148,6 +148,13 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	if isAdmin && (adminClosedData(cq.Data) || cq.Data == "inp:cancel" && adminClosedData(a.getUI(chatID).inputBack)) {
 		ctx = withAdminClosed(ctx)
 	}
+	if isAdmin {
+		if clientData(cq.Data) {
+			ctx = withClientFlow(ctx)
+		} else {
+			ctx = withAdminFlow(ctx)
+		}
+	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 	// Любая кнопка вне редактора текстов снимает ожидание нового текста:
 	// иначе ответ на вопрос другого раздела ушёл бы в текст бота.
