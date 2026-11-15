@@ -255,7 +255,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 			a.onBroadcast(ctx, chatID, val)
 		}
 	case cbPromo:
-		if isAdmin {
+		// Ввод кода из витрины и кошелька — путь покупателя и у админа,
+		// который смотрит витрину.
+		if isAdmin && !promoUserData(val) {
 			a.onPromoAdmin(ctx, chatID, val)
 		} else {
 			a.onPromoUser(ctx, chatID, val)

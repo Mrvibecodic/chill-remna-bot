@@ -609,7 +609,8 @@ function renderSide(on){
   function it(key,ic,label,fn,bdg){return '<button class="snav'+(SECT===key?' on':'')+'" onclick="'+fn+'">'+ic+'<span>'+esc(label)+'</span>'+(bdg?'<span class="bdg">'+esc(bdg)+'</span>':'')+'</button>';}
   var h='<div class="sbrand" onclick="goHome()">'+brandHTML(false)+'</div>';
   h+=it('home',IC.bolt,T('home'),'goHome()');
-  if(STATE.plans.length)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
+  // «Тарифы» есть всегда, как в чате: на триале внутри — почему купить пока нельзя.
+  if(STATE.plans.length||STATE.plansNotice)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
   if(walletShown())h+=it('wallet',IC.wallet,T('wallet'),'navTo(\'wallet\')',rub(STATE.balanceK));
   if(s.sub_url)h+=it('connect',IC.download,T('conn_title'),'navTo(\'connect\')');
   if(s.active)h+=it('devices',IC.device,T('devices_title'),'navTo(\'devices\')',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'');
@@ -716,7 +717,7 @@ function apBlock(){
 }
 function homeList(){
   var m=STATE.menu||{},s=STATE.sub||{},h='<div class="list">';
-  if(STATE.plans.length)h+=item(IC.bolt,T('plans'),'','','openPlans()');
+  if(STATE.plans.length||STATE.plansNotice)h+=item(IC.bolt,T('plans'),'','','openPlans()');
   if(walletShown())h+=item(IC.wallet,T('wallet'),'',rub(STATE.balanceK),'go(\'wallet\')');
   if(m.referral_on)h+=item(IC.gift,T('ref'),'','','go(\'ref\')');
   h+=item(IC.tag,T('promo'),'','','go(\'promo\')');
@@ -799,6 +800,7 @@ function openRenew(){
 }
 SCREENS.plans=function(){
   var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('plans'))+'</div><div class="plans-grid dwide">';
+  if(!STATE.plans.length&&STATE.plansNotice)h+='<div class="note info">'+esc(STATE.plansNotice)+'</div>';
   h+=planCards();
   view(h+'</div>');
 };

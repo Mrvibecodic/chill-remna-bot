@@ -232,15 +232,16 @@ func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
 	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
 }
 
-// renewEligible — кнопка «Продлить»: платная подписка, до конца 7 дней и
-// меньше. Триал не продлевают — с него переходят на тариф через витрину. Одно
-// правило для чата, мини-аппа и кабинета.
+// renewEligible — кнопка «Продлить»: подписка куплена в боте, до конца 7 дней
+// и меньше. Триал не продлевают — с него переходят на тариф через витрину; без
+// покупки в боте (подписка из панели, перенесённая) продлевать нечего — тоже
+// витрина. Одно правило для чата, мини-аппа и кабинета.
 func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
 	if a.store == nil {
 		return false
 	}
 	u, _ := a.store.GetUser(ctx, chatID)
-	if u == nil || u.NotifyKind == "trial" {
+	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" {
 		return false
 	}
 	if u.SubExpireAt == "" {

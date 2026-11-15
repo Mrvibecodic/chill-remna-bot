@@ -23,6 +23,12 @@ func (a *App) showPromoUser(ctx context.Context, chatID int64) {
 	})
 }
 
+// promoUserData — кнопка ввода промокода покупателем (витрина, кошелёк,
+// экран промокода).
+func promoUserData(val string) bool {
+	return val == "enter" || val == "enterw" || val == "enterp"
+}
+
 func (a *App) onPromoUser(ctx context.Context, chatID int64, val string) {
 	back := "menu:promo"
 	switch val {

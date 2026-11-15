@@ -93,6 +93,8 @@ func clientData(data string) bool {
 	case cbBuy, cbPlanBuy, cbPlanView, cbPlanBack, cbMethod, cbTop, cbP2P, cbYKCheck, cbAutoPay,
 		cbCBCheck, cbPLCheck, cbYMCheck, cbHLCheck, cbDevices, cbTerms:
 		return true
+	case cbPromo:
+		return promoUserData(val)
 	case cbMenu:
 		switch val {
 		case "buy", "renew", "topup", "balance", "ref", "promo", "mysubs", "autopay", "register":

@@ -950,6 +950,8 @@ function openPlan(code,renew){
   h+='<div class="sec-title">'+IC.tag+'Срок подписки</div>';
   h+=durListHTML(p);
   h=deskSplit(hl,h);
+  // Тариф один — «Тарифы» открывают сразу его, и промокод здесь же.
+  if(!renew&&!many)h+=promoCard();
   h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,many?openPlans:boot);
 }

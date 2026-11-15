@@ -1235,7 +1235,7 @@ var en = map[string]string{
 	"admin.btn_open_all":    "🔓 Transfer for everyone",
 	"user.not_whitelisted":  "⛔️ Access to the bot is restricted. Contact support.",
 	"btn.wallet":            "👛 Wallet",
-	"wallet.title":          "👛 <b>Wallet</b>\n\nBalance top-up: <b>%s</b>\n“How long it lasts” block: <b>%s</b>\nCurrently held: %s ₽ across %d users.\n\nPaying from balance always works: referral rewards and promo codes land on the balance and have to be spendable. Turning top-up off only forbids adding new money — what is already there gets spent on subscriptions.\n\nThe bot cannot withdraw money from a balance and never promises users otherwise.",
+	"wallet.title":          "👛 <b>Wallet</b>\n\nBalance top-up: <b>%s</b>\n“How long it lasts” block: <b>%s</b>\nCurrently held: %s ₽ across %d users.\n\nPaying from balance always works: referral rewards and promo codes land on the balance and have to be spendable. Turning top-up off only forbids adding new money — what is already there gets spent on subscriptions. While top-up is off, users with an empty balance don't see the wallet button in the menu.\n\nThe bot cannot withdraw money from a balance and never promises users otherwise.",
 	"wallet.state_on":       "enabled",
 	"wallet.state_off":      "disabled",
 	"wallet.btn_topup_off":  "🔒 Disable top-up",
