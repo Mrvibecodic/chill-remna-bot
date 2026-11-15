@@ -464,7 +464,7 @@ function renderSide(){
   // через innerHTML, а не textContent.
   if(!DESK||!PAGE){document.body.classList.add('noside');side.innerHTML='';if(h1)h1.innerHTML='Личный кабинет';return;}
   document.body.classList.remove('noside');
-  if(h1){if(PAGE_TITLES[PAGE])h1.textContent=PAGE_TITLES[PAGE];else h1.innerHTML='Личный кабинет';}
+  if(h1){if(PAGE_TITLES[PAGE])h1.textContent=(PAGE==='wallet'&&STATE.menu&&!walletShown())?'Ещё':PAGE_TITLES[PAGE];else h1.innerHTML='Личный кабинет';}
   // Данные ещё грузятся — заготовка меню, чтобы раскладка не прыгала.
   if(!STATE.menu){
     var sk='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
@@ -477,7 +477,9 @@ function renderSide(){
   var h='<div class="sbrand"><span class="lg">'+IC.bolt+'</span>Личный кабинет</div>';
   h+=item('home',IC.layers,'Главная','boot()');
   if((STATE.plans&&STATE.plans.length)||STATE.plansNotice)h+=item('plans',IC.tag,'Тарифы','openPlans()');
-  h+=item('wallet',IC.wallet,'Кошелёк','openMore()',esc(rub(STATE.balanceK))+' ₽');
+  // Кошелёк — пока его можно пополнить или на нём есть деньги, как в чате;
+  // иначе тот же раздел — «Ещё»: промокод, рефералка, документы.
+  h+=walletShown()?item('wallet',IC.wallet,'Кошелёк','openMore()',esc(rub(STATE.balanceK))+' ₽'):item('wallet',IC.dots,'Ещё','openMore()');
   if(sub.sub_url)h+=item('connect',IC.download,'Подключение','openConnect()');
   h+=item('account',IC.users,'Аккаунт','openAccount()');
   if(m.support_url||m.group_url){
@@ -772,7 +774,9 @@ function planInfoDesk(p){
 }
 // Продление ведёт на свой тариф, как кнопка «Продлить» в чате: витрина
 // «Базового» продала бы подписчику чужие условия.
-function renewShown(m){return !!((m.can_renew||m.own_plan)&&(STATE.plans.length||m.renew_gone));}
+// «Продлить» — как в чате: платная подписка, до конца 7 дней и меньше. В
+// остальное время свой тариф продлевается из списка тарифов.
+function renewShown(m){return !!(m.can_renew&&(STATE.plans.length||m.renew_gone));}
 function openRenew(){
   var m=STATE.menu||{};
   if(m.renew_gone){toast('Тариф, которым вы пользовались, больше недоступен. Выберите новый — действующая подписка не пострадает.','err');openPlans();return;}
@@ -785,6 +789,7 @@ function openPlans(){
   var h='<div class="stagger">';
   if(STATE.plans.length)h+=plansGridHTML();
   else h+='<div class="card"><div class="hint center">'+esc(STATE.plansNotice||'Тарифов пока нет')+'</div></div>';
+  h+=promoCard();
   h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
   view(h,boot);
 }
@@ -1134,12 +1139,12 @@ async function openMore(){
   haptic('tap');skSimple();setBack(boot);
   var ref={enabled:false};
   try{ref=await api('/api/miniapp/referral');}catch(e){}
-  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Баланс</span></div>'+
+  var h='<div class="stagger">';
+  if(walletShown())h+='<div class="card hero glow"><div class="top"><span class="status">'+IC.wallet+' Баланс</span></div>'+
     '<div class="title">'+rub(STATE.balanceK)+' ₽</div>'+
     (topupOn()?'<button class="btn" style="margin-top:14px" onclick="topupOpen()">'+IC.plus+'Пополнить баланс</button>':'')+
     '<div class="hint" style="margin-top:12px">Баланс тратится только на подписку. Вывод средств невозможен.</div></div>';
-  h+='<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
-    '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';
+  h+=promoCard();
   var hl=h;h='';
   if(ref&&ref.enabled){
     var bonus=(ref.bonus_kind==='days')?(ref.bonus_value+' дн.'):(ref.bonus_value+' ₽');
@@ -1243,6 +1248,11 @@ function legalGate(code,months){
 
 /* ---- top-up ---- */
 function topupOn(){return !(STATE.menu&&STATE.menu.topup_on===false);}
+// walletShown — кошелёк в меню, как в чате: пока его можно пополнить или на
+// нём есть деньги.
+function walletShown(){return topupOn()||STATE.balanceK>0;}
+function promoCard(){return '<div class="sec-title">'+IC.tag+'Промокод</div><div class="card"><input id="promoIn" class="field" placeholder="Введите код">'+
+    '<button class="btn" style="margin-top:10px" onclick="promoApply(this)">'+IC.check+'Применить</button></div>';}
 async function topupOpen(){
   PAGE='wallet';
   if(!topupOn())return;
@@ -1700,7 +1710,7 @@ async function boot(){
     if(WEB){try{STATE.acct=await api('/api/cabinet/account');}catch(e){STATE.acct=null;}}
     STATE.me_id=me.tg_id||0;loadAva();
     STATE.balanceK=me.balance_kopecks||0; STATE.methods=menu.pay_methods||[]; STATE.menu=menu; STATE.lang=me.lang||'ru'; STATE.me_name=me.name||''; STATE.me_email=me.email||''; STATE.me_subexp=me.sub_expire||'';
-    balchip.style.display='inline-flex';
+    balchip.style.display=walletShown()?'inline-flex':'none';
     balchip.innerHTML=IC.wallet+rub(STATE.balanceK)+' ₽';
     NOFX=true;render(me,menu,sub,plans);NOFX=false;
     // Ссылка ждёт согласия с документами на входе: после «Принимаю» boot()

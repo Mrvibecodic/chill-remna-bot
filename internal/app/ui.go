@@ -208,9 +208,7 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 	var row []models.InlineKeyboardButton
 	if a.userHasSub(ctx, chatID) {
 		row = append(row, btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs"))
-		// Продлевается платная подписка: триал не продлевают, с него
-		// переходят на тариф через «Тарифы».
-		if !a.userOnTrial(ctx, chatID) && a.renewEligible(ctx, chatID) {
+		if a.renewEligible(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.renew"), "menu:renew"))
 		}
 		// Витрина: продлить свой тариф или сменить его можно в любой день.
@@ -227,15 +225,6 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 	return row
 }
 
-// userOnTrial — сейчас идёт триал, а не платная подписка.
-func (a *App) userOnTrial(ctx context.Context, chatID int64) bool {
-	if a.store == nil {
-		return false
-	}
-	u, _ := a.store.GetUser(ctx, chatID)
-	return u != nil && u.NotifyKind == "trial"
-}
-
 // walletInMenu — кошелёк в главном меню: пока его можно пополнить или на
 // нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
 // пополнения в меню не нужен — промокод вводится и в витрине.
@@ -243,16 +232,16 @@ func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
 	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
 }
 
+// renewEligible — кнопка «Продлить»: платная подписка, до конца 7 дней и
+// меньше. Триал не продлевают — с него переходят на тариф через витрину. Одно
+// правило для чата, мини-аппа и кабинета.
 func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
 	if a.store == nil {
 		return false
 	}
 	u, _ := a.store.GetUser(ctx, chatID)
-	if u == nil {
+	if u == nil || u.NotifyKind == "trial" {
 		return false
-	}
-	if u.NotifyKind == "trial" {
-		return true
 	}
 	if u.SubExpireAt == "" {
 		return false

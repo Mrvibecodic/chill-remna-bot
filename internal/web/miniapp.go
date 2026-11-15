@@ -309,8 +309,9 @@ type MiniMenuDTO struct {
 	CanRenew       bool `json:"can_renew"`
 	TrialAvailable bool `json:"trial_available"`
 	ReferralOn     bool `json:"referral_on"`
-	// TopUpOn — включено ли пополнение баланса. Кошелёк как таковой остаётся:
-	// на баланс приходят реферальные начисления, тратить их можно всегда.
+	// TopUpOn — включено ли пополнение баланса. Кошелёк в меню показывается,
+	// пока пополнение включено или на балансе есть деньги (рефералка,
+	// промокод), — как в чате; тратить баланс можно всегда.
 	TopUpOn    bool     `json:"topup_on"`
 	PayMethods []string `json:"pay_methods"`
 	// PayLabels / PayNotes — названия и описания способов оплаты по коду

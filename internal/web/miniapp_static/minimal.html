@@ -539,7 +539,10 @@ function brandHTML(big){
   return '<span'+cls+' style="display:flex;align-items:center;gap:10px;min-width:0">'+h+(name?'<span class="nm">'+esc(name)+'</span>':'')+'</span>';
 }
 function paintBrand(){document.getElementById('brand').innerHTML=brandHTML(false);}
-function paintBalance(){var b=document.getElementById('bal');if(TOKEN&&STATE.me){b.style.display='inline-flex';b.innerHTML=IC.wallet+esc(rub(STATE.balanceK));}else{b.style.display='none';b.innerHTML='';}}
+// walletShown — кошелёк в меню, как в чате: пока его можно пополнить или на
+// нём есть деньги.
+function walletShown(){return !!(STATE.menu&&STATE.menu.topup_on)||STATE.balanceK>0;}
+function paintBalance(){var b=document.getElementById('bal');if(TOKEN&&STATE.me&&walletShown()){b.style.display='inline-flex';b.innerHTML=IC.wallet+esc(rub(STATE.balanceK));}else{b.style.display='none';b.innerHTML='';}}
 
 /* ---------- API ---------- */
 async function authenticate(){
@@ -607,7 +610,7 @@ function renderSide(on){
   var h='<div class="sbrand" onclick="goHome()">'+brandHTML(false)+'</div>';
   h+=it('home',IC.bolt,T('home'),'goHome()');
   if(STATE.plans.length)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
-  h+=it('wallet',IC.wallet,T('wallet'),'navTo(\'wallet\')',rub(STATE.balanceK));
+  if(walletShown())h+=it('wallet',IC.wallet,T('wallet'),'navTo(\'wallet\')',rub(STATE.balanceK));
   if(s.sub_url)h+=it('connect',IC.download,T('conn_title'),'navTo(\'connect\')');
   if(s.active)h+=it('devices',IC.device,T('devices_title'),'navTo(\'devices\')',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'');
   if(m.referral_on)h+=it('ref',IC.gift,T('ref'),'navTo(\'ref\')');
@@ -688,7 +691,8 @@ function subCard(){
     if(s.sub_url){
       h+='<div class="link" onclick="copy(\''+jsq(s.sub_url)+'\')"><code>'+esc(s.sub_url)+'</code>'+IC.copy+'</div>';
       h+='<div class="stack" style="margin-top:14px"><button class="btn" onclick="go(\'connect\')">'+IC.download+esc(T('connect'))+'</button>';
-      if(m.can_renew||m.own_plan)h+='<button class="btn sec" onclick="openRenew()">'+IC.repeat+esc(T('renew'))+'</button>';
+      // «Продлить» — как в чате: платная подписка, до конца 7 дней и меньше.
+      if(m.can_renew)h+='<button class="btn sec" onclick="openRenew()">'+IC.repeat+esc(T('renew'))+'</button>';
       h+='</div>';
     }
     h+='</div>';
@@ -713,7 +717,7 @@ function apBlock(){
 function homeList(){
   var m=STATE.menu||{},s=STATE.sub||{},h='<div class="list">';
   if(STATE.plans.length)h+=item(IC.bolt,T('plans'),'','','openPlans()');
-  h+=item(IC.wallet,T('wallet'),'',rub(STATE.balanceK),'go(\'wallet\')');
+  if(walletShown())h+=item(IC.wallet,T('wallet'),'',rub(STATE.balanceK),'go(\'wallet\')');
   if(m.referral_on)h+=item(IC.gift,T('ref'),'','','go(\'ref\')');
   h+=item(IC.tag,T('promo'),'','','go(\'promo\')');
   if(s.active)h+=item(IC.device,T('devices_title'),'',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'','go(\'devices\')');
