@@ -133,7 +133,7 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 	}
 	if ui.awaitBackup {
 		ui.awaitBackup = false
-		a.handleBackupDoc(withAdminClosed(ctx), m)
+		a.handleBackupDoc(ctx, m)
 		return
 	}
 	if ui.awaitPlanImport {

@@ -400,8 +400,7 @@ func ptr[T any](v T) *T { return &v }
 func (a *App) setBackupDest(ctx context.Context, chatID int64, ch destChange) {
 	a.getUI(chatID).adminInput = ""
 	a.sendSysKB(ctx, chatID, i18n.T(a.lang(chatID), "bk.checking_dest"), nil)
-	// Экраны бэкапа закрыты от пересылки и после фоновой работы.
-	bg := withAdminClosed(a.bgContext())
+	bg := a.bgContext()
 	a.spawn(func() { a.applyBackupDest(bg, chatID, ch) })
 }
 
@@ -537,8 +536,7 @@ func (a *App) restorePassText(ctx context.Context, chatID int64, text string) bo
 		return true
 	}
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.checking"), nil)
-	// Экраны бэкапа закрыты от пересылки и после фоновой работы.
-	bg := withAdminClosed(a.bgContext())
+	bg := a.bgContext()
 	pass := strings.TrimSpace(text)
 	a.spawn(func() { a.openBackupFile(bg, chatID, p, pass, nil) })
 	return true
@@ -680,8 +678,7 @@ func (a *App) backupNow(ctx context.Context, chatID int64) {
 		return
 	}
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.making"), nil)
-	// Экраны бэкапа закрыты от пересылки и после фоновой работы.
-	bg := withAdminClosed(a.bgContext())
+	bg := a.bgContext()
 	a.spawn(func() {
 		defer a.bkMu.Unlock()
 		if err := a.sendBackupFile(bg, a.configuredDest(bc), bc.Password, "bk.caption_title"); err != nil {
@@ -826,8 +823,7 @@ func (a *App) handleBackupDoc(ctx context.Context, m *models.Message) {
 	fileID := m.Document.FileID
 	pass := a.backupCfg().Password
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.checking"), nil)
-	// Экраны бэкапа закрыты от пересылки и после фоновой работы.
-	bg := withAdminClosed(a.bgContext())
+	bg := a.bgContext()
 	a.spawn(func() {
 		dctx, cancel := context.WithTimeout(bg, dumpDownloadTimeout)
 		data, err := a.msg.Download(dctx, fileID)
@@ -974,8 +970,7 @@ func (a *App) applyRestore(ctx context.Context, chatID int64) {
 	a.restorePhase.Store(phaseWait)
 	a.restoring.Store(true)
 	a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.restore_wait"), nil)
-	// Экраны бэкапа закрыты от пересылки и после фоновой работы.
-	bg := withAdminClosed(a.bgContext())
+	bg := a.bgContext()
 	a.spawn(func() {
 		defer a.bkMu.Unlock()
 		a.runRestore(bg, chatID, p)

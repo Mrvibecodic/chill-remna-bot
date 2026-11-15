@@ -532,7 +532,7 @@ func (a *App) showUpdates(ctx context.Context, chatID int64) {
 	if updOn {
 		updLabel, updState = i18n.T(lang, "btn.upd_notify_on"), i18n.T(lang, "updates.on")
 	}
-	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionAdminStats, i18n.T(lang, "updates.title", a.channelName(lang), updState), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "updates.title", a.channelName(lang), updState), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
 		{btn(updLabel, "upd:toggle")},
 		{btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},

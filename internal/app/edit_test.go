@@ -66,7 +66,7 @@ func TestAdminNavigationEditsInPlace(t *testing.T) {
 		"menu:pay":              {"menu:payments", "menu:analytics", "menu:payplans"},
 		"menu:paymethods":       {"menu:p2p", "menu:stars", "menu:yookassa", "menu:cryptobot", "menu:platega", "menu:heleket", "menu:tribute", "menu:yoomoney", "menu:wallet", "menu:moynalog"},
 		"menu:payplans":         {"menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub"},
-		"menu:system":           {"menu:status", "menu:apilog", "menu:panelauth", "menu:webhooks", "menu:mail", "menu:miniapp", "menu:cabinet", "menu:rsimp", "menu:reconf"},
+		"menu:system":           {"menu:status", "menu:updates", "menu:backup", "menu:apilog", "menu:panelauth", "menu:webhooks", "menu:mail", "menu:miniapp", "menu:cabinet", "menu:rsimp", "menu:reconf"},
 		"menu:iface":            {"tx:pm", "menu:welcome", "menu:welcome_sections", "menu:contacts", "tx:home", "menu:devices", "menu:webui", "menu:botlang"},
 		"menu:payments":         {"pay:card:5:0", "pay:err"},
 		"menu:updates":          {"upd:chan"},

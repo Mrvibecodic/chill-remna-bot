@@ -1633,7 +1633,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 	lang := a.lang(chatID)
 
 	// Пароль от присланного файла бэкапа — только когда другого ввода не ждём.
-	if ui.adminInput == "" && ui.rejectReq == 0 && a.restorePassText(withAdminClosed(ctx), chatID, text) {
+	if ui.adminInput == "" && ui.rejectReq == 0 && a.restorePassText(ctx, chatID, text) {
 		return
 	}
 

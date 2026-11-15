@@ -1270,8 +1270,6 @@ func (a *App) clearUpdNotice(chatID int64, msgID int) bool {
 }
 
 func (a *App) handleUpdate(ctx context.Context, chatID int64) {
-	// Ход обновления — копировать нечего; /update приходит и командой.
-	ctx = withAdminClosed(ctx)
 	lang := a.lang(chatID)
 	// Reuse the message the admin acted on so the whole update flow lives in ONE
 	// message: changelog -> starting -> result (edit in place, not delete+resend).

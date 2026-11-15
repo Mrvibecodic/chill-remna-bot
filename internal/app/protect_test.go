@@ -98,14 +98,15 @@ func TestUserScreensProtect(t *testing.T) {
 		t.Fatal("реферальный экран закрыт: ссылку не скопировать")
 	}
 	// Экраны админки закрываются по разделам: меню, «Продажи», «Тарифы и
-	// триал», «Обновление» — да. «Способы оплаты» и «Система» открыты, как и
-	// большинство их экранов с ключами и адресами, карточка пользователя — тоже.
-	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:analytics", "menu:updates"} {
+	// триал» — да. «Способы оплаты», «Система» с обновлением и бэкапом,
+	// «Интерфейс» и карточка пользователя открыты, как и большинство их экранов
+	// с ключами, адресами и текстами.
+	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:analytics"} {
 		if id := tap(100, data); !fm.isProt(id) {
 			t.Fatalf("%s у админа ушёл без запрета пересылки", data)
 		}
 	}
-	for _, data := range []string{"menu:paymethods", "menu:system", "menu:status", "menu:iface", "tx:pm"} {
+	for _, data := range []string{"menu:paymethods", "menu:system", "menu:status", "menu:updates", "menu:backup", "menu:iface", "tx:pm"} {
 		if id := tap(100, data); fm.isProt(id) {
 			t.Fatalf("%s у админа закрыт", data)
 		}
@@ -234,37 +235,5 @@ func TestAdminNestedSalesScreensClosed(t *testing.T) {
 	a.handleMessage(ctx, msgText(planAdmin, "100"))
 	if fm.seq == n || !fm.isProt(fm.seq) {
 		t.Error("экран тарифа после ввода цены ЮKassa открыт")
-	}
-}
-
-// Подразделы «Системы», где копировать нечего, закрыты целиком: обновление и
-// бэкап с его настройками и ответами на вопросы. Экраны с адресами, ключами и
-// журналом запросов остаются открытыми.
-func TestAdminSystemChildrenClosed(t *testing.T) {
-	ctx := context.Background()
-	a, fm, _ := newTextsApp(t)
-	tap := func(data string) bool {
-		t.Helper()
-		n := fm.seq
-		a.handleCallback(ctx, cb(100, data))
-		if fm.seq == n {
-			t.Fatalf("%s: экран не пришёл", data)
-		}
-		return fm.isProt(fm.seq)
-	}
-	for _, data := range []string{"upd:chan", "menu:backup", "bk:dest", "bk:pass"} {
-		if !tap(data) {
-			t.Errorf("%s ушёл без запрета пересылки", data)
-		}
-	}
-	n := fm.seq
-	a.handleMessage(ctx, msgText(100, "a-long-enough-password"))
-	if fm.seq == n || !fm.isProt(fm.seq) {
-		t.Error("экран бэкапа после ввода пароля ушёл без запрета пересылки")
-	}
-	for _, data := range []string{"menu:apilog", "menu:webhooks", "menu:panelauth", "menu:miniapp", "menu:cabinet", "menu:mail"} {
-		if tap(data) {
-			t.Errorf("%s закрыт, а там адреса и ключи", data)
-		}
 	}
 }
