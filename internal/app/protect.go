@@ -85,14 +85,16 @@ func withProtect(ctx context.Context, on bool) context.Context {
 
 // adminClosedData — нажатие ведёт в раздел админки, закрытый от пересылки
 // целиком, со всеми вложенными экранами: тарифы и триал (тарифы, цены,
-// быстрая настройка, триал, сквады, доп-подписка) и названия и описания
-// способов оплаты.
+// быстрая настройка, триал, сквады, доп-подписка), названия и описания
+// способов оплаты, обновление и бэкап базы. Копировать там нечего: пароль
+// бэкапа бот не показывает, а адреса и ключи живут в других разделах.
 func adminClosedData(data string) bool {
 	switch data {
-	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub", "tx:pm":
+	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub", "tx:pm",
+		"menu:update", "menu:backup":
 		return true
 	}
-	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:"} {
+	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "tx:pm:", "upd:", "bk:"} {
 		if strings.HasPrefix(data, p) {
 			return true
 		}
@@ -105,7 +107,8 @@ func adminClosedData(data string) bool {
 func adminClosedInput(ui *uiState) bool {
 	in := ui.adminInput
 	switch {
-	case strings.HasPrefix(in, "plan_"), strings.HasPrefix(in, "trial_"), strings.HasPrefix(in, "addsub_"):
+	case strings.HasPrefix(in, "plan_"), strings.HasPrefix(in, "trial_"), strings.HasPrefix(in, "addsub_"),
+		strings.HasPrefix(in, "bk_"):
 		return true
 	case in == "price", in == "ykprice", in == "starprice":
 		// Те же вопросы задают экраны P2P, ЮKassa и Stars — там тариф не

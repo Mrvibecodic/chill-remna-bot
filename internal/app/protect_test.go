@@ -231,3 +231,35 @@ func TestAdminNestedSalesScreensClosed(t *testing.T) {
 		t.Error("экран тарифа после ввода цены ЮKassa открыт")
 	}
 }
+
+// Дочерние экраны «Системы», где копировать нечего, закрыты: статус, выбор
+// канала, бэкап с его настройками и ответами на вопросы. Экраны с адресами,
+// ключами и журналом запросов остаются открытыми.
+func TestAdminSystemChildrenClosed(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _ := newTextsApp(t)
+	tap := func(data string) bool {
+		t.Helper()
+		n := fm.seq
+		a.handleCallback(ctx, cb(100, data))
+		if fm.seq == n {
+			t.Fatalf("%s: экран не пришёл", data)
+		}
+		return fm.isProt(fm.seq)
+	}
+	for _, data := range []string{"menu:status", "upd:chan", "menu:backup", "bk:dest", "bk:pass"} {
+		if !tap(data) {
+			t.Errorf("%s ушёл без запрета пересылки", data)
+		}
+	}
+	n := fm.seq
+	a.handleMessage(ctx, msgText(100, "a-long-enough-password"))
+	if fm.seq == n || !fm.isProt(fm.seq) {
+		t.Error("экран бэкапа после ввода пароля ушёл без запрета пересылки")
+	}
+	for _, data := range []string{"menu:apilog", "menu:webhooks", "menu:panelauth", "menu:miniapp", "menu:cabinet", "menu:mail"} {
+		if tap(data) {
+			t.Errorf("%s закрыт, а там адреса и ключи", data)
+		}
+	}
+}
