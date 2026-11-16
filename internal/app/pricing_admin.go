@@ -46,37 +46,15 @@ func (a *App) showPlanSquads(ctx context.Context, chatID int64, mo int) {
 	intSquads, _ := panel.ListSquads(ctx)
 	extSquads, _ := panel.ListExternalSquads(ctx)
 	live := panel.LiveSquads(ctx)
-	isActive := func(uuid string) bool {
-		for _, u := range actInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
 	moStr := strconv.Itoa(mo)
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+3)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isActive(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, "prc:sqi:"+moStr+":"+sq.UUID)})
-	}
-	if len(extSquads) > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{btn("— 📡 External —", "prc:sqm:"+moStr)})
-		for _, sq := range extSquads {
-			mark := "⚪"
-			if actExt == sq.UUID {
-				mark = "🟢"
-			}
-			rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 📡 "+sq.Name, "prc:sqe:"+moStr+":"+sq.UUID)})
-		}
-	}
-	gone := goneSquadRows(lang, live, actInt, actExt,
-		func(u string) string { return "prc:sqi:" + moStr + ":" + u },
-		func(u string) string { return "prc:sqe:" + moStr + ":" + u })
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, extSquads, squadPick{
+		selInt:   actInt,
+		selExt:   actExt,
+		intCB:    func(u string) string { return "prc:sqi:" + moStr + ":" + u },
+		extCB:    func(u string) string { return "prc:sqe:" + moStr + ":" + u },
+		extHead:  "prc:sqm:" + moStr,
+		extRadio: true,
+	})
 	if len(actInt) > 0 || actExt != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "pricing.sq_clear"), "prc:sqclear:"+moStr)})
 	}
@@ -213,9 +191,9 @@ func (a *App) onPricing(ctx context.Context, chatID int64, val string) {
 		a.askInput(ctx, chatID, i18n.T(lang, "pricing.ask_devices", mo), "menu:pricing")
 	case "strategy":
 		a.sendKB(ctx, chatID, i18n.T(lang, "pricing.ask_strategy"), [][]models.InlineKeyboardButton{
-			{btn("📅 MONTH", "prc:setstrat:MONTH"), btn("🔁 MONTH_ROLLING", "prc:setstrat:MONTH_ROLLING")},
-			{btn("🗓 WEEK", "prc:setstrat:WEEK"), btn("📆 DAY", "prc:setstrat:DAY")},
-			{btn("♾ NO_RESET", "prc:setstrat:NO_RESET")},
+			{btn("📅 MONTH", "prc:setstrat:MONTH"), btn("🗓 WEEK", "prc:setstrat:WEEK")},
+			{btn("🔁 MONTH_ROLLING", "prc:setstrat:MONTH_ROLLING")},
+			{btn("📆 DAY", "prc:setstrat:DAY"), btn("♾ NO_RESET", "prc:setstrat:NO_RESET")},
 			navBack(lang, "menu:pricing"),
 		})
 	case "setstrat":

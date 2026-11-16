@@ -93,9 +93,7 @@ const (
 // пустой список вместо недоступного хранилища значило бы предложить админу
 // создать тариф заново поверх существующих.
 func (a *App) planList(ctx context.Context) ([]model.Plan, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, errStorageUnavailable
 	}
@@ -103,13 +101,24 @@ func (a *App) planList(ctx context.Context) ([]model.Plan, error) {
 }
 
 func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, errStorageUnavailable
 	}
 	return st.GetPlan(ctx, code)
+}
+
+// planOrBase — тариф по коду; «Базовый» без строки собирается из сетки цен.
+// Строки у него может не быть только после сбоя стартовой синхронизации, а
+// продаёт его всё равно сетка — отказывать «тариф не найден» нельзя.
+func (a *App) planOrBase(ctx context.Context, code string) (*model.Plan, error) {
+	p, err := a.planByCode(ctx, code)
+	if err != nil || p != nil || code != model.PlanCodeBase {
+		return p, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return basePlanFrom(a.botCfg, nil), nil
 }
 
 // savePlan пишет тариф. Вызывать ТОЛЬКО под a.plansMu (см. editPlan): запись
@@ -117,9 +126,7 @@ func (a *App) planByCode(ctx context.Context, code string) (*model.Plan, error) 
 // чужую правку — например, цену, которую синхронизация только что привезла из
 // конфига.
 func (a *App) savePlan(ctx context.Context, p *model.Plan) error {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return errStorageUnavailable
 	}
@@ -185,7 +192,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	plans, err := a.planList(ctx)
 	if err != nil {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "err.storage"),
-			[][]models.InlineKeyboardButton{navBack(lang, "menu:pay")})
+			[][]models.InlineKeyboardButton{navBack(lang, "menu:payplans")})
 		return
 	}
 	if page < 0 {
@@ -213,7 +220,7 @@ func (a *App) showPlansAdmin(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows,
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_new"), "pln:new"), btn(i18n.T(lang, "plans.btn_import"), "pln:imp")},
-		navBack(lang, "menu:pay"),
+		navBack(lang, "menu:payplans"),
 	)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.title", len(plans), page+1, pages), rows)
 }
@@ -294,14 +301,13 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	}
 
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code)},
-		{btn(toggleLabel, "pln:toggle:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_pricing"), "pln:pr:"+p.Code), btn(toggleLabel, "pln:toggle:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_avail", availModeName(lang, p.Availability)), "pln:av:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_addsub", addSubModeName(lang, p.AddSub)), "pln:as:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_name"), "pln:name:"+p.Code), btn(i18n.T(lang, "plans.btn_desc"), "pln:desc:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code), btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code),
+			btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
+		{btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code), btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
 	}
 	// «Базовый» удалить нельзя: он мост к старой сетке цен, по которой продаёт
 	// предыдущий образ бота после откатa, и единственный тариф, который бот
@@ -906,9 +912,7 @@ func (a *App) deletePlan(ctx context.Context, chatID int64, code string) {
 		a.showPlanCard(ctx, chatID, code)
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return

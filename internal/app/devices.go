@@ -29,9 +29,7 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 			navBack(lang, "menu:mysubs"),
 		})
 	case "confirm":
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
+		panel := a.panelClient()
 		// Отказ — тем же экраном, что и успех: отдельным уведомлением он
 		// оставался в чате с двумя кнопками «Главная».
 		fail := func() {
@@ -73,9 +71,7 @@ func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 // если и в него не влезает, список уходит несколькими сообщениями.
 func (a *App) showDevices(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	rows := [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")},
 		navBack(lang, "menu:mysubs"),
@@ -141,9 +137,7 @@ func devicePages(head string, lines []string, note string) []string {
 // cross-user access. A delete-all failure is logged but still reported as success
 // because the credential rotation already applied.
 func (a *App) MiniResetDevices(ctx context.Context, tgID int64) web.MiniActionDTO {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.panel_down"))}
 	}
@@ -198,9 +192,7 @@ func (a *App) clearHwidInBackground(tgID int64, ref remnawave.UserRef) {
 				a.log.Error("hwid background retry panicked", "tg", tgID, "err", r)
 			}
 		}()
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
+		panel := a.panelClient()
 		if panel == nil {
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"remnabot/internal/model"
 )
@@ -311,5 +312,33 @@ func TestCabinetApprovalToggles(t *testing.T) {
 	a.handleCallback(ctx, cb(100, "menu:cabinet"))
 	if !strings.Contains(fm.joined(), "почта — <b>да (бот закрыт)</b>") {
 		t.Fatalf("закрытый бот: %s", fm.joined())
+	}
+}
+
+// Адрес пользователя, удалённого прежней версией бота, после стартовой чистки
+// снова свободен: до неё регистрация упиралась в оставшийся аккаунт кабинета.
+func TestPruneWebUsersFreesEmail(t *testing.T) {
+	a, _, st := bkTestApp(t)
+	ctx := context.Background()
+	a.botCfg.NormalizeCabinet()
+	a.botCfg.Cabinet.Enabled = true
+	a.botCfg.Webhook.PublicBaseURL = "https://example.com"
+	old := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	if err := st.CreateWebUser(ctx, &model.WebUser{TgID: -1000000041, Email: "gone@example.com", PassHash: "h", CreatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1", ""); err == nil {
+		t.Fatal("до чистки адрес обязан быть занят — иначе тест ничего не проверяет")
+	}
+	a.pruneWebUsers(ctx)
+	id, err := a.CabinetEmailRegister(ctx, "gone@example.com", "password1", "")
+	if err != nil || id == 0 || id == -1000000041 {
+		t.Fatalf("регистрация после чистки: id=%d err=%v", id, err)
+	}
+	a.waitMail()
+	// Живой аккаунт вторая чистка не трогает.
+	a.pruneWebUsers(ctx)
+	if wu, _ := st.GetWebUserByEmail(ctx, "gone@example.com"); wu == nil || wu.TgID != id {
+		t.Fatal("чистка удалила только что заведённый аккаунт")
 	}
 }

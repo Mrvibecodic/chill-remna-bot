@@ -59,9 +59,7 @@ func (a *App) planAccessibleFor(ctx context.Context, p *model.Plan, tgID int64) 
 		}
 		return paid || a.userPlanCode(ctx, tgID) == p.Code
 	case model.PlanAvailList:
-		a.mu.Lock()
-		st := a.store
-		a.mu.Unlock()
+		st := a.storeRef()
 		if st == nil {
 			return false
 		}
@@ -82,9 +80,7 @@ func (a *App) planAccessibleFor(ctx context.Context, p *model.Plan, tgID int64) 
 // hasPaidPayment — «человек платил хотя бы раз». Ошибка возвращается наверх:
 // fail-closed решает вызывающий гейт.
 func (a *App) hasPaidPayment(ctx context.Context, tgID int64) (bool, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return false, errStorageUnavailable
 	}
@@ -95,9 +91,7 @@ func (a *App) hasPaidPayment(ctx context.Context, tgID int64) (bool, error) {
 // снимком не было). Это и есть grandfathering для режимов «новым» и
 // «действующим»: продление своего тарифа не отрезается.
 func (a *App) userPlanCode(ctx context.Context, tgID int64) string {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -157,15 +151,10 @@ func (a *App) showRenew(ctx context.Context, chatID int64) {
 		a.noticeThen(ctx, chatID, i18n.T(a.lang(chatID), "renew.no_history"), func() { a.showPlans(ctx, chatID) })
 		return
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
 		// Сценарий 3: тариф удалён, выключен или закрыт для покупателя.
@@ -209,9 +198,7 @@ func (a *App) renewTermsChanged(p *model.Plan, snap *model.PlanSnapshot) bool {
 
 // userSnapshot — снимок последней сделки пользователя (nil — покупок не было).
 func (a *App) userSnapshot(ctx context.Context, tgID int64) *model.PlanSnapshot {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil
 	}
@@ -232,7 +219,7 @@ func (a *App) trialLockNotice(ctx context.Context, chatID int64) bool {
 	}
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, i18n.T(lang, "buy.trial_locked", formatExpire(expireAt, lang)),
-		[][]models.InlineKeyboardButton{homeRow(lang)})
+		[][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 	return true
 }
 
@@ -261,9 +248,7 @@ func (a *App) trialBuyLock(ctx context.Context, chatID int64) (string, bool) {
 // сделки с этим кодом и не истёкшая подписка. Ошибка хранилища здесь не
 // повод блокировать экран — счётчик информационный, возвращаем ноль.
 func (a *App) usersOnPlan(ctx context.Context, code string) int {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return 0
 	}
@@ -279,9 +264,7 @@ func (a *App) usersOnPlan(ctx context.Context, code string) int {
 // предыдущий образ бота: его DeletePlan про таблицу списков не знает, и
 // осиротевшая запись молча ожила бы, достанься код новому тарифу (импорт).
 func (a *App) prunePlanAccess(ctx context.Context) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

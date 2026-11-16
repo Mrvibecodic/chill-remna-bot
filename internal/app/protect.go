@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"regexp"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -40,19 +41,68 @@ func copyableEnts(text string, ents []models.MessageEntity) bool {
 	return copyableText(text)
 }
 
-// screenProtect — закрыть ли экран от пересылки. Только чаты пользователей:
-// у экранов админки свой набор того, что нужно копировать.
+// screenProtect — закрыть ли экран от пересылки. Экраны пользователя — все,
+// где нечего копировать; экраны админки — только помеченные withAdminClosed.
 func (a *App) screenProtect(ctx context.Context, chatID int64, copyable bool) bool {
-	if copyable || ctx.Value(keepCopyKey{}) != nil {
+	if ctx.Value(keepCopyKey{}) != nil || !hasChat(chatID) || a.cfg == nil {
 		return false
 	}
-	return hasChat(chatID) && a.cfg != nil && chatID != a.cfg.AdminID
+	if chatID == a.cfg.AdminID {
+		return ctx.Value(adminClosedKey{}) != nil
+	}
+	return !copyable
 }
 
 type (
-	protectKey  struct{}
-	keepCopyKey struct{}
+	protectKey     struct{}
+	keepCopyKey    struct{}
+	adminClosedKey struct{}
 )
+
+// withAdminClosed — экран админки, закрытый от пересылки. Экраны админки
+// закрываются по одному, после проверки, что копировать там нечего: у админа
+// это реквизиты, ID и тексты. Детектор здесь не спрашивается — в сводках
+// бывают суммы, похожие для него на номера.
+func withAdminClosed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, adminClosedKey{}, true)
+}
+
+type flowKey struct{}
+
+// withClientFlow — админ нажал кнопку покупателя (витрина, оплата, свои
+// подписки): экран строится так же, как у покупателя.
+func withClientFlow(ctx context.Context) context.Context {
+	return context.WithValue(ctx, flowKey{}, "client")
+}
+
+// withAdminFlow — нажатие или команда админки. Без пометки (фоновая работа,
+// ответ на вопрос) экран остаётся того же вида, что и текущий.
+func withAdminFlow(ctx context.Context) context.Context {
+	return context.WithValue(ctx, flowKey{}, "admin")
+}
+
+func flowOf(ctx context.Context) string {
+	s, _ := ctx.Value(flowKey{}).(string)
+	return s
+}
+
+// clientData — кнопка ведёт на экран покупателя.
+func clientData(data string) bool {
+	key, val, _ := strings.Cut(data, ":")
+	switch key {
+	case cbBuy, cbPlanBuy, cbPlanView, cbPlanBack, cbMethod, cbTop, cbP2P, cbYKCheck, cbAutoPay,
+		cbCBCheck, cbPLCheck, cbYMCheck, cbHLCheck, cbDevices, cbTerms:
+		return true
+	case cbPromo:
+		return promoUserData(val)
+	case cbMenu:
+		switch val {
+		case "buy", "renew", "topup", "balance", "ref", "promo", "mysubs", "autopay", "register":
+			return true
+		}
+	}
+	return false
+}
 
 // withKeepCopy — экран в этом контексте не закрывать, даже если детектор не
 // нашёл в нём ничего для копирования (текст документов).
@@ -68,6 +118,42 @@ func withProtect(ctx context.Context, on bool) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, protectKey{}, true)
+}
+
+// adminClosedData — нажатие ведёт в раздел админки, закрытый от пересылки
+// целиком, со всеми вложенными экранами: тарифы и триал (тарифы, цены,
+// быстрая настройка, триал, сквады, доп-подписка) и сводка ошибок оплат.
+// Копировать там нечего. «Система» открыта целиком, с обновлением и бэкапом:
+// у раздела и его экранов один режим, иначе переходы не правятся на месте.
+func adminClosedData(data string) bool {
+	switch data {
+	case "menu:plans", "menu:pricing", "menu:trial", "menu:squads", "menu:addsub":
+		return true
+	}
+	for _, p := range []string{"pln:", "plq:", "prc:", "trial:", "sqd:", "addsub:", "pay:err"} {
+		if strings.HasPrefix(data, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// adminClosedInput — ответ админа на вопрос из тех же разделов.
+func adminClosedInput(ui *uiState) bool {
+	in := ui.adminInput
+	switch {
+	case strings.HasPrefix(in, "plan_"), strings.HasPrefix(in, "trial_"), strings.HasPrefix(in, "addsub_"):
+		return true
+	case in == "price", in == "ykprice", in == "starprice":
+		// Те же вопросы задают экраны P2P, ЮKassa и Stars — там тариф не
+		// выбран, и экран способа оплаты остаётся открытым.
+		return ui.planCode != ""
+	}
+	switch in {
+	case "baseprice", "traffic_gb", "device_per", "device_limit", "currency":
+		return true
+	}
+	return false
 }
 
 func protectedCtx(ctx context.Context) bool {

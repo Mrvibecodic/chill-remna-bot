@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -74,6 +75,32 @@ func (s *Server) staticFS() (fs.FS, error) {
 // is tried next; the embedded page of the chosen design is the final fallback.
 // Свой дизайн оператора из папки перекрывает выбор дизайна в админке.
 func (s *Server) readIndexHTML(specific, design string) ([]byte, error) {
+	page, err := s.readIndexFile(specific, design)
+	if err != nil {
+		return nil, err
+	}
+	return injectShared(page), nil
+}
+
+// sharedMarker — место в странице, куда сервер вставляет общий скрипт двух
+// дизайнов (miniapp_static/shared.js).
+const sharedMarker = "/*SHARED*/"
+
+// injectShared вставляет общий скрипт в страницу. Страница без метки (свой
+// дизайн оператора, собранный до появления общего файла) отдаётся как есть —
+// в ней эти функции свои.
+func injectShared(page []byte) []byte {
+	if !bytes.Contains(page, []byte(sharedMarker)) {
+		return page
+	}
+	js, err := miniStaticFS.ReadFile("miniapp_static/shared.js")
+	if err != nil {
+		return page
+	}
+	return bytes.Replace(page, []byte(sharedMarker), js, 1)
+}
+
+func (s *Server) readIndexFile(specific, design string) ([]byte, error) {
 	if s.staticDir != "" {
 		for _, n := range []string{specific, "index.html"} {
 			if n == "" {

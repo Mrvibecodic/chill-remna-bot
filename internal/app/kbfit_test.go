@@ -145,21 +145,71 @@ func TestMessengerSendsFittedKeyboard(t *testing.T) {
 	}
 }
 
-// Способы оплаты: название и «Описание» стоят парой, поэтому при нехватке
-// места столбиком встают все пары, а не только длинные.
-func TestPayMethodTextsStackUniformly(t *testing.T) {
-	a, fm, _ := newTextsApp(t)
-	a.handleCallback(context.Background(), cb(100, "tx:pm:t"))
-	rows := fm.lastKB
-	if len(rows) < 3 {
-		t.Fatalf("экран не отрисован: %v", kbLabels(rows))
-	}
-	for _, r := range rows[:len(rows)-1] {
-		if len(r) != 1 {
-			t.Fatalf("пары не встали столбиком: %v", kbLabels(rows))
+// Переделанные экраны админки разложены так, чтобы на телефоне шириной 360dp
+// каждая подпись влезала в свой ряд как есть, без переразбивки на выходе, на
+// обоих языках и со всеми способами оплаты включёнными. В рядах из нескольких
+// кнопок подписи занимают не больше 90% своей доли: мера ширины приблизительна,
+// и на краю Telegram обрезает последнюю букву.
+func TestAdminScreensFitPhone(t *testing.T) {
+	for _, lang := range []string{"ru", "en"} {
+		a, fm, _ := newTextsApp(t)
+		a.botCfg.Language = lang
+		a.botCfg.P2P.Enabled, a.botCfg.YooKassa.Enabled, a.botCfg.CryptoBot.Enabled = true, true, true
+		ctx := context.Background()
+		for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:paymethods", "menu:system", "menu:updates", "upd:toggle", "menu:iface",
+			"menu:trial", "trial:rules", "trial:hwid", "trial:strategy", "tx:home", "tx:pm", "menu:access", "torj:home", "leg:open",
+			"menu:cabinet", "menu:mail", "menu:webhooks", "menu:yoomoney", "menu:yookassa", "menu:heleket", "menu:platega",
+			"menu:tribute", "menu:cryptobot", "menu:refadmin", "menu:notify", "menu:contacts", "menu:backup", "menu:webui", "menu:devices"} {
+			a.handleCallback(ctx, cb(100, data))
+			fm.mu.Lock()
+			rows := fm.lastKB
+			fm.mu.Unlock()
+			if len(rows) == 0 {
+				t.Fatalf("%s/%s: нет клавиатуры", lang, data)
+			}
+			for _, r := range rows {
+				if !rowFits(r) {
+					t.Errorf("%s/%s: ряд %v не влезает в телефон", lang, data, kbLabels([][]models.InlineKeyboardButton{r}))
+				}
+				for _, x := range r {
+					if len(r) > 1 && btnWidth(x) > rowCap(len(r))*0.9 {
+						t.Errorf("%s/%s: «%s» впритык к краю кнопки", lang, data, x.Text)
+					}
+				}
+			}
 		}
 	}
-	if !strings.HasPrefix(rows[1][0].CallbackData, "tx:k:") || rows[0][0].CallbackData == rows[1][0].CallbackData {
-		t.Fatalf("за названием не идёт его описание: %v", kbLabels(rows))
+}
+
+// Обновление живёт в подменю «Системы»: тумблер уведомлений возвращает туда
+// же, выбор канала ведёт обратно в подменю.
+func TestSystemUpdatesSubmenu(t *testing.T) {
+	a, fm, _ := newTextsApp(t)
+	ctx := context.Background()
+	a.handleCallback(ctx, cb(100, "menu:system"))
+	cbs := fm.allCallbackData()
+	if !hasCB(cbs, "menu:updates") || hasCB(cbs, "menu:update") || hasCB(cbs, "upd:toggle") {
+		t.Fatalf("в «Системе» обновление не в подменю: %v", cbs)
 	}
+	a.handleCallback(ctx, cb(100, "upd:toggle"))
+	if !strings.Contains(fm.last(), "Обновление") || !hasCB(fm.allCallbackData(), "upd:check") {
+		t.Fatalf("после тумблера не вернулись в подменю обновления:\n%s", fm.last())
+	}
+	a.handleCallback(ctx, cb(100, "upd:chan"))
+	fm.mu.Lock()
+	rows := fm.lastKB
+	fm.mu.Unlock()
+	if !hasCB(cbsOf(rows), "menu:updates") {
+		t.Fatalf("из выбора канала нет пути назад: %v", kbLabels(rows))
+	}
+}
+
+func cbsOf(rows [][]models.InlineKeyboardButton) []string {
+	var out []string
+	for _, r := range rows {
+		for _, b := range r {
+			out = append(out, b.CallbackData)
+		}
+	}
+	return out
 }

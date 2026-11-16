@@ -119,7 +119,7 @@ func (c *Controller) EnablePostgres(ctx context.Context) (string, error) {
 	if err := c.addPostgresToCompose(); err != nil {
 		return "", fmt.Errorf("правка compose: %w", err)
 	}
-	if err := c.compose(ctx, "up", "-d", "db"); err != nil {
+	if err := c.runCompose(ctx, false, fmt.Sprintf("docker compose -p %s up -d db", c.project)); err != nil {
 		return "", err
 	}
 	if err := waitTCP(ctx, "db:5432", 60*time.Second); err != nil {
@@ -493,14 +493,6 @@ func (c *Controller) PublishBotPort(ctx context.Context, port int) error {
 		return fmt.Errorf("правка compose: %w", err)
 	}
 	return c.runComposeDetached(ctx, fmt.Sprintf("docker compose -p %s up -d", c.project))
-}
-
-func (c *Controller) compose(ctx context.Context, args ...string) error {
-	full := append([]string{"compose", "-f", c.composeFile, "-p", c.project}, args...)
-	if out, err := exec.CommandContext(ctx, "docker", full...).CombinedOutput(); err != nil {
-		return fmt.Errorf("docker compose %v: %w: %s", args, err, out)
-	}
-	return nil
 }
 
 func waitTCP(ctx context.Context, addr string, timeout time.Duration) error {

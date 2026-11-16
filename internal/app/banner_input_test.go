@@ -123,7 +123,7 @@ func TestBanner_SectionNeedsPhoto(t *testing.T) {
 	ctx := context.Background()
 	a, fm, _ := planAdminApp(t)
 
-	a.getUI(planAdmin).awaitSectionBanner = "main_menu"
+	a.getUI(planAdmin).awaitSectionBanner = "admin_iface"
 	a.handleMessage(ctx, msgText(planAdmin, "картинка"))
 	if !strings.Contains(fm.last(), "Нужна картинка") {
 		t.Fatalf("нет подсказки: %q", fm.last())
@@ -138,7 +138,7 @@ func TestBanner_SectionWaitDoesNotEatOtherInput(t *testing.T) {
 	ctx := context.Background()
 	a, _, _ := planAdminApp(t)
 
-	a.getUI(planAdmin).awaitSectionBanner = "main_menu"
+	a.getUI(planAdmin).awaitSectionBanner = "admin_iface"
 	a.handleCallback(ctx, cb(planAdmin, "wel:txt"))
 	a.handleMessage(ctx, msgText(planAdmin, "Привет!"))
 	if a.botCfg.Welcome.Text != "Привет!" {
@@ -146,7 +146,7 @@ func TestBanner_SectionWaitDoesNotEatOtherInput(t *testing.T) {
 	}
 
 	// Ввод поля тарифа тоже важнее подсказки про картинку.
-	a.getUI(planAdmin).awaitSectionBanner = "main_menu"
+	a.getUI(planAdmin).awaitSectionBanner = "admin_iface"
 	a.handleCallback(ctx, cb(planAdmin, "menu:home"))
 	if a.getUI(planAdmin).awaitSectionBanner != "" {
 		t.Fatal("возврат на главную должен закрывать ожидание картинки")

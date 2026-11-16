@@ -11,7 +11,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" -o /out/bot ./cmd/bot
 
 FROM alpine:3.24
-RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose
+# Только docker-клиент: compose выполняется отдельным контейнером docker:cli,
+# база часовых поясов вшита в бинарник (time/tzdata).
+RUN apk add --no-cache ca-certificates docker-cli
 WORKDIR /app
 COPY --from=build /out/bot /app/bot
 # Уведомления о лицензиях едут вместе с бинарником (требование MIT/BSD).

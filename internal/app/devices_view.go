@@ -26,12 +26,7 @@ func (a *App) devicesConfig() model.DevicesConfig {
 
 // cut подрезает чужую строку до разумной длины.
 func cutField(s string) string {
-	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) > deviceFieldMaxLen {
-		return string(r[:deviceFieldMaxLen]) + "…"
-	}
-	return s
+	return clipRunes(strings.TrimSpace(s), deviceFieldMaxLen, "…")
 }
 
 // shortHWID — отпечаток в виде «a1b2…9f3c». Целиком он бесполезен на экране:

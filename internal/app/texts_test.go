@@ -537,22 +537,26 @@ func TestOptionalNoteEditAndClear(t *testing.T) {
 	}
 }
 
-// Экран «Способы оплаты»: вход из продаж и из текстов, «Назад» — туда же.
+// Экран «Названия и описания способов»: вход из «Интерфейса» и из текстов, «Назад» — туда же.
 func TestPayMethodsScreen(t *testing.T) {
 	a, fm, _ := newTextsApp(t)
 	ctx := context.Background()
-	a.handleCallback(ctx, cb(100, "menu:pay"))
+	a.handleCallback(ctx, cb(100, "menu:iface"))
 	if !hasCB(fm.allCallbackData(), "tx:pm") {
-		t.Fatal("в продажах нет входа в названия способов")
+		t.Fatal("в «Интерфейсе» нет входа в названия способов")
 	}
 	a.handleCallback(ctx, cb(100, "tx:pm"))
 	cbs := fm.allCallbackData()
-	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.yk_note", "tx:k:method.trb_name", "menu:pay"} {
+	for _, want := range []string{"tx:k:method.yk_name", "tx:k:method.trb_name", "menu:iface"} {
 		if !hasCB(cbs, want) {
 			t.Fatalf("на экране нет %s", want)
 		}
 	}
 	a.handleCallback(ctx, cb(100, "tx:k:method.yk_name"))
+	// Описание способа открывается из карточки его названия.
+	if !hasCB(fm.allCallbackData(), "tx:k:method.yk_note") {
+		t.Fatal("из карточки названия не открыть описание")
+	}
 	if !hasCB(fm.allCallbackData(), "tx:pm:") {
 		t.Fatal("из карточки не вернуться к способам оплаты")
 	}

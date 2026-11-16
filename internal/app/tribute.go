@@ -131,7 +131,9 @@ func (a *App) startTribute(ctx context.Context, chatID int64) {
 	}
 	text := withPayNote(lang, model.PayMethodTribute, i18n.T(lang, "trb.pay_prompt", a.saleTitleHTML(ctx, lang, s)))
 	if len(terms) > 0 {
-		text += "\n\n" + i18n.T(lang, "trb.pay_terms", html.EscapeString(strings.Join(terms, ", ")))
+		if line := i18n.T(lang, "trb.pay_terms", html.EscapeString(strings.Join(terms, ", "))); line != "" {
+			text += "\n\n" + line
+		}
 	}
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "trb.btn_pay"), URL: url}},

@@ -41,7 +41,7 @@ func (a *App) showTributeAdmin(ctx context.Context, chatID int64) {
 		{toggleBtn(lang, cfg.Enabled, "trb:toggle")},
 		{btn(i18n.T(lang, "trb.btn_key"), "trb:key"), btn(i18n.T(lang, "trb.btn_url"), "trb:url")},
 		{btn(i18n.T(lang, "trb.btn_plans"), "trb:plans")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 
@@ -146,15 +146,10 @@ func (a *App) tributePlanRow(ctx context.Context, code string) *model.Plan {
 	if !model.ValidPlanCode(code) {
 		return nil
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.log.Warn("tribute: тариф не прочитан", "err", err, "plan", code)
 		return nil
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	return p
 }

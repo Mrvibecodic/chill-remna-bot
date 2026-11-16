@@ -48,8 +48,8 @@
   Wikimedia Commons; сервис бесплатный, обратная ссылка на https://flagpedia.net
   приветствуется его авторами.
 - **Базовый образ Docker.** `Dockerfile` собирает бинарник в `golang:alpine` и
-  кладёт его в `alpine` с пакетами `ca-certificates`, `tzdata`, `docker-cli`,
-  `docker-cli-compose`. Это отдельные программы внутри образа со своими лицензиями
+  кладёт его в `alpine` с пакетами `ca-certificates` и `docker-cli`.
+  Это отдельные программы внутри образа со своими лицензиями
   (Alpine/busybox — GPL-2.0, musl — MIT, docker-cli — Apache-2.0, ca-certificates —
   MPL-2.0); они не линкуются с кодом бота и никаких требований на него не переносят.
   Их уведомления живут в самих пакетах внутри образа.
@@ -61,9 +61,13 @@
 результат сборки — статические HTML/CSS/JS, публикуемые на GitHub Pages. Полный
 список зависимостей сборки — `site/package-lock.json`.
 
+Шрифт сайта — **Onest** (SIL Open Font License 1.1, © The Onest Project Authors,
+<https://github.com/simpals/onest>), подключён пакетом `@fontsource-variable/onest`.
+Файлы шрифта публикуются вместе с сайтом без изменений; в поставку бота не входят.
+
 ## Собственные материалы проекта
 
-Иллюстрации разделов (`assets/`, `internal/assets/sections/`), иконки сайта
+Иллюстрации разделов (`internal/assets/sections/`), иконки сайта
 (`site/public/favicon*`, `site/public/icon-*`) и оформление сайта документации
 (`site/`) подготовлены для этого проекта и распространяются вместе с ним по MIT.
 

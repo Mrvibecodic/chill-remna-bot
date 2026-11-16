@@ -29,19 +29,7 @@ const (
 // То же бывает после ручных правок в панели. Сверка превращает «поехало
 // молча и навсегда» в «поехало и починилось само».
 func (a *App) RunSubRepair(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(subRepairFirstDelay):
-	}
-	for {
-		a.repairSubscriptions(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(subRepairInterval):
-		}
-	}
+	afterThenEvery(ctx, subRepairFirstDelay, subRepairInterval, func() { a.repairSubscriptions(ctx) })
 }
 
 type subRepairStats struct {

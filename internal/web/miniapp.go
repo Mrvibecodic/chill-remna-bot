@@ -121,10 +121,15 @@ type MiniProvider interface {
 	CabinetEmailRegister(ctx context.Context, email, password, start string) (int64, error)
 	CabinetEmailLogin(ctx context.Context, email, password string) (int64, error)
 	CabinetGate(ctx context.Context, tgID int64, isEmail bool) error
+	// CabinetApproval — модерация кабинета без проверки режима доступа бота
+	// (её страж запросов уже сделал через MiniAccessDenied).
+	CabinetApproval(ctx context.Context, tgID int64, isEmail bool) error
 	// CabinetAccount — состояние аккаунта для экрана «Аккаунт».
 	CabinetAccount(ctx context.Context, tgID int64) CabinetAccountDTO
 	// CabinetMoneyBlocked — платные действия закрыты до подтверждения почты.
 	CabinetMoneyBlocked(ctx context.Context, tgID int64) bool
+	// CabinetTrialAllowed — аккаунту можно взять пробный период.
+	CabinetTrialAllowed(ctx context.Context, tgID int64) bool
 	// MailReady — отправка писем настроена.
 	MailReady() bool
 	CabinetSendVerify(ctx context.Context, tgID int64) error
@@ -284,11 +289,17 @@ type CabinetAccountDTO struct {
 	EmailVerified bool `json:"email_verified"`
 	// TgLinked — Telegram привязан (или это изначально телеграм-аккаунт).
 	TgLinked bool `json:"tg_linked"`
+	// TgName — @username привязанного Telegram, без него имя; пусто — бот
+	// его ещё не знает.
+	TgName string `json:"tg_name,omitempty"`
 	// MailOn — отправка писем настроена. Без неё кабинет не предлагает ни
 	// подтверждение, ни восстановление пароля.
 	MailOn bool `json:"mail_on"`
 	// MoneyBlocked — платные действия закрыты до подтверждения адреса.
 	MoneyBlocked bool `json:"money_blocked"`
+	// TrialAfterVerify — после подтверждения адреса аккаунту станет доступен
+	// пробный период.
+	TrialAfterVerify bool `json:"trial_after_verify,omitempty"`
 }
 
 // MiniMenuDTO mirrors navRow predicates so the front-end shows exactly the
@@ -298,8 +309,9 @@ type MiniMenuDTO struct {
 	CanRenew       bool `json:"can_renew"`
 	TrialAvailable bool `json:"trial_available"`
 	ReferralOn     bool `json:"referral_on"`
-	// TopUpOn — включено ли пополнение баланса. Кошелёк как таковой остаётся:
-	// на баланс приходят реферальные начисления, тратить их можно всегда.
+	// TopUpOn — включено ли пополнение баланса. Кошелёк в меню показывается,
+	// пока пополнение включено или на балансе есть деньги (рефералка,
+	// промокод), — как в чате; тратить баланс можно всегда.
 	TopUpOn    bool     `json:"topup_on"`
 	PayMethods []string `json:"pay_methods"`
 	// PayLabels / PayNotes — названия и описания способов оплаты по коду
@@ -406,9 +418,9 @@ type MiniPlanDTO struct {
 	// Tribute — тариф продаётся через Tribute (привязана подписка). Способ
 	// общий в списке, но кнопка есть только у таких тарифов.
 	Tribute bool `json:"tribute,omitempty"`
-	// TributeTerms — сроки, которые бот выдаёт по подписке Tribute тарифа
-	// (пусто — периоды подписки неизвестны).
-	TributeTerms []string `json:"tribute_terms,omitempty"`
+	// TributeHint — какие сроки подписки Tribute выдают доступ: тот же текст,
+	// что в чате (пусто — периоды неизвестны или текст убран).
+	TributeHint string `json:"tribute_hint,omitempty"`
 	// Durations — продаваемые сроки тарифа.
 	Durations []MiniDurationDTO `json:"durations"`
 	// Own — тариф последней покупки человека (показывается и тогда, когда
@@ -465,6 +477,16 @@ type MiniPlansDTO struct {
 type MiniConnectButtonDTO struct {
 	Text string `json:"text"`
 	URL  string `json:"url"`
+	// Copy — кнопка копирует URL, а не открывает его.
+	Copy bool `json:"copy,omitempty"`
+}
+
+// MiniConnectBlockDTO — раздел инструкции приложения после добавления
+// подписки: название, текст и кнопки.
+type MiniConnectBlockDTO struct {
+	Title   string                 `json:"title"`
+	Text    string                 `json:"text,omitempty"`
+	Buttons []MiniConnectButtonDTO `json:"buttons,omitempty"`
 }
 
 // MiniConnectAppDTO is one VPN client app the user can install and import the
@@ -476,6 +498,10 @@ type MiniConnectAppDTO struct {
 	Deeplink string                 `json:"deeplink,omitempty"`
 	AddDesc  string                 `json:"add_desc,omitempty"`
 	Installs []MiniConnectButtonDTO `json:"installs,omitempty"`
+	// Copies — кнопки копирования из блоков установки и добавления подписки.
+	Copies []MiniConnectButtonDTO `json:"copies,omitempty"`
+	// More — остальные разделы инструкции, фронт показывает их свёрнутыми.
+	More []MiniConnectBlockDTO `json:"more,omitempty"`
 }
 
 // MiniConnectDTO carries the subscription URL plus the iOS/Android app lists.
@@ -576,10 +602,11 @@ func legalFreePaths(path string) bool {
 // moneyPath — ручки, за которыми стоят деньги или выдача дней. Ровно этот
 // список закрыт до подтверждения почты; чтение подписки, ссылок и документов
 // остаётся доступным, иначе человек не увидел бы даже того, за что уже платил.
+// Пробного периода здесь нет: у него свой гейт (handleMiniTrial).
 func moneyPath(path string) bool {
 	switch path {
 	case "/api/miniapp/checkout", "/api/miniapp/topup", "/api/miniapp/promo",
-		"/api/miniapp/trial", "/api/miniapp/autopay", "/api/cabinet/p2p/screenshot":
+		"/api/miniapp/autopay", "/api/cabinet/p2p/screenshot":
 		return true
 	}
 	return false
@@ -620,7 +647,7 @@ func (s *Server) miniGuard(w http.ResponseWriter, r *http.Request) (id int64, we
 	// пропуск живёт семь суток, и без этого отзыв доступа не действовал бы всю
 	// неделю.
 	if web {
-		if err := s.mini.CabinetGate(r.Context(), id, id < 0); err != nil {
+		if err := s.mini.CabinetApproval(r.Context(), id, id < 0); err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return 0, false, false
 		}
@@ -732,19 +759,21 @@ func (s *Server) handleMiniPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMiniTrial(w http.ResponseWriter, r *http.Request) {
-	id, web, ok := s.miniGuard(w, r)
+	id, _, ok := s.miniGuard(w, r)
 	if !ok {
-		return
-	}
-	// В кабинете пробный период доступен только тем, кто вошёл через
-	// Telegram: это тот же проверенный аккаунт, что и в чате. Аккаунт по почте
-	// заводится на любой ящик — ему триал не выдаётся никогда.
-	if web && id < 0 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "триал недоступен в веб-кабинете"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	// Вошедший через Telegram — тот же проверенный аккаунт, что и в чате.
+	// Аккаунт по почте заводится на любой ящик: ему триал выдаётся, только
+	// если это включено и почта подтверждена либо аккаунт одобрен
+	// администратором. Общий гейт подтверждения почты этот путь не закрывает:
+	// одобренному подтверждение не требуется.
+	if !s.mini.CabinetTrialAllowed(ctx, id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "пробный период недоступен"})
+		return
+	}
 	writeJSON(w, http.StatusOK, s.mini.MiniTrial(ctx, id))
 }
 

@@ -447,7 +447,7 @@ func (a *App) showInviteUses(ctx context.Context, chatID int64, code string, pag
 			return
 		}
 	}
-	text := i18n.T(lang, "inv.who_title", inv.Code, total)
+	text := i18n.T(lang, "inv.who_title", inv.Code, total) + "\n\n" + i18n.T(lang, "users.legend")
 	if total == 0 {
 		text = i18n.T(lang, "inv.who_empty", inv.Code)
 	}

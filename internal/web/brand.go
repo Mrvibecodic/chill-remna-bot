@@ -38,18 +38,40 @@ const (
 // brandMarker — место в странице, куда сервер подставляет WebUIDTO.
 const brandMarker = "/*BRAND*/{}"
 
+// classicBrandMarker — то же для классического дизайна. Метка отдельная: по
+// основной сервер решает, что заголовок кабинета страница берёт из настроек, а
+// классическая получает его заменой текста в разметке.
+const classicBrandMarker = "/*BRAND_CLASSIC*/{}"
+
 // injectBrand подставляет настройки оформления в страницу. Страница без маркера
-// (классический дизайн, свой дизайн оператора) возвращается как есть.
+// (свой дизайн оператора) возвращается как есть.
 // json.Marshal экранирует <, > и & — значение безопасно внутри <script>.
 func injectBrand(page []byte, ui WebUIDTO) []byte {
-	if !bytes.Contains(page, []byte(brandMarker)) {
-		return page
+	for _, m := range []string{brandMarker, classicBrandMarker} {
+		if !bytes.Contains(page, []byte(m)) {
+			continue
+		}
+		js, err := brandJSON(ui, m == classicBrandMarker)
+		if err != nil {
+			return page
+		}
+		return bytes.Replace(page, []byte(m), js, 1)
 	}
-	js, err := json.Marshal(ui)
-	if err != nil {
-		return page
+	return page
+}
+
+// brandJSON — настройки для страницы. Классической нужны только название и
+// логотипы: остальное в ней не используется и в режиме защиты от
+// отпечатков лишь выдавало бы, чья это страница.
+func brandJSON(ui WebUIDTO, classic bool) ([]byte, error) {
+	if !classic {
+		return json.Marshal(ui)
 	}
-	return bytes.Replace(page, []byte(brandMarker), js, 1)
+	return json.Marshal(struct {
+		Name     string `json:"name,omitempty"`
+		Logo     string `json:"logo,omitempty"`
+		LogoDark string `json:"logo_dark,omitempty"`
+	}{ui.Name, ui.Logo, ui.LogoDark})
 }
 
 // hasBrandMarker — страница нового образца: оформление она берёт из

@@ -278,7 +278,9 @@ func (a *App) showBackupNote(ctx context.Context, chatID int64, note string) {
 	var r2 []models.InlineKeyboardButton
 	for i, h := range model.BackupIntervals {
 		b := btn(mark(h)+i18n.T(lang, "bk.btn_hours", h), "bk:h:"+strconv.Itoa(h))
-		if i < 3 {
+		// Выкл и два первых — в первом ряду, четыре остальных — во втором: с
+		// отметкой «✅ Выкл» ряд из четырёх не влезает.
+		if i < 2 {
 			r1 = append(r1, b)
 		} else {
 			r2 = append(r2, b)
@@ -560,9 +562,7 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 // makeBackup снимает бэкап и запирает его паролем. Вызывающий держит bkMu.
 func (a *App) makeBackup(ctx context.Context, password string) ([]byte, *storage.BackupInfo, error) {
 	lang := a.lang(a.cfg.AdminID)
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, nil, errors.New(i18n.T(lang, "bk.err_no_db"))
 	}
@@ -695,19 +695,12 @@ func (a *App) backupNow(ctx context.Context, chatID int64) {
 // RunBackups шлёт бэкапы по расписанию и после восстановления базы
 // сверяет сроки подписок с панелью.
 func (a *App) RunBackups(ctx context.Context) {
-	t := time.NewTicker(backupTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			now := time.Now()
-			a.bkPendPurge(now)
-			a.guardTick(ctx, now)
-			a.backupOnce(ctx, now)
-		}
-	}
+	everyTick(ctx, backupTick, func() {
+		now := time.Now()
+		a.bkPendPurge(now)
+		a.guardTick(ctx, now)
+		a.backupOnce(ctx, now)
+	})
 }
 
 // backupDue — пора ли слать бэкап по расписанию.
@@ -901,9 +894,7 @@ func (a *App) openBackupFile(ctx context.Context, chatID int64, p *bkPending, pa
 			return
 		}
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		if a.bkPendReplace(chatID, p, nil) {
 			a.sendSysKB(ctx, chatID, i18n.T(lang, "bk.fail", i18n.T(lang, "bk.err_no_db")), back)
@@ -1051,9 +1042,7 @@ func (a *App) runRestore(ctx context.Context, chatID int64, p *bkPending) {
 		return
 	}
 
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	// cfgSaveMu держим всю замену: сохранение конфига, начатое раньше, должно
 	// доехать ДО неё, а не лечь поверх восстановленного.
 	a.cfgSaveMu.Lock()

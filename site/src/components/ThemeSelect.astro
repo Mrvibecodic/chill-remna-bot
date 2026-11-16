@@ -1,0 +1,104 @@
+---
+// Два переключателя: дизайн (как у кабинета бота) и цветовая схема.
+// Схема хранится так же, как у Starlight (ключ starlight-theme), дизайн —
+// в docs-design; оба ставятся на <html> до первой отрисовки.
+---
+
+<div class="docs-prefs">
+	<docs-design-select class="docs-seg docs-seg-text" role="group" aria-label="Оформление">
+		<button type="button" data-v="minimal">Минимализм</button>
+		<button type="button" data-v="classic">Классика</button>
+	</docs-design-select>
+	<docs-theme-select class="docs-seg" role="group" aria-label="Цветовая схема">
+		<button type="button" data-v="light" title="Светлая" aria-label="Светлая">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"></path></svg>
+		</button>
+		<button type="button" data-v="auto" title="Как на устройстве" aria-label="Как на устройстве">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+		</button>
+		<button type="button" data-v="dark" title="Тёмная" aria-label="Тёмная">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"></path></svg>
+		</button>
+	</docs-theme-select>
+</div>
+
+{/* Сразу, без ожидания модуля: кнопки показывают выбранное. */}
+<script is:inline>
+	(function () {
+		var design = document.documentElement.dataset.design === 'classic' ? 'classic' : 'minimal';
+		var theme = 'auto';
+		try {
+			var t = localStorage.getItem('starlight-theme');
+			if (t === 'light' || t === 'dark') theme = t;
+		} catch (e) {}
+		window.docsSyncPrefs = function (d, th) {
+			document.querySelectorAll('docs-design-select button').forEach(function (b) {
+				b.setAttribute('aria-pressed', String(b.dataset.v === d));
+			});
+			document.querySelectorAll('docs-theme-select button').forEach(function (b) {
+				b.setAttribute('aria-pressed', String(b.dataset.v === th));
+			});
+		};
+		window.docsSyncPrefs(design, theme);
+	})();
+</script>
+
+<script>
+	type Theme = 'auto' | 'dark' | 'light';
+	const themeKey = 'starlight-theme';
+	const designKey = 'docs-design';
+	const sync = (window as any).docsSyncPrefs as (d: string, t: string) => void;
+
+	const loadTheme = (): Theme => {
+		try {
+			const t = localStorage.getItem(themeKey);
+			return t === 'light' || t === 'dark' ? t : 'auto';
+		} catch {
+			return 'auto';
+		}
+	};
+	const loadDesign = () => (document.documentElement.dataset.design === 'classic' ? 'classic' : 'minimal');
+	const deviceTheme = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+
+	function setTheme(theme: Theme) {
+		document.documentElement.dataset.theme = theme === 'auto' ? deviceTheme() : theme;
+		try {
+			localStorage.setItem(themeKey, theme === 'auto' ? '' : theme);
+		} catch {}
+		sync(loadDesign(), theme);
+	}
+	function setDesign(design: string) {
+		document.documentElement.dataset.design = design;
+		try {
+			localStorage.setItem(designKey, design === 'classic' ? 'classic' : '');
+		} catch {}
+		sync(design, loadTheme());
+	}
+
+	// Схема «как на устройстве» следует за устройством.
+	matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+		if (loadTheme() === 'auto') setTheme('auto');
+	});
+
+	class DocsThemeSelect extends HTMLElement {
+		constructor() {
+			super();
+			this.querySelectorAll('button').forEach((b) =>
+				b.addEventListener('click', () => {
+					const v = b.dataset.v;
+					setTheme(v === 'light' || v === 'dark' ? v : 'auto');
+				})
+			);
+		}
+	}
+	class DocsDesignSelect extends HTMLElement {
+		constructor() {
+			super();
+			this.querySelectorAll('button').forEach((b) =>
+				b.addEventListener('click', () => setDesign(b.dataset.v === 'classic' ? 'classic' : 'minimal'))
+			);
+		}
+	}
+	customElements.define('docs-theme-select', DocsThemeSelect);
+	customElements.define('docs-design-select', DocsDesignSelect);
+</script>

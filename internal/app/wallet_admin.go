@@ -32,7 +32,7 @@ func (a *App) showWalletAdmin(ctx context.Context, chatID int64) {
 	a.sendPayKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
 		{btn(label, "wal:topup")},
 		{btn(fcLabel, "wal:forecast")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

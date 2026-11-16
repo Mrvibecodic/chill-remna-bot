@@ -22,6 +22,7 @@ type addSubPanel struct {
 	mainUsername string
 	mainStatus   string
 	mainExpire   string
+	mainEmail    string
 
 	// users by username -> raw JSON body of the panel user
 	users map[string]string
@@ -54,7 +55,7 @@ func (p *addSubPanel) start(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/api/users/by-telegram-id/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"response":[{"uuid":"main-uuid","username":"` + p.mainUsername +
-			`","telegramId":42,"tag":"` + BotTag + `","status":"` + p.mainStatus +
+			`","telegramId":42,"tag":"` + BotTag + `","email":"` + p.mainEmail + `","status":"` + p.mainStatus +
 			`","expireAt":"` + p.mainExpire + `","hwidDeviceLimit":3,"trafficLimitStrategy":"MONTH","subscriptionUrl":"https://x/y"}]}`))
 	})
 	mux.HandleFunc("/api/users/by-username/", func(w http.ResponseWriter, r *http.Request) {

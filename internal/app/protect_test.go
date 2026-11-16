@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,8 +97,22 @@ func TestUserScreensProtect(t *testing.T) {
 	if id := tap(protUser, "menu:ref"); fm.isProt(id) {
 		t.Fatal("реферальный экран закрыт: ссылку не скопировать")
 	}
-	if id := tap(100, "menu:home"); fm.isProt(id) {
-		t.Fatal("меню админа закрыто, а его чат не трогаем")
+	// Экраны админки закрываются по разделам: меню, «Продажи», «Тарифы и
+	// триал» — да. «Способы оплаты», «Система» с обновлением и бэкапом,
+	// «Интерфейс» и карточка пользователя открыты, как и большинство их экранов
+	// с ключами, адресами и текстами.
+	for _, data := range []string{"menu:home", "menu:pay", "menu:payplans", "menu:analytics"} {
+		if id := tap(100, data); !fm.isProt(id) {
+			t.Fatalf("%s у админа ушёл без запрета пересылки", data)
+		}
+	}
+	for _, data := range []string{"menu:paymethods", "menu:system", "menu:status", "menu:updates", "menu:backup", "menu:iface", "tx:pm"} {
+		if id := tap(100, data); fm.isProt(id) {
+			t.Fatalf("%s у админа закрыт", data)
+		}
+	}
+	if id := tap(100, "usr:view:"+strconv.FormatInt(protUser, 10)); fm.isProt(id) {
+		t.Fatal("карточка пользователя у админа закрыта: ID не скопировать")
 	}
 	n := fm.seq
 	a.notify(ctx, protUser, "уведомление без ссылок")
@@ -160,5 +175,65 @@ func TestLegalAcceptScreenOpen(t *testing.T) {
 	}
 	if fm.isProt(fm.seq) {
 		t.Fatal("экран согласия с текстом документа закрыт от копирования")
+	}
+}
+
+// Раздел «Тарифы и триал» закрыт от пересылки со всеми вложенными экранами — и после нажатия кнопки, и после
+// ответа на вопрос. Ссылка на тариф и экраны самих способов оплаты (там карты
+// и ключи) остаются открытыми.
+func TestAdminNestedSalesScreensClosed(t *testing.T) {
+	ctx := context.Background()
+	a, fm, fs := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = fs.SavePlan(ctx, &model.Plan{Code: "family", Name: "Семья", Enabled: true, Currency: "₽",
+		Availability: model.PlanAvailLink, Durations: []model.PlanDuration{{Months: 1, Base: "499"}}})
+	a.botUser = "example_bot"
+	tap := func(data string) bool {
+		t.Helper()
+		n := fm.seq
+		a.handleCallback(ctx, cb(planAdmin, data))
+		if fm.seq == n {
+			t.Fatalf("%s: экран не пришёл", data)
+		}
+		return fm.isProt(fm.seq)
+	}
+	for _, data := range []string{
+		"menu:plans", "pln:open:" + model.PlanCodeBase, "pln:pr:" + model.PlanCodeBase, "prc:quick",
+		"menu:trial", "menu:squads", "menu:addsub", "trial:days",
+	} {
+		if !tap(data) {
+			t.Errorf("%s ушёл без запрета пересылки", data)
+		}
+	}
+	// Ответ на вопрос «сколько дней триала» — экран триала снова закрыт.
+	n := fm.seq
+	a.handleMessage(ctx, msgText(planAdmin, "5"))
+	if fm.seq == n || !fm.isProt(fm.seq) {
+		t.Error("экран после ввода дней триала ушёл без запрета пересылки")
+	}
+	if tap("pln:av:family") {
+		t.Error("экран со ссылкой на тариф закрыт: ссылку не скопировать")
+	}
+	if tap("menu:p2p") {
+		t.Error("экран P2P с картами закрыт")
+	}
+	// Цену задают и экраны самих способов оплаты: после ответа они остаются
+	// открытыми, а из карточки тарифа — закрытыми.
+	for _, data := range []string{"star:price:1", "yk:price:1", "adm:price:1"} {
+		tap(data)
+		n := fm.seq
+		a.handleMessage(ctx, msgText(planAdmin, "100"))
+		if fm.seq == n || fm.isProt(fm.seq) {
+			t.Errorf("%s: экран способа оплаты после ввода цены закрыт", data)
+		}
+	}
+	tap("pln:prm:1:" + model.PlanCodeBase)
+	tap("pln:in:y:1:" + model.PlanCodeBase)
+	n = fm.seq
+	a.handleMessage(ctx, msgText(planAdmin, "100"))
+	if fm.seq == n || !fm.isProt(fm.seq) {
+		t.Error("экран тарифа после ввода цены ЮKassa открыт")
 	}
 }

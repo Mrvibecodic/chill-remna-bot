@@ -34,9 +34,7 @@ func (a *App) infra(ctx context.Context) ([]remnawave.SquadFull, []remnawave.Hos
 	if ce != nil && time.Since(ce.fetchedAt) < infraCacheTTL {
 		return ce.squads, ce.hosts
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		if ce != nil {
 			return ce.squads, ce.hosts
@@ -117,19 +115,6 @@ func (a *App) saleCountriesLine(ctx context.Context, lang string, s *sale) strin
 	}
 	g := a.squadGeo(ctx, s.Plan.IntSquadsFor(s.D))
 	return geoText(lang, g.countries, g.hosts)
-}
-
-// planCountries returns the distinct countries available to a plan, taken from
-// the flags in host remarks (e.g. "🇩🇪 Frankfurt"), deduped by flag and in first-seen order,
-// plus the count of accessible inbounds (configs).
-func (a *App) planCountries(ctx context.Context, months int) (countries []country, inbounds int) {
-	return a.squadCountries(ctx, a.planSquadUUIDs(months))
-}
-
-// squadCountries — страны и число конфигов для явно заданного набора сквадов.
-func (a *App) squadCountries(ctx context.Context, squadIDs []string) (countries []country, inbounds int) {
-	g := a.squadGeo(ctx, squadIDs)
-	return g.countries, g.inbounds
 }
 
 // squadGeo — страны, конфиги и хосты для явно заданного набора сквадов.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -150,16 +151,21 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
+	// Свой тариф в режиме «по ссылке» витрина прячет, но продлевать его
+	// человек вправе в любой день — как в мини-аппе.
+	if own := a.ownLinkPlan(ctx, a.userPlanCode(ctx, chatID)); own != nil {
+		plans = append(plans, *own)
+	}
 	switch {
 	case len(plans) == 1:
-		a.showPlanOfferView(ctx, chatID, &plans[0], offerView{})
+		a.showPlanOfferView(ctx, chatID, &plans[0], offerView{promo: true})
 		return
 	case len(plans) == 0 && anySellable:
 		// Продаваемые тарифы есть, но все закрыты от этого покупателя.
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.not_available"), [][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 		return
 	case len(plans) == 0:
-		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{homeRow(lang)})
+		a.sendKB(ctx, chatID, i18n.T(lang, "buy.no_plans"), [][]models.InlineKeyboardButton{promoRow(lang), homeRow(lang)})
 		return
 	}
 
@@ -178,7 +184,7 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 		}
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "plo:"+p.Code)})
 	}
-	rows = append(rows, homeRow(lang))
+	rows = append(rows, promoRow(lang), homeRow(lang))
 	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "buy.choose_tariff"), rows)
 }
 
@@ -565,13 +571,6 @@ func (a *App) nextP2PCardIdx(p2p model.P2PConfig) int {
 	}
 	n := a.p2pRotate.Add(1) - 1
 	return int(n % uint64(len(p2p.Cards)))
-}
-
-// prepareP2PCard picks the next card, creates an awaiting P2P request and
-// returns the card + price + request id, without messaging the user (shared by
-// the chat flow and the web cabinet).
-func (a *App) prepareP2PCard(ctx context.Context, chatID int64, months int) (card, price string, reqID int64, err error) {
-	return a.prepareP2PCardSale(ctx, chatID, baseSale(months))
 }
 
 func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (card, price string, reqID int64, err error) {
@@ -1011,7 +1010,7 @@ func (a *App) showP2PAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "admin.btn_open_all"), "adm:openall")},
 		{btn(i18n.T(lang, "admin.btn_cards"), "adm:cards"), btn(i18n.T(lang, "admin.btn_prices"), "adm:prices")},
 		{btn(i18n.T(lang, "admin.btn_pending"), "adm:pending")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 
@@ -1340,9 +1339,7 @@ func (a *App) planSnapshotLocked(months int) *model.PlanSnapshot {
 // строка — носитель снимка для всех внешних платёжек: payload провайдера мы
 // намеренно не меняем, чтобы предыдущий образ бота продолжал его понимать.
 func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnapshot {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil || extID == "" {
 		return nil
 	}
@@ -1353,16 +1350,90 @@ func (a *App) pendingSnapshot(ctx context.Context, extID string) *model.PlanSnap
 	return p.Snapshot
 }
 
+// errOrphanPayment — счёт оплачен, а того, кому его выставляли, уже удалили.
+// Для вызывающего это конец разбора: счёт закрыт, администратор извещён,
+// повторять доставку незачем.
+var errOrphanPayment = errors.New("оплата на удалённого пользователя")
+
+const stageOrphanPaid = "orphan_paid"
+
+// orphanInvoice — оплата по счёту, выставленному пользователю, которого с тех
+// пор удалили. Выдавать нельзя: человек завёлся бы заново с подпиской, но без
+// принятых документов, допуска к тарифам и вайтлиста. Удалять счета вместе с
+// пользователем тоже нельзя: он мог оплатить уже после удаления, и тогда
+// деньги списаны, услуги нет, следов нет. Поэтому счёт закрывается, а
+// разбирается администратор.
+//
+// Проверка стоит в общей точке выдачи: оплату доносят вебхук, кнопка
+// «Проверить оплату» и сверка, и ответ у всех троих обязан быть один.
+// Пути без счёта (Stars, перевод на карту, баланс) сюда не попадают — там
+// строки счёта нет, а пользователь существует по построению.
+func (a *App) orphanInvoice(ctx context.Context, method, extID string, telegramID int64, amount string) bool {
+	st := a.storeRef()
+	if st == nil || extID == "" {
+		return false
+	}
+	p, _ := st.PendingByExtID(ctx, extID)
+	if p == nil {
+		return false
+	}
+	if u, err := st.GetUser(ctx, telegramID); err != nil || u != nil {
+		return false
+	}
+	_ = st.ResolvePending(ctx, p.ID)
+	// Платёжка повторяет доставку, сверка приходит следом — администратору
+	// хватит одного сообщения. Отметка — в журнале: строка счёта к этому
+	// моменту могла быть закрыта и раньше (истёк срок сверки).
+	if logs, err := st.PayLogs(ctx, extID, 0, 0); err == nil {
+		for i := range logs {
+			if logs[i].ExtID == extID && logs[i].Stage == stageOrphanPaid {
+				return true
+			}
+		}
+	}
+	a.payLog(ctx, method, extID, telegramID, stageOrphanPaid,
+		"оплата пришла на удалённого пользователя: %s, purpose=%s", amount, p.Purpose)
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.orphan_payment",
+		escapeName(method), escapeName(extID), escapeName(amount), telegramID))
+	a.log.Warn("оплата на удалённого пользователя", "method", method, "ext_id", extID)
+	return true
+}
+
 // finalizePurchase выдаёт или продлевает подписку по оплаченному счёту. snap —
 // условия сделки, снятые при выставлении счёта; nil означает «снять по
 // текущему конфигу» (так ведут себя пути, где счёта не было, и строки,
 // созданные до появления снимков).
 func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, error) {
+	d, err := a.closeDeal(ctx, telegramID, months, method, amount, extID, snap, false)
+	return d.link, d.expireAt, err
+}
+
+// dealDone — итог сделки для вызывающего.
+type dealDone struct {
+	link, expireAt string
+	applied        *model.PlanSnapshot
+	// autoPayMoved — включённое автосписание перешло на тариф этой сделки.
+	autoPayMoved bool
+}
+
+// closeDeal — сделка целиком: ядро выдачи и шаги после него, общие для
+// покупки и выдачи администратором. grant — выдача: гейты доступности тарифа
+// не проверяются (тариф выбрал администратор), остальное — как у покупки.
+func (a *App) closeDeal(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot, grant bool) (dealDone, error) {
+	var d dealDone
+	if a.orphanInvoice(ctx, method, extID, telegramID, amount) {
+		return d, errOrphanPayment
+	}
 	// Доступность тарифа оценивается по состоянию ДО покупки: после неё
 	// человек уже «платил» и уже «на этом тарифе», и гейты «только новым» /
 	// «только действующим» задним числом всегда сходились бы.
-	breach := a.planGateBreach(ctx, telegramID, snapCodeOr(snap, model.PlanCodeBase))
-	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap)
+	breach := ""
+	if !grant {
+		breach = a.planGateBreach(ctx, telegramID, snapCodeOr(snap, model.PlanCodeBase))
+	}
+	link, expireAt, applied, err := a.finalizePurchaseCore(ctx, telegramID, months, method, amount, extID, snap, grant)
+	d.link, d.expireAt, d.applied = link, expireAt, applied
 	if err == nil {
 		// Доп-подписка применяется ПОСЛЕ ядра: это ещё один поход в панель, а
 		// ядро держит шардовый замок финализации — лишний HTTP-раунд под ним
@@ -1377,19 +1448,24 @@ func (a *App) finalizePurchase(ctx context.Context, telegramID int64, months int
 		if method == model.PayMethodTribute {
 			a.autoPayYield(ctx, telegramID, method, applied)
 		} else {
-			a.autoPayFollowPurchase(ctx, telegramID, applied)
+			d.autoPayMoved = a.autoPayFollowPurchase(ctx, telegramID, applied)
 		}
 		// Третья точка гейта доступности: счёт оплачен, а тариф к этому моменту
 		// стал покупателю недоступен. Подписка уже выдана по снимку (решение
 		// владельца: деньги приняты — клиент получает то, за что платил), админ
 		// узнаёт и разбирается. Вызов ПОСЛЕ ядра — по той же причине, что и
 		// доп-подписка: чтения базы и поход в Telegram под замком не живут.
-		a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
+		if !grant {
+			a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
+		}
 	}
-	return link, expireAt, err
+	return d, err
 }
 
-func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot) (string, string, *model.PlanSnapshot, error) {
+// finalizePurchaseCore — ядро выдачи по сделке. grant — подписку выдаёт
+// администратор без оплаты: та же выдача, зачёт и снимок, но без начислений
+// рефереру, без чека и без чужого выбора срока.
+func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months int, method, amount, extID string, snap *model.PlanSnapshot, grant bool) (string, string, *model.PlanSnapshot, error) {
 	// Serialize duplicate deliveries of the same payment and bail before we touch
 	// the panel if it's already been finalized (the panel extend happens below,
 	// before the AddPayment idempotency barrier, so without this two concurrent
@@ -1474,6 +1550,7 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 		}
 	}
 	extraDays := switchCredit(prevSnap, prevExpire, snap)
+	snap.SwitchDays = extraDays
 	if extraDays != 0 {
 		a.payLog(ctx, method, extID, telegramID, "switch_credit", "plan=%s days=%+d", snap.Code, extraDays)
 	}
@@ -1540,6 +1617,9 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 		_ = a.store.SetUserSnapshot(ctx, telegramID, snap)
 	}
 	a.payLog(ctx, method, extID, telegramID, "done", "подписка выдана, ссылка отправляется")
+	if grant {
+		return link, expireAt, snap, nil
+	}
 	// Выбор срока отработал — убираем его, иначе кнопка способа оплаты на
 	// старом экране продаст тот же срок ещё раз, минуя витрину.
 	a.forgetBuyIntentFor(ctx, telegramID, months)
@@ -1583,7 +1663,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		})
 		a.cleanupP2PUser(ctx, req.TelegramID)
 		if hasChat(req.TelegramID) {
-			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html_(text)))
+			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html.EscapeString(text)))
 		}
 		a.sendHome(ctx, chatID, i18n.T(lang, "admin.done"))
 		return
@@ -1920,6 +2000,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.adminInput = ""
 		ui.linkUID = 0
 		a.adminLinkPanel(ctx, chatID, uid, text)
+	case "grant_days":
+		a.applyGrantDays(ctx, chatID, text)
+	case "pay_user":
+		a.applyPayUserSearch(ctx, chatID, text)
 	case "user_find":
 		a.applyUserSearch(ctx, chatID, text)
 	case "wl_add":
@@ -2069,13 +2153,13 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
 		a.setTrialResetPct(n)
 		_ = a.saveBotConfig(ctx)
-		a.showTrialAdmin(ctx, chatID)
+		a.showTrialRules(ctx, chatID)
 	case "trial_reset_max":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))
 		a.setTrialResetMax(n)
 		_ = a.saveBotConfig(ctx)
-		a.showTrialAdmin(ctx, chatID)
+		a.showTrialRules(ctx, chatID)
 	case "addsub_gb":
 		ui.adminInput = ""
 		n, _ := strconv.Atoi(strings.TrimSpace(text))

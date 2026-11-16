@@ -15,6 +15,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/web"
 )
 
 type rwWebhookEvent struct {
@@ -47,11 +48,18 @@ type rwUserPayload struct {
 	ExpireAt   string          `json:"expireAt"`
 	ExpireTime string          `json:"expireTime"`
 	Status     string          `json:"status"`
+	// Порог расхода трафика в процентах, который панель отметила последним.
+	LastTriggeredThreshold int `json:"lastTriggeredThreshold"`
 }
+
+// errRWNoSecret — секрет вебхука в боте не задан. Панель без секрета вебхуки
+// не шлёт, так что проверить такой запрос нечем, а обработчики пишут людям
+// на telegramId из тела запроса.
+var errRWNoSecret = errors.New("remnawave webhook: секрет не задан")
 
 func verifyRemnawaveSignature(signatureHex, secret string, body []byte) error {
 	if secret == "" {
-		return nil
+		return errRWNoSecret
 	}
 	if signatureHex == "" {
 		return errors.New("remnawave webhook: signature header missing")
@@ -69,14 +77,13 @@ func verifyRemnawaveSignature(signatureHex, secret string, body []byte) error {
 }
 
 func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body []byte) (bool, error) {
-	a.mu.Lock()
-	secret := ""
-	if a.botCfg != nil {
-		secret = strings.TrimSpace(a.botCfg.Webhook.RemnawaveSecret)
-	}
-	a.mu.Unlock()
-	if err := verifyRemnawaveSignature(signature, secret, body); err != nil {
-		return false, err
+	if err := verifyRemnawaveSignature(signature, a.rwSecret(), body); err != nil {
+		// Панель подпись шлёт всегда: запрос без неё — не панель, и сообщать
+		// о нём администратору нечего.
+		if errors.Is(err, errRWNoSecret) && signature != "" {
+			a.rwNoSecretNotice(ctx)
+		}
+		return false, fmt.Errorf("%w: %w", web.ErrUnauthorized, err)
 	}
 
 	var ev rwWebhookEvent
@@ -151,8 +158,11 @@ func (a *App) HandleRemnawaveWebhook(ctx context.Context, signature string, body
 	case ev.Event == "user.enabled":
 		delivered = a.pushAccessChanged(ctx, u, true)
 		return true, nil
-	case ev.Event == "user.limited" || ev.Event == "user.bandwidth_usage_threshold_reached":
+	case ev.Event == "user.limited":
 		delivered = a.pushTrafficLimited(ctx, u)
+		return true, nil
+	case ev.Event == "user.bandwidth_usage_threshold_reached":
+		delivered = a.pushTrafficThreshold(ctx, u)
 		return true, nil
 	case ev.Event == "torrent_blocker.report":
 		a.pushTorrentReport(ctx, ev.Data)
@@ -167,6 +177,10 @@ func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event stri
 	if u.TelegramID == 0 {
 		return true
 	}
+	if a.remindCovers(ctx, u.TelegramID, hours) {
+		a.log.Info("remnawave webhook: о сроке напоминает бот, предупреждение панели пропущено", "event", event, "tg_id", u.TelegramID)
+		return true
+	}
 	lang := a.lang(u.TelegramID)
 	text := i18n.T(lang, "rw.warn_expiring")
 	switch {
@@ -175,9 +189,15 @@ func (a *App) pushExpiryWarning(ctx context.Context, u rwUserPayload, event stri
 	case hours > 0:
 		text = i18n.T(lang, "rw.warn_expiring_hours", hours)
 	}
-	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	}) != 0
+	// Продление — тому, у кого есть сделка: кнопка откроет его тариф. Человеку
+	// без покупок в боте (подписку завели в панели) продлевать нечего, ему —
+	// витрина, как и раньше.
+	buy := "menu:buy"
+	if planCodeOf(a.userSnapshot(ctx, u.TelegramID)) != "" {
+		buy = "menu:renew"
+	}
+	text, rows := a.expiryNotice(ctx, u.TelegramID, lang, text, buy)
+	ok := a.notifyKB(ctx, u.TelegramID, text, rows) != 0
 	a.log.Info("remnawave webhook: warn sent", "event", event, "tg_id", u.TelegramID, "ok", ok)
 	return ok
 }
@@ -213,6 +233,25 @@ func (a *App) pushTrafficLimited(ctx context.Context, u rwUserPayload) bool {
 	return ok
 }
 
+// pushTrafficThreshold — расход трафика дошёл до порога из настроек панели
+// (BANDWIDTH_USAGE_NOTIFICATIONS_THRESHOLD). Лимит ещё не исчерпан, доступ
+// работает.
+func (a *App) pushTrafficThreshold(ctx context.Context, u rwUserPayload) bool {
+	if u.TelegramID == 0 {
+		return true
+	}
+	lang := a.lang(u.TelegramID)
+	text := i18n.T(lang, "rw.traffic_low")
+	if pct := u.LastTriggeredThreshold; pct > 0 && pct < 100 {
+		text = i18n.T(lang, "rw.traffic_pct", pct)
+	}
+	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")},
+	}) != 0
+	a.log.Info("remnawave webhook: traffic threshold notified", "tg_id", u.TelegramID, "pct", u.LastTriggeredThreshold, "ok", ok)
+	return ok
+}
+
 // pushAccessChanged — доступ выключили или включили в панели. Раньше событие
 // молча игнорировалось: человек терял связь и не понимал почему, а кэш
 // «есть подписка» ещё полминуты говорил обратное.
@@ -236,6 +275,39 @@ func (a *App) pushAccessChanged(ctx context.Context, u rwUserPayload, enabled bo
 	}
 	a.log.Info("remnawave webhook: access change notified", "tg_id", u.TelegramID, "enabled", enabled, "ok", ok)
 	return ok
+}
+
+// rwNoSecretRetry — пауза между попытками сообщить администратору о
+// незаданном секрете, пока сообщение не доставлено.
+const rwNoSecretRetry = 10 * time.Minute
+
+// rwNoSecretNotice — раз за запуск сообщает администратору, что события
+// панели не принимаются: иначе уведомления людям пропали бы без следа.
+// Отметка ставится только после доставки: событие может прийти раньше, чем
+// поднимется мессенджер, и Telegram может отказать.
+func (a *App) rwNoSecretNotice(ctx context.Context) {
+	a.mu.Lock()
+	ready := a.msg != nil
+	a.mu.Unlock()
+	if !ready || a.cfg == nil {
+		return
+	}
+	now := time.Now()
+	a.thrMu.Lock()
+	skip := a.rwNoSecretTold || now.Sub(a.rwNoSecretTried) < rwNoSecretRetry
+	if !skip {
+		a.rwNoSecretTried = now
+	}
+	a.thrMu.Unlock()
+	if skip {
+		return
+	}
+	if a.notifyKB(ctx, a.cfg.AdminID, i18n.T(a.lang(a.cfg.AdminID), "wh.no_secret_event"), nil) == 0 {
+		return
+	}
+	a.thrMu.Lock()
+	a.rwNoSecretTold = true
+	a.thrMu.Unlock()
 }
 
 // rwEventTTL — окно, в котором повторная доставка считается повтором. Панель

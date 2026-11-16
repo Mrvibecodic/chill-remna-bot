@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 
@@ -10,12 +11,10 @@ import (
 
 func (a *App) showSquads(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 
 	back := []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.back"), "menu:pay"),
+		btn(i18n.T(lang, "btn.back"), "menu:payplans"),
 		btn(i18n.T(lang, "btn.home"), "menu:home"),
 	}
 	if panel == nil {
@@ -41,43 +40,15 @@ func (a *App) showSquads(ctx context.Context, chatID int64) {
 	activeInt := append([]string(nil), a.botCfg.Plan.ActiveInternalSquads...)
 	activeExt := a.botCfg.Plan.ExternalSquadUUID
 	a.mu.Unlock()
-	isActiveInt := func(uuid string) bool {
-		for _, u := range activeInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
 
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+3)
-
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isActiveInt(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 🏠 "+sq.Name, "sqd:int:"+sq.UUID),
-		})
-	}
-	if len(extSquads) > 0 {
-
-		rows = append(rows, []models.InlineKeyboardButton{btn("— 📡 External —", "sqd:noop")})
-		for _, sq := range extSquads {
-			mark := "⚪"
-			if activeExt == sq.UUID {
-				mark = "🟢"
-			}
-			rows = append(rows, []models.InlineKeyboardButton{
-				btn(mark+" 📡 "+sq.Name, "sqd:ext:"+sq.UUID),
-			})
-		}
-	}
-	gone := goneSquadRows(lang, live, activeInt, activeExt,
-		func(u string) string { return "sqd:int:" + u },
-		func(u string) string { return "sqd:ext:" + u })
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, extSquads, squadPick{
+		selInt:   activeInt,
+		selExt:   activeExt,
+		intCB:    func(u string) string { return "sqd:int:" + u },
+		extCB:    func(u string) string { return "sqd:ext:" + u },
+		extHead:  "sqd:noop",
+		extRadio: true,
+	})
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "sqd:refresh")})
 	rows = append(rows, back)
 
@@ -92,7 +63,7 @@ func display(v, lang string) string {
 }
 
 func (a *App) onSquads(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "int":
 		a.toggleInternalSquad(ctx, chatID, arg)

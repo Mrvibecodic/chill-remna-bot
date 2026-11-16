@@ -586,9 +586,7 @@ func (a *App) commitPanelConn(ctx context.Context, field, value string) error {
 // оказаться HTML — тогда Telegram не разобрал бы сообщение целиком.
 func (a *App) panelAuthNote(ctx context.Context, chatID int64) string {
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return ""
 	}

@@ -138,6 +138,8 @@ type offerView struct {
 	backToList bool
 	// switchPlan — кнопка «выбрать другой тариф» (продление).
 	switchPlan bool
+	// promo — кнопка промокода: тариф один, и карточка заменяет витрину.
+	promo bool
 }
 
 // offerMemo — карточка тарифа и то, как она была показана.
@@ -189,6 +191,9 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	}
 	if view.switchPlan {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "buy.btn_switch_plan"), "menu:buy")})
+	}
+	if view.promo {
+		rows = append(rows, promoRow(lang))
 	}
 	if view.backToList {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:buy"), btn(i18n.T(lang, "btn.home"), "menu:home")})
@@ -410,20 +415,15 @@ func (a *App) onPlanView(ctx context.Context, chatID int64, code string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
-	}
-	// Тариф «по ссылке» с витрины не открывается: список — не обладание
-	// ссылкой. Несуществующий код и скрытый «по ссылке» похожи на перебор —
-	// считаются в лимит.
-	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink {
+	// Тариф «по ссылке» с витрины открывается только свой: список — не
+	// обладание ссылкой. Несуществующий код и чужой скрытый «по ссылке»
+	// похожи на перебор — считаются в лимит.
+	if p == nil || model.NormalizeAvailability(p.Availability) == model.PlanAvailLink && a.userPlanCode(ctx, chatID) != p.Code {
 		a.planLinkFail(chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
@@ -489,18 +489,10 @@ func (a *App) onPlanBuy(ctx context.Context, chatID int64, val string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "plans.offer_gone"))
 		return
 	}
-	p, perr := a.planByCode(ctx, code)
+	p, perr := a.planOrBase(ctx, code)
 	if perr != nil {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
-	}
-	if p == nil && code == model.PlanCodeBase {
-		// «Базовый» без строки — сбой стартовой синхронизации: продаёт сетка,
-		// и кнопки его карточки обязаны работать (та же логика, что в
-		// editPlanPricing).
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	// Вторая точка гейта: создание намерения. Кнопка могла пролежать в
 	// переписке сколько угодно — тариф успели выключить, срок снять с продажи,

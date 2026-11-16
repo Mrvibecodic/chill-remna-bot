@@ -48,6 +48,13 @@ type fakeMsg struct {
 	// refunds — возвраты звёзд, которые бот попросил у Telegram ("<uid>:<charge>").
 	refunds   []string
 	refundErr error
+	// photoIDs — с каким сохранённым file_id уходил каждый экран с баннером
+	// раздела ("" — картинка из сборки).
+	photoIDs []string
+	// photoNewID — file_id, который вернёт отправка экрана с баннером раздела:
+	// так Telegram отвечает, когда сохранённую картинку пришлось заменить
+	// встроенной.
+	photoNewID string
 	// kbFail — SendKB возвращает 0 (Telegram отказал): так проверяется, что
 	// вызывающий отличает доставку от неудачи.
 	kbFail bool
@@ -263,9 +270,12 @@ func (f *fakeMsg) SendPhoto(_ context.Context, _ int64, _, caption string, rows 
 	f.recordKB(rows)
 	return f.add(caption)
 }
-func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, _ string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+func (f *fakeMsg) SendPhotoCacheable(ctx context.Context, _ int64, cached string, _ []byte, caption string, rows [][]models.InlineKeyboardButton) (int, string) {
+	f.mu.Lock()
+	f.photoIDs = append(f.photoIDs, cached)
+	f.mu.Unlock()
 	f.recordKB(rows)
-	return f.noteProt(ctx, f.add(caption)), ""
+	return f.noteProt(ctx, f.add(caption)), f.photoNewID
 }
 func (f *fakeMsg) SendBanner(ctx context.Context, _ int64, photo models.InputFile, caption string, _ []models.MessageEntity, rm models.ReplyMarkup) (int, error) {
 	// failBanner имитирует отказ Telegram на конкретной картинке (битый
@@ -404,7 +414,9 @@ func (f *fakeMsg) joined() string {
 }
 
 type fakeStore struct {
-	bkState *model.BackupConfig
+	// screenMsgs — последний экран чата, как его хранит база.
+	screenMsgs map[int64]int
+	bkState    *model.BackupConfig
 
 	// mu защищает ДЕНЕЖНЫЕ пути фейка: реальное хранилище — база, и параллельные
 	// запросы там сериализует она. Тесты на гонку (двойное списание, двойной
@@ -665,8 +677,20 @@ func (s *fakeStore) DeleteAutoPay(_ context.Context, id int64) error {
 
 func (s *fakeStore) Migrate(context.Context) error { return nil }
 
-func (s *fakeStore) GetScreenMsg(context.Context, int64) (int, error) { return 0, nil }
-func (s *fakeStore) SetScreenMsg(context.Context, int64, int) error   { return nil }
+func (s *fakeStore) GetScreenMsg(_ context.Context, chatID int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.screenMsgs[chatID], nil
+}
+func (s *fakeStore) SetScreenMsg(_ context.Context, chatID int64, msgID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.screenMsgs == nil {
+		s.screenMsgs = map[int64]int{}
+	}
+	s.screenMsgs[chatID] = msgID
+	return nil
+}
 
 func (s *fakeStore) AddPayLog(_ context.Context, e *model.PayLogEntry) error {
 	s.mu.Lock()
@@ -1016,6 +1040,13 @@ func (s *fakeStore) SetUserInfo(_ context.Context, id int64, username, firstName
 	return nil
 }
 
+func (s *fakeStore) FillUserInfo(_ context.Context, id int64, username, firstName string) error {
+	if u := s.users[id]; u != nil && u.Username == "" && u.FirstName == "" {
+		u.Username, u.FirstName = username, firstName
+	}
+	return nil
+}
+
 func (s *fakeStore) HasApprovedPurchase(_ context.Context, id int64) (bool, error) {
 	for _, r := range s.reqs {
 		if r.TelegramID == id && r.Status == model.P2PApproved {
@@ -1078,6 +1109,12 @@ func (s *fakeStore) ListPayments(_ context.Context, limit, offset int) ([]model.
 	for _, p := range s.pays {
 		all = append(all, *p)
 	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].CreatedAt != all[j].CreatedAt {
+			return all[i].CreatedAt > all[j].CreatedAt
+		}
+		return all[i].ID > all[j].ID
+	})
 	total := len(all)
 	if offset > total {
 		offset = total
@@ -1088,9 +1125,40 @@ func (s *fakeStore) ListPayments(_ context.Context, limit, offset int) ([]model.
 	}
 	return all[offset:end], total, nil
 }
+func (s *fakeStore) ListUserPayments(_ context.Context, id int64, limit, offset int) ([]model.Payment, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var all []model.Payment
+	for _, p := range s.pays {
+		if p.TelegramID == id {
+			all = append(all, *p)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].CreatedAt != all[j].CreatedAt {
+			return all[i].CreatedAt > all[j].CreatedAt
+		}
+		return all[i].ID > all[j].ID
+	})
+	total := len(all)
+	offset = min(offset, total)
+	end := min(offset+limit, total)
+	return all[offset:end], total, nil
+}
+
+func (s *fakeStore) GetPayment(_ context.Context, id int64) (*model.Payment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.pays[id]; p != nil {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, nil
+}
+
 func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 	for _, p := range s.pays {
-		if p.TelegramID == id && p.Status == model.PaymentPaid {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant {
 			return true, nil
 		}
 	}
@@ -1099,7 +1167,7 @@ func (s *fakeStore) HasPaidPayment(_ context.Context, id int64) (bool, error) {
 func (s *fakeStore) PaidPayments(_ context.Context) ([]model.Payment, error) {
 	var out []model.Payment
 	for _, p := range s.pays {
-		if p.Status == model.PaymentPaid {
+		if p.Status == model.PaymentPaid && p.Method != model.PayMethodTrial && p.Method != model.PayMethodGrant {
 			out = append(out, *p)
 		}
 	}
@@ -1110,7 +1178,7 @@ func (s *fakeStore) MostPopularPlan(_ context.Context) (int, int, error) {
 	counts := map[int]int{}
 	total := 0
 	for _, p := range s.pays {
-		if p.Status == model.PaymentPaid {
+		if p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant {
 			counts[p.Months]++
 			total++
 		}
@@ -1231,6 +1299,17 @@ func (s *fakeStore) DeleteUser(_ context.Context, id int64) error {
 	return nil
 }
 
+func (s *fakeStore) PruneWebUsers(_ context.Context, before string) (int64, error) {
+	var n int64
+	for k, u := range s.webUsers {
+		if s.users[u.TgID] == nil && u.CreatedAt < before {
+			delete(s.webUsers, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) DeletePaymentsByUser(_ context.Context, id int64) error {
 	for k, p := range s.pays {
 		if p.TelegramID == id {
@@ -1342,7 +1421,8 @@ func (s *fakeStore) SetRefOnPay(_ context.Context, id int64) error {
 }
 func (s *fakeStore) HasPaidPaymentSince(_ context.Context, id int64, since string) (bool, error) {
 	for _, p := range s.pays {
-		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since {
+		if p.TelegramID == id && p.Status == model.PaymentPaid && p.CreatedAt >= since &&
+			p.Method != model.PayMethodTrial && p.Method != model.PayMethodGrant {
 			return true, nil
 		}
 	}
@@ -2583,7 +2663,7 @@ func TestNavRow(t *testing.T) {
 
 	hasSub = true
 	a.invalidateSubCache(user)
-	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
 		t.Fatalf("юзер с подпиской: %s", btnData(row))
 	}
 }
@@ -2675,7 +2755,7 @@ func TestStarsFlow(t *testing.T) {
 		t.Fatal("оплата не записана в лог")
 	}
 
-	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:balance|" {
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
 		t.Fatalf("после Stars-оплаты ожидались Мои подписки: %s", btnData(row))
 	}
 }

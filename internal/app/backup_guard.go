@@ -93,9 +93,7 @@ func invoiceMethod(method string) bool {
 // reviewNoted — эта оплата уже ушла админу на проверку (отметка в журнале
 // платежей переживает перезапуск).
 func (a *App) reviewNoted(ctx context.Context, extID string) bool {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return true
 	}
@@ -457,9 +455,7 @@ func (a *App) flushReview(ctx context.Context) {
 // повторные вебхуки. Оплата уходит админу; true — выдавать нельзя.
 func (a *App) holdRestoredPayment(ctx context.Context, method, purpose string, months int, amount string, userID int64, extID string) bool {
 	at, ok := a.restoreGuard().RestoreAt()
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if !ok || st == nil || extID == "" || !invoiceMethod(method) {
 		return false
 	}
@@ -503,9 +499,7 @@ func (a *App) restoreHeldErr(userID int64) error {
 // true — список дошёл (или посылать нечего).
 func (a *App) reviewRestoredP2P(ctx context.Context) bool {
 	at, ok := a.restoreGuard().RestoreAt()
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if !ok || st == nil {
 		return true
 	}

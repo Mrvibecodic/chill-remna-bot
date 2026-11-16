@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +16,7 @@ import (
 
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
+	"remnabot/internal/web"
 )
 
 const torrentBody = `{
@@ -525,28 +524,9 @@ func torrentApp(t *testing.T) (*App, *fakeMsg, *fakeStore) {
 	return a, fm, fs
 }
 
-func rwDeliver(t *testing.T, a *App, body string) {
-	t.Helper()
-	a.mu.Lock()
-	secret := ""
-	if a.botCfg != nil {
-		secret = a.botCfg.Webhook.RemnawaveSecret
-	}
-	a.mu.Unlock()
-	sig := ""
-	if secret != "" {
-		m := hmac.New(sha256.New, []byte(secret))
-		m.Write([]byte(body))
-		sig = hex.EncodeToString(m.Sum(nil))
-	}
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), sig, []byte(body)); err != nil {
-		t.Fatalf("доставка отчёта: %v", err)
-	}
-}
-
-// Без секрета вебхука подпись не проверяется, поэтому отчёт торрент-блокера
-// не обрабатывается вовсе: подделанным запросом можно было бы и подписку
-// отключить, и рассылать сообщения произвольным Telegram-ID, и раздуть журнал.
+// Без секрета вебхука отчёт торрент-блокера не обрабатывается вовсе:
+// подделанным запросом можно было бы и подписку отключить, и рассылать
+// сообщения произвольным Telegram-ID, и раздуть журнал.
 func TestTorrentWebhook_RequiresWebhookSecret(t *testing.T) {
 	a, fm, fs := newTestApp(t)
 	a.store = fs
@@ -556,8 +536,8 @@ func TestTorrentWebhook_RequiresWebhookSecret(t *testing.T) {
 	stub := newTorrentPanelStub(t)
 	stub.attach(a)
 
-	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", []byte(torrentBody)); err != nil {
-		t.Fatalf("err=%v", err)
+	if _, err := a.HandleRemnawaveWebhook(context.Background(), "", []byte(torrentBody)); !errors.Is(err, web.ErrUnauthorized) {
+		t.Fatalf("без секрета отчёт должен быть отклонён, err=%v", err)
 	}
 	if stub.disabledTG {
 		t.Fatalf("без секрета вебхука подписку трогать нельзя")

@@ -102,7 +102,7 @@ func (a *App) toggleTorrentNotify(admin bool) {
 	}
 }
 
-// rwSecret — секрет вебхука панели (пустой = подпись не проверяется).
+// rwSecret — секрет вебхука панели (пустой = события панели не принимаются).
 func (a *App) rwSecret() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -113,15 +113,6 @@ func (a *App) rwSecret() string {
 }
 
 func (a *App) pushTorrentReport(ctx context.Context, data json.RawMessage) {
-	// Без секрета подпись вебхука не проверяется, а этот обработчик пишет строки
-	// в БД и шлёт сообщения на telegramId ИЗ ТЕЛА ЗАПРОСА — то есть кто угодно,
-	// зная адрес бота, рассылал бы «ваш IP заблокирован» произвольным людям и
-	// раздувал журнал. Остальные события панели ничего такого не делают.
-	if a.rwSecret() == "" {
-		a.log.Warn("торрент-блокер: отчёт отброшен — не задан секрет вебхука панели")
-		return
-	}
-
 	var r rwTorrentReport
 	if err := json.Unmarshal(data, &r); err != nil {
 		a.log.Warn("торрент-блокер: не разобран payload", "err", err)
@@ -226,9 +217,7 @@ func (a *App) torrentApplyStrikes(ctx context.Context, r *rwTorrentReport, limit
 	if limit <= 0 || uid == 0 {
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}
@@ -385,11 +374,7 @@ const fieldMaxLen = 256
 const torrentMaxBlockSeconds = 366 * 24 * 3600
 
 func clipField(s string) string {
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > fieldMaxLen {
-		return string(r[:fieldMaxLen])
-	}
-	return s
+	return clipRunes(strings.TrimSpace(s), fieldMaxLen, "")
 }
 
 // torrentReportID — идемпотентный ключ отчёта. Панель переотправляет вебхук,
@@ -470,9 +455,7 @@ func (a *App) storeTorrentReport(ctx context.Context, r *rwTorrentReport) *model
 		// Уведомлять о разблокировке некого — сразу помечено отправленным.
 		UnblockNotified: r.User.TelegramID == 0 || will == "",
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return rep
 	}
@@ -484,9 +467,7 @@ func (a *App) storeTorrentReport(ctx context.Context, r *rwTorrentReport) *model
 
 // torrentRepeatCount — номер нарушения за окно (включая текущее).
 func (a *App) torrentRepeatCount(ctx context.Context, rep *model.TorrentReport) int {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return 1
 	}
@@ -610,16 +591,7 @@ func (a *App) torrentNotifyUser(ctx context.Context, r *rwTorrentReport, will st
 // RunTorrentUnblocker — фоновый цикл: шлёт «блокировка снята», когда истекает
 // срок из журнала. Переживает рестарт: очередь лежит в БД (unblock_notified).
 func (a *App) RunTorrentUnblocker(ctx context.Context) {
-	t := time.NewTicker(torrentUnblockTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			a.torrentUnblockOnce(ctx)
-		}
-	}
+	everyTick(ctx, torrentUnblockTick, func() { a.torrentUnblockOnce(ctx) })
 }
 
 func (a *App) torrentUnblockOnce(ctx context.Context) {
@@ -627,9 +599,7 @@ func (a *App) torrentUnblockOnce(ctx context.Context) {
 		return
 	}
 	defer a.leaveWork()
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

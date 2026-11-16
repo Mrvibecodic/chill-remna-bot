@@ -23,6 +23,18 @@ func (a *App) showPromoUser(ctx context.Context, chatID int64) {
 	})
 }
 
+// promoRow — ввод промокода на экранах витрины: кошелька в меню может не
+// быть, и тогда промокод вводится только здесь.
+func promoRow(lang string) []models.InlineKeyboardButton {
+	return []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.promo"), "pr:enterp")}
+}
+
+// promoUserData — кнопка ввода промокода покупателем (витрина, кошелёк,
+// экран промокода).
+func promoUserData(val string) bool {
+	return val == "enter" || val == "enterw" || val == "enterp"
+}
+
 func (a *App) onPromoUser(ctx context.Context, chatID int64, val string) {
 	back := "menu:promo"
 	switch val {
@@ -30,6 +42,8 @@ func (a *App) onPromoUser(ctx context.Context, chatID int64, val string) {
 	case "enterw":
 		// Ввод открыт из кошелька — «Отмена» возвращает туда же.
 		back = "menu:balance"
+	case "enterp":
+		back = "menu:buy"
 	default:
 		return
 	}
@@ -247,9 +261,7 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 	if gb <= 0 || gb > maxPromoTrafficGB {
 		return false, ""
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false, ""
 	}
@@ -316,9 +328,7 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 // bonusTrafficApplied перечитывает потолок в панели после неудачного ответа:
 // true — прибавка на месте, начисление считать состоявшимся.
 func (a *App) bonusTrafficApplied(tgID int64, want int64) bool {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false
 	}

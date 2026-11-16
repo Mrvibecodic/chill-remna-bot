@@ -812,14 +812,9 @@ func TestTributeMiniTermsAndPrice(t *testing.T) {
 	ctx := context.Background()
 	a, _, _, p := trbChatApp(t)
 	a.botCfg.Tribute.Links = []model.TributeLink{{Plan: p.Code, SubID: 42, URL: trbVipURL, Periods: []string{"monthly"}}}
-	var terms []string
-	for _, pd := range a.MiniPlans(ctx, 1000000015).Plans {
-		if pd.Code == p.Code {
-			terms = pd.TributeTerms
-		}
-	}
-	if len(terms) != 1 || terms[0] != "1 месяц" {
-		t.Fatalf("сроки Tribute в витрине: %v", terms)
+	hint := trbMiniHint(ctx, a, p.Code)
+	if hint != "Подходят сроки: 1 месяц. Другой срок на странице Tribute выбирать не нужно — по нему доступ не выдастся." {
+		t.Fatalf("сроки Tribute в витрине: %q", hint)
 	}
 	dto := a.MiniCheckout(ctx, 1000000015, p.Code, 1, model.PayMethodTribute, "1", false, false)
 	if !dto.OK || dto.PayURL != trbVipURL {
@@ -902,5 +897,52 @@ func TestTributeNoTelegramID_NotifiesAdmin(t *testing.T) {
 	}
 	if len(fm2.texts) != 0 {
 		t.Fatalf("бесплатное событие потревожило админа: %v", fm2.texts)
+	}
+}
+
+// trbMiniHint — подсказка о сроках Tribute у тарифа в витрине мини-аппа и ЛК.
+func trbMiniHint(ctx context.Context, a *App, code string) string {
+	for _, pd := range a.MiniPlans(ctx, 1000000015).Plans {
+		if pd.Code == code {
+			return pd.TributeHint
+		}
+	}
+	return ""
+}
+
+// Подсказка о сроках одна на чат, мини-апп и ЛК: свой текст из «Текстов бота»
+// виден везде, убранный — нигде.
+func TestTributeTermsTextIsShared(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _, p := trbChatApp(t)
+	const uid int64 = 1000000016
+	a.botCfg.Tribute.Links = []model.TributeLink{{Plan: p.Code, SubID: 42, URL: trbVipURL, Periods: []string{"monthly"}}}
+	t.Cleanup(i18n.ResetOverrides)
+	pay := func() string {
+		t.Helper()
+		a.handleCallback(ctx, cb(uid, "plb:"+p.Code+":1"))
+		a.handleCallback(ctx, cb(uid, "method:trb"))
+		return fm.last()
+	}
+
+	if rej := i18n.SetOverrides(map[string]map[string]string{"ru": {"trb.pay_terms": "Берите <b>{terms}</b> &amp; не другой"}}); rej != nil {
+		t.Fatalf("свой текст не применён: %v", rej)
+	}
+	if got := pay(); !strings.Contains(got, "Берите <b>1 месяц</b> &amp; не другой") {
+		t.Fatalf("чат без своего текста: %q", got)
+	}
+	if got := trbMiniHint(ctx, a, p.Code); got != "Берите 1 месяц & не другой" {
+		t.Fatalf("витрина без своего текста: %q", got)
+	}
+
+	if rej := i18n.SetOverrides(map[string]map[string]string{"ru": {"trb.pay_terms": ""}}); rej != nil {
+		t.Fatalf("убранный текст не применён: %v", rej)
+	}
+	got := pay()
+	if strings.Contains(got, "1 месяц") || strings.HasSuffix(got, "\n") {
+		t.Fatalf("чат с убранным текстом: %q", got)
+	}
+	if hint := trbMiniHint(ctx, a, p.Code); hint != "" {
+		t.Fatalf("витрина с убранным текстом: %q", hint)
 	}
 }

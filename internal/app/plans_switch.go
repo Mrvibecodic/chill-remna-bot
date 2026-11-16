@@ -226,9 +226,7 @@ func (a *App) switchCreditDays(ctx context.Context, tgID int64, newSnap *model.P
 	if newSnap == nil || newSnap.Code == "" {
 		return 0
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return 0
 	}
@@ -253,9 +251,7 @@ func (a *App) switchCreditFor(ctx context.Context, tgID int64, s *sale) int {
 // пусто, если активной подписки нет или тариф тот же. Гейт для плашки «остаток
 // не сгорает» на карточке тарифа.
 func (a *App) switchingFrom(ctx context.Context, tgID int64, toCode string) string {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -280,25 +276,25 @@ func (a *App) switchingFrom(ctx context.Context, tgID int64, toCode string) stri
 // остатка в обратную сторону, которого никто не видел. Сумма и срок списания
 // не трогаются: цену chargeAutoPay пересчитывает по коду тарифа из снимка, а
 // отсутствие срока у нового тарифа честно откладывает списание с причиной.
-func (a *App) autoPayFollowPurchase(ctx context.Context, tgID int64, applied *model.PlanSnapshot) {
-	if applied == nil || applied.Code == "" {
-		return
+//
+// Возвращает true, если включённое автосписание перешло на новый тариф.
+func (a *App) autoPayFollowPurchase(ctx context.Context, tgID int64, applied *model.PlanSnapshot) bool {
+	if applied == nil {
+		return false
 	}
 	ap := a.getAutoPay(ctx, tgID)
-	if ap == nil || planCodeOf(ap.Snapshot) == applied.Code {
-		return
+	if !autoPayFollows(ap, applied.Code) {
+		return false
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
-		return
+		return false
 	}
 	// Атомарное обновление одного поля: полная перезапись строки гонялась бы
 	// с параллельным «Отключить автопродление» и включала бы его обратно.
 	if err := st.UpdateAutoPaySnapshot(ctx, tgID, applied); err != nil {
 		a.log.Warn("autopay: снимок не обновлён после смены тарифа", "tg_id", tgID, "err", err)
-		return
+		return false
 	}
 	a.payLog(ctx, ap.Method, "", tgID, "autopay_plan", "автосписание переведено на тариф %s", applied.Code)
 	// Регулярное списание меняется — молчать нельзя (та же логика, что при
@@ -309,7 +305,16 @@ func (a *App) autoPayFollowPurchase(ctx context.Context, tgID int64, applied *mo
 			name = applied.Code
 		}
 		a.notify(ctx, tgID, i18n.T(a.lang(tgID), "ap.plan_changed", escapeName(name)))
+		return true
 	}
+	return false
+}
+
+// autoPayFollows — перейдёт ли автосписание на тариф code после сделки по
+// нему. Одна проверка и для самого перехода, и для предупреждения перед
+// выдачей подписки: иначе экран обещал бы одно, а выдача делала другое.
+func autoPayFollows(ap *model.AutoPay, code string) bool {
+	return ap != nil && code != "" && planCodeOf(ap.Snapshot) != code
 }
 
 // dayDealResets — сбрасывать ли трафик при покупке срока в днях. Лимит в таком
@@ -336,9 +341,7 @@ func (a *App) autoPayYield(ctx context.Context, tgID int64, method string, appli
 	if ap == nil {
 		return
 	}
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return
 	}

@@ -932,11 +932,12 @@ func TestPaymentsList_ShowsPlan(t *testing.T) {
 		Status: model.PaymentPaid, ExtID: "pp-2",
 	})
 	planTap(t, a, "menu:payments")
-	if !strings.Contains(fm.last(), "1m·VIP") {
-		t.Fatalf("тариф сделки не виден в списке платежей:\n%s", fm.last())
+	labels := strings.Join(fm.buttonLabels(), "\n")
+	if !strings.Contains(labels, "VIP 1 мес · CryptoBot 990") {
+		t.Fatalf("тариф сделки не виден в списке платежей:\n%s", labels)
 	}
-	if !strings.Contains(fm.last(), "3m") || strings.Contains(fm.last(), "3m·") {
-		t.Fatalf("платёж без снимка должен остаться голым «3m»:\n%s", fm.last())
+	if !strings.Contains(labels, "841 · 3 мес · CryptoBot 400") {
+		t.Fatalf("платёж без снимка — без тарифа:\n%s", labels)
 	}
 }
 

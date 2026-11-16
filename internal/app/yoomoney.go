@@ -432,7 +432,9 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			return ymIssued
 		}
-		a.log.Error("yoomoney finalize", "err", err, "ext_id", label)
+		if !errors.Is(err, errOrphanPayment) {
+			a.log.Error("yoomoney finalize", "err", err, "ext_id", label)
+		}
 		return ymFailed
 	}
 	a.sendSubActive(ctx, p.TelegramID, link, expireAt)
@@ -640,7 +642,7 @@ func (a *App) showYooMoneyAdmin(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "ym.btn_client"), "ym:client"), btn(i18n.T(lang, "ym.btn_csecret"), "ym:csecret")},
 		{btn(i18n.T(lang, "ym.btn_auth"), "ym:auth"), btn(i18n.T(lang, "ym.btn_token"), "ym:token")},
 		{btn(i18n.T(lang, "ym.btn_verify"), "ym:verify"), btn(i18n.T(lang, "ym.btn_return"), "ym:return")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

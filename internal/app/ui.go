@@ -94,15 +94,17 @@ func (a *App) userLabelByID(ctx context.Context, id int64) string {
 	return strconv.FormatInt(id, 10)
 }
 
-// userLabelFor — подпись пользователя. У аккаунта кабинета нет ни имени, ни
-// @username — подписываем почтой. Проверяется не знак идентификатора, а наличие
-// имени: после привязки Telegram аккаунт положительный, и подписывать его
-// почтой вместо имени уже неправильно.
+// userLabelFor — подпись пользователя в текстах админки (карточки,
+// уведомления): «почта / @ник (ID)», если у аккаунта оба способа входа, иначе
+// тот, что есть. Почта бывает только у аккаунтов, заведённых в кабинете; после
+// привязки Telegram такой аккаунт положительный, и у него оба способа.
 func (a *App) userLabelFor(ctx context.Context, u *model.User) string {
-	if u.Username == "" && u.FirstName == "" {
-		if l := a.emailLabel(ctx, u.TelegramID); l != "" {
-			return l
-		}
+	email := a.emailLabel(ctx, u.TelegramID)
+	switch {
+	case email != "" && u.TelegramID > 0:
+		return email + " / " + userLabel(u)
+	case email != "":
+		return email
 	}
 	return userLabel(u)
 }
@@ -118,20 +120,27 @@ func (a *App) emailLabelWith(ctx context.Context, id int64, name func(string) st
 	if wu, _ := a.store.GetWebUserByTgID(ctx, id); wu != nil && wu.Email != "" {
 		// Эскейп обязателен: e-mail — свободный ввод при регистрации в
 		// кабинете и попадает в сообщения с ParseModeHTML.
-		return "📧 " + name(wu.Email)
+		return name(wu.Email)
 	}
 	return ""
 }
 
-// userButtonLabel — подпись пользователя для кнопки: без HTML-экранирования.
+// userButtonLabel — подпись пользователя на кнопке списка, без
+// HTML-экранирования. Подпись — по способу регистрации (почта или @ник), а
+// второй способ входа показывает только значок: 💬 после почты — к аккаунту
+// привязан Telegram. Один способ — без значков.
 func (a *App) userButtonLabel(ctx context.Context, u *model.User) string {
-	if u.Username == "" && u.FirstName == "" {
-		if l := a.emailLabelWith(ctx, u.TelegramID, plainName); l != "" {
-			return l
+	if email := a.emailLabelWith(ctx, u.TelegramID, plainName); email != "" {
+		if u.TelegramID > 0 {
+			return email + " " + tgLinkedMark
 		}
+		return email
 	}
 	return userLabelWith(u, plainName)
 }
+
+// tgLinkedMark — значок «к почтовому аккаунту привязан Telegram».
+const tgLinkedMark = "💬"
 
 // plainName — имя для подписи кнопки: та же обрезка, что у escapeName, без
 // экранирования.
@@ -156,9 +165,7 @@ func (a *App) userHasSub(ctx context.Context, chatID int64) bool {
 	}
 	a.subMu.Unlock()
 
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return false
 	}
@@ -204,26 +211,38 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 		if a.renewEligible(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.renew"), "menu:renew"))
 		}
+		// Витрина: продлить свой тариф или сменить его можно в любой день.
+		row = append(row, btn(i18n.T(lang, "btn.tariffs"), "menu:buy"))
 	} else {
 		if a.trialAvailable(ctx, chatID) {
 			row = append(row, btn(i18n.T(lang, "btn.trial_user"), "menu:trial"))
 		}
 		row = append(row, btn(i18n.T(lang, "btn.buy"), "menu:buy"))
 	}
-	row = append(row, btn(i18n.T(lang, "btn.balance"), "menu:balance"))
+	if a.walletInMenu(ctx, chatID) {
+		row = append(row, btn(i18n.T(lang, "btn.balance"), "menu:balance"))
+	}
 	return row
 }
 
+// walletInMenu — кошелёк в главном меню: пока его можно пополнить или на
+// нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
+// пополнения в меню не нужен — промокод вводится и в витрине.
+func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
+	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
+}
+
+// renewEligible — кнопка «Продлить»: подписка куплена в боте, до конца 7 дней
+// и меньше. Триал не продлевают — с него переходят на тариф через витрину; без
+// покупки в боте (подписка из панели, перенесённая) продлевать нечего — тоже
+// витрина. Одно правило для чата, мини-аппа и кабинета.
 func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
 	if a.store == nil {
 		return false
 	}
 	u, _ := a.store.GetUser(ctx, chatID)
-	if u == nil {
+	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" {
 		return false
-	}
-	if u.NotifyKind == "trial" {
-		return true
 	}
 	if u.SubExpireAt == "" {
 		return false
@@ -273,7 +292,7 @@ func (a *App) sendSysKB(ctx context.Context, chatID int64, text string, rows [][
 }
 
 func (a *App) sendIfaceKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, text, rows)
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, text, rows)
 }
 
 func (a *App) sendMktKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
@@ -331,12 +350,12 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 
 func (a *App) showIface(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, i18n.T(lang, "menu.iface_title"), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, i18n.T(lang, "menu.iface_title"), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.banner"), "menu:welcome"), btn(i18n.T(lang, "btn.emoji"), "menu:emoji")},
 		{btn(i18n.T(lang, "btn.section_banners"), "menu:welcome_sections")},
+		{btn(i18n.T(lang, "btn.texts"), "tx:home"), btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
+		{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
 		{btn(i18n.T(lang, "btn.contacts"), "menu:contacts")},
-		{btn(i18n.T(lang, "btn.texts"), "tx:home")},
-		{btn(i18n.T(lang, "btn.devices_admin"), "menu:devices")},
 		{btn(i18n.T(lang, "btn.webui"), "menu:webui")},
 		{btn(i18n.T(lang, "btn.bot_lang")+": "+i18n.T(lang, "lang.name_"+lang), "menu:botlang")},
 		homeRow(lang),
@@ -350,7 +369,7 @@ func (a *App) showIface(ctx context.Context, chatID int64) {
 // выбора базы, а обработчик языка живёт только при активном мастере.
 func (a *App) showBotLang(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	a.sendKBSection(ctx, chatID, assets.SectionMainMenu, i18n.T(lang, "lang.title"), [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminIface, i18n.T(lang, "lang.title"), [][]models.InlineKeyboardButton{
 		{btn("🇷🇺 "+i18n.T(lang, "lang.name_ru"), "botlang:ru"), btn("🇬🇧 "+i18n.T(lang, "lang.name_en"), "botlang:en")},
 		{btn(i18n.T(lang, "btn.back"), "menu:iface"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
@@ -370,39 +389,50 @@ func (a *App) setBotLang(ctx context.Context, chatID int64, code string) {
 	a.showBotLang(ctx, chatID)
 }
 
+// showPay — «Продажи»: история и аналитика, вход в тарифы и в способы оплаты.
+// Настройки разнесены по двум подменю: одним полотном из двадцати кнопок на
+// телефоне не пользоваться.
 func (a *App) showPay(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
+	var on []string
+	for _, m := range a.payMethodsMenu() {
+		if m.on {
+			on = append(on, i18n.T(lang, m.short))
+		}
+	}
+	methods := i18n.T(lang, "sales.methods_none")
+	if len(on) > 0 {
+		methods = strings.Join(on, ", ")
+	}
+	plans := 0
+	if list, err := a.plansOnSale(ctx); err == nil {
+		plans = len(list)
+	}
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.title", methods, plans), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
+		{btn(i18n.T(lang, "btn.sales_plans"), "menu:payplans")},
+		{btn(i18n.T(lang, "btn.sales_methods"), "menu:paymethods")},
+		homeRow(lang),
+	})
+}
+
+// showPayPlans — «Продажи → Тарифы и триал»: лимиты тарифов, сквады,
+// доп-подписка.
+func (a *App) showPayPlans(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
 	a.mu.Lock()
-	p2pOn, starsOn, ykOn, cbOn, plOn, hlOn, trbOn, ymOn := false, false, false, false, false, false, false, false
 	strat := "MONTH"
 	addsubOn, addsubGB, addsubInt := false, 0, 0
 	if a.botCfg != nil {
-		p2pOn = a.botCfg.P2P.Enabled
-		starsOn = a.botCfg.Stars.Enabled
-		ykOn = a.botCfg.YooKassa.Enabled
-		cbOn = a.botCfg.CryptoBot.Enabled
-		plOn = a.botCfg.Platega.Enabled
-		hlOn = a.botCfg.Heleket.Enabled
-		trbOn = a.botCfg.Tribute.Enabled
-		ymOn = a.botCfg.YooMoney.Enabled
 		strat = a.botCfg.Pricing.ResetStrategy()
 		addsubOn = a.botCfg.AddSub.Enabled
 		addsubGB = a.botCfg.AddSub.TrafficGB
 		addsubInt = len(a.botCfg.AddSub.InternalSquads)
 	}
 	a.mu.Unlock()
-	mark := func(on bool) string {
-		if on {
-			return "✅"
-		}
-		return "❌"
-	}
 	internalCSV, externalName := a.squadDisplay(ctx)
-	title := i18n.T(lang, "subsetup.title",
-		mark(p2pOn), mark(starsOn), mark(ykOn), mark(cbOn), mark(plOn), mark(hlOn), mark(trbOn), mark(ymOn),
-		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat,
-		internalCSV, externalName,
-	)
+	title := i18n.T(lang, "sales.plans_title",
+		a.formatTrafficLimits(), a.formatDeviceLimits(ctx, lang), strat, internalCSV, externalName)
 	if addsubOn {
 		traffic := i18n.T(lang, "addsub.unlimited")
 		if addsubGB > 0 {
@@ -410,21 +440,70 @@ func (a *App) showPay(ctx context.Context, chatID int64) {
 		}
 		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
 	}
-	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick"), btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
+	// Лимиты и сквады — сводка, копировать из неё нечего.
+	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
+		{btn(i18n.T(lang, "subsetup.btn_quick"), "prc:quick")},
+		{btn(i18n.T(lang, "subsetup.btn_manual"), "menu:pricing")},
 		{btn(i18n.T(lang, "btn.trial_admin"), "menu:trial"), btn(i18n.T(lang, "btn.squads"), "menu:squads")},
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
-		{btn(i18n.T(lang, "btn.p2p"), "menu:p2p"), btn(i18n.T(lang, "btn.stars"), "menu:stars")},
-		{btn(i18n.T(lang, "btn.yookassa"), "menu:yookassa"), btn(i18n.T(lang, "btn.cryptobot"), "menu:cryptobot")},
-		{btn(i18n.T(lang, "btn.platega"), "menu:platega"), btn(i18n.T(lang, "btn.heleket"), "menu:heleket")},
-		{btn(i18n.T(lang, "btn.tribute"), "menu:tribute"), btn(i18n.T(lang, "btn.yoomoney"), "menu:yoomoney")},
-		{btn(i18n.T(lang, "btn.pay_names"), "tx:pm")},
-		{btn(i18n.T(lang, "btn.wallet"), "menu:wallet")},
-		{btn(i18n.T(lang, "btn.payments"), "menu:payments"), btn(i18n.T(lang, "btn.analytics"), "menu:analytics")},
-		{btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
-		homeRow(lang),
+		navBack(lang, "menu:pay"),
 	})
+}
+
+// payMethodItem — способ оплаты в меню «Способы оплаты».
+type payMethodItem struct {
+	short, cb string
+	on        bool
+}
+
+// payMethodsMenu — способы оплаты по порядку, с включённостью.
+func (a *App) payMethodsMenu() []payMethodItem {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := a.botCfg
+	if c == nil {
+		c = &model.BotConfig{}
+	}
+	return []payMethodItem{
+		{"paym.p2p", "menu:p2p", c.P2P.Enabled},
+		{"paym.stars", "menu:stars", c.Stars.Enabled},
+		{"paym.yookassa", "menu:yookassa", c.YooKassa.Enabled},
+		{"paym.cryptobot", "menu:cryptobot", c.CryptoBot.Enabled},
+		{"paym.platega", "menu:platega", c.Platega.Enabled},
+		{"paym.heleket", "menu:heleket", c.Heleket.Enabled},
+		{"paym.tribute", "menu:tribute", c.Tribute.Enabled},
+		{"paym.yoomoney", "menu:yoomoney", c.YooMoney.Enabled},
+	}
+}
+
+// showPayMethods — «Продажи → Способы оплаты»: включён способ или нет, видно
+// на кнопке.
+func (a *App) showPayMethods(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	var rows [][]models.InlineKeyboardButton
+	var row []models.InlineKeyboardButton
+	for _, m := range a.payMethodsMenu() {
+		mark := "❌ "
+		if m.on {
+			mark = "✅ "
+		}
+		row = append(row, btn(mark+i18n.T(lang, m.short), m.cb))
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
+		navBack(lang, "menu:pay"),
+	)
+	// Открыт, как и экраны способов (там карты и ключи): между открытыми и
+	// закрытыми экранами Telegram не даёт править сообщение на месте.
+	a.sendKBSection(ctx, chatID, assets.SectionBuySubscription, i18n.T(lang, "sales.methods_title"), rows)
 }
 
 func (a *App) showMarketing(ctx context.Context, chatID int64) {
@@ -436,28 +515,41 @@ func (a *App) showMarketing(ctx context.Context, chatID int64) {
 	})
 }
 
+// showSystem — «Система». Обновление вынесено в подменю: «Обновить» там
+// запускается сразу, без подтверждения, и первой кнопкой раздела ему не место.
 func (a *App) showSystem(ctx context.Context, chatID int64) {
+	lang := a.lang(chatID)
+	// Открыт, как и большинство его экранов (адреса, ключи, журнал): между
+	// открытыми и закрытыми экранами сообщение не правится на месте.
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
+		{btn(i18n.T(lang, "btn.updates"), "menu:updates"), btn(i18n.T(lang, "btn.backup"), "menu:backup")},
+		{btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
+		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.mail"), "menu:mail")},
+		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
+		{btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
+		{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
+		homeRow(lang),
+	})
+}
+
+// showUpdates — «Система → Обновление»: обновить, проверить, уведомления о
+// новых версиях и канал.
+func (a *App) showUpdates(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
 	a.mu.Lock()
 	updOn := a.botCfg != nil && a.botCfg.UpdateCheck.Enabled
 	a.mu.Unlock()
-	updLabel := i18n.T(lang, "btn.upd_notify_off")
+	updLabel, updState := i18n.T(lang, "btn.upd_notify_off"), i18n.T(lang, "updates.off")
 	if updOn {
-		updLabel = i18n.T(lang, "btn.upd_notify_on")
+		updLabel, updState = i18n.T(lang, "btn.upd_notify_on"), i18n.T(lang, "updates.on")
 	}
-	rows := [][]models.InlineKeyboardButton{
+	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "updates.title", a.channelName(lang), updState), [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.update"), "menu:update"), btn(i18n.T(lang, "btn.check_update"), "upd:check")},
-		{btn(updLabel, "upd:toggle"), btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
-		{btn(i18n.T(lang, "btn.status"), "menu:status"), btn(i18n.T(lang, "btn.apilog"), "menu:apilog")},
-		{btn(i18n.T(lang, "btn.webhooks"), "menu:webhooks"), btn(i18n.T(lang, "btn.panelauth"), "menu:panelauth")},
-		{btn(i18n.T(lang, "btn.miniapp"), "menu:miniapp"), btn(i18n.T(lang, "btn.cabinet"), "menu:cabinet")},
-		{btn(i18n.T(lang, "btn.mail"), "menu:mail")},
-		{btn(i18n.T(lang, "btn.backup"), "menu:backup"), btn(i18n.T(lang, "btn.rsimport"), "menu:rsimp")},
-	}
-	rows = append(rows,
-		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.reconfig"), "menu:reconf")},
-		homeRow(lang))
-	a.sendKBSection(ctx, chatID, assets.SectionAdminStats, i18n.T(lang, "menu.system_title"), rows)
+		{btn(updLabel, "upd:toggle")},
+		{btn(i18n.T(lang, "btn.channel")+": "+a.channelName(lang), "upd:chan")},
+		navBack(lang, "menu:system"),
+	})
 }
 
 func (a *App) squadDisplay(ctx context.Context) (string, string) {
@@ -587,6 +679,11 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 }
 
 func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name string) {
+	a.showMenuNote(ctx, chatID, isAdmin, name, "")
+}
+
+// showMenuNote — главное меню со строкой note над ним (итог обновления).
+func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name, note string) {
 	a.ensureHomeKey(ctx, chatID)
 	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
 	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
@@ -603,6 +700,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 		ents = nil
 		rows = a.adminMenuRows(lang)
 		photo = bannerInputFor(assets.SectionAdminStats)
+		ctx = withAdminClosed(ctx)
 	} else {
 		rows = append(rows, a.navRow(ctx, chatID))
 		if row := a.miniAppButtonRow(lang); row != nil {
@@ -615,6 +713,9 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 			rows = append(rows, row)
 		}
 		rows = append(rows, a.contactRows()...)
+	}
+	if note != "" && len(ents) == 0 {
+		caption = note + "\n\n" + caption
 	}
 	if len(ents) == 0 {
 		caption = a.applyPremium(caption)
@@ -805,6 +906,14 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 		if isAdmin {
 			a.showPay(ctx, chatID)
 		}
+	case "payplans":
+		if isAdmin {
+			a.showPayPlans(ctx, chatID)
+		}
+	case "paymethods":
+		if isAdmin {
+			a.showPayMethods(ctx, chatID)
+		}
 	case "manage":
 		if isAdmin {
 			a.showMenu(ctx, chatID, true, name)
@@ -820,6 +929,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "system":
 		if isAdmin {
 			a.showSystem(ctx, chatID)
+		}
+	case "updates":
+		if isAdmin {
+			a.showUpdates(ctx, chatID)
 		}
 	case "devices":
 		if isAdmin {

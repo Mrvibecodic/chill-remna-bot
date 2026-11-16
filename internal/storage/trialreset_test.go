@@ -54,6 +54,13 @@ func TestTrialResetTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 		mk(-9006, expired, expired) // кабинетный аккаунт без чата
+		mk(9007, expired, expired)  // получил подписку от администратора
+		if err := st.AddPayment(ctx, &model.Payment{
+			TelegramID: 9007, Method: model.PayMethodGrant, Months: 1,
+			Amount: "—", Status: model.PaymentPaid, ExtID: "grant:9007:aa",
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		idsLim := func(maxResets, lim int) map[int64]int {
 			t.Helper()

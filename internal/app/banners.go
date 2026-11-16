@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 
@@ -11,8 +12,9 @@ import (
 
 func (a *App) showSectionBanners(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	rows := make([][]models.InlineKeyboardButton, 0, len(assets.AllSections)+2)
-	for _, sec := range assets.UserSections() {
+	sections := assets.UserSections()
+	rows := make([][]models.InlineKeyboardButton, 0, len(sections)+1)
+	for _, sec := range sections {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(assets.LabelByKey(sec.Key, lang), "sec:open:"+sec.Key),
 		})
@@ -25,7 +27,7 @@ func (a *App) showSectionBanners(ctx context.Context, chatID int64) {
 }
 
 func (a *App) onSectionBanner(ctx context.Context, chatID int64, val string) {
-	action, key, _ := cut3(val)
+	action, key, _ := strings.Cut(val, ":")
 	switch action {
 	case "open":
 		a.showSectionBanner(ctx, chatID, key)
@@ -37,15 +39,6 @@ func (a *App) onSectionBanner(ctx context.Context, chatID int64, val string) {
 		a.getUI(chatID).awaitSectionBanner = ""
 		a.showSectionBanner(ctx, chatID, key)
 	}
-}
-
-func cut3(s string) (string, string, bool) {
-	for i := 0; i < len(s); i++ {
-		if s[i] == ':' {
-			return s[:i], s[i+1:], true
-		}
-	}
-	return s, "", false
 }
 
 func (a *App) showSectionBanner(ctx context.Context, chatID int64, section string) {
@@ -77,9 +70,7 @@ func (a *App) showSectionBanner(ctx context.Context, chatID int64, section strin
 		newFileID = nf
 		return id
 	})
-	if a.store != nil && newFileID != "" && newFileID != cached {
-		_ = a.store.SaveMediaFileID(ctx, section, newFileID)
-	}
+	a.keepSectionPhoto(ctx, section, cached, newFileID)
 }
 
 func (a *App) askSectionBanner(ctx context.Context, chatID int64, section string) {

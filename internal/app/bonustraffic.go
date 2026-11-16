@@ -31,19 +31,7 @@ const (
 // не повторялись каждый месяц оплаченного года, бот помнит, что именно он
 // накинул, и снимает прибавку, как только панель обнулит счётчик расхода.
 func (a *App) RunBonusTrafficSweep(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(bonusSweepFirstDelay):
-	}
-	for {
-		a.sweepBonusTrafficOnce(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(bonusSweepInterval):
-		}
-	}
+	afterThenEvery(ctx, bonusSweepFirstDelay, bonusSweepInterval, func() { a.sweepBonusTrafficOnce(ctx) })
 }
 
 func (a *App) sweepBonusTrafficOnce(ctx context.Context) int {

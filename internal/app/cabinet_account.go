@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
@@ -171,9 +172,16 @@ func (a *App) CabinetAccount(ctx context.Context, tgID int64) web.CabinetAccount
 	}
 	dto.TgLinked = tgID > 0
 	dto.MoneyBlocked = a.CabinetMoneyBlocked(ctx, tgID)
+	dto.TrialAfterVerify = dto.MoneyBlocked && a.trialEmailOn() && a.trialAvailable(ctx, tgID) && !a.CabinetTrialAllowed(ctx, tgID)
 	if a.store != nil {
 		if u, _ := a.store.GetUser(ctx, tgID); u != nil {
 			dto.Name = displayName(a.lang(tgID), u.FirstName, u.Username)
+			if dto.TgLinked {
+				dto.TgName = u.FirstName
+				if u.Username != "" {
+					dto.TgName = "@" + u.Username
+				}
+			}
 		}
 	}
 	return dto
@@ -214,7 +222,11 @@ func (a *App) CabinetVerifyEmail(ctx context.Context, token string) error {
 	if wu.VerifiedAt != "" {
 		return nil
 	}
-	return a.store.SetWebUserVerified(ctx, t.TgID, "")
+	if err := a.store.SetWebUserVerified(ctx, t.TgID, ""); err != nil {
+		return err
+	}
+	a.fillPanelEmail(t.TgID)
+	return nil
 }
 
 // CabinetChangePassword меняет пароль по старому.
@@ -260,7 +272,7 @@ func (a *App) CabinetForgotPassword(ctx context.Context, email string) {
 	if a.store == nil || !a.MailReady() {
 		return
 	}
-	email = normEmail(email)
+	email = model.NormalizeEmail(email)
 	if !mailer.ValidAddress(email) {
 		return
 	}
@@ -302,9 +314,63 @@ func (a *App) CabinetResetPassword(ctx context.Context, token, newPass string) (
 		return 0, err
 	}
 	if wu.VerifiedAt == "" {
-		_ = a.store.SetWebUserVerified(ctx, t.TgID, "")
+		if err := a.store.SetWebUserVerified(ctx, t.TgID, ""); err == nil {
+			a.fillPanelEmail(t.TgID)
+		}
 	}
 	a.bumpEpoch(ctx, t.TgID)
 	a.notifyPasswordChanged(ctx, wu.Email)
 	return t.TgID, nil
+}
+
+// webUserGrace — аккаунты кабинета моложе этого срока стартовая чистка не
+// трогает: регистрация заводит аккаунт раньше пользователя.
+const webUserGrace = time.Hour
+
+// pruneWebUsers убирает на старте аккаунты кабинета, чей пользователь удалён.
+// Их оставляли прежние версии бота: адрес оставался занятым, а старый пароль
+// продолжал открывать кабинет.
+func (a *App) pruneWebUsers(ctx context.Context) {
+	st := a.storeRef()
+	if st == nil {
+		return
+	}
+	n, err := st.PruneWebUsers(ctx, time.Now().Add(-webUserGrace).UTC().Format(time.RFC3339))
+	if err != nil {
+		a.log.Warn("чистка аккаунтов кабинета", "err", err)
+		return
+	}
+	if n > 0 {
+		a.log.Info("кабинет: убраны аккаунты удалённых пользователей", "count", n)
+	}
+}
+
+// CabinetTrialAllowed — аккаунту можно взять пробный период в кабинете.
+//
+// Аккаунт по почте заводится на любой ящик, поэтому триал ему положен, только
+// когда это включено в настройках и за аккаунтом стоит хоть что-то, кроме
+// введённого адреса: подтверждённая почта или одобрение администратора.
+func (a *App) CabinetTrialAllowed(ctx context.Context, tgID int64) bool {
+	if tgID >= 0 {
+		return true
+	}
+	if !a.trialEmailOn() {
+		return false
+	}
+	wu := a.webAccount(ctx, tgID)
+	if wu == nil {
+		return false
+	}
+	if wu.VerifiedAt != "" {
+		return true
+	}
+	u, _ := a.store.GetUser(ctx, tgID)
+	return u != nil && u.WebApproved
+}
+
+// trialEmailOn — пробный период аккаунтам по почте включён в настройках.
+func (a *App) trialEmailOn() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.botCfg != nil && a.botCfg.Trial.Email
 }

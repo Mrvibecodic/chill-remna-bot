@@ -13,13 +13,59 @@ import (
 // liveSquads — свежий список сквадов панели. Без панели ничего не известно,
 // и ни один сквад не считается удалённым.
 func (a *App) liveSquads(ctx context.Context) remnawave.LiveSquads {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return remnawave.LiveSquads{}
 	}
 	return panel.LiveSquads(ctx)
+}
+
+// squadPick — что отмечено на экране выбора сквадов и куда ведут кнопки.
+type squadPick struct {
+	selInt []string
+	selExt string
+	// intCB и extCB строят данные кнопки по UUID сквада.
+	intCB, extCB func(string) string
+	// extHead — данные строки-заголовка над внешними; пусто — без заголовка.
+	extHead string
+	// extRadio — внешний сквад отмечается кружком (выбирается один), иначе
+	// галочкой, как внутренние.
+	extRadio bool
+}
+
+// squadPickRows — кнопки выбора сквадов для любого экрана настроек: сначала
+// внутренние, затем внешние (exts == nil — их на экране нет), в конце те, что
+// выбраны, но в панели уже удалены. gone возвращается отдельно — по нему
+// экран дописывает подсказку.
+func squadPickRows(lang string, live remnawave.LiveSquads, ints []remnawave.Squad, exts []remnawave.ExternalSquad, o squadPick) (rows, gone [][]models.InlineKeyboardButton) {
+	on := make(map[string]bool, len(o.selInt))
+	for _, u := range o.selInt {
+		on[u] = true
+	}
+	rows = make([][]models.InlineKeyboardButton, 0, len(ints)+len(exts)+3)
+	for _, sq := range ints {
+		mark := "⬜"
+		if on[sq.UUID] {
+			mark = "✅"
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, o.intCB(sq.UUID))})
+	}
+	if len(exts) > 0 && o.extHead != "" {
+		rows = append(rows, []models.InlineKeyboardButton{btn("— 📡 External —", o.extHead)})
+	}
+	off, sel := "⬜", "✅"
+	if o.extRadio {
+		off, sel = "⚪", "🟢"
+	}
+	for _, sq := range exts {
+		mark := off
+		if o.selExt == sq.UUID {
+			mark = sel
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 📡 "+sq.Name, o.extCB(sq.UUID))})
+	}
+	gone = goneSquadRows(lang, live, o.selInt, o.selExt, o.intCB, o.extCB)
+	return append(rows, gone...), gone
 }
 
 // goneSquadRows — кнопки «удалён в панели» для выбранных сквадов, которых в

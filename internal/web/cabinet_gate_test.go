@@ -26,6 +26,12 @@ type fakeMini struct {
 	start   string
 	payURL  string
 	since   int64
+
+	trialOK bool
+	trials  int
+
+	accessAsked   int
+	approvalAsked int
 }
 
 const fakeBotToken = "123456:TESTTOKEN"
@@ -46,12 +52,29 @@ func (f *fakeMini) MiniMe(_ context.Context, id int64) MiniMeDTO {
 func (f *fakeMini) CabinetBotUsername() string {
 	return "testbot"
 }
-func (f *fakeMini) SessionEpoch(context.Context, int64) int         { return f.epoch }
-func (f *fakeMini) MiniBlocked(context.Context, int64) bool         { return false }
-func (f *fakeMini) MiniAccessDenied(context.Context, int64) bool    { return false }
-func (f *fakeMini) MiniLegalRequired(context.Context, int64) bool   { return false }
-func (f *fakeMini) CabinetGate(context.Context, int64, bool) error  { return nil }
+func (f *fakeMini) SessionEpoch(context.Context, int64) int { return f.epoch }
+func (f *fakeMini) MiniBlocked(context.Context, int64) bool { return false }
+func (f *fakeMini) MiniAccessDenied(context.Context, int64) bool {
+	f.accessAsked++
+	return false
+}
+func (f *fakeMini) MiniLegalRequired(context.Context, int64) bool { return false }
+
+// CabinetGate сам спрашивает допуск — как настоящий.
+func (f *fakeMini) CabinetGate(ctx context.Context, id int64, _ bool) error {
+	f.MiniAccessDenied(ctx, id)
+	return nil
+}
+func (f *fakeMini) CabinetApproval(context.Context, int64, bool) error {
+	f.approvalAsked++
+	return nil
+}
 func (f *fakeMini) CabinetMoneyBlocked(context.Context, int64) bool { return f.blocked }
+func (f *fakeMini) CabinetTrialAllowed(context.Context, int64) bool { return f.trialOK }
+func (f *fakeMini) MiniTrial(context.Context, int64) MiniActionDTO {
+	f.trials++
+	return MiniActionDTO{OK: true}
+}
 func (f *fakeMini) CabinetForgotPassword(_ context.Context, e string) {
 	f.forgot = append(f.forgot, e)
 }
@@ -286,5 +309,42 @@ func TestCheckoutIssuedAtAndPayCheckSince(t *testing.T) {
 	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/paycheck", "", tok, "203.0.113.53"))
 	if w.Code != http.StatusOK || f.since != 0 {
 		t.Fatalf("старый фронт без тела: code=%d since=%d", w.Code, f.since)
+	}
+}
+
+// Страж кабинета спрашивает допуск к боту один раз за запрос: модерация
+// кабинета идёт отдельным вызовом, который допуск не перепроверяет.
+func TestCabinetGuardAsksAccessOnce(t *testing.T) {
+	f := &fakeMini{}
+	h := gateServer(t, f)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodGet, "/api/cabinet/account", "", webToken(f, 1000000001, 0), "198.51.100.7"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("код %d: %s", w.Code, w.Body.String())
+	}
+	if f.accessAsked != 1 || f.approvalAsked != 1 {
+		t.Fatalf("допуск спрошен %d раз, модерация %d — ожидалось по одному", f.accessAsked, f.approvalAsked)
+	}
+}
+
+// Пробный период в кабинете: аккаунту, которому он не положен, — отказ без
+// выдачи; тому, кому положен, гейт подтверждения почты не мешает (одобренному
+// администратором подтверждение не требуется).
+func TestTrialGate(t *testing.T) {
+	f := &fakeMini{blocked: true}
+	h := gateServer(t, f)
+	tok := webToken(f, -7, 0)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/trial", "", tok, "203.0.113.70"))
+	if w.Code != http.StatusForbidden || f.trials != 0 {
+		t.Fatalf("триал без допуска: код %d, выдач %d", w.Code, f.trials)
+	}
+
+	f.trialOK = true
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, gateReq(http.MethodPost, "/api/miniapp/trial", "", tok, "203.0.113.71"))
+	if w.Code != http.StatusOK || f.trials != 1 {
+		t.Fatalf("триал с допуском: код %d, выдач %d: %s", w.Code, f.trials, w.Body.String())
 	}
 }

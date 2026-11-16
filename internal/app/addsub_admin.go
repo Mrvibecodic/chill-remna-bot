@@ -59,13 +59,13 @@ func (a *App) showAddSubAdmin(ctx context.Context, chatID int64) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "addsub.btn_sync"), "addsub:sync")})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home"),
+		btn(i18n.T(lang, "btn.back"), "menu:payplans"), btn(i18n.T(lang, "btn.home"), "menu:home"),
 	})
 	a.sendPayKB(ctx, chatID, title, rows)
 }
 
 func (a *App) onAddSubAdmin(ctx context.Context, chatID int64, val string) {
-	action, arg, _ := cut3(val)
+	action, arg, _ := strings.Cut(val, ":")
 	switch action {
 	case "toggle":
 		a.mu.Lock()
@@ -219,7 +219,8 @@ func addSubCabinetCandidates(users []remnawave.PanelUser) []remnawave.PanelUser 
 	var out []remnawave.PanelUser
 	for i := range users {
 		u := users[i]
-		if u.TelegramID > 0 {
+		// Доп-подписка несёт почту основной учётки, но аккаунту не учётка.
+		if u.TelegramID > 0 || u.Tag == remnawave.BotTagAdd {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, u.ExpireAt); err == nil && !t.After(time.Now().UTC()) {
@@ -237,9 +238,7 @@ func addSubCabinetCandidates(users []remnawave.PanelUser) []remnawave.PanelUser 
 // учётка. Сама учётка здесь не выбирается: её потом находит тот же поиск, что
 // и при покупке, а здесь только решается, за кем в панель стоит идти.
 func (a *App) cabinetAccountIDs(ctx context.Context, candidates []remnawave.PanelUser) ([]int64, error) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, nil
 	}
@@ -434,9 +433,7 @@ func (a *App) addSubByPlan(ctx context.Context, snap *model.PlanSnapshot) (*mode
 // продление бонусом или разблокировка выключили бы только что созданную
 // доп-подписку. granted — снимок, по которому она создана.
 func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSnapshot) error {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil
 	}
@@ -461,9 +458,7 @@ func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSn
 
 // addSubDeal — снимок последней сделки пользователя и идёт ли у него триал.
 func (a *App) addSubDeal(ctx context.Context, tgID int64) (*model.PlanSnapshot, bool) {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return nil, false
 	}
@@ -496,25 +491,10 @@ func (a *App) showAddSubSquads(ctx context.Context, chatID int64) {
 	}
 	live := panel.LiveSquads(ctx)
 
-	isActiveInt := func(uuid string) bool {
-		for _, u := range activeInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+2)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isActiveInt(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{btn(mark+" 🏠 "+sq.Name, "addsub:int:"+sq.UUID)})
-	}
-	gone := goneSquadRows(lang, live, activeInt, "",
-		func(u string) string { return "addsub:int:" + u }, nil)
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, nil, squadPick{
+		selInt: activeInt,
+		intCB:  func(u string) string { return "addsub:int:" + u },
+	})
 	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "squads.btn_refresh"), "addsub:refresh")})
 	rows = append(rows, back)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "addsub.squads_title", len(intSquads), len(activeInt))+goneSquadsHint(lang, gone), rows)
@@ -527,20 +507,7 @@ func (a *App) toggleAddSubInternal(ctx context.Context, chatID int64, uuid strin
 	live := a.liveSquads(ctx)
 	a.mu.Lock()
 	if a.botCfg != nil {
-		cur := a.botCfg.AddSub.InternalSquads
-		idx := -1
-		for i, u := range cur {
-			if u == uuid {
-				idx = i
-				break
-			}
-		}
-		if idx >= 0 {
-			a.botCfg.AddSub.InternalSquads = append(cur[:idx], cur[idx+1:]...)
-		} else {
-			a.botCfg.AddSub.InternalSquads = append(cur, uuid)
-		}
-		a.botCfg.AddSub.InternalSquads, _ = pruneGoneSquads(live, a.botCfg.AddSub.InternalSquads, "")
+		a.botCfg.AddSub.InternalSquads, _ = pruneGoneSquads(live, toggleString(a.botCfg.AddSub.InternalSquads, uuid), "")
 	}
 	a.mu.Unlock()
 	_ = a.saveBotConfig(ctx)

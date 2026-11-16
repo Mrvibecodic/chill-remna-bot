@@ -143,6 +143,18 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		}
 		return
 	}
+	// «Отмена» вопроса возвращает на экран, с которого спросили: режим у
+	// него тот же, что у раздела этого экрана.
+	if isAdmin && (adminClosedData(cq.Data) || cq.Data == "inp:cancel" && adminClosedData(a.getUI(chatID).inputBack)) {
+		ctx = withAdminClosed(ctx)
+	}
+	if isAdmin {
+		if clientData(cq.Data) || cq.Data == "inp:cancel" && clientData(a.getUI(chatID).inputBack) {
+			ctx = withClientFlow(ctx)
+		} else {
+			ctx = withAdminFlow(ctx)
+		}
+	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 	// Любая кнопка вне редактора текстов снимает ожидание нового текста:
 	// иначе ответ на вопрос другого раздела ушёл бы в текст бота.
@@ -243,7 +255,9 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 			a.onBroadcast(ctx, chatID, val)
 		}
 	case cbPromo:
-		if isAdmin {
+		// Ввод кода из витрины и кошелька — путь покупателя и у админа,
+		// который смотрит витрину.
+		if isAdmin && !promoUserData(val) {
 			a.onPromoAdmin(ctx, chatID, val)
 		} else {
 			a.onPromoUser(ctx, chatID, val)
@@ -594,9 +608,7 @@ func (a *App) applyPendingDB(ctx context.Context, w *wizard) error {
 	if w.pendingDBKind == "" {
 		return nil
 	}
-	a.mu.Lock()
-	cur := a.store
-	a.mu.Unlock()
+	cur := a.storeRef()
 	if cur != nil && cur.Kind() == w.pendingDBKind && a.storeDSN() == w.pendingDSN {
 		return nil
 	}

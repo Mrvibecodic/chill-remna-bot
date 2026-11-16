@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -135,7 +136,7 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 	case "ra":
 		n := len(a.textOverrides(a.botLang()))
 		a.sendIfaceKB(ctx, chatID, i18n.T(lang, "tx.reset_all_ask", n), [][]models.InlineKeyboardButton{
-			{btn(i18n.T(lang, "tx.btn_yes_reset"), "tx:ray"), btn(i18n.T(lang, "btn.cancel"), "tx:home")},
+			{btn(i18n.T(lang, "tx.btn_yes_reset"), "tx:ray"), btn(i18n.T(lang, "btn.cancel"), "tx:ch:0")},
 		})
 	case "ray":
 		note := i18n.T(lang, "tx.reset_all_done")
@@ -153,6 +154,16 @@ func (a *App) onTexts(ctx context.Context, chatID int64, val string) {
 
 func txtSectionTitle(lang, sec string) string { return i18n.T(lang, "tx.sec."+sec) }
 
+// txtSectionButton — подпись раздела на кнопке: длинным названиям — короткая,
+// чтобы разделы стояли по два в ряд.
+func txtSectionButton(lang, sec string) string {
+	switch sec {
+	case "buy", "sub", "trial":
+		return i18n.T(lang, "tx.secb."+sec)
+	}
+	return txtSectionTitle(lang, sec)
+}
+
 func (a *App) showTextsHome(ctx context.Context, chatID int64) {
 	a.showTextsHomeNote(ctx, chatID, "")
 }
@@ -167,15 +178,22 @@ func (a *App) showTextsHomeNote(ctx context.Context, chatID int64, note string) 
 			perSec[e.Section]++
 		}
 	}
-	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "tx.btn_search"), "tx:q")},
-		{btn(i18n.T(lang, "tx.btn_methods"), "tx:pm:t")},
+	top := []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_search"), "tx:q")}
+	if len(own) > 0 {
+		top = append(top, btn(i18n.T(lang, "tx.btn_changed"), "tx:ch:0"))
 	}
+	rows := [][]models.InlineKeyboardButton{top}
+	// Разделы по два в ряд: у раздела с правками значок сменяется на ✏️, а
+	// число правок по разделам — в тексте экрана (с ним подписи не влезают).
 	var row []models.InlineKeyboardButton
+	var counts strings.Builder
 	for _, sec := range i18n.EditSections() {
-		label := txtSectionTitle(lang, sec)
+		label := txtSectionButton(lang, sec)
 		if n := perSec[sec]; n > 0 {
-			label += " · ✏️" + strconv.Itoa(n)
+			if _, name, ok := strings.Cut(label, " "); ok {
+				label = "✏️ " + name
+			}
+			fmt.Fprintf(&counts, "\n%s — %d", txtSectionTitle(lang, sec), n)
 		}
 		row = append(row, btn(label, "tx:s:"+sec+":0"))
 		if len(row) == 2 {
@@ -186,17 +204,12 @@ func (a *App) showTextsHomeNote(ctx context.Context, chatID int64, note string) 
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	if len(own) > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_changed", len(own)), "tx:ch:0")})
-	}
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_methods"), "tx:pm:t")})
 	if stale, broken := a.textsAttention(bl); len(stale)+len(broken) > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_attention", len(stale)+len(broken)), "tx:att:0")})
 	}
-	if len(own) > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_reset_all"), "tx:ra")})
-	}
 	rows = append(rows, navBack(lang, "menu:iface"))
-	text := i18n.T(lang, "tx.title", len(own))
+	text := i18n.T(lang, "tx.title", len(own)) + counts.String()
 	if note != "" {
 		text = note + "\n\n" + text
 	}
@@ -240,6 +253,11 @@ func (a *App) txtLabel(lang, key string) string {
 
 // showTextsList — общий список текстов с листанием.
 func (a *App) showTextsList(ctx context.Context, chatID int64, head string, keys []string, page int, pagePrefix, back string) {
+	a.showTextsListExtra(ctx, chatID, head, keys, page, pagePrefix, back, nil)
+}
+
+// showTextsListExtra — список с рядом extra над «Назад».
+func (a *App) showTextsListExtra(ctx context.Context, chatID int64, head string, keys []string, page int, pagePrefix, back string, extra []models.InlineKeyboardButton) {
 	lang := a.lang(chatID)
 	pages := (len(keys) + txtPageSize - 1) / txtPageSize
 	if pages == 0 {
@@ -256,6 +274,9 @@ func (a *App) showTextsList(ctx context.Context, chatID int64, head string, keys
 	}
 	if nav := paginationRow(pagePrefix, page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
+	}
+	if len(extra) > 0 {
+		rows = append(rows, extra)
 	}
 	rows = append(rows, navBack(lang, back))
 	a.sendIfaceKB(ctx, chatID, head, rows)
@@ -287,7 +308,9 @@ func (a *App) showTextsChanged(ctx context.Context, chatID int64, page int) {
 		a.showTextsHome(ctx, chatID)
 		return
 	}
-	a.showTextsList(ctx, chatID, i18n.T(lang, "tx.changed_title", len(keys)), keys, page, "tx:ch:", "tx:home")
+	// «Вернуть все стандартные» — здесь, рядом с тем, что вернётся.
+	a.showTextsListExtra(ctx, chatID, i18n.T(lang, "tx.changed_title", len(keys)), keys, page, "tx:ch:", "tx:home",
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_reset_all"), "tx:ra")})
 }
 
 func (a *App) showTextsAttention(ctx context.Context, chatID int64, page int) {
@@ -488,6 +511,15 @@ func (a *App) showTextCard(ctx context.Context, chatID int64, key, note string) 
 	}
 	if bk := methodBtnKey(key); bk != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "tx.btn_method_btn"), "tx:k:"+bk)})
+	}
+	// Описание способа — из карточки его названия: в списке способов отдельной
+	// кнопки у описания нет.
+	if nk := methodNoteKey(key); nk != "" {
+		note := i18n.T(lang, "tx.btn_note")
+		if strings.TrimSpace(i18n.T(bl, nk)) != "" {
+			note = i18n.T(lang, "tx.btn_note_set")
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(note, "tx:k:"+nk)})
 	}
 	if stored {
 		if own && textStale(bl, key, o) {

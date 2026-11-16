@@ -40,9 +40,7 @@ func (c *hwidDefCache) usable() bool {
 // удалось прочитать, и тогда экраны показывают всё как без него.
 func (a *App) hwidDefaults(ctx context.Context) (remnawave.HwidDefaults, bool) {
 	c := &a.hwidDef
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 
 	c.mu.Lock()
 	if wait := c.inflight; wait != nil && !c.usable() {

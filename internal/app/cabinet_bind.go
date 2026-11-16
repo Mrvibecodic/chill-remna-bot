@@ -165,9 +165,15 @@ func (a *App) CabinetBindTelegram(ctx context.Context, tgID, newTgID int64) (int
 }
 
 // CabinetBindName записывает имя и @username из подписи виджета входа: без них
-// привязанный аккаунт остаётся в списке пользователей безымянной строкой.
+// аккаунт, не писавший боту, остаётся в списке пользователей безымянной
+// строкой. Уже известное имя не трогается.
 func (a *App) CabinetBindName(ctx context.Context, tgID int64, username, firstName string) {
-	a.rememberUser(ctx, tgID, username, firstName)
+	if a.store == nil || (username == "" && firstName == "") {
+		return
+	}
+	if err := a.store.FillUserInfo(ctx, tgID, username, firstName); err != nil {
+		a.log.Warn("кабинет: имя из виджета входа не записано", "err", err)
+	}
 }
 
 // notifyAdminBindRollback зовётся, когда откат не удался: учётка в панели

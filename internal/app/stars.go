@@ -245,7 +245,7 @@ func (a *App) showStarsAdmin(ctx context.Context, chatID int64) {
 	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "admin.stars_title", status, a.formatStarPrices()), [][]models.InlineKeyboardButton{
 		{toggleBtn(lang, a.starsConfig().Enabled, "star:toggle"), btn(i18n.T(lang, "admin.btn_prices"), "star:prices")},
-		{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")},
+		{btn(i18n.T(lang, "btn.back"), "menu:paymethods"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 	})
 }
 

@@ -60,12 +60,43 @@ type Client struct {
 	// emailFor — подтверждённая почта аккаунта кабинета ("" — искать по почте
 	// нельзя). Задаётся один раз при создании клиента.
 	emailFor func(ctx context.Context, telegramID int64) string
+	// accountEmail — подтверждённая почта аккаунта для поля email учётки, в том
+	// числе после привязки Telegram ("" — писать нечего). Отдельно от emailFor:
+	// искать по почте можно только аккаунты без Telegram, а вписывать — всем.
+	accountEmail func(ctx context.Context, telegramID int64) string
 }
 
 // SetEmailResolver подключает поиск учётки по почте для аккаунтов кабинета.
 // Вызывать до первого запроса.
 func (c *Client) SetEmailResolver(f func(ctx context.Context, telegramID int64) string) {
 	c.emailFor = f
+}
+
+// SetAccountEmail подключает почту, которую бот вписывает в учётку аккаунта
+// кабинета. Вызывать до первого запроса.
+func (c *Client) SetAccountEmail(f func(ctx context.Context, telegramID int64) string) {
+	c.accountEmail = f
+}
+
+// emailToWrite — почта для поля email учётки ("" — не писать). Панель
+// проверяет формат строже бота (контракт: z.email()), и адрес, который она не
+// примет, сорвал бы вместе с собой создание учётки и продление.
+func (c *Client) emailToWrite(ctx context.Context, telegramID int64) string {
+	if c.accountEmail == nil {
+		return ""
+	}
+	if e := c.accountEmail(ctx, telegramID); PanelEmailOK(e) {
+		return e
+	}
+	return ""
+}
+
+// panelEmailRe — проверка почты из контракта панели (zod 4, z.email()).
+var panelEmailRe = regexp.MustCompile(`^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$`)
+
+// PanelEmailOK — примет ли панель этот адрес в поле email.
+func PanelEmailOK(email string) bool {
+	return email != "" && panelEmailRe.MatchString(email)
 }
 
 // hwidSyncAttempts is how many times ResetDevicesByTelegramID tries the HWID
@@ -892,6 +923,9 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		// Unlike A, B's traffic allowance is fully bot-owned, so "unlimited"
 		// (0) must be written explicitly instead of being left as-is.
 		patch["trafficLimitBytes"] = opt.TrafficBytes
+		if addSubEmail(main.Email) != "" && existing.Email == "" {
+			patch["email"] = main.Email
+		}
 		if _, _, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch); err != nil {
 			return res, err
 		}
@@ -909,6 +943,16 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 	return res, nil
 }
 
+// addSubEmail — почта, которую доп-подписка берёт у основной учётки ("" —
+// никакой). Поиск по почте доп-подписки пропускает (тег CHILLBOT_ADD), так что
+// общая почта двух учёток одного человека его не путает.
+func addSubEmail(mainEmail string) string {
+	if PanelEmailOK(mainEmail) {
+		return mainEmail
+	}
+	return ""
+}
+
 func (c *Client) createAddSub(ctx context.Context, username string, main PanelUser, limits UserLimits, trafficBytes int64, disabled bool) error {
 	body := map[string]any{
 		"username": username,
@@ -917,6 +961,9 @@ func (c *Client) createAddSub(ctx context.Context, username string, main PanelUs
 	}
 	if disabled {
 		body["status"] = StatusDisabled
+	}
+	if e := addSubEmail(main.Email); e != "" {
+		body["email"] = e
 	}
 	lim, err := c.liveLimits(ctx, limits, true)
 	if err != nil {
@@ -933,7 +980,7 @@ func (c *Client) createAddSub(ctx context.Context, username string, main PanelUs
 // that would narrow the search to the legacy name and quietly skip a B living
 // under the derived one — leaving a blocked user served or an orphan behind.
 func (c *Client) mainUsernameFor(ctx context.Context, telegramID int64) (string, error) {
-	a, err := c.findByTelegram(ctx, telegramID)
+	a, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil {
 		return "", err
 	}
@@ -1074,70 +1121,15 @@ type UserLimits struct {
 // поправка (обычно отрицательная при апгрейде) сдвигает конец срока; ноль —
 // обычное продление.
 func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months, extraDays int, limits UserLimits) (string, string, error) {
-	existing, err := c.findByTelegram(ctx, telegramID)
-	if err != nil {
-		return "", "", err
-	}
-	expire := nextExpire(existing, months, extraDays)
-
-	if existing != nil && !existing.ref().Empty() {
-		if !ownedByBot(existing, telegramID) {
-			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
-		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		lim, err := c.liveLimits(ctx, limits, false)
-		if err != nil {
-			return "", "", err
-		}
-		applyLimits(patch, lim)
-		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-		if err == nil {
-			_ = c.ResetTraffic(ctx, existing.ref())
-		}
-		return link, expireAt, err
-	}
-
-	lim, err := c.liveLimits(ctx, limits, true)
-	if err != nil {
-		return "", "", err
-	}
-	body := newUserBody(telegramID, expire)
-	applyLimits(body, lim)
-	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	return c.grant(ctx, telegramID, limits, true, func(existing *panelUser) string {
+		return nextExpire(existing, months, extraDays)
+	})
 }
 
 func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, days int, limits UserLimits) (string, string, error) {
-	existing, err := c.findByTelegram(ctx, telegramID)
-	if err != nil {
-		return "", "", err
-	}
-	base := time.Now().UTC()
-	if existing != nil && existing.ExpireAt != "" {
-		if t, err := time.Parse(time.RFC3339, existing.ExpireAt); err == nil && t.After(base) {
-			base = t
-		}
-	}
-	expire := base.AddDate(0, 0, days).Format(time.RFC3339)
-
-	if existing != nil && !existing.ref().Empty() {
-		if !ownedByBot(existing, telegramID) {
-			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
-		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
-		lim, err := c.liveLimits(ctx, limits, false)
-		if err != nil {
-			return "", "", err
-		}
-		applyLimits(patch, lim)
-		return c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
-	}
-	lim, err := c.liveLimits(ctx, limits, true)
-	if err != nil {
-		return "", "", err
-	}
-	body := newUserBody(telegramID, expire)
-	applyLimits(body, lim)
-	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	return c.grant(ctx, telegramID, limits, false, func(existing *panelUser) string {
+		return nextExpireDays(existing, days, 0)
+	})
 }
 
 // ExtendUserDays — покупка срока в днях (недельная подписка Tribute). Поправка
@@ -1146,17 +1138,33 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 // месячного срока тарифа, и сброс на каждом недельном продлении выдавал бы
 // месячный объём каждую неделю. Когда сбрасывать, решает вызывающий.
 func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, extraDays int, limits UserLimits, reset bool) (string, string, error) {
+	return c.grant(ctx, telegramID, limits, reset, func(existing *panelUser) string {
+		return nextExpireDays(existing, days, extraDays)
+	})
+}
+
+// grant — общая выдача срока: учётке бота сдвигает конец срока и применяет
+// лимиты, а если человека в панели нет — заводит его. Новый конец срока
+// считает expire от найденной учётки (nil — её нет). reset — сбросить ли
+// трафик продлённой учётке.
+func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits, reset bool, expire func(existing *panelUser) string) (string, string, error) {
 	existing, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
 		return "", "", err
 	}
-	expire := nextExpireDays(existing, days, extraDays)
+	until := expire(existing)
+	email := c.emailToWrite(ctx, telegramID)
 
 	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
 			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
-		patch := existing.ref().apply(map[string]any{"expireAt": expire})
+		patch := existing.ref().apply(map[string]any{"expireAt": until})
+		// Учётке, заведённой до того, как бот стал вписывать почту, — при
+		// продлении. Чужую почту в поле не трогаем.
+		if email != "" && existing.Email == "" {
+			patch["email"] = email
+		}
 		lim, err := c.liveLimits(ctx, limits, false)
 		if err != nil {
 			return "", "", err
@@ -1168,11 +1176,15 @@ func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, ext
 		}
 		return link, expireAt, err
 	}
+
 	lim, err := c.liveLimits(ctx, limits, true)
 	if err != nil {
 		return "", "", err
 	}
-	body := newUserBody(telegramID, expire)
+	body := newUserBody(telegramID, until)
+	if email != "" {
+		body["email"] = email
+	}
 	applyLimits(body, lim)
 	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
 }
@@ -1651,14 +1663,6 @@ func (c *Client) hwidCount(ctx context.Context, ref UserRef) int {
 	return len(env.Response.Devices)
 }
 
-func (c *Client) Subscription(ctx context.Context, telegramID int64) (string, string, bool) {
-	u, err := c.findByTelegram(ctx, telegramID)
-	if err != nil || u == nil || u.SubscriptionURL == "" {
-		return "", "", false
-	}
-	return u.SubscriptionURL, u.ExpireAt, true
-}
-
 // Статусы пользователя в панели. Раньше объявлен был только DISABLED, а
 // EXPIRED и LIMITED не упоминались нигде — поэтому истёкшая подписка и
 // исчерпанный трафик показывались как «активна».
@@ -1702,7 +1706,7 @@ type SubSnapshot struct {
 // SubscriptionSnapshot — как SubscriptionState, но с трафиком; запрос к
 // панели тот же.
 func (c *Client) SubscriptionSnapshot(ctx context.Context, telegramID int64) (SubSnapshot, bool, error) {
-	u, err := c.findByTelegram(ctx, telegramID)
+	u, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil {
 		return SubSnapshot{}, false, err
 	}
@@ -1794,7 +1798,7 @@ func devTime(raw string) time.Time {
 // Read-only: it never registers or deletes devices. ok=false when the user
 // is unknown to the panel or HWID data is unavailable.
 func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (DeviceInfo, bool) {
-	u, err := c.findByTelegram(ctx, telegramID)
+	u, err := c.findByTelegramOnce(ctx, telegramID)
 	if err != nil || u == nil || u.ref().Empty() {
 		return DeviceInfo{}, false
 	}
@@ -1855,6 +1859,52 @@ func (c *Client) DevicesByTelegramID(ctx context.Context, telegramID int64) (Dev
 // turn a temporary panel outage into "your subscription is gone", and a renewal
 // into creating a second account.
 var errPanelDialect = errors.New("не удалось определить версию API панели")
+
+type lookupMemoKey struct{}
+
+// lookupMemo — найденные в панели пользователи в пределах одного показа экрана.
+// nil в карте значит «в панели такого нет».
+type lookupMemo struct {
+	mu   sync.Mutex
+	seen map[int64]*panelUser
+}
+
+// WithLookupMemo делает так, что в пределах этого ctx читающие вызовы
+// (подписка, устройства, доп-подписка) ищут пользователя в панели один раз, а
+// не каждый заново. Только для показа экрана: вызовы, меняющие пользователя,
+// памятью не пользуются и всегда спрашивают панель.
+func WithLookupMemo(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(lookupMemoKey{}).(*lookupMemo); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, lookupMemoKey{}, &lookupMemo{seen: map[int64]*panelUser{}})
+}
+
+// findByTelegramOnce — findByTelegram с памятью показа (см. WithLookupMemo).
+// Без памяти в ctx это обычный поиск. Ошибка не запоминается.
+func (c *Client) findByTelegramOnce(ctx context.Context, telegramID int64) (*panelUser, error) {
+	m, _ := ctx.Value(lookupMemoKey{}).(*lookupMemo)
+	if m == nil {
+		return c.findByTelegram(ctx, telegramID)
+	}
+	m.mu.Lock()
+	u, ok := m.seen[telegramID]
+	m.mu.Unlock()
+	if !ok {
+		var err error
+		if u, err = c.findByTelegram(ctx, telegramID); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		m.seen[telegramID] = u
+		m.mu.Unlock()
+	}
+	if u == nil {
+		return nil, nil
+	}
+	cp := *u
+	return &cp, nil
+}
 
 // findByTelegram resolves a user by telegram id in whichever dialect the panel
 // speaks (see panelGen).

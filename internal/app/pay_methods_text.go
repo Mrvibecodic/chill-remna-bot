@@ -47,6 +47,17 @@ func methodBtnKey(nameKey string) string {
 	return ""
 }
 
+// methodNoteKey — описание способа для ключа его названия ("" — ключ не
+// название способа).
+func methodNoteKey(nameKey string) string {
+	for _, k := range payMethodKeys {
+		if k.name == nameKey {
+			return k.note
+		}
+	}
+	return ""
+}
+
 // methodName — название способа для кнопки чата.
 func methodName(lang, method string) string {
 	if k, ok := payMethodKeys[method]; ok {
@@ -144,11 +155,11 @@ func (a *App) methodEnabled(method string) bool {
 
 // showPayMethodTexts — экран «Способы оплаты: названия и описания». Включённые
 // способы сверху.
-// from == "t" — пришли из «Тексты бота», иначе — из настроек продаж.
+// from == "t" — пришли из «Тексты бота», иначе — из «Интерфейса».
 func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string) {
 	lang := a.lang(chatID)
 	bl := a.botLang()
-	back := "menu:pay"
+	back := "menu:iface"
 	if from == "t" {
 		back = "tx:home"
 	}
@@ -161,11 +172,11 @@ func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string)
 		if enabled {
 			label = "✅ " + label
 		}
-		noteBtn := i18n.T(lang, "tx.btn_note")
+		// Описание открывается из карточки названия; 📝 — оно уже задано.
 		if methodNote(bl, m) != "" {
-			noteBtn = i18n.T(lang, "tx.btn_note_set")
+			label += " · 📝"
 		}
-		row := []models.InlineKeyboardButton{btn(label, "tx:k:"+k.name), btn(noteBtn, "tx:k:"+k.note)}
+		row := []models.InlineKeyboardButton{btn(label, "tx:k:"+k.name)}
 		if enabled {
 			on = append(on, row)
 		} else {
@@ -173,20 +184,6 @@ func (a *App) showPayMethodTexts(ctx context.Context, chatID int64, from string)
 		}
 	}
 	rows := append(on, off...)
-	// Название и его «Описание» читаются парой: если хоть одна пара не влезает
-	// в ряд на телефоне, все пары встают столбиком, а не вперемешку.
-	for _, r := range rows {
-		if !rowFits(r) {
-			var stacked [][]models.InlineKeyboardButton
-			for _, r := range rows {
-				for _, b := range r {
-					stacked = append(stacked, []models.InlineKeyboardButton{b})
-				}
-			}
-			rows = stacked
-			break
-		}
-	}
 	rows = append(rows, navBack(lang, back))
 	text := i18n.T(lang, "tx.methods_title")
 	// Кнопка со своим текстом без {способ_оплаты} название не подхватит.

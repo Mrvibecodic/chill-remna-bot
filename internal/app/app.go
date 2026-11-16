@@ -170,6 +170,11 @@ type App struct {
 
 	rwSeen    map[string]time.Time
 	rwSweptAt time.Time
+	// rwNoSecretTold — администратору уже сказано, что события панели
+	// отклоняются из-за незаданного секрета; rwNoSecretTried — когда была
+	// последняя попытка это сказать.
+	rwNoSecretTold  bool
+	rwNoSecretTried time.Time
 	// remindFails — сколько раз подряд не удалось доставить напоминание по
 	// ключу «человек:окно». Без потолка заблокировавший бота крутился бы в
 	// очереди до самого истечения подписки.
@@ -198,6 +203,11 @@ type App struct {
 	editTarget      map[int64]int
 	editProt        map[int64]bool
 	screenSection   map[int64]string
+	// screenProt — текущий экран ушёл с запретом пересылки. По нему ответ
+	// админа на вопрос правит экран на месте (см. adminInputEditsScreen).
+	screenProt map[int64]bool
+	// screenClient — текущий экран админа — экран покупателя (витрина).
+	screenClient map[int64]bool
 	// notices — уведомления с одной кнопкой «Главная» (notify): они не экран,
 	// и без учёта оставались висеть после ухода с них. noticeHit — уведомление,
 	// на кнопку которого нажали: уходит вместе со старым экраном.
@@ -286,12 +296,14 @@ type App struct {
 	// куке конкретной подписки, и один человек с отозванной ссылкой не должен
 	// на минуту выключать «Подключить» всем остальным.
 	connectFail map[string]time.Time
-	// panelCfgs — разобранные конфиги страницы подписки из панели (3.0.0+).
+	// panelCfgs — разобранные конфиги страницы подписки из панели.
 	panelCfgs *panelCfgCache
 	// subpageOffUntil молчит про конфиг приложений в панели до этого момента:
 	// на панелях без такого API спрашивать его на каждый заход в «Подключить»
-	// незачем.
+	// незачем. subpageOffOwner — чей это отказ: после смены адреса или токена
+	// клиент панели другой, и пауза прежнего на него не действует.
 	subpageOffUntil time.Time
+	subpageOffOwner *remnawave.Client
 
 	flagMu       sync.RWMutex
 	flags        map[string][]byte
@@ -533,7 +545,46 @@ func (a *App) foldLegacyP2PSquad(ctx context.Context) {
 func (a *App) newPanel(pc model.PanelConfig) *remnawave.Client {
 	c := remnawave.New(a.panelWithEnv(pc))
 	c.SetEmailResolver(a.panelEmailFor)
+	c.SetAccountEmail(a.accountEmailFor)
 	return c
+}
+
+// accountEmailFor — почта аккаунта кабинета для поля email его учётки в
+// панели, в том числе после привязки Telegram.
+//
+// Неподтверждённая пишется, только пока письма выключены: подтвердить её
+// нечем, а ждать подтверждения значило бы не писать почту никогда. Чужую
+// подписку по такой записи не забрать — учётку по почте ищут только по
+// подтверждённой (panelEmailFor).
+//
+// Зовётся из создания и продления учётки и из fillPanelEmail — ни один из этих
+// путей не держит a.mu, который берёт MailReady.
+func (a *App) accountEmailFor(ctx context.Context, tgID int64) string {
+	st := a.storeRef()
+	if tgID == 0 || st == nil {
+		return ""
+	}
+	wu, err := st.GetWebUserByTgID(ctx, tgID)
+	if err != nil || wu == nil || (wu.VerifiedAt == "" && a.MailReady()) {
+		return ""
+	}
+	return model.NormalizeEmail(wu.Email)
+}
+
+// fillPanelEmail дописывает только что подтверждённую почту в учётку панели и
+// доп-подписку — в фоне, чтобы подтверждение не ждало панель. Ошибка не
+// мешает: почта впишется при следующем продлении.
+func (a *App) fillPanelEmail(tgID int64) {
+	panel, _, suffix, _, _ := a.addSubParams()
+	if panel == nil {
+		return
+	}
+	ctx := a.bgContext()
+	a.spawn(func() {
+		if err := panel.FillEmail(ctx, tgID, suffix); err != nil {
+			a.log.Warn("почта в учётку панели", "tg_id", tgID, "err", err)
+		}
+	})
 }
 
 // panelEmailFor — почта, по которой аккаунт кабинета ищет свою учётку в панели.
@@ -650,9 +701,7 @@ func (a *App) switchStore(ctx context.Context, kind, dsn string) error {
 		_ = newSt.Close()
 		return err
 	}
-	a.mu.Lock()
-	old := a.store
-	a.mu.Unlock()
+	old := a.storeRef()
 	if old != nil {
 		if err := storage.Transfer(ctx, old, newSt); err != nil {
 			_ = newSt.Close()
@@ -680,10 +729,15 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		up = nil
 	}
+	// Под замком: веб-сервер уже принимает запросы, и AlertAdmin с вебхуком
+	// панели читают msg из своих горутин.
+	a.mu.Lock()
 	a.msg = botMessenger{b: b, log: a.log, up: up}
+	a.mu.Unlock()
 	a.sendHealNotice(ctx)
 	a.sendTextsNotice(ctx)
 	a.prunePlanAccess(ctx)
+	a.pruneWebUsers(ctx)
 	a.notifyUpdated(ctx)
 	a.noticeRestored(ctx)
 	a.resumeBroadcast(ctx)
@@ -865,8 +919,9 @@ func (a *App) isRestoreApply(u *models.Update) bool {
 
 func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
-	// A text message/command is not an inline-button action — drop any stale
-	// edit target from a previous callback so we never edit the wrong message.
+	// Текст или команда — не нажатие: прежнюю цель правки снимаем, чтобы не
+	// править чужое сообщение. Ответ админа на вопрос ставит её заново (см.
+	// adminInputEditsScreen).
 	a.setEditTarget(chatID, 0)
 	userID := int64(0)
 	firstName, username := "", ""
@@ -893,6 +948,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	}
 	if a.denyAccess(ctx, chatID, isAdmin) {
 		return
+	}
+	// Команда админа ведёт в админку, даже если сейчас открыта витрина.
+	if isAdmin && strings.HasPrefix(text, "/") {
+		ctx = withAdminFlow(ctx)
 	}
 
 	// Новый текст бота может начинаться с «/» (например, подсказка про
@@ -1048,6 +1107,10 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 
 	a.msg.Delete(ctx, chatID, m.ID)
 	ui := a.getUI(chatID)
+	if adminClosedInput(ui) {
+		ctx = withAdminClosed(ctx)
+	}
+	a.adminInputEditsScreen(chatID)
 	if ui.welcomeAwait == "txt" {
 		a.setWelcomeText(ctx, chatID, m)
 		return
@@ -1199,12 +1262,16 @@ func (a *App) takeUpdNotice(chatID int64) int {
 	return id
 }
 
-func (a *App) clearUpdNotice(chatID int64, msgID int) {
+// clearUpdNotice снимает уведомление, если по нему ещё не нажали «Обновить»:
+// нажатое уже стало сообщением о ходе обновления и удалять его нельзя.
+func (a *App) clearUpdNotice(chatID int64, msgID int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.updNoticeMsg[chatID] == msgID {
-		delete(a.updNoticeMsg, chatID)
+	if a.updNoticeMsg[chatID] != msgID {
+		return false
 	}
+	delete(a.updNoticeMsg, chatID)
+	return true
 }
 
 func (a *App) handleUpdate(ctx context.Context, chatID int64) {
@@ -1220,15 +1287,10 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 		}
 	}
 	if a.ctl == nil || !a.ctl.Available() {
-		if src != 0 && a.msg.EditText(ctx, chatID, src, a.applyPremium(i18n.T(lang, "update.not_available")), [][]models.InlineKeyboardButton{homeRow(lang)}) {
-			return
-		}
-		a.sendHome(ctx, chatID, i18n.T(lang, "update.not_available"))
+		a.showUpdateMsg(ctx, chatID, src, i18n.T(lang, "update.not_available"), [][]models.InlineKeyboardButton{homeRow(lang)})
 		return
 	}
-	startText := a.applyPremium(i18n.T(lang, "update.starting"))
-	startRows := [][]models.InlineKeyboardButton{backHomeRow(lang)}
-	startMsgID := a.postUpdateStart(ctx, chatID, src, startText, startRows)
+	startMsgID := a.showUpdateMsg(ctx, chatID, src, i18n.T(lang, "update.starting"), [][]models.InlineKeyboardButton{backHomeRow(lang)})
 	marker := filepath.Join(a.cfg.DataDir, "update.pending")
 	// Третьим полем — версия, с которой уходим. После рестарта по нему видно,
 	// обновились мы на самом деле или контейнер просто перезапустился на том
@@ -1242,22 +1304,32 @@ func (a *App) handleUpdate(ctx context.Context, chatID int64) {
 	go a.runSelfUpdate(chatID, startMsgID, marker)
 }
 
-// postUpdateStart превращает сообщение, с которого нажали «Обновить», в
-// «запускается». Экран с баннером текстом не редактируется — тогда уходит новое
-// сообщение и становится текущим экраном, а старое удаляется: иначе экран
-// оставался в списке текущих и dropScreen его не трогал.
-func (a *App) postUpdateStart(ctx context.Context, chatID int64, src int, text string, rows [][]models.InlineKeyboardButton) int {
-	if src != 0 && a.msg.EditText(ctx, chatID, src, text, rows) {
-		return src
+// showUpdateMsg выводит шаг обновления текущим экраном: правит msgID, а если
+// его не отредактировать (баннер, уже удалено), шлёт новое. Прежний экран и
+// само msgID из чата уходят — нажать «Обновить» могли и на уведомлении под
+// главным меню. Цель правки от последнего нажатия не трогается: часть шагов
+// приходит из фоновой горутины, пока админ нажимает что-то ещё.
+func (a *App) showUpdateMsg(ctx context.Context, chatID int64, msgID int, text string, rows [][]models.InlineKeyboardButton) int {
+	t := a.applyPremium(text)
+	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, t, rows) {
+		a.adoptScreen(ctx, chatID, msgID)
+		return msgID
 	}
-	id := 0
-	a.emit(ctx, chatID, func() int {
-		id = a.msg.SendKB(ctx, chatID, text, rows)
-		return id
-	})
-	if id != 0 {
-		a.dropScreen(chatID, []int{src})
+	// Экран, с которого запустили, бывает и с картинкой раздела — тогда
+	// правится подпись, а раздел экрана остаётся: следующий экран раздела
+	// тоже правится на месте.
+	sec := a.sectionOf(chatID, msgID)
+	if msgID != 0 && a.msg.EditCaption(ctx, chatID, msgID, t, rows) {
+		a.adoptScreen(ctx, chatID, msgID)
+		a.setScreenSection(chatID, sec)
+		return msgID
 	}
+	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableText(t)))
+	id := a.msg.SendKB(pctx, chatID, t, rows)
+	if id == 0 {
+		return 0
+	}
+	a.adoptScreen(ctx, chatID, id, msgID)
 	return id
 }
 
@@ -1300,31 +1372,29 @@ func (a *App) runSelfUpdate(chatID int64, startMsgID int, marker string) {
 		fail(err)
 		return
 	}
-	time.AfterFunc(90*time.Second, func() {
-		bg := context.Background()
-		if _, err := os.Stat(marker); err != nil {
-			return
-		}
-		_ = os.Remove(marker)
-		txt := a.applyPremium(i18n.T(a.botLang(), "update.no_restart"))
-		rows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
-		if startMsgID != 0 && a.msg != nil && a.msg.EditText(bg, chatID, startMsgID, txt, rows) {
-			return
-		}
-		a.sendHome(bg, chatID, i18n.T(a.botLang(), "update.no_restart"))
-		a.dropScreen(chatID, []int{startMsgID})
-	})
+	time.AfterFunc(90*time.Second, func() { a.reportNoRestart(chatID, startMsgID, marker) })
+}
+
+// reportNoRestart сообщает, что контейнер так и не перезапустился. Если бот
+// уже останавливается, маркер остаётся: это и есть перезапуск, и новый
+// процесс по маркеру скажет «обновлено».
+func (a *App) reportNoRestart(chatID int64, startMsgID int, marker string) {
+	if a.bgContext().Err() != nil {
+		return
+	}
+	if _, err := os.Stat(marker); err != nil {
+		return
+	}
+	_ = os.Remove(marker)
+	ctx, cancel := context.WithTimeout(a.bgContext(), time.Minute)
+	defer cancel()
+	lang := a.botLang()
+	a.showUpdateMsg(ctx, chatID, startMsgID, i18n.T(lang, "update.no_restart"), [][]models.InlineKeyboardButton{homeRow(lang)})
 }
 
 func (a *App) updateFailMsg(ctx context.Context, chatID int64, msgID int, err error) {
 	lang := a.lang(chatID)
-	text := a.applyPremium(i18n.T(lang, "update.fail", err.Error()))
-	rows := [][]models.InlineKeyboardButton{homeRow(lang)}
-	if msgID != 0 && a.msg.EditText(ctx, chatID, msgID, text, rows) {
-		return
-	}
-	a.sendHome(ctx, chatID, i18n.T(lang, "update.fail", err.Error()))
-	a.dropScreen(chatID, []int{msgID})
+	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, "update.fail", err.Error()), [][]models.InlineKeyboardButton{homeRow(lang)})
 }
 
 func (a *App) notifyUpdated(ctx context.Context) {
@@ -1356,32 +1426,42 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	if sameVersion {
 		doneKey = "update.same_version"
 	}
-	doneText := a.applyPremium(i18n.T(a.botLang(), doneKey))
-	doneRows := [][]models.InlineKeyboardButton{homeRow(a.botLang())}
-	doneID := msgID
-	if msgID == 0 || a.msg == nil || !a.msg.EditText(ctx, chatID, msgID, doneText, doneRows) {
-		if a.msg != nil {
-			doneID = a.msg.SendKB(ctx, chatID, doneText, doneRows)
-			if doneID != 0 {
-				a.dropScreen(chatID, []int{msgID})
-			}
+	if a.msg == nil {
+		return
+	}
+	lang := a.botLang()
+	if a.cfg != nil && chatID == a.cfg.AdminID {
+		// Итог — сразу на главной админки строкой сверху: отдельный экран
+		// «обновлено» требовал лишнего нажатия «Домой». Главная закрыта от
+		// пересылки, поэтому приходит новым сообщением, а стартовое сообщение
+		// и экран, открытый во время скачивания, уходят вместе с прежним.
+		a.queueOldScreens(ctx, chatID, msgID)
+		a.showMenuNote(withAdminFlow(ctx), chatID, true, "", i18n.T(lang, doneKey))
+		return
+	}
+	// «Обновлено» остаётся экраном до следующего перехода: прежний экран уже
+	// убран, и удаление по таймеру оставляло бы чат пустым.
+	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, doneKey), [][]models.InlineKeyboardButton{homeRow(lang)})
+}
+
+// queueOldScreens — после перезапуска прежний экран известен только из базы:
+// он и msgID уйдут, когда придёт следующий экран.
+func (a *App) queueOldScreens(ctx context.Context, chatID int64, msgID int) {
+	var ids []int
+	if a.store != nil {
+		if pid, _ := a.store.GetScreenMsg(ctx, chatID); pid != 0 {
+			ids = append(ids, pid)
 		}
 	}
-	if doneID != 0 && a.msg != nil {
-		// Register as the current screen so the next navigation (e.g. "Главная")
-		// deletes it instead of leaving it stuck.
-		a.scrMu.Lock()
-		if a.screen == nil {
-			a.screen = map[int64][]int{}
-		}
-		a.screen[chatID] = []int{doneID}
-		a.scrMu.Unlock()
-		if a.store != nil {
-			_ = a.store.SetScreenMsg(ctx, chatID, doneID)
-		}
-		id := doneID
-		time.AfterFunc(60*time.Second, func() { a.msg.Delete(context.Background(), chatID, id) })
+	if msgID != 0 && !slices.Contains(ids, msgID) {
+		ids = append(ids, msgID)
 	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
+	a.screen[chatID] = append(a.screen[chatID], ids...)
 }
 
 func (a *App) setEditTarget(chatID int64, msgID int) {
@@ -1427,6 +1507,16 @@ func (a *App) setScreenSection(chatID int64, section string) {
 	a.screenSection[chatID] = section
 }
 
+// sectionOf — раздел экрана msgID, если он сейчас текущий.
+func (a *App) sectionOf(chatID int64, msgID int) string {
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if ids := a.screen[chatID]; len(ids) != 1 || ids[0] != msgID {
+		return ""
+	}
+	return a.screenSection[chatID]
+}
+
 func (a *App) getScreenSection(chatID int64) string {
 	a.scrMu.Lock()
 	defer a.scrMu.Unlock()
@@ -1444,19 +1534,36 @@ func (a *App) tryEditScreen(ctx context.Context, chatID int64, text string, rows
 	if !a.msg.EditText(ctx, chatID, target, text, rows) {
 		return false
 	}
+	a.adoptScreen(ctx, chatID, target)
+	return true
+}
+
+// adoptScreen делает уже показанное сообщение текущим экраном и убирает
+// прежний вместе с also. После перезапуска прежний экран известен только из
+// базы. Раздел экрана сбрасывается: вызывающий с баннером ставит свой после.
+func (a *App) adoptScreen(ctx context.Context, chatID int64, id int, also ...int) {
+	a.setScreenSection(chatID, "")
 	a.scrMu.Lock()
+	if a.screen == nil {
+		a.screen = map[int64][]int{}
+	}
 	old := a.screen[chatID]
-	a.screen[chatID] = []int{target}
+	a.screen[chatID] = []int{id}
 	a.scrMu.Unlock()
-	for _, id := range old {
-		if id != target {
-			a.msg.Delete(ctx, chatID, id)
+	if a.store != nil {
+		if len(old) == 0 {
+			if pid, _ := a.store.GetScreenMsg(ctx, chatID); pid != 0 {
+				old = []int{pid}
+			}
+		}
+		_ = a.store.SetScreenMsg(ctx, chatID, id)
+	}
+	for _, x := range also {
+		if x != 0 && !slices.Contains(old, x) {
+			old = append(old, x)
 		}
 	}
-	if a.store != nil {
-		_ = a.store.SetScreenMsg(ctx, chatID, target)
-	}
-	return true
+	a.dropScreen(chatID, old)
 }
 
 func (a *App) emit(ctx context.Context, chatID int64, send func() int) {
@@ -1545,15 +1652,97 @@ func (a *App) sendHome(ctx context.Context, chatID int64, text string) {
 	a.sendKB(ctx, chatID, text, [][]models.InlineKeyboardButton{homeRow(a.lang(chatID))})
 }
 
+// sendKB — экран текстом. В админке на экране с картинкой раздела (вопрос
+// «введите значение», короткий итог) он уходит подписью под той же
+// картинкой: так экран правится на месте, а не удаляется и не приходит
+// заново — картинку в текст Telegram править не даёт. Экраны покупателя,
+// которые админ видит через витрину, остаются как у покупателя.
 func (a *App) sendKB(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
+	if a.adminScreenNow(ctx, chatID) {
+		if sec := a.getScreenSection(chatID); sec != "" {
+			a.sendKBSection(ctx, chatID, sec, text, rows)
+			return
+		}
+	}
+	a.sendKBText(ctx, chatID, text, rows)
+}
+
+// sendKBText — экран обычным текстовым сообщением.
+func (a *App) sendKBText(ctx context.Context, chatID int64, text string, rows [][]models.InlineKeyboardButton) {
 	t := a.applyPremium(text)
 	prot := a.screenProtect(ctx, chatID, copyableText(t))
 	a.setScreenSection(chatID, "")
 	if a.editMatches(chatID, prot) && a.tryEditScreen(ctx, chatID, t, rows) {
+		a.noteScreen(ctx, chatID, prot)
 		return
 	}
 	pctx := withProtect(ctx, prot)
-	a.emit(ctx, chatID, func() int { return a.msg.SendKB(pctx, chatID, t, rows) })
+	a.emit(ctx, chatID, func() int {
+		id := a.msg.SendKB(pctx, chatID, t, rows)
+		if id != 0 {
+			a.noteScreen(ctx, chatID, prot)
+		}
+		return id
+	})
+}
+
+// noteScreen запоминает, закрыт ли текущий экран от пересылки и экран ли он
+// покупателя.
+func (a *App) noteScreen(ctx context.Context, chatID int64, prot bool) {
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	if a.screenProt == nil {
+		a.screenProt = map[int64]bool{}
+	}
+	a.screenProt[chatID] = prot
+	if a.screenClient == nil {
+		a.screenClient = map[int64]bool{}
+	}
+	switch flowOf(ctx) {
+	case "client":
+		a.screenClient[chatID] = true
+	case "admin":
+		a.screenClient[chatID] = false
+	}
+}
+
+// adminScreenNow — в чате админа показывается экран админки, а не экран
+// покупателя из витрины.
+func (a *App) adminScreenNow(ctx context.Context, chatID int64) bool {
+	if a.cfg == nil || chatID != a.cfg.AdminID {
+		return false
+	}
+	switch flowOf(ctx) {
+	case "client":
+		return false
+	case "admin":
+		return true
+	}
+	a.scrMu.Lock()
+	defer a.scrMu.Unlock()
+	return !a.screenClient[chatID]
+}
+
+// adminInputEditsScreen — ответ админа на вопрос: следующий экран правит
+// текущий (вопрос) на месте, а не удаляет его и не приходит заново. Только
+// когда экран — последнее сообщение бота: под уведомлением итог ушёл бы
+// вверх, а не встал внизу чата.
+func (a *App) adminInputEditsScreen(chatID int64) {
+	if !a.adminScreenNow(context.Background(), chatID) {
+		return
+	}
+	a.scrMu.Lock()
+	ids := a.screen[chatID]
+	prot := a.screenProt[chatID]
+	below := len(ids) == 1 && slices.ContainsFunc(a.notices[chatID], func(n int) bool { return n > ids[0] })
+	a.scrMu.Unlock()
+	if len(ids) != 1 || below {
+		return
+	}
+	a.setEditTarget(chatID, ids[0])
+	if prot {
+		a.markEditProt(chatID)
+	}
 }
 
 // sendKBParts отправляет экран, не влезающий в одно сообщение Telegram.
@@ -1600,11 +1789,13 @@ func (a *App) sendKBParts(ctx context.Context, chatID int64, parts []string, row
 // приходит. На отказе пробуем встроенный баннер, а негодную настройку снимаем
 // — иначе бот остаётся «мёртвым» до вмешательства администратора.
 func (a *App) sendBanner(ctx context.Context, chatID int64, photo models.InputFile, caption string, ents []models.MessageEntity, rm models.ReplyMarkup) {
-	pctx := withProtect(ctx, a.screenProtect(ctx, chatID, copyableEnts(caption, ents)))
+	prot := a.screenProtect(ctx, chatID, copyableEnts(caption, ents))
+	pctx := withProtect(ctx, prot)
 	a.emit(ctx, chatID, func() int {
 		id, err := a.msg.SendBanner(pctx, chatID, photo, caption, ents, rm)
 		if id != 0 {
 			a.noteBannerOK(photo)
+			a.noteScreen(ctx, chatID, prot)
 			return id
 		}
 		// Настройку снимаем ТОЛЬКО когда Telegram отверг саму картинку:
@@ -1725,7 +1916,7 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	// Предел подписи Telegram (1024) считается в единицах UTF-16 видимого
 	// текста: эмодзи — по две. Длинная подпись уходит обычным сообщением.
 	if !assets.Has(section) || len([]rune(caption)) > 1000 || len(utf16.Encode([]rune(stripHTMLTags(caption)))) > 1000 {
-		a.sendKB(ctx, chatID, caption, rows)
+		a.sendKBText(ctx, chatID, caption, rows)
 		return
 	}
 	t := a.applyPremium(caption)
@@ -1736,19 +1927,9 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	// failure falls through to the normal resend below.
 	if target := a.takeEditTarget(chatID); target != 0 && match && a.getScreenSection(chatID) == section {
 		if a.msg.EditCaption(ctx, chatID, target, t, rows) {
-			a.scrMu.Lock()
-			old := a.screen[chatID]
-			a.screen[chatID] = []int{target}
-			a.scrMu.Unlock()
-			for _, id := range old {
-				if id != target {
-					a.msg.Delete(ctx, chatID, id)
-				}
-			}
-			if a.store != nil {
-				_ = a.store.SetScreenMsg(ctx, chatID, target)
-			}
+			a.adoptScreen(ctx, chatID, target)
 			a.setScreenSection(chatID, section)
+			a.noteScreen(ctx, chatID, prot)
 			return
 		}
 	}
@@ -1764,14 +1945,33 @@ func (a *App) sendKBSection(ctx context.Context, chatID int64, section, caption 
 	a.emit(ctx, chatID, func() int {
 		id, nf := a.msg.SendPhotoCacheable(pctx, chatID, cached, embed, t, rows)
 		newFileID = nf
+		if id != 0 {
+			a.noteScreen(ctx, chatID, prot)
+		}
 		return id
 	})
-	if a.store != nil && newFileID != "" && newFileID != cached {
-		if err := a.store.SaveMediaFileID(ctx, section, newFileID); err != nil {
-			a.log.Warn("media_cache save", "section", section, "err", err)
-		}
-	}
+	a.keepSectionPhoto(ctx, section, cached, newFileID)
 	a.setScreenSection(chatID, section)
+}
+
+// keepSectionPhoto запоминает file_id картинки раздела, только что ушедшей из
+// сборки. Если в ячейке до этого лежала другая, Telegram её отверг — а это
+// могла быть картинка, загруженная администратором: ему об этом говорим.
+func (a *App) keepSectionPhoto(ctx context.Context, section, cached, newFileID string) {
+	if a.store == nil || newFileID == "" || newFileID == cached {
+		return
+	}
+	if err := a.store.SaveMediaFileID(ctx, section, newFileID); err != nil {
+		a.log.Warn("media_cache save", "section", section, "err", err)
+	}
+	if cached == "" || !assets.IsUserSection(section) || a.cfg == nil || a.cfg.AdminID == 0 {
+		return
+	}
+	a.log.Warn("картинка раздела не принята Telegram, показана встроенная", "section", section)
+	lang := a.botLang()
+	a.msg.SendKB(ctx, a.cfg.AdminID, i18n.T(lang, "banners.dropped", assets.LabelByKey(section, lang)), [][]models.InlineKeyboardButton{
+		{btn(assets.LabelByKey(section, lang), "sec:open:"+section)},
+	})
 }
 
 // hasChat — есть ли у аккаунта чат в Telegram. У аккаунта кабинета,
@@ -2373,19 +2573,30 @@ func (m botMessenger) SendPhotoCacheable(ctx context.Context, chatID int64, cach
 		source string
 		err    error
 	)
+	var idErr error
 	for _, src := range tries {
 		msg, source, err = build(src)
 		if err == nil {
 			break
+		}
+		if src == "id" {
+			idErr = err
 		}
 	}
 	if err != nil {
 		m.log.Error("send photo cacheable", "err", err)
 		return 0, ""
 	}
+	if idErr != nil {
+		m.log.Warn("сохранённая картинка не ушла, отправлена встроенная", "err", idErr)
+	}
 
+	// Сохранённую картинку заменяем, только когда Telegram отверг именно её:
+	// на file_id пришёл 400, а тот же экран с картинкой из сборки ушёл. Сбой
+	// сети или лимит запросов — не повод: в той же ячейке лежит картинка,
+	// загруженная администратором, и она пропала бы без следа.
 	var newFileID string
-	if source != "id" && len(msg.Photo) > 0 {
+	if source != "id" && len(msg.Photo) > 0 && (idErr == nil || errors.Is(idErr, bot.ErrorBadRequest)) {
 		newFileID = msg.Photo[len(msg.Photo)-1].FileID
 	}
 	return msg.ID, newFileID

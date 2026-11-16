@@ -45,12 +45,16 @@ func stripHTMLTags(s string) string {
 }
 
 func escapeName(s string) string {
-	s = strings.TrimSpace(s)
+	return html.EscapeString(clipRunes(strings.TrimSpace(s), nameMaxLen, "…"))
+}
+
+// clipRunes обрезает строку до n знаков; обрезанной дописывает tail.
+func clipRunes(s string, n int, tail string) string {
 	r := []rune(s)
-	if len(r) > nameMaxLen {
-		s = string(r[:nameMaxLen]) + "…"
+	if len(r) <= n {
+		return s
 	}
-	return html.EscapeString(s)
+	return string(r[:n]) + tail
 }
 
 func suspiciousName(parts ...string) string {

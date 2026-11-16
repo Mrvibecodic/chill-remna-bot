@@ -96,7 +96,7 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 		squads += " + 1"
 	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.pr_title",
-		planTitleHTML(lang, p), html_(cur), p.Strategy, devlim, squads), rows)
+		planTitleHTML(lang, p), html.EscapeString(cur), p.Strategy, devlim, squads), rows)
 }
 
 // showPlanMonth — экран одной длительности: цены по способам, трафик,
@@ -119,7 +119,7 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 			return "—"
 		}
 		// Валюту тоже вводит человек — экранируется вместе со значением.
-		return html_(v + curSuffix(curSymbol(p.Currency)))
+		return html.EscapeString(v + curSuffix(curSymbol(p.Currency)))
 	}
 	base, p2p, yk := "", "", ""
 	stars := 0
@@ -318,9 +318,7 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 	if mo > 0 {
 		back = "pln:prm:" + strconv.Itoa(mo) + ":" + p.Code
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "squads.no_panel"),
 			[][]models.InlineKeyboardButton{navBack(lang, back)})
@@ -352,40 +350,15 @@ func (a *App) showPlanSquadEditor(ctx context.Context, chatID int64, code string
 	} else {
 		inherited = true
 	}
-	isSel := func(uuid string) bool {
-		for _, u := range selInt {
-			if u == uuid {
-				return true
-			}
-		}
-		return false
-	}
 
 	h := planEditHash(p.Code)
 	moStr := strconv.Itoa(mo)
-	rows := make([][]models.InlineKeyboardButton, 0, len(intSquads)+len(extSquads)+3)
-	for _, sq := range intSquads {
-		mark := "⬜"
-		if isSel(sq.UUID) {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 🏠 "+sq.Name, "plq:i:"+moStr+":"+h+":"+sq.UUID),
-		})
-	}
-	for _, sq := range extSquads {
-		mark := "⬜"
-		if selExt == sq.UUID {
-			mark = "✅"
-		}
-		rows = append(rows, []models.InlineKeyboardButton{
-			btn(mark+" 📡 "+sq.Name, "plq:e:"+moStr+":"+h+":"+sq.UUID),
-		})
-	}
-	gone := goneSquadRows(lang, live, selInt, selExt,
-		func(u string) string { return "plq:i:" + moStr + ":" + h + ":" + u },
-		func(u string) string { return "plq:e:" + moStr + ":" + h + ":" + u })
-	rows = append(rows, gone...)
+	rows, gone := squadPickRows(lang, live, intSquads, extSquads, squadPick{
+		selInt: selInt,
+		selExt: selExt,
+		intCB:  func(u string) string { return "plq:i:" + moStr + ":" + h + ":" + u },
+		extCB:  func(u string) string { return "plq:e:" + moStr + ":" + h + ":" + u },
+	})
 	if mo > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{
 			btn(i18n.T(lang, "pricing.sq_clear"), "pln:sqc:"+moStr+":"+p.Code),
@@ -450,8 +423,6 @@ func (a *App) onPlanSquadToggle(ctx context.Context, chatID int64, val string) {
 
 // html_ — короткий алиас экранирования для экранов тарифов: значения вводит
 // человек, а экраны уходят с разметкой.
-func html_(s string) string { return html.EscapeString(s) }
-
 // showPlanStrategy — выбор стратегии сброса трафика для тарифа.
 func (a *App) showPlanStrategy(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
@@ -461,9 +432,9 @@ func (a *App) showPlanStrategy(ctx context.Context, chatID int64, code string) {
 	}
 	a.getUI(chatID).planEdit = p.Code
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "pricing.ask_strategy"), [][]models.InlineKeyboardButton{
-		{btn("📅 MONTH", "pln:sts:MONTH:"+p.Code), btn("🔁 MONTH_ROLLING", "pln:sts:MONTH_ROLLING:"+p.Code)},
-		{btn("🗓 WEEK", "pln:sts:WEEK:"+p.Code), btn("📆 DAY", "pln:sts:DAY:"+p.Code)},
-		{btn("♾ NO_RESET", "pln:sts:NO_RESET:"+p.Code)},
+		{btn("📅 MONTH", "pln:sts:MONTH:"+p.Code), btn("🗓 WEEK", "pln:sts:WEEK:"+p.Code)},
+		{btn("🔁 MONTH_ROLLING", "pln:sts:MONTH_ROLLING:"+p.Code)},
+		{btn("📆 DAY", "pln:sts:DAY:"+p.Code), btn("♾ NO_RESET", "pln:sts:NO_RESET:"+p.Code)},
 		navBack(lang, "pln:pr:"+p.Code),
 	})
 }

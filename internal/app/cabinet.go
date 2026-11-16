@@ -103,19 +103,45 @@ var errCabinetAccess = errors.New("доступ к боту ограничен �
 // (and notifies the admin once) when the account still needs approval, or a
 // permanent "denied" error when the admin already rejected the request.
 func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
-	needApproval := a.cabinetNeedsApproval(isEmail)
-	if isEmail {
-		// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
-		// закрытом боте (приглашения/вайтлист) для него обязательна модерация
-		// кабинета: ранее одобренные (WebApproved) проходят как раньше,
-		// остальные попадают в обычную очередь на одобрение к админу.
-		if a.accessMode() != model.AccessPublic {
-			needApproval = true
-		}
-	} else if a.MiniAccessDenied(ctx, tgID) {
+	if !isEmail && a.MiniAccessDenied(ctx, tgID) {
 		// Telegram-аккаунт: закрытый бот не пускает через веб тех, кого он не
 		// пускает в чат.
 		return errCabinetAccess
+	}
+	return a.CabinetApproval(ctx, tgID, isEmail)
+}
+
+// CabinetApproval — только модерация кабинета, без проверки режима доступа
+// бота. Для вызывающих, которые MiniAccessDenied уже спросили сами (страж
+// запросов кабинета): иначе одна проверка шла бы дважды на каждый запрос.
+func (a *App) CabinetApproval(ctx context.Context, tgID int64, isEmail bool) error {
+	err := a.cabinetAdmission(ctx, tgID, isEmail)
+	if !errors.Is(err, errCabinetPending) {
+		return err
+	}
+	cabNotifyMu.Lock()
+	first := !cabNotified[tgID]
+	cabNotified[tgID] = true
+	cabNotifyMu.Unlock()
+	if first {
+		a.notifyAdminWebRequest(ctx, tgID, isEmail)
+	}
+	return err
+}
+
+// errCabinetPending — вход ждёт одобрения администратора.
+var errCabinetPending = errors.New("аккаунт ожидает одобрения администратором")
+
+// cabinetAdmission — решение модерации кабинета без побочных действий: nil —
+// пускает, errCabinetDenied — отказ, errCabinetPending — ждёт одобрения.
+func (a *App) cabinetAdmission(ctx context.Context, tgID int64, isEmail bool) error {
+	needApproval := a.cabinetNeedsApproval(isEmail)
+	// E-mail-аккаунт не описывается вайтлистом Telegram-ID, поэтому в
+	// закрытом боте (приглашения/вайтлист) для него обязательна модерация
+	// кабинета: ранее одобренные (WebApproved) проходят как раньше,
+	// остальные попадают в обычную очередь на одобрение к админу.
+	if isEmail && a.accessMode() != model.AccessPublic {
+		needApproval = true
 	}
 	if !needApproval {
 		return nil
@@ -132,17 +158,8 @@ func (a *App) CabinetGate(ctx context.Context, tgID int64, isEmail bool) error {
 			}
 		}
 	}
-	cabNotifyMu.Lock()
-	first := !cabNotified[tgID]
-	cabNotified[tgID] = true
-	cabNotifyMu.Unlock()
-	if first {
-		a.notifyAdminWebRequest(ctx, tgID, isEmail)
-	}
-	return errors.New("аккаунт ожидает одобрения администратором")
+	return errCabinetPending
 }
-
-func normEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
 
 var errCabinetOff = errors.New("веб-кабинет выключен")
 
@@ -163,7 +180,7 @@ func (a *App) CabinetEmailRegister(ctx context.Context, email, password, start s
 	if !a.CabinetEnabled() {
 		return 0, errCabinetOff
 	}
-	email = normEmail(email)
+	email = model.NormalizeEmail(email)
 	// Проверка строже прежней «есть собака и пять символов»: адрес, на который
 	// нельзя отправить письмо, регистрировать незачем — человек застрянет на
 	// «подтвердите почту» навсегда.
@@ -233,7 +250,7 @@ func (a *App) CabinetEmailLogin(ctx context.Context, email, password string) (in
 	if a.store == nil {
 		return 0, errCabinetOff
 	}
-	u, _ := a.store.GetWebUserByEmail(ctx, normEmail(email))
+	u, _ := a.store.GetWebUserByEmail(ctx, model.NormalizeEmail(email))
 	if u == nil {
 		// Spend the same work as a real comparison so timing does not reveal
 		// that the email is unknown.

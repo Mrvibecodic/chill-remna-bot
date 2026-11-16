@@ -73,14 +73,9 @@ func (a *App) ownPlanView(ctx context.Context, tgID int64, lang string) (code, n
 	if snap == nil || code == "" {
 		return "", "", false
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		return "", "", false
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, tgID) {
 		return code, "", true
@@ -174,14 +169,9 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		return web.MiniPlansDTO{Notice: stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))}
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		return web.MiniPlansDTO{Notice: stripHTMLTags(i18n.T(lang, "err.storage"))}
-	}
-	if p == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, tgID) {
 		a.planLinkFail(tgID)

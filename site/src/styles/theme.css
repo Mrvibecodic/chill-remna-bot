@@ -1,77 +1,590 @@
-/* Палитра сайта chill-remna-bot — та же, что была на старой странице:
-   тёмный сине-серый фон, синий акцент, зелёный «stable», сиреневый «dev». */
+/* Оформление сайта документации в тонах личного кабинета бота.
+
+   Два дизайна, как у кабинета, — переключатель рядом с выбором схемы:
+   • «Минимализм» (по умолчанию) — палитра нового дизайна кабинета: ровные
+     плоскости, синий акцент, без свечений;
+   • «Классика» — палитра классического кабинета: глубокий тёмный фон,
+     сине-фиолетовый акцент, мягкое свечение.
+   Цветовая схема (светлая / тёмная) по умолчанию берётся с устройства; человек
+   может выбрать её сам. Дизайн хранится в data-design у <html>, схема — в
+   data-theme.
+
+   Раскладка: слева меню со значками, название и поиск над ним, переключатели
+   под ним; текст с отступами; справа оглавление страницы. Всё вместе держится
+   по центру экрана. На телефоне — обычная шапка и выезжающее меню. */
 :root {
-  --brand-bg: #0a0d15;
-  --brand-bg2: #121726;
-  --brand-card: #151a2a;
-  --brand-line: #232c42;
-  --brand-fg: #e8edf7;
-  --brand-muted: #97a3bb;
-  --brand-accent: #5b8cff;
+  --brand-line: var(--sl-color-hairline);
   --brand-accent2: #27d3a2;
   --brand-dev: #b58bff;
-  --brand-warn: #ffb454;
+  --docs-radius: 14px;
 }
 
-/* Тёмная тема — палитра прежнего сайта. Светлую оставляем штатной Starlight,
-   иначе подсветка кода (Expressive Code) остаётся светлой на тёмном фоне. */
-[data-theme='dark'] {
-  --sl-color-accent-low: #16224a;
-  --sl-color-accent: #3f6fe0;
-  --sl-color-accent-high: #b9ccff;
+/* ── Минимализм: светлая ── */
+:root[data-theme='light'] {
+  --sl-color-white: #0f1115;
+  --sl-color-gray-1: #1d2129;
+  --sl-color-gray-2: #344054;
+  --sl-color-gray-3: #667085;
+  --sl-color-gray-4: #98a2b3;
+  --sl-color-gray-5: #d0d5dd;
+  --sl-color-gray-6: #eef0f3;
+  --sl-color-gray-7: #f7f8fa;
+  --sl-color-black: #ffffff;
+  --sl-color-accent-low: #dfe8ff;
+  --sl-color-accent: #2f6bff;
+  --sl-color-accent-high: #1a3fa6;
+  --sl-color-text-accent: #2f6bff;
+  --sl-color-bg: #f4f5f7;
+  --sl-color-bg-nav: rgba(244, 245, 247, 0.9);
+  --sl-color-bg-sidebar: #f4f5f7;
+  --sl-color-bg-inline-code: #e9ecf1;
+  --sl-color-hairline: #e4e7ec;
+  --sl-color-hairline-light: #eef0f3;
+  --sl-color-hairline-shade: #d0d5dd;
+  --brand-accent2: #067647;
+  --brand-dev: #6941c6;
+  --docs-card: #ffffff;
+}
+
+/* ── Минимализм: тёмная ── */
+:root[data-theme='dark'] {
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #e8edf7;
+  --sl-color-gray-1: #f1f3f6;
+  --sl-color-gray-2: #c9ced6;
+  --sl-color-gray-3: #9aa1ad;
+  --sl-color-gray-4: #6b7280;
+  --sl-color-gray-5: #2c3038;
+  --sl-color-gray-6: #17191e;
+  --sl-color-black: #0d0e11;
+  --sl-color-accent-low: #18244a;
+  --sl-color-accent: #3f6fe0;
+  --sl-color-accent-high: #c7d7ff;
+  --sl-color-text-accent: #7aa2ff;
+  --sl-color-bg: #0d0e11;
+  --sl-color-bg-nav: rgba(13, 14, 17, 0.9);
+  --sl-color-bg-sidebar: #0d0e11;
+  --sl-color-bg-inline-code: #1f2228;
+  --sl-color-hairline: #262930;
+  --sl-color-hairline-light: #1f2228;
+  --sl-color-hairline-shade: #0d0e11;
+  --docs-card: #17191e;
+}
+
+/* ── Классика: тёмная ── */
+:root[data-design='classic'][data-theme='dark'] {
+  --sl-color-gray-1: #eef2f8;
   --sl-color-gray-2: #c3cbdd;
-  --sl-color-gray-3: #97a3bb;
-  --sl-color-gray-4: #5b6780;
-  --sl-color-gray-5: #2a3452;
-  --sl-color-gray-6: #192035;
-  --sl-color-black: #0a0d15;
-  --sl-color-bg: #0a0d15;
-  --sl-color-bg-nav: rgba(10, 13, 21, 0.85);
-  --sl-color-bg-sidebar: #0c1019;
-  --sl-color-hairline: #232c42;
-  --sl-color-hairline-light: #2a3452;
-  --sl-color-text-accent: #8fb0ff;
+  --sl-color-gray-3: #8b94a7;
+  --sl-color-gray-4: #5f6877;
+  --sl-color-gray-5: #232c42;
+  --sl-color-gray-6: #141a2a;
+  --sl-color-black: #0b0f17;
+  --sl-color-accent-low: #1b1f4d;
+  --sl-color-accent: #5b6ef0;
+  --sl-color-accent-high: #cfd3ff;
+  --sl-color-text-accent: #9fb0ff;
+  --sl-color-bg: #0b0f17;
+  --sl-color-bg-nav: rgba(11, 15, 23, 0.85);
+  --sl-color-bg-sidebar: #0e1320;
+  --sl-color-bg-inline-code: #1a2136;
+  --sl-color-hairline: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.07);
+  --sl-color-hairline-shade: #0b0f17;
+  --docs-card: rgba(255, 255, 255, 0.045);
+  --docs-radius: 20px;
 }
 
-[data-theme='light'] {
-  --sl-color-accent-low: #d8e2ff;
-  --sl-color-accent: #2f5fd0;
-  --sl-color-accent-high: #16306e;
-  --sl-color-text-accent: #2f5fd0;
+/* ── Классика: светлая (те же сине-фиолетовые тона на светлом) ── */
+:root[data-design='classic'][data-theme='light'] {
+  --sl-color-white: #141a2e;
+  --sl-color-gray-1: #1f2740;
+  --sl-color-gray-2: #3a4463;
+  --sl-color-gray-3: #636d8a;
+  --sl-color-gray-4: #9099b3;
+  --sl-color-gray-5: #cfd4e6;
+  --sl-color-gray-6: #e9ebf7;
+  --sl-color-gray-7: #f4f5fc;
+  --sl-color-accent-low: #e3e1ff;
+  --sl-color-accent: #5b5ff0;
+  --sl-color-accent-high: #2f2a9c;
+  --sl-color-text-accent: #5148e0;
+  --sl-color-bg: #f2f3fb;
+  --sl-color-bg-nav: rgba(242, 243, 251, 0.88);
+  --sl-color-bg-sidebar: #eceef9;
+  --sl-color-bg-inline-code: #e4e6f5;
+  --sl-color-hairline: #dcdff0;
+  --sl-color-hairline-light: #e6e8f5;
+  --docs-radius: 20px;
 }
 
-/* Фоновое свечение, как на прежней главной. */
-[data-theme='dark'] body {
+/* Свечение фона и градиентный заголовок — только у «Классики». */
+:root[data-design='classic'][data-theme='dark'] body {
   background-image:
-    radial-gradient(1100px 520px at 78% -8%, rgba(91, 140, 255, 0.1), transparent),
-    radial-gradient(900px 480px at 8% 4%, rgba(39, 211, 162, 0.07), transparent);
+    radial-gradient(1100px 520px at 78% -8%, rgba(91, 140, 255, 0.12), transparent),
+    radial-gradient(900px 480px at 8% 4%, rgba(157, 123, 255, 0.1), transparent);
   background-attachment: fixed;
 }
-
-/* Заголовок страницы — тот же градиентный текст, что был в шапке сайта. */
-[data-theme='dark'] .content-panel h1#_top {
+:root[data-design='classic'][data-theme='light'] body {
+  background-image: radial-gradient(1000px 480px at 80% -10%, rgba(157, 123, 255, 0.14), transparent);
+  background-attachment: fixed;
+}
+:root[data-design='classic'][data-theme='dark'] .content-panel h1#_top {
   background: linear-gradient(180deg, #fff, #b9c6e6);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   letter-spacing: -0.02em;
 }
+:root[data-design='classic'] .sl-link-button.primary,
+:root[data-design='classic'] .hero .sl-link-button.primary {
+  background: linear-gradient(135deg, #5b8cff, #9d7bff);
+  border-color: transparent;
+  color: #fff;
+}
 
-/* Таблицы: компактнее и с полосами — их в доке много. */
-.sl-markdown-content table {
-  font-size: 0.94em;
+/* ── Шрифт и общие размеры ─────────────────────────────────────────────── */
+:root {
+  --sl-font: 'Onest Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --sl-line-height: 1.7;
+  /* Страница держится по центру: шире этого сайт не растягивается. */
+  --docs-shell: 92.5rem;
+  --docs-gutter: 0px;
+  --sl-content-width: 48.75rem;
+  --sl-content-pad-x: 1.15rem;
 }
-.sl-markdown-content tbody tr:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.02);
-}
-.sl-markdown-content th {
+
+/* ── Название сайта ────────────────────────────────────────────────────── */
+.docs-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  text-decoration: none;
   color: var(--sl-color-white);
+}
+.docs-brand img {
+  flex: none;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 9px;
+}
+.docs-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+.docs-brand-text b {
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.docs-brand-text small {
+  font-size: 0.74rem;
+  color: var(--sl-color-gray-3);
 }
 
-/* Значки каналов релиза (stable / dev) — как на прежней главной. */
+/* ── Переключатели дизайна и цветовой схемы ───────────────────────────── */
+.docs-prefs {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.docs-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 999px;
+  background: var(--docs-card, var(--sl-color-black));
+}
+.docs-seg button {
+  display: grid;
+  place-items: center;
+  min-width: 1.85rem;
+  height: 1.75rem;
+  padding: 0 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.docs-seg-text button {
+  padding: 0 0.7rem;
+}
+.docs-seg svg {
+  width: 1rem;
+  height: 1rem;
+}
+.docs-seg button:hover {
+  color: var(--sl-color-white);
+}
+.docs-seg button[aria-pressed='true'] {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+}
+
+/* ── Меню: подписи групп, значки, выбранный пункт ─────────────────────── */
+.sidebar-content .top-level > li + li {
+  margin-top: 1.15rem;
+}
+/* Группы не сворачиваются: подпись — не кнопка (клавиатуру отключает скрипт
+   в astro.config.mjs). */
+.sidebar-content summary {
+  padding: 0.15rem 0.55rem 0.4rem;
+  pointer-events: none;
+}
+.sidebar-content summary .caret {
+  display: none;
+}
+.sidebar-content .group-label .large {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+.sidebar-content ul ul li {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.sidebar-content ul ul li + li {
+  margin-top: 2px;
+}
+.sidebar-content a {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.62rem;
+  padding: 0.42rem 0.6rem;
+  border-radius: 9px;
+  font-size: 0.93rem;
+  line-height: 1.35;
+  color: var(--sl-color-gray-2);
+}
+.sidebar-content a[data-icon]::before {
+  content: '';
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.07rem;
+  background: currentColor;
+  opacity: 0.78;
+  -webkit-mask: var(--docs-icon) center / contain no-repeat;
+  mask: var(--docs-icon) center / contain no-repeat;
+}
+.sidebar-content a:hover,
+.sidebar-content a:focus-visible {
+  background: color-mix(in srgb, var(--sl-color-gray-5) 40%, transparent);
+  color: var(--sl-color-white);
+}
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+}
+.sidebar-content a[aria-current='page']::before {
+  opacity: 1;
+}
+
+/* ── Заголовок страницы: путь, заголовок, описание ────────────────────── */
+.content-panel + .content-panel {
+  border-top: 0;
+  padding-top: 0.4rem;
+}
+.docs-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+  color: var(--sl-color-gray-3);
+}
+.docs-crumbs svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  opacity: 0.7;
+}
+.content-panel h1#_top {
+  margin-top: 0.7rem;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--sl-color-white);
+}
+.content-panel .docs-lead {
+  margin-top: 0.7rem;
+  font-size: 1.08rem;
+  line-height: 1.6;
+  color: var(--sl-color-gray-3);
+}
+
+/* ── Текст ─────────────────────────────────────────────────────────────── */
+.sl-markdown-content {
+  overflow-wrap: anywhere;
+}
+.sl-markdown-content :is(h2, h3, h4):not(:where(.not-content *)) {
+  letter-spacing: -0.01em;
+}
+.sl-markdown-content h2:not(:where(.not-content *)) {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.sl-markdown-content h3:not(:where(.not-content *)) {
+  font-size: 1.2rem;
+  font-weight: 650;
+}
+.sl-markdown-content h4:not(:where(.not-content *)) {
+  font-size: 1.04rem;
+}
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2.6rem;
+}
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+  margin-top: 2rem;
+}
+.sl-markdown-content img {
+  height: auto;
+  max-width: 100%;
+}
+.sl-markdown-content :not(pre) > code {
+  border-radius: 6px;
+  padding: 0.12rem 0.38rem;
+}
+.sl-markdown-content hr {
+  border-color: var(--sl-color-hairline);
+}
+
+/* Нумерованный список верхнего уровня — шаги с кружками. */
+.sl-markdown-content > ol:not([start]) {
+  list-style: none;
+  padding-inline-start: 0;
+  counter-reset: docs-step;
+}
+.sl-markdown-content > ol:not([start]) > li {
+  position: relative;
+  counter-increment: docs-step;
+  padding-inline-start: 2.7rem;
+  min-height: 1.9rem;
+}
+.sl-markdown-content > ol:not([start]) > li + li {
+  margin-top: 0.9rem;
+}
+.sl-markdown-content > ol:not([start]) > li::before {
+  content: counter(docs-step);
+  position: absolute;
+  inset-inline-start: 0;
+  top: -0.05rem;
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 50%;
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* Заметки: рамка со скруглением вместо полосы слева. */
+.starlight-aside {
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--sl-color-asides-border) 45%, transparent);
+  border-radius: var(--docs-radius);
+}
+.starlight-aside__title {
+  font-size: 1rem;
+}
+
+/* Карточки, код, поиск. */
+.sl-markdown-content .card,
+.sl-markdown-content .sl-link-card,
+.expressive-code .frame,
+site-search button[data-open-modal] {
+  border-radius: var(--docs-radius);
+}
+.sl-markdown-content .card,
+.sl-markdown-content .sl-link-card {
+  background: var(--docs-card);
+  border-color: var(--sl-color-hairline);
+}
+.sl-markdown-content .card {
+  padding: 1.15rem 1.25rem;
+}
+.sl-markdown-content .card .icon {
+  border-radius: 10px;
+}
+
+/* Таблицы: рамка со скруглением, шапка с подложкой. */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--docs-radius);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.94em;
+  background: var(--docs-card);
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6rem 0.95rem;
+  border-bottom: 1px solid var(--sl-color-hairline);
+  vertical-align: top;
+  /* слова в ячейках не рвём посреди: узкая колонка не должна резать «Уровень» */
+  overflow-wrap: break-word;
+}
+.sl-markdown-content tr:last-child > td:not(:where(.not-content *)) {
+  border-bottom: 0;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+  color: var(--sl-color-white);
+  font-weight: 600;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--sl-color-gray-5) 28%, transparent);
+}
+
+/* ── Схема «кто с кем связан» ─────────────────────────────────────────────
+   <div class="docs-flow not-content"> с узлами .docs-flow-node и стрелками
+   .docs-flow-arrow; .docs-flow-col — два узла друг над другом. */
+.docs-flow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-block: 1.4rem;
+}
+.docs-flow-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1.15;
+  min-width: 0;
+}
+.docs-flow-node {
+  flex: 1;
+  min-width: 0;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--docs-radius);
+  background: var(--docs-card);
+  line-height: 1.35;
+}
+.docs-flow-node small {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+.docs-flow-node b {
+  display: block;
+  font-size: 0.98rem;
+  color: var(--sl-color-white);
+}
+.docs-flow-node span {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.84rem;
+  color: var(--sl-color-gray-3);
+}
+.docs-flow-node.is-accent {
+  border-color: color-mix(in srgb, var(--sl-color-accent) 55%, transparent);
+  background: var(--sl-color-accent-low);
+}
+.docs-flow-node.is-accent b {
+  color: var(--sl-color-accent-high);
+}
+.docs-flow-arrow {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--sl-color-gray-3);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h15M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h15M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* ── Карточки со значком ──────────────────────────────────────────────────
+   <div class="docs-cards not-content"> с .docs-card (ссылка или div),
+   значок берётся из data-icon — те же имена, что у пунктов меню. */
+.docs-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  margin-block: 1.4rem;
+}
+.docs-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  column-gap: 0.85rem;
+  align-items: start;
+  padding: 0.95rem 1.05rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--docs-radius);
+  background: var(--docs-card);
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+  line-height: 1.45;
+}
+.docs-card::before {
+  content: '';
+  grid-area: 1 / 1 / 3 / 2;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
+  background: var(--sl-color-accent-low);
+}
+.docs-card::after {
+  content: '';
+  grid-area: 1 / 1 / 3 / 2;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.55rem;
+  background: var(--sl-color-accent-high);
+  -webkit-mask: var(--docs-icon) center / contain no-repeat;
+  mask: var(--docs-icon) center / contain no-repeat;
+}
+.docs-card b {
+  grid-column: 2;
+  font-size: 0.98rem;
+  color: var(--sl-color-white);
+}
+.docs-card span {
+  grid-column: 2;
+  margin-top: 0.15rem;
+  font-size: 0.88rem;
+  color: var(--sl-color-gray-3);
+}
+a.docs-card:hover {
+  border-color: color-mix(in srgb, var(--sl-color-accent) 60%, transparent);
+}
+a.docs-card:hover b {
+  color: var(--sl-color-text-accent);
+}
+
+/* Низ страницы: «вперёд / назад». */
+.pagination-links a {
+  border-radius: var(--docs-radius);
+  border-color: var(--sl-color-hairline);
+  background: var(--docs-card);
+  box-shadow: none;
+}
+
+/* Значки каналов релиза (stable / dev). */
 .tag {
   display: inline-block;
   font-size: 12px;
@@ -91,7 +604,12 @@
   background: rgba(181, 139, 255, 0.12);
 }
 
-/* Главная: чипы под заголовком и аккуратные карточки. */
+/* Главная: без лишнего воздуха вокруг заголовка. */
+.hero {
+  padding-block: clamp(2rem, 6vmin, 4.5rem);
+}
+
+/* Главная: чипы под заголовком. */
 .hero-chips {
   display: flex;
   gap: 10px;
@@ -100,10 +618,9 @@
 }
 .hero-chips span {
   font-size: 13px;
-  /* цвета от темы Starlight, иначе в светлой теме чипы остаются тёмными */
   color: var(--sl-color-gray-2);
-  background: var(--sl-color-gray-6);
-  border: 1px solid var(--sl-color-gray-5);
+  background: var(--docs-card, var(--sl-color-gray-6));
+  border: 1px solid var(--sl-color-hairline);
   border-radius: 10px;
   padding: 7px 13px;
 }
@@ -111,33 +628,133 @@
   color: var(--sl-color-white);
 }
 
-/* ── Пропорции колонок ───────────────────────────────────────────────────────
-   У Starlight обе боковые колонки по 18.75rem, а текст жёстко ограничен 45rem.
-   На ноутбучных 1150–1400px текст из-за этого сжимается до ~630px, а на 2K+
-   между меню и текстом остаётся пустая полоса, зато «На этой странице»
-   растягивается на четверть экрана. Пересчитываем: оглавление — узкая колонка
-   по своему содержимому, текст занимает остальное место и растёт вместе с
-   экраном. */
-/* Планшеты и небольшие ноутбуки: меню 18.75rem съедало место у текста. */
-@media (min-width: 50rem) {
-  :root {
-    --sl-sidebar-width: 16rem;
+/* ── Широкий экран: меню слева целиком, шапки нет ─────────────────────────
+   На страницах с меню шапка Starlight переезжает в левую колонку: название и
+   поиск — над меню, ссылки и переключатели — под ним. Колонка меню, текст и
+   оглавление вместе держатся по центру экрана и не растягиваются. Только для
+   экрана: при печати остаётся обычная шапка Starlight без переключателей. */
+@media screen and (min-width: 50rem) {
+  html:root[data-has-sidebar] {
+    --sl-nav-height: 0rem;
+    --sl-sidebar-width: 17rem;
+    --sl-content-pad-x: 2.4rem;
+    --docs-gutter: max(0px, (100vw - var(--docs-shell)) / 2);
+    --sl-content-inline-start: calc(var(--docs-gutter) + var(--sl-sidebar-width));
+    --docs-side-top: 7.75rem;
+    --docs-side-foot: 6.6rem;
+  }
+
+  /* Колонка меню: подложка и рамка — это бывшая шапка. */
+  [data-has-sidebar] .page > .header {
+    inset-block: 0;
+    inset-inline-start: var(--docs-gutter);
+    width: var(--sl-sidebar-width);
+    height: auto;
+    padding: 0;
+    border-bottom: 0;
+    border-inline-end: 1px solid var(--sl-color-hairline);
+    background: var(--sl-color-bg-sidebar);
+  }
+  [data-has-sidebar] .page > .header > .header {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
+    height: 100%;
+    padding: 1.2rem 0.95rem 0.9rem;
+  }
+  [data-has-sidebar] .header .title-wrapper {
+    height: 2.4rem;
+    margin: 0 0 1rem;
+    padding: 0 0.25rem;
+    align-items: center;
+    overflow: visible;
+  }
+  [data-has-sidebar] .header site-search button[data-open-modal] {
+    width: 100%;
+    max-width: none;
+    height: 2.55rem;
+    background: var(--docs-card, var(--sl-color-black));
+    border-color: var(--sl-color-hairline);
+  }
+  [data-has-sidebar] .header .right-group {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: auto;
+    padding: 0.8rem 0.25rem 0;
+    border-top: 1px solid var(--sl-color-hairline);
+  }
+  [data-has-sidebar] .header .right-group .docs-prefs {
+    display: contents;
+  }
+  [data-has-sidebar] .header .right-group docs-design-select {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+  }
+  [data-has-sidebar] .header .right-group docs-design-select button {
+    flex: 1;
+  }
+  [data-has-sidebar] .header .right-group .social-icons {
+    grid-row: 2;
+    grid-column: 1;
+    gap: 0.9rem;
+    padding-inline-start: 0.35rem;
+  }
+  [data-has-sidebar] .header .right-group .social-icons::after {
+    display: none;
+  }
+  [data-has-sidebar] .header .right-group .social-icons a {
+    color: var(--sl-color-gray-3);
+  }
+  [data-has-sidebar] .header .right-group .social-icons a:hover {
+    color: var(--sl-color-white);
+  }
+  [data-has-sidebar] .header .right-group docs-theme-select {
+    grid-row: 2;
+    grid-column: 2;
+  }
+
+  /* Само меню — между названием и переключателями, поверх подложки. */
+  [data-has-sidebar] .sidebar-pane {
+    z-index: calc(var(--sl-z-index-navbar) + 1);
+    inset-block: var(--docs-side-top) var(--docs-side-foot);
+    inset-inline-start: var(--docs-gutter);
+    width: calc(var(--sl-sidebar-width) - 1px);
+    border: 0;
+    background: transparent;
+    scrollbar-width: thin;
+  }
+  [data-has-sidebar] .sidebar-content {
+    padding: 0.35rem 0.7rem 1rem;
+  }
+
+  /* Текст: отступ от меню и от правого края, сверху — как у меню. */
+  [data-has-sidebar] .main-frame {
+    padding-inline-end: var(--docs-gutter);
+  }
+  [data-has-sidebar] main > .content-panel:first-child {
+    padding-top: 2.1rem;
   }
 }
 
-@media (min-width: 72rem) {
+/* С оглавлением справа: текст прижат к меню, оглавление — к правому краю. */
+@media screen and (min-width: 72rem) {
   :root {
-    --sl-sidebar-width: 14.5rem;
-    --toc-width: 13.5rem;
-    /* шапка выравнивает поиск по той же сетке */
-    --__toc-width: var(--toc-width);
-    --sl-content-width: 45rem;
+    --toc-width: 15.5rem;
   }
   .right-sidebar-container {
     width: var(--toc-width);
   }
   .right-sidebar {
     width: var(--toc-width);
+    border-inline-start: 0;
+  }
+  .right-sidebar-panel {
+    padding: 2.4rem 1.2rem 1rem 0;
   }
   .right-sidebar-panel .sl-container {
     width: 100%;
@@ -145,31 +762,102 @@
   }
   [data-has-sidebar][data-has-toc] .main-pane {
     width: calc(100% - var(--toc-width));
-    --sl-content-margin-inline: auto;
+    --sl-content-margin-inline: 0;
+  }
+  [data-has-sidebar]:not([data-has-toc]) .main-pane {
+    --sl-content-margin-inline: 0;
   }
 }
 
-@media (min-width: 80rem) {
-  :root {
-    --sl-sidebar-width: 15.5rem;
-    --toc-width: 14.5rem;
-    --sl-content-width: 48rem;
-  }
+/* Оглавление «На этой странице». */
+.right-sidebar-panel h2 {
+  font-size: 0.86rem;
+  font-weight: 600;
+  margin-bottom: 0.7rem;
 }
-
-@media (min-width: 90rem) {
-  :root {
-    --sl-sidebar-width: 17rem;
-    --toc-width: 15.5rem;
-    --sl-content-width: 52rem;
-  }
+.right-sidebar-panel starlight-toc > nav > ul {
+  border-inline-start: 1px solid var(--sl-color-hairline);
+}
+.right-sidebar-panel a {
+  font-size: 0.86rem;
+  line-height: 1.4;
+  padding-block: 0.28rem;
+}
+.right-sidebar-panel a[aria-current='true'] {
+  color: var(--sl-color-text-accent);
+  font-weight: 600;
 }
 
 @media (min-width: 120rem) {
   :root {
     font-size: 17px;
-    --sl-sidebar-width: 18rem;
-    --toc-width: 17rem;
-    --sl-content-width: 60rem;
+  }
+}
+@media (min-width: 150rem) {
+  :root {
+    font-size: 18px;
+  }
+}
+
+/* ── Телефон ───────────────────────────────────────────────────────────
+   Широкие таблицы и длинные строки не растягивают страницу: таблица
+   прокручивается внутри себя, длинные адреса и команды переносятся. */
+@media (max-width: 49.99rem) {
+  .docs-brand-text small {
+    display: none;
+  }
+  .docs-brand img {
+    width: 1.9rem;
+    height: 1.9rem;
+  }
+  .content-panel h1#_top {
+    font-size: 1.7rem;
+  }
+  .content-panel .docs-lead {
+    font-size: 1rem;
+  }
+  .sl-markdown-content h2:not(:where(.not-content *)) {
+    font-size: 1.32rem;
+  }
+  .sl-markdown-content table:not(:where(.not-content *)) {
+    font-size: 0.9em;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sl-markdown-content th:not(:where(.not-content *)) {
+    white-space: normal;
+  }
+  .sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+    padding: 0.45rem 0.65rem;
+  }
+  .docs-flow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .docs-flow-arrow {
+    align-self: center;
+    transform: rotate(90deg);
+  }
+  .hero-chips {
+    gap: 6px;
+  }
+  .hero-chips span {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+  /* Меню на телефоне: крупные области нажатия. */
+  .sidebar-content {
+    padding-inline: 1rem;
+  }
+  .sidebar-content a {
+    padding-block: 0.62rem;
+    font-size: 1rem;
+  }
+  .pagination-links a {
+    min-height: 2.75rem;
+  }
+  .mobile-preferences {
+    align-items: center;
+    row-gap: 0.4rem;
+    padding-block: 0.8rem;
   }
 }

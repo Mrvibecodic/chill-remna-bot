@@ -259,9 +259,7 @@ func (a *App) creditReferralPercent(ctx context.Context, telegramID int64, amoun
 }
 
 func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, found bool) {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	// Бонусные дни только сдвигают срок окончания. Лимиты и сквады остаются
 	// теми, что человек оплатил: applyLimits перезаписывает в панели лишь
 	// непустые поля, поэтому набор здесь намеренно пустой. Раньше сюда

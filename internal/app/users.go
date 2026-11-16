@@ -85,10 +85,9 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 
 	mode := a.accessMode()
 	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.user_search"), "usr:find")},
+		{btn(i18n.T(lang, "btn.user_search"), "usr:find"), btn(i18n.T(lang, "btn.torrents"), "torj:home")},
+		// Вайтлист — в «Доступе»: здесь кнопки дублировали его.
 		{btn(i18n.T(lang, "access.btn_open", i18n.T(lang, "access.mode_"+mode)), "menu:access")},
-		{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"), btn(i18n.T(lang, "btn.wl_list"), "usr:wllist")},
-		{btn(i18n.T(lang, "btn.torrents"), "torj:home")},
 	}
 	now := time.Now().UTC()
 	for _, u := range users {
@@ -100,7 +99,7 @@ func (a *App) showUsers(ctx context.Context, chatID int64, page int) {
 	}
 	rows = append(rows, homeRow(lang))
 
-	a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "users.title", total, page+1, pages), rows)
+	a.sendKBSection(ctx, chatID, assets.SectionReferral, i18n.T(lang, "users.title", total, page+1, pages, i18n.T(lang, "users.legend")), rows)
 }
 
 // userListBtn — строка пользователя в списке: значок и цвет кнопки по статусу
@@ -183,7 +182,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 	var rows [][]models.InlineKeyboardButton
 	now := time.Now().UTC()
 	for _, u := range users {
-		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userLabelByID(ctx, u.TelegramID), now)})
+		rows = append(rows, []models.InlineKeyboardButton{userListBtn(&u, a.userButtonLabel(ctx, &u), now)})
 	}
 	if nav := paginationRow("usr:fpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
@@ -191,7 +190,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 
 	// Запрос уходит в HTML-сообщение: без экранирования «R&D» или «<тест»
 	// роняют отправку целиком, и экран просто не появляется.
-	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1))
+	title := i18n.T(lang, "users.search_title", escapeName(q), total, page+1, max(pages, 1), i18n.T(lang, "users.legend"))
 	if total == 0 {
 		title = i18n.T(lang, "users.search_empty", escapeName(q))
 		// В боте пусто — может, человек есть в панели, но не связан с чатом.
@@ -235,9 +234,7 @@ func (a *App) showUserSearch(ctx context.Context, chatID int64, page int) {
 // searchPanelUser — точное совпадение по имени учётки в панели: подстрочного
 // поиска панель не умеет, но по нику она находит и тех, кого бот ещё не видел.
 func (a *App) searchPanelUser(ctx context.Context, q string) *remnawave.PanelUser {
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel == nil {
 		return nil
 	}
@@ -311,16 +308,17 @@ func (a *App) showWhitelist(ctx context.Context, chatID int64, page int) {
 	if nav := paginationRow("usr:wlpage:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{
-		btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd"),
-		btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids"),
-	})
+	// Подпись предзаполненных длинная: по кнопке в ряд, а не неровная пара.
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_add_id"), "usr:wladd")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_ids", ids), "usr:wlids")})
 	if total > 0 {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wl_clear"), "usr:wlclear")})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:users")})
+	// Вайтлист открывается из «Доступа» — туда и назад.
+	rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:access")})
 
-	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1))
+	title := i18n.T(lang, "wl.granted_title", total, page+1, max(pages, 1)) + "\n\n" + i18n.T(lang, "users.legend")
 	if total == 0 {
 		title = i18n.T(lang, "wl.granted_empty")
 	}
@@ -430,11 +428,15 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	}
 	subBlock := i18n.T(lang, "user.no_sub")
 	subExists, subBlocked := false, false
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel != nil {
-		if url, exp, st, ok := panel.SubscriptionFull(ctx, uid); ok {
+		url, exp, st, ok, perr := panel.SubscriptionState(ctx, uid)
+		if perr != nil {
+			// «Панель не ответила» — не «подписки нет»: по второму админ
+			// решил бы, что выдача не прошла, и выдал бы срок ещё раз.
+			subBlock = i18n.T(lang, "user.sub_unknown")
+		}
+		if ok {
 			subExists = true
 			subBlocked = st == remnawave.StatusDisabled
 			if subBlocked {
@@ -468,7 +470,11 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 	if botBlocked || (subExists && subBlocked) {
 		actions = append(actions, btn(i18n.T(lang, "btn.unblock"), "usr:unblock:"+id))
 	}
-	rows := [][]models.InlineKeyboardButton{{p2pBtn, wlBtn}}
+	grantRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.user_grant"), "usr:gr:"+id)}
+	if n := a.userPayCount(ctx, uid); n > 0 {
+		grantRow = append(grantRow, btn(i18n.T(lang, "btn.user_pays", n), "usr:pays:"+id+":0"))
+	}
+	rows := [][]models.InlineKeyboardButton{grantRow, {p2pBtn, wlBtn}}
 	if len(actions) > 0 {
 		rows = append(rows, actions)
 	}
@@ -502,9 +508,7 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 // покупки под текущим именем. "" — тариф неизвестен (подписку выдали
 // вручную или привязали учётку без покупки), строку тогда не показываем.
 func (a *App) clientPlanTitle(ctx context.Context, lang string, uid int64) string {
-	a.mu.Lock()
-	st := a.store
-	a.mu.Unlock()
+	st := a.storeRef()
 	if st == nil {
 		return ""
 	}
@@ -519,14 +523,9 @@ func (a *App) clientPlanTitle(ctx context.Context, lang string, uid int64) strin
 	if code == "" {
 		return ""
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		p = nil
-	}
-	if p == nil && err == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p != nil {
 		return planTitle(lang, p)
@@ -551,14 +550,9 @@ func (a *App) userPlanLine(ctx context.Context, lang string, u *model.User) stri
 	if code == "" {
 		return ""
 	}
-	p, err := a.planByCode(ctx, code)
+	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		p = nil
-	}
-	if p == nil && err == nil && code == model.PlanCodeBase {
-		a.mu.Lock()
-		p = basePlanFrom(a.botCfg, nil)
-		a.mu.Unlock()
 	}
 	if p != nil {
 		return i18n.T(lang, "user.plan", planTitleHTML(lang, p))
@@ -579,9 +573,7 @@ func (a *App) userBlockState(ctx context.Context, uid int64) (botBlocked, subExi
 			botBlocked = u.Blocked
 		}
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if panel != nil {
 		if _, _, st, ok := panel.SubscriptionFull(ctx, uid); ok {
 			subExists = true
@@ -660,7 +652,7 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.showAccess(ctx, chatID)
 	case "wladd":
 		a.getUI(chatID).adminInput = "wl_add"
-		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:users")
+		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "wl.ask_ids"), "menu:access")
 	case "find":
 		a.startUserSearch(ctx, chatID)
 	case "fpage":
@@ -702,6 +694,34 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 	case "plans":
 		uid, _ := strconv.ParseInt(arg, 10, 64)
 		a.showUserPlanAccess(ctx, chatID, uid)
+	case "gr":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		if uid == 0 {
+			return
+		}
+		a.showGrantPlans(ctx, chatID, uid)
+	case "grp":
+		a.pickGrantPlan(ctx, chatID, arg)
+	case "grt":
+		a.pickGrantTerm(ctx, chatID, arg)
+	case "grd":
+		uid, _ := strconv.ParseInt(arg, 10, 64)
+		a.askGrantDays(ctx, chatID, uid)
+	case "grok":
+		a.confirmGrant(ctx, chatID, arg)
+	case "pays":
+		uidStr, pageStr, _ := strings.Cut(arg, ":")
+		uid, _ := strconv.ParseInt(uidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		if uid == 0 {
+			return
+		}
+		a.showUserPayments(ctx, chatID, uid, page)
+	case "pay":
+		pidStr, pageStr, _ := strings.Cut(arg, ":")
+		pid, _ := strconv.ParseInt(pidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		a.showUserPayment(ctx, chatID, pid, page, false)
 	case "pg":
 		uidStr, code, _ := strings.Cut(arg, ":")
 		uid, _ := strconv.ParseInt(uidStr, 10, 64)
@@ -747,77 +767,61 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 }
 
 func (a *App) applyBlock(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int) {
-	if uid == 0 || a.store == nil {
-		return
-	}
-	alang := a.lang(adminChat)
-	wantBot := mode == "blockboth" || mode == "blockbot"
-	wantSub := mode == "blockboth" || mode == "blocksub"
-	didBot, didSub := false, false
-	if wantBot {
-		if err := a.store.SetBlocked(ctx, uid, true); err == nil {
-			didBot = true
-		}
-	}
-	if wantSub {
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
-		if panel != nil {
-			if _, err := panel.DisableByTelegramID(ctx, uid); err != nil {
-				a.notify(ctx, adminChat, "⚠️ "+err.Error())
-			} else {
-				didSub = true
-			}
-			a.setAddSubEnabledPanel(ctx, uid, false)
-		}
-		a.invalidateSubCache(uid)
-	}
-	defer a.dropScreen(adminChat, []int{srcMsgID})
-	if eff := effMode("block", didBot, didSub); eff != "" {
-		a.notifyBlockState(ctx, uid, eff)
-		a.send(ctx, adminChat, i18n.T(alang, "block.done"))
-	} else {
-		a.send(ctx, adminChat, i18n.T(alang, "block.fail"))
-	}
-	a.showUser(ctx, adminChat, uid)
+	a.applyAccess(ctx, adminChat, uid, mode, srcMsgID, true)
 }
 
 func (a *App) applyUnblock(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int) {
+	a.applyAccess(ctx, adminChat, uid, mode, srcMsgID, false)
+}
+
+// applyAccess — блокировка (block) и разблокировка одним ходом: в боте, в
+// панели или там и там, смотря что выбрал администратор (mode). Доп-подписка
+// идёт следом за основной: иначе после разблокировки она осталась бы
+// выключенной навсегда и слияние подписок молча прекратилось бы.
+func (a *App) applyAccess(ctx context.Context, adminChat, uid int64, mode string, srcMsgID int, block bool) {
 	if uid == 0 || a.store == nil {
 		return
 	}
+	prefix, done, fail := "unblock", "unblock.done", "unblock.fail"
+	if block {
+		prefix, done, fail = "block", "block.done", "block.fail"
+	}
 	alang := a.lang(adminChat)
-	wantBot := mode == "unblockboth" || mode == "unblockbot"
-	wantSub := mode == "unblockboth" || mode == "unblocksub"
+	wantBot := mode == prefix+"both" || mode == prefix+"bot"
+	wantSub := mode == prefix+"both" || mode == prefix+"sub"
 	didBot, didSub := false, false
 	if wantBot {
-		if err := a.store.SetBlocked(ctx, uid, false); err == nil {
+		if err := a.store.SetBlocked(ctx, uid, block); err == nil {
 			didBot = true
 		}
 	}
 	if wantSub {
-		a.mu.Lock()
-		panel := a.panel
-		a.mu.Unlock()
-		if panel != nil {
-			if _, err := panel.EnableByTelegramID(ctx, uid); err != nil {
+		if panel := a.panelClient(); panel != nil {
+			var err error
+			if block {
+				_, err = panel.DisableByTelegramID(ctx, uid)
+			} else {
+				_, err = panel.EnableByTelegramID(ctx, uid)
+			}
+			if err != nil {
 				a.notify(ctx, adminChat, "⚠️ "+err.Error())
 			} else {
 				didSub = true
 			}
-			// Mirror of applyBlock: without this B stays DISABLED forever and
-			// the subscription merge silently stops for an unblocked user.
-			a.setAddSubEnabledPanel(ctx, uid, true)
+			a.setAddSubEnabledPanel(ctx, uid, !block)
 		}
 		a.invalidateSubCache(uid)
 	}
 	defer a.dropScreen(adminChat, []int{srcMsgID})
-	if eff := effMode("unblock", didBot, didSub); eff != "" {
-		a.notifyUnblockState(ctx, uid, eff)
-		a.send(ctx, adminChat, i18n.T(alang, "unblock.done"))
+	if eff := effMode(prefix, didBot, didSub); eff != "" {
+		if block {
+			a.notifyBlockState(ctx, uid, eff)
+		} else {
+			a.notifyUnblockState(ctx, uid, eff)
+		}
+		a.send(ctx, adminChat, i18n.T(alang, done))
 	} else {
-		a.send(ctx, adminChat, i18n.T(alang, "unblock.fail"))
+		a.send(ctx, adminChat, i18n.T(alang, fail))
 	}
 	a.showUser(ctx, adminChat, uid)
 }
@@ -866,9 +870,7 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	if a.store == nil {
 		return
 	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	if deleteSub && panel != nil {
 		// B first: it is resolved through A's username, so deleting A first
 		// would leave an orphan add-on user in the panel.
@@ -891,16 +893,6 @@ func (a *App) adminDeleteUser(ctx context.Context, adminChat, uid int64, deleteS
 	cabNotifyMu.Lock()
 	delete(cabNotified, uid)
 	cabNotifyMu.Unlock()
-}
-
-func payMethodLabel(method string) string {
-	switch method {
-	case "stars":
-		return "⭐"
-	case "p2p":
-		return "P2P"
-	}
-	return method
 }
 
 func paymentTotals(ps []model.Payment) (users int, sums string) {
@@ -950,107 +942,51 @@ func (a *App) showPayments(ctx context.Context, chatID int64, page int) {
 	}
 	back := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:pay"), btn(i18n.T(lang, "btn.home"), "menu:home")}
 	if total == 0 {
-		a.sendPayKB(ctx, chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
+		a.sendPayKB(withAdminClosed(ctx), chatID, i18n.T(lang, "payments.empty"), [][]models.InlineKeyboardButton{back})
 		return
 	}
 	pages := (total + usersPageSize - 1) / usersPageSize
 
-	type row struct{ date, method, user, term, amount, status string }
-	rows := make([]row, 0, len(items))
-	wMethod, wUser, wAmount, wTerm := len("Method"), len("User"), len("Amount"), len("Term")
-	for _, p := range items {
-		date := p.CreatedAt
-		if len(date) >= 10 {
-			date = date[:10]
-		}
-		statusKey := "payments.st_paid"
-		switch p.Status {
-		case model.PaymentRejected:
-			statusKey = "payments.st_rejected"
-		case model.PaymentRefunded:
-			statusKey = "payments.st_refunded"
-		}
-		user := strconv.FormatInt(p.TelegramID, 10)
-		term := strconv.Itoa(p.Months) + "m"
-		// Голое «Nm» с тарифами стало неинформативным: одинаковые сроки у
-		// разных тарифов стоят по-разному. Тариф — из снимка сделки; сделки
-		// «Базового» и старые (без снимка) остаются как были.
-		if code := planCodeOf(p.Snapshot); code != "" && code != model.PlanCodeBase {
-			name := p.Snapshot.Name
-			if name == "" {
-				name = code
-			}
-			// Имя тарифа — свободный текст админа, а сообщение уходит с
-			// parse_mode=HTML (и внутри <pre> тоже): спецсимволы не
-			// экранируем сущностями — они ломали бы моноширинное выравнивание
-			// (&amp; — 5 рун вместо одной), — а просто выбрасываем.
-			name = strings.Map(func(r rune) rune {
-				switch r {
-				case '<', '>', '&':
-					return -1
-				}
-				return r
-			}, name)
-			term += "·" + truncRunes(name, 12)
-		}
-		method := payMethodLabel(p.Method)
-		amount := p.Amount
-		rows = append(rows, row{date, method, user, term, amount, i18n.T(lang, statusKey)})
-		if l := visualWidth(method); l > wMethod {
-			wMethod = l
-		}
-		if l := visualWidth(user); l > wUser {
-			wUser = l
-		}
-		if l := visualWidth(amount); l > wAmount {
-			wAmount = l
-		}
-		if l := visualWidth(term); l > wTerm {
-			wTerm = l
-		}
-	}
-
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "payments.title", total, page+1, pages))
 	if paid, err := a.store.PaidPayments(ctx); err == nil {
-		users, sums := paymentTotals(paid)
+		users, _ := paymentTotals(paid)
+		// Оплата с баланса в сумму не идёт: эти деньги уже посчитаны пополнением.
+		money := make([]model.Payment, 0, len(paid))
+		for _, p := range paid {
+			if p.Method != model.PayMethodBalance {
+				money = append(money, p)
+			}
+		}
+		_, sums := paymentTotals(money)
 		if sums == "" {
 			sums = "—"
 		}
-		sb.WriteString("\n" + i18n.T(lang, "payments.totals", users, sums))
+		sb.WriteString("\n" + i18n.T(lang, "payments.totals", users, html.EscapeString(sums)))
 	}
-	sb.WriteString("\n<pre>")
-	header := padRight("Date", 10) + "  " + padRight("Method", wMethod) + "  " +
-		padRight("User", wUser) + "  " + padRight("Term", wTerm) + "  " +
-		padRight("Amount", wAmount) + "  " + "Status"
-	sb.WriteString(header)
-	sb.WriteString("\n")
-	sb.WriteString(strings.Repeat("─", visualWidth(header)))
-	for _, r := range rows {
-		sb.WriteString("\n")
-		sb.WriteString(padRight(r.date, 10))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.method, wMethod))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.user, wUser))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.term, wTerm))
-		sb.WriteString("  ")
-		sb.WriteString(padRight(r.amount, wAmount))
-		sb.WriteString("  ")
-		sb.WriteString(r.status)
-	}
-	sb.WriteString("</pre>")
+	sb.WriteString("\n\n" + i18n.T(lang, "upay.hint"))
 
+	// Платёж — кнопка, как в платежах пользователя: таблица в моноширинном
+	// блоке на телефоне не читалась, а подробности всё равно в карточке.
 	var kbRows [][]models.InlineKeyboardButton
-	nav := paginationRow("pay:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next"))
-	if len(nav) > 0 {
+	plans := map[string]string{}
+	who := map[int64][]string{}
+	for i := range items {
+		p := &items[i]
+		kbRows = append(kbRows, []models.InlineKeyboardButton{
+			btn(a.userPayLabel(ctx, lang, p, plans, a.payWho(ctx, p.TelegramID, who)...), "pay:card:"+strconv.FormatInt(p.ID, 10)+":"+strconv.Itoa(page)),
+		})
+	}
+	if nav := paginationRow("pay:page:", page, pages, i18n.T(lang, "btn.prev"), i18n.T(lang, "btn.next")); len(nav) > 0 {
 		kbRows = append(kbRows, nav)
 	}
-	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")})
-	kbRows = append(kbRows, []models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")})
-	kbRows = append(kbRows, back)
-	a.sendPayKB(ctx, chatID, sb.String(), kbRows)
+	kbRows = append(kbRows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_user"), "pay:user")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn"), "pay:log"), btn(i18n.T(lang, "paylog.btn_csv"), "pay:csv")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "paylog.btn_errors"), "pay:err")},
+		back)
+	// Сводка и кнопки — копировать нечего.
+	a.sendPayKB(withAdminClosed(ctx), chatID, sb.String(), kbRows)
 }
 
 // truncRunes обрезает строку до n рун с «…»: имена тарифов в таблице платежей
@@ -1085,11 +1021,18 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 	case "page":
 		page, _ := strconv.Atoi(arg)
 		a.showPayments(ctx, chatID, page)
+	case "card":
+		pidStr, pageStr, _ := strings.Cut(arg, ":")
+		pid, _ := strconv.ParseInt(pidStr, 10, 64)
+		page, _ := strconv.Atoi(pageStr)
+		a.showUserPayment(ctx, chatID, pid, page, true)
 	case "log":
 		a.getUI(chatID).adminInput = "paylog"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "paylog.ask"), "menu:payments")
 	case "csv":
 		a.exportPayLogCSV(ctx, chatID)
+	case "user":
+		a.startPayUserSearch(ctx, chatID)
 	case "err":
 		a.showPayErrors(ctx, chatID, 7)
 	case "errf":
@@ -1099,10 +1042,11 @@ func (a *App) onPayments(ctx context.Context, chatID int64, val string) {
 }
 
 func (a *App) showMySubs(ctx context.Context, chatID int64) {
+	// Подписка, устройства и доп-подписка — про одного человека: в панели он
+	// ищется один раз на показ экрана.
+	ctx = remnawave.WithLookupMemo(ctx)
 	lang := a.lang(chatID)
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
+	panel := a.panelClient()
 	home := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.home"), "menu:home")}
 	var snap remnawave.SubSnapshot
 	ok := false
@@ -1189,7 +1133,7 @@ func (a *App) addSubLine(ctx context.Context, chatID int64) string {
 	lang := a.lang(chatID)
 	// Название опции — тарифа пользователя (или общее): у каждого тарифа опция
 	// может называться по-своему.
-	name := html_(a.userAddSubName(ctx, chatID))
+	name := html.EscapeString(a.userAddSubName(ctx, chatID))
 	switch {
 	case strings.EqualFold(info.Status, remnawave.StatusDisabled):
 		return "\n" + i18n.T(lang, "sub.addsub_off", name)

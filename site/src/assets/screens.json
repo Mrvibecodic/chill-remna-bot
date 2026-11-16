@@ -11,6 +11,11 @@
    "caption": "Выбор тарифа"
   },
   {
+   "name": "user_plan",
+   "src": "/screens/dark/user/user_plan.webp",
+   "caption": "Тариф: условия и сроки"
+  },
+  {
    "name": "user_methods",
    "src": "/screens/dark/user/user_methods.webp",
    "caption": "Способы оплаты"
@@ -46,11 +51,6 @@
    "caption": "Промокод"
   },
   {
-   "name": "user_squadpicker",
-   "src": "/screens/dark/user/user_squadpicker.webp",
-   "caption": "Выбор локаций"
-  },
-  {
    "name": "user_menu_new",
    "src": "/screens/dark/user/user_menu_new.webp",
    "caption": "Меню нового пользователя (без подписки)"
@@ -58,7 +58,7 @@
   {
    "name": "user_terms",
    "src": "/screens/dark/user/user_terms.webp",
-   "caption": "Пользовательское соглашение"
+   "caption": "Документы сервиса: согласие перед покупкой"
   },
   {
    "name": "user_p2p_card",
@@ -68,12 +68,12 @@
   {
    "name": "user_p2p_wait_shot",
    "src": "/screens/dark/user/user_p2p_wait_shot.webp",
-   "caption": "Просьба прислать скриншот оплаты"
+   "caption": "Просьба прислать подтверждение оплаты"
   },
   {
    "name": "user_p2p_submitted",
    "src": "/screens/dark/user/user_p2p_submitted.webp",
-   "caption": "Скриншот отправлен на проверку"
+   "caption": "Подтверждение отправлено на проверку"
   },
   {
    "name": "user_remind_sub",
@@ -98,6 +98,16 @@
    "caption": "Раздел «Продажи»"
   },
   {
+   "name": "admin_pay_plans",
+   "src": "/screens/dark/admin/admin_pay_plans.webp",
+   "caption": "Продажи: тарифы и триал"
+  },
+  {
+   "name": "admin_pay_methods",
+   "src": "/screens/dark/admin/admin_pay_methods.webp",
+   "caption": "Продажи: способы оплаты"
+  },
+  {
    "name": "admin_iface",
    "src": "/screens/dark/admin/admin_iface.webp",
    "caption": "Раздел «Интерфейс»"
@@ -113,6 +123,11 @@
    "caption": "Раздел «Система»"
   },
   {
+   "name": "admin_updates",
+   "src": "/screens/dark/admin/admin_updates.webp",
+   "caption": "Обновление бота"
+  },
+  {
    "name": "admin_users",
    "src": "/screens/dark/admin/admin_users.webp",
    "caption": "Список пользователей"
@@ -121,6 +136,26 @@
    "name": "admin_user_card",
    "src": "/screens/dark/admin/admin_user_card.webp",
    "caption": "Карточка пользователя"
+  },
+  {
+   "name": "admin_grant",
+   "src": "/screens/dark/admin/admin_grant.webp",
+   "caption": "Выдача подписки: подтверждение"
+  },
+  {
+   "name": "admin_user_pays",
+   "src": "/screens/dark/admin/admin_user_pays.webp",
+   "caption": "Платежи пользователя"
+  },
+  {
+   "name": "admin_pay_card",
+   "src": "/screens/dark/admin/admin_pay_card.webp",
+   "caption": "Карточка платежа"
+  },
+  {
+   "name": "admin_access",
+   "src": "/screens/dark/admin/admin_access.webp",
+   "caption": "Доступ в бота"
   },
   {
    "name": "admin_whitelist",
@@ -138,9 +173,14 @@
    "caption": "Аналитика"
   },
   {
+   "name": "admin_plans",
+   "src": "/screens/dark/admin/admin_plans.webp",
+   "caption": "Список тарифов"
+  },
+  {
    "name": "admin_pricing",
    "src": "/screens/dark/admin/admin_pricing.webp",
-   "caption": "Тарифы и цены"
+   "caption": "Цены и лимиты тарифа"
   },
   {
    "name": "admin_plan_squads",
@@ -178,6 +218,16 @@
    "caption": "Platega"
   },
   {
+   "name": "admin_heleket",
+   "src": "/screens/dark/admin/admin_heleket.webp",
+   "caption": "Heleket"
+  },
+  {
+   "name": "admin_yoomoney",
+   "src": "/screens/dark/admin/admin_yoomoney.webp",
+   "caption": "ЮMoney"
+  },
+  {
    "name": "admin_tribute",
    "src": "/screens/dark/admin/admin_tribute.webp",
    "caption": "Tribute"
@@ -188,9 +238,19 @@
    "caption": "МойНалог"
   },
   {
+   "name": "admin_wallet",
+   "src": "/screens/dark/admin/admin_wallet.webp",
+   "caption": "Кошелёк: настройки"
+  },
+  {
    "name": "admin_trial",
    "src": "/screens/dark/admin/admin_trial.webp",
    "caption": "Пробный период"
+  },
+  {
+   "name": "admin_trial_rules",
+   "src": "/screens/dark/admin/admin_trial_rules.webp",
+   "caption": "Правила триала"
   },
   {
    "name": "admin_trial_squads",
@@ -238,6 +298,11 @@
    "caption": "Веб-кабинет"
   },
   {
+   "name": "admin_mail",
+   "src": "/screens/dark/admin/admin_mail.webp",
+   "caption": "Почта кабинета"
+  },
+  {
    "name": "admin_webhooks",
    "src": "/screens/dark/admin/admin_webhooks.webp",
    "caption": "Вебхуки"
@@ -255,7 +320,7 @@
   {
    "name": "admin_contacts",
    "src": "/screens/dark/admin/admin_contacts.webp",
-   "caption": "Контакты и оферта"
+   "caption": "Контакты и документы"
   },
   {
    "name": "admin_banners",
@@ -278,6 +343,21 @@
    "caption": "Премиум-эмодзи"
   },
   {
+   "name": "admin_texts",
+   "src": "/screens/dark/admin/admin_texts.webp",
+   "caption": "Тексты бота"
+  },
+  {
+   "name": "admin_webui",
+   "src": "/screens/dark/admin/admin_webui.webp",
+   "caption": "Дизайн мини-аппа и кабинета"
+  },
+  {
+   "name": "admin_devices",
+   "src": "/screens/dark/admin/admin_devices.webp",
+   "caption": "Устройства"
+  },
+  {
    "name": "admin_apilog",
    "src": "/screens/dark/admin/admin_apilog.webp",
    "caption": "Лог API панели"
@@ -286,6 +366,16 @@
    "name": "admin_channel",
    "src": "/screens/dark/admin/admin_channel.webp",
    "caption": "Канал обновлений"
+  },
+  {
+   "name": "admin_backup",
+   "src": "/screens/dark/admin/admin_backup.webp",
+   "caption": "Бэкап базы"
+  },
+  {
+   "name": "admin_panelauth",
+   "src": "/screens/dark/admin/admin_panelauth.webp",
+   "caption": "Подключение к панели"
   },
   {
    "name": "admin_rsimport",
@@ -312,7 +402,7 @@
   {
    "name": "minimal_home",
    "src": "/screens/dark/minimal/minimal_home.webp",
-   "caption": "Главный экран: подписка, подключение и продление. Логотип и цвет — свои"
+   "caption": "Главный экран: подписка и подключение. Логотип и цвет — свои"
   },
   {
    "name": "minimal_home_new",
@@ -352,7 +442,7 @@
   {
    "name": "minimal_connect",
    "src": "/screens/dark/minimal/minimal_connect.webp",
-   "caption": "Подключение: приложения, добавление в один тап и QR"
+   "caption": "Подключение: приложения, добавление в один тап, разделы инструкции и QR"
   },
   {
    "name": "minimal_ref",
@@ -411,7 +501,7 @@
   {
    "name": "miniapp_connect",
    "src": "/screens/miniapp/miniapp_connect.webp",
-   "caption": "Подключение: приложения, deeplink и QR"
+   "caption": "Подключение: приложения, разделы инструкции и QR"
   },
   {
    "name": "miniapp_more",
