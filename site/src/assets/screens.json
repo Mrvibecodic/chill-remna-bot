@@ -402,7 +402,7 @@
   {
    "name": "minimal_home",
    "src": "/screens/dark/minimal/minimal_home.webp",
-   "caption": "Главный экран: подписка, подключение и продление. Логотип и цвет — свои"
+   "caption": "Главный экран: подписка и подключение. Логотип и цвет — свои"
   },
   {
    "name": "minimal_home_new",
