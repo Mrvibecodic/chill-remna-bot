@@ -608,7 +608,9 @@ function renderSide(on){
   h+=it('home',IC.bolt,T('home'),'goHome()');
   // «Тарифы» есть всегда, как в чате: на триале внутри — почему купить пока нельзя.
   if(STATE.plans.length||STATE.plansNotice)h+=it('plans',IC.tag,T('plans'),'navTo(\'plans\')');
+  // Кошелька нет — на его месте промокод: иначе на широком экране код ввести негде.
   if(walletShown())h+=it('wallet',IC.wallet,T('wallet'),'navTo(\'wallet\')',rub(STATE.balanceK));
+  else h+=it('wallet',IC.tag,T('promo'),'navTo(\'promo\')');
   if(s.sub_url)h+=it('connect',IC.download,T('conn_title'),'navTo(\'connect\')');
   if(s.active)h+=it('devices',IC.device,T('devices_title'),'navTo(\'devices\')',s.devices_ok?(s.has_limit?(s.devices_used+' / '+s.device_limit):String(s.devices_used)):'');
   if(m.referral_on)h+=it('ref',IC.gift,T('ref'),'navTo(\'ref\')');
@@ -625,6 +627,8 @@ function renderSide(on){
   side.innerHTML=h;
 }
 function dsplit(l,r){return DESK?'<div class="dsplit"><div>'+l+'</div><div>'+r+'</div></div>':l+r;}
+// promoLink — строка «Промокод»: в кошельке и в тарифах, как в чате.
+function promoLink(){return '<div class="list">'+item(IC.tag,T('promo'),T('promo_hint'),'','go(\'promo\')')+'</div>';}
 function backBtn(){return STACK.length?'<button class="back" onclick="goBack()">'+IC.left+esc(T('back'))+'</button>':'';}
 if(tg){try{tg.ready();tg.expand();}catch(e){}try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes();}catch(e){}
   try{tg.BackButton&&tg.BackButton.onClick(function(){goBack();});}catch(e){}
@@ -799,7 +803,7 @@ SCREENS.plans=function(){
   var h=backBtn()+'<div class="h1" style="margin-top:8px">'+esc(T('plans'))+'</div><div class="plans-grid dwide">';
   if(!STATE.plans.length&&STATE.plansNotice)h+='<div class="note info">'+esc(STATE.plansNotice)+'</div>';
   h+=planCards();
-  view(h+'</div>');
+  view(h+'</div>'+promoLink());
 };
 SCREENS.plan=function(a){
   var p=planBy(a.code);if(!p){goHome();return;}
@@ -844,6 +848,8 @@ SCREENS.plan=function(a){
   var hWhat=h;h='';
   h+='<div style="margin-top:18px"><button class="btn" onclick="toCheckout(\''+jsq(p.code)+'\','+sel+')">'+esc(T('checkout'))+' '+esc(price(d))+'</button></div>';
   h=DESK?dsplit(hHead+hWhat,hPer+h):hHead+hPer+hWhat+h;
+  // Тариф один — «Тарифы» открывают сразу его, и промокод здесь же.
+  if(STATE.plans.length<2&&!a.renew)h+=promoLink();
   view(h);
 };
 function pickDur(code,m){haptic();CUR.arg.months=m;rerender();}
@@ -986,7 +992,7 @@ SCREENS.wallet=async function(a){
     h+='<div id="tuM">'+tuMethods(a)+'</div></div>';
   }
   var hl=h;h='';
-  h+='<div class="list">'+item(IC.tag,T('promo'),T('promo_hint'),'','go(\'promo\')')+'</div>';
+  h+=promoLink();
   h=dsplit(hl,h);
   view(h);
 };
