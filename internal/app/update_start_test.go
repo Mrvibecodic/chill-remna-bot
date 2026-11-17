@@ -89,41 +89,96 @@ func TestUpdateStartFromNoticeRemovesMenu(t *testing.T) {
 	}
 }
 
-// После перезапуска итог приходит главной админки со строкой сверху, а
-// стартовое сообщение и экран, открытый во время скачивания, удаляются.
-func TestUpdatedRemovesScreenOpenedDuringPull(t *testing.T) {
-	a, fm, fs := newTestApp(t)
-	a.store = fs
-	fm.editOK = true
-	ctx := context.Background()
-	const chat = 100
-	start := fm.SendKB(ctx, chat, "starting", nil)
-	menu := fm.SendKB(ctx, chat, "menu", nil)
-	_ = fs.SetScreenMsg(ctx, chat, menu)
-	marker := filepath.Join(a.cfg.DataDir, "update.pending")
-	if err := os.WriteFile(marker, []byte("100:"+strconv.Itoa(start)+":old"), 0o600); err != nil {
-		t.Fatal(err)
+// captionMsg запоминает последнюю правку подписи — так видно, во что
+// превратилось сообщение под баннером.
+type captionMsg struct {
+	*fakeMsg
+	caption string
+	rows    [][]models.InlineKeyboardButton
+}
+
+func (c *captionMsg) EditCaption(ctx context.Context, chatID int64, id int, caption string, rows [][]models.InlineKeyboardButton) bool {
+	ok := c.fakeMsg.EditCaption(ctx, chatID, id, caption, rows)
+	if ok {
+		c.caption, c.rows = caption, rows
 	}
-	a.notifyUpdated(ctx)
-	fm.mu.Lock()
-	menuGone, startGone := slices.Contains(fm.deleted, menu), slices.Contains(fm.deleted, start)
-	fm.mu.Unlock()
-	if !menuGone || !startGone {
-		t.Fatalf("в чате остались: экран во время скачивания=%v, стартовое=%v", !menuGone, !startGone)
+	return ok
+}
+
+// После перезапуска итог — главная админки со строкой сверху. Стартовое
+// сообщение под баннером само становится ею; текстовое (уведомление,
+// /update) заменяется новым. Экран, открытый во время скачивания, уходит, а
+// нижняя кнопка «Главная» заново не ставится — её служебное сообщение мелькало.
+func TestUpdatedShowsMenuWithNote(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		banner bool
+	}{
+		{"под баннером — правкой", true},
+		{"текстом — новым сообщением", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, fm, fs := newTestApp(t)
+			a.store = fs
+			cm := &captionMsg{fakeMsg: fm}
+			a.msg = cm
+			fm.editOK = tc.banner
+			ctx := context.Background()
+			const chat = 100
+			start := fm.SendKB(ctx, chat, "⏳ обновляем", nil)
+			menu := fm.SendKB(ctx, chat, "menu", nil)
+			_ = fs.SetScreenMsg(ctx, chat, menu)
+			marker := filepath.Join(a.cfg.DataDir, "update.pending")
+			if err := os.WriteFile(marker, []byte("100:"+strconv.Itoa(start)+":old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sent := fm.seq
+			a.notifyUpdated(ctx)
+
+			fm.mu.Lock()
+			menuGone, startGone := slices.Contains(fm.deleted, menu), slices.Contains(fm.deleted, start)
+			newMsgs := fm.seq - sent
+			fm.mu.Unlock()
+			home := a.screenMsgID(chat)
+			if pid, _ := fs.GetScreenMsg(ctx, chat); pid != home {
+				t.Fatalf("в базе экран %d, текущий %d", pid, home)
+			}
+			if !menuGone {
+				t.Fatal("экран, открытый во время скачивания, остался")
+			}
+			if tc.banner {
+				if newMsgs != 0 || home != start || startGone {
+					t.Fatalf("стартовое не стало главной: новых %d, экран %d, стартовое удалено=%v", newMsgs, home, startGone)
+				}
+				if !strings.HasPrefix(cm.caption, "✅") || !strings.Contains(cm.caption, "Админ") || !hasCB(btnsData(cm.rows), "menu:system") {
+					t.Fatalf("в подписи не главная с итогом сверху: %q", cm.caption)
+				}
+			} else {
+				if newMsgs != 1 || home == start || !startGone {
+					t.Fatalf("новых %d, экран %d, стартовое удалено=%v", newMsgs, home, startGone)
+				}
+				if !strings.HasPrefix(fm.last(), "✅") || !hasCB(fm.allCallbackData(), "menu:system") {
+					t.Fatalf("не главная с итогом сверху: %q", fm.last())
+				}
+			}
+			a.scrMu.Lock()
+			keySet := a.kbSet[chat]
+			a.scrMu.Unlock()
+			if keySet {
+				t.Fatal("итог обновления ставил нижнюю кнопку «Главная»")
+			}
+		})
 	}
-	home := a.screenMsgID(chat)
-	if pid, _ := fs.GetScreenMsg(ctx, chat); pid != home || home == start || home == menu {
-		t.Fatalf("в базе экран %d, текущий %d", pid, home)
+}
+
+func btnsData(rows [][]models.InlineKeyboardButton) []string {
+	var out []string
+	for _, r := range rows {
+		for _, b := range r {
+			out = append(out, b.CallbackData)
+		}
 	}
-	if !strings.HasPrefix(fm.last(), "✅") || !hasCB(fm.allCallbackData(), "menu:system") {
-		t.Fatalf("не главная с итогом сверху: %q", fm.last())
-	}
-	a.scrMu.Lock()
-	keySet := a.kbSet[chat]
-	a.scrMu.Unlock()
-	if keySet {
-		t.Fatal("итог обновления ставил нижнюю кнопку «Главная»: служебное сообщение мелькает")
-	}
+	return out
 }
 
 // Обновить кнопкой нельзя, а нажали на уведомлении: ответ «недоступно» встаёт

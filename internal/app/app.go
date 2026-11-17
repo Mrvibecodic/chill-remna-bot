@@ -1431,17 +1431,32 @@ func (a *App) notifyUpdated(ctx context.Context) {
 	}
 	lang := a.botLang()
 	if a.cfg != nil && chatID == a.cfg.AdminID {
-		// Итог — сразу на главной админки строкой сверху: отдельный экран
-		// «обновлено» требовал лишнего нажатия «Домой». Главная закрыта от
-		// пересылки, поэтому приходит новым сообщением, а стартовое сообщение
-		// и экран, открытый во время скачивания, уходят вместе с прежним.
-		a.queueOldScreens(ctx, chatID, msgID)
-		a.showMenuNote(withAdminFlow(ctx), chatID, true, "", i18n.T(lang, doneKey))
+		a.showUpdatedMenu(ctx, chatID, msgID, i18n.T(lang, doneKey))
 		return
 	}
 	// «Обновлено» остаётся экраном до следующего перехода: прежний экран уже
 	// убран, и удаление по таймеру оставляло бы чат пустым.
 	a.showUpdateMsg(ctx, chatID, msgID, i18n.T(lang, doneKey), [][]models.InlineKeyboardButton{homeRow(lang)})
+}
+
+// showUpdatedMenu — итог обновления админу: главная админки со строкой итога
+// сверху, без отдельного экрана «обновлено». Она вписывается в то же
+// сообщение под баннером, где шли «найдено» и «обновляем»: у главной админки
+// та же картинка раздела. Запрет пересылки правкой не ставится, поэтому эта
+// главная открыта до перехода с неё. Если стартовое сообщение — текст
+// (уведомление, /update) или его уже нет, главная приходит новым сообщением,
+// а стартовое и экран, открытый во время скачивания, уходят.
+func (a *App) showUpdatedMenu(ctx context.Context, chatID int64, msgID int, note string) {
+	ctx = withAdminFlow(ctx)
+	lang := a.botLang()
+	caption := a.applyPremium(note + "\n\n" + i18n.T(lang, "menu.admin_title"))
+	if msgID != 0 && a.msg.EditCaption(ctx, chatID, msgID, caption, a.adminMenuRows(lang)) {
+		a.adoptScreen(ctx, chatID, msgID)
+		a.noteScreen(ctx, chatID, false)
+		return
+	}
+	a.queueOldScreens(ctx, chatID, msgID)
+	a.showMenuNote(ctx, chatID, true, "", note)
 }
 
 // queueOldScreens — после перезапуска прежний экран известен только из базы:
