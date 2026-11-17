@@ -1990,10 +1990,19 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 	if id == 0 {
 		return
 	}
+	a.addNotice(chatID, id)
+}
+
+// addNotice учитывает сообщение как уведомление (см. notices): нажатие на его
+// кнопку уберёт его вместе со старым экраном.
+func (a *App) addNotice(chatID int64, id int) {
 	a.scrMu.Lock()
 	defer a.scrMu.Unlock()
 	if a.notices == nil {
 		a.notices = map[int64][]int{}
+	}
+	if slices.Contains(a.notices[chatID], id) {
+		return
 	}
 	// Хватает последних: старые уведомления после перезапуска и так забыты.
 	n := append(a.notices[chatID], id)
@@ -2001,6 +2010,20 @@ func (a *App) notify(ctx context.Context, chatID int64, text string) {
 		n = n[len(n)-20:]
 	}
 	a.notices[chatID] = n
+}
+
+// isScreen — сообщение и есть текущий экран. После перезапуска экран
+// известен только из базы.
+func (a *App) isScreen(ctx context.Context, chatID int64, id int) bool {
+	a.scrMu.Lock()
+	ids := a.screen[chatID]
+	ok := slices.Contains(ids, id)
+	a.scrMu.Unlock()
+	if ok || len(ids) > 0 || a.store == nil {
+		return ok
+	}
+	pid, _ := a.store.GetScreenMsg(ctx, chatID)
+	return pid == id
 }
 
 // noticeThen показывает короткое пояснение и сразу под ним экран. Пояснение
