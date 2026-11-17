@@ -118,6 +118,12 @@ func TestUpdatedRemovesScreenOpenedDuringPull(t *testing.T) {
 	if !strings.HasPrefix(fm.last(), "✅") || !hasCB(fm.allCallbackData(), "menu:system") {
 		t.Fatalf("не главная с итогом сверху: %q", fm.last())
 	}
+	a.scrMu.Lock()
+	keySet := a.kbSet[chat]
+	a.scrMu.Unlock()
+	if keySet {
+		t.Fatal("итог обновления ставил нижнюю кнопку «Главная»: служебное сообщение мелькает")
+	}
 }
 
 // Обновить кнопкой нельзя, а нажали на уведомлении: ответ «недоступно» встаёт

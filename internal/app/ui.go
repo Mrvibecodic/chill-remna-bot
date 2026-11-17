@@ -680,12 +680,15 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 }
 
 func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name string) {
+	a.ensureHomeKey(ctx, chatID)
 	a.showMenuNote(ctx, chatID, isAdmin, name, "")
 }
 
 // showMenuNote — главное меню со строкой note над ним (итог обновления).
+// Нижнюю кнопку «Главная» не ставит: итогу обновления она не нужна — у админа
+// она уже есть, а служебное сообщение для неё мелькало между «обновляем» и
+// главной.
 func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name, note string) {
-	a.ensureHomeKey(ctx, chatID)
 	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
 	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
 	if !isAdmin && a.legalStartRequired(ctx, chatID) {
