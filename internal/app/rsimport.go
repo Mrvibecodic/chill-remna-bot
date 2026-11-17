@@ -99,7 +99,13 @@ func (a *App) onRSImport(ctx context.Context, chatID int64, val string) {
 				{btn(i18n.T(lang, "btn.back"), "menu:system"), btn(i18n.T(lang, "btn.home"), "menu:home")},
 			})
 		})
+	case "lk":
+		a.onRSLink(ctx, chatID, val)
 	default:
+		if strings.HasPrefix(val, "lp:") || strings.HasPrefix(val, "ls:") {
+			a.onRSLink(ctx, chatID, val)
+			return
+		}
 		a.showRSImport(ctx, chatID)
 	}
 }
@@ -201,10 +207,16 @@ func (a *App) showRSPreview(ctx context.Context, chatID int64, d *rsimport.Data)
 		}
 		text += "\n\n⚠️ " + strings.Join(esc, "\n⚠️ ")
 	}
-	a.sendSysKB(ctx, chatID, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "rsimp.btn_apply"), "rsimp:apply")},
-		{btn(i18n.T(lang, "rsimp.btn_cancel"), "rsimp:cancel")},
-	})
+	var rows [][]models.InlineKeyboardButton
+	if line, b := a.rsPreviewPlans(ctx, lang, d); line != "" {
+		text += "\n\n" + line
+		rows = append(rows, b)
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "rsimp.btn_apply"), "rsimp:apply")},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "rsimp.btn_cancel"), "rsimp:cancel")},
+	)
+	a.sendSysKB(ctx, chatID, text, rows)
 }
 
 // rsReport — что именно сделал импорт.
@@ -220,6 +232,8 @@ type rsReport struct {
 	promoUses  int
 	payments   int
 	errs       int
+	linked     int
+	listed     int
 }
 
 // applyRSImport переносит данные в нашу базу.
@@ -275,7 +289,11 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 		// Срок подписки не укорачиваем: если у нас уже записан более поздний,
 		// он и остаётся.
 		if u.SubExpireAt != "" && (fresh || existing.SubExpireAt < u.SubExpireAt) {
-			if err := a.store.SetSubExpiry(ctx, u.TelegramID, u.SubExpireAt, "paid"); err == nil {
+			kind := "paid"
+			if u.SubTrial {
+				kind = "trial"
+			}
+			if err := a.store.SetSubExpiry(ctx, u.TelegramID, u.SubExpireAt, kind); err == nil {
 				rep.subs++
 			}
 			a.invalidateSubCache(u.TelegramID)
@@ -297,6 +315,8 @@ func (a *App) applyRSImport(ctx context.Context, d *rsimport.Data) rsReport {
 			_ = a.store.SetRefBonusPaid(ctx, u.TelegramID)
 		}
 	}
+
+	a.rsApplyLinks(ctx, d, &rep)
 
 	for _, p := range d.Promos {
 		if existing, _ := a.store.GetPromo(ctx, p.Code); existing != nil {
@@ -367,6 +387,12 @@ func (a *App) rsReportText(lang string, d *rsimport.Data, rep rsReport) string {
 	text := i18n.T(lang, "rsimp.report",
 		rep.usersNew, rep.usersFound, rep.subs, rep.trials, rep.blocked,
 		rep.balance, rep.refs, rep.promos, rep.promoUses, rep.payments)
+	if len(d.Plans) > 0 {
+		text += "\n" + i18n.T(lang, "rsimp.report_links", rep.linked)
+	}
+	if rep.listed > 0 {
+		text += "\n" + i18n.T(lang, "rsimp.report_listed", rep.listed)
+	}
 	if rep.errs > 0 {
 		text += "\n" + i18n.T(lang, "rsimp.report_errs", rep.errs)
 	}
