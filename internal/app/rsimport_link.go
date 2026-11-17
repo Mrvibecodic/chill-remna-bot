@@ -282,7 +282,11 @@ func (a *App) rsLinkUser(ctx context.Context, u *rsimport.User, p *model.Plan) r
 		return rsLink{failed: true}
 	}
 	// Тариф по списку: как и выдача, связывание добавляет человека в список —
-	// иначе свой тариф был бы ему закрыт.
+	// иначе свой тариф был бы ему закрыт. Режим проверяет вызывающий: для
+	// тарифа не по списку grantListAccess отвечает отказом.
+	if model.NormalizeAvailability(p.Availability) != model.PlanAvailList {
+		return rsLink{linked: true}
+	}
 	switch a.grantListAccess(ctx, u.TelegramID, p.Code) {
 	case grantListAdded:
 		return rsLink{linked: true, listed: true}

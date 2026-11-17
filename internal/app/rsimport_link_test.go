@@ -126,7 +126,8 @@ func TestRSLink_EndToEnd(t *testing.T) {
 
 	rsTap(t, a, "rsimp:apply")
 	report := fm.last()
-	if !strings.Contains(report, "Тариф записан: <b>3</b>") || !strings.Contains(report, "Добавлено в списки тарифов: <b>1</b>") {
+	if !strings.Contains(report, "Тариф записан: <b>3</b>") || !strings.Contains(report, "Добавлено в списки тарифов: <b>1</b>") ||
+		strings.Contains(report, "Ошибок") {
 		t.Fatalf("отчёт:\n%s", report)
 	}
 
@@ -144,6 +145,9 @@ func TestRSLink_EndToEnd(t *testing.T) {
 	}
 	if s := snap(1000000016); s == nil || s.Code != "std" || s.Strategy != "MONTH" { // отключённая и истёкшая
 		t.Fatalf("16: %+v", s)
+	}
+	if ok, _ := fs.HasPlanAccess(ctx, "std", 1000000011, ""); ok {
+		t.Fatal("в список добавлен тариф не по списку")
 	}
 	if s := snap(1000000019); s == nil || s.Code != "prem" {
 		t.Fatalf("19: %+v", s)
