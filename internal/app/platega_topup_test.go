@@ -132,13 +132,13 @@ func TestPlategaTopUp_MethodGate(t *testing.T) {
 	if r := a.MiniTopUp(ctx, u, 10000, "pl", false); r.Error == "" {
 		t.Fatalf("мини-апп принял пополнение выключенной Platega: %+v", r)
 	}
-	if got := a.MiniTopUpOptions(ctx, u).Methods; len(got) != 0 {
+	if got := a.MiniTopUpOptions(ctx, u, false).Methods; len(got) != 0 {
 		t.Fatalf("мини-апп предлагает выключенный способ: %v", got)
 	}
 
 	a, fm, fs, _ := plTopUpStub(t, true)
 	_ = fs.UpsertUser(ctx, u)
-	if got := a.MiniTopUpOptions(ctx, u).Methods; len(got) != 1 || got[0] != "pl" {
+	if got := a.MiniTopUpOptions(ctx, u, false).Methods; len(got) != 1 || got[0] != "pl" {
 		t.Fatalf("мини-апп не предлагает Platega: %v", got)
 	}
 	a.getUI(u).topUpKopecks = 10000

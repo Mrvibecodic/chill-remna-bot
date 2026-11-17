@@ -1140,6 +1140,8 @@ var editableList = []Editable{
 		Where: [2]string{"Мини-апп/ЛК: пробный период сейчас получить нельзя", "Mini-app/cabinet: the trial cannot be taken now"}},
 	{Key: "mini.plan_unavailable", Section: "buy", Kind: KindPlain,
 		Where: [2]string{"Мини-апп/ЛК: выбранный тариф недоступен для покупки", "Mini-app/cabinet: the chosen plan cannot be bought"}},
+	{Key: "mini.pay_method", Section: "buy", Kind: KindPlain,
+		Where: [2]string{"Мини-апп/ЛК: выбранный способ оплаты скрыт в этом месте", "Mini-app/cabinet: the chosen payment method is hidden here"}},
 	{Key: "mini.legal_first", Section: "legal", Kind: KindPlain,
 		Where: [2]string{"Мини-апп/ЛК: покупка до принятия документов сервиса", "Mini-app/cabinet: purchase before accepting the service documents"}},
 	{Key: "mini.already_bought", Section: "buy", Kind: KindPlain,

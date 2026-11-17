@@ -61,7 +61,7 @@ type MiniProvider interface {
 	// чате. Открытый тариф после этого можно купить.
 	MiniPlanLink(ctx context.Context, tgID int64, code string) MiniPlansDTO
 	// MiniWallet — кошелёк: баланс и на сколько его хватит по своему тарифу.
-	MiniWallet(ctx context.Context, tgID int64) MiniWalletDTO
+	MiniWallet(ctx context.Context, tgID int64, web bool) MiniWalletDTO
 	// MiniPayCheck перепроверяет у платёжек незакрытые счета человека — то же,
 	// что кнопка «Проверить оплату» в чате.
 	// since — когда выставлен счёт, которого ждёт экран (unix; 0 — не знаем):
@@ -87,7 +87,7 @@ type MiniProvider interface {
 	// MiniPromo applies a promo code (mirrors the chat promo flow).
 	MiniPromo(ctx context.Context, tgID int64, code string) MiniPromoDTO
 	// MiniTopUpOptions returns preset top-up amounts + enabled methods.
-	MiniTopUpOptions(ctx context.Context, tgID int64) MiniTopUpOptionsDTO
+	MiniTopUpOptions(ctx context.Context, tgID int64, web bool) MiniTopUpOptionsDTO
 	// MiniTopUp creates a balance top-up payment (yk/cb) and returns the URL.
 	// web — запрос из браузерного кабинета: ссылка мини-аппа там не работает.
 	MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method string, web bool) MiniActionDTO
@@ -879,13 +879,13 @@ func (s *Server) handleMiniPromo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMiniTopUpOptions(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniTopUpOptions(ctx, id))
+	writeJSON(w, http.StatusOK, s.mini.MiniTopUpOptions(ctx, id, web))
 }
 
 func (s *Server) handleMiniTopUp(w http.ResponseWriter, r *http.Request) {
@@ -982,13 +982,13 @@ func (s *Server) handleMiniResetDevices(w http.ResponseWriter, r *http.Request) 
 
 // handleMiniWallet — кошелёк: баланс и прогноз по своему тарифу.
 func (s *Server) handleMiniWallet(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.miniGuard(w, r)
+	id, web, ok := s.miniGuard(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.mini.MiniWallet(ctx, id))
+	writeJSON(w, http.StatusOK, s.mini.MiniWallet(ctx, id, web))
 }
 
 // handleMiniPayCheck — ручная перепроверка незакрытых счетов человека.

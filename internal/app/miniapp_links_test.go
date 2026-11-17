@@ -13,7 +13,7 @@ import (
 func TestMiniTopUp_CustomAmount(t *testing.T) {
 	ctx := context.Background()
 	a, _ := planApp(t)
-	opts := a.MiniTopUpOptions(ctx, 555)
+	opts := a.MiniTopUpOptions(ctx, 555, false)
 	if opts.MaxKopecks != 140000 {
 		t.Fatalf("потолок своей суммы: %d", opts.MaxKopecks)
 	}
@@ -204,7 +204,7 @@ func TestMiniWallet_Balance(t *testing.T) {
 	const uid int64 = 1000000030
 	_ = fs.UpsertUser(ctx, uid)
 	_ = fs.AddBalance(ctx, uid, 45000)
-	if w := a.MiniWallet(ctx, uid); w.BalanceK != 45000 {
+	if w := a.MiniWallet(ctx, uid, false); w.BalanceK != 45000 {
 		t.Fatalf("кошелёк: %+v", w)
 	}
 }

@@ -178,7 +178,7 @@ func TestP2PTopUp_MiniAndCabinet(t *testing.T) {
 	const u int64 = 558
 	_ = fs.UpsertUser(ctx, u)
 
-	if got := a.MiniTopUpOptions(ctx, u).Methods; len(got) == 0 || got[0] != model.PayMethodP2P {
+	if got := a.MiniTopUpOptions(ctx, u, false).Methods; len(got) == 0 || got[0] != model.PayMethodP2P {
 		t.Fatalf("мини-апп не предлагает перевод: %v", got)
 	}
 	r := a.MiniTopUp(ctx, u, 25000, model.PayMethodP2P, true)

@@ -186,9 +186,9 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 	return web.MiniPlansDTO{Plans: []web.MiniPlanDTO{pd}}
 }
 
-// MiniWallet — кошелёк: баланс и доступно ли пополнение.
-func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
-	return web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), BalanceK: a.userBalance(ctx, tgID)}
+// MiniWallet — кошелёк: баланс и доступно ли пополнение в этом месте.
+func (a *App) MiniWallet(ctx context.Context, tgID int64, web_ bool) web.MiniWalletDTO {
+	return web.MiniWalletDTO{TopUpOn: a.topUpOpen(web_), BalanceK: a.userBalance(ctx, tgID)}
 }
 
 // MiniPayCheck — «Проверить оплату» из мини-аппа и кабинета: незакрытые счета

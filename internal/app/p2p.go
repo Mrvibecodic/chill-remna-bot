@@ -340,44 +340,47 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	// тариф в другой валюте не продают — их кнопки прячутся, счёт всё равно не
 	// выставится.
 	gridCur := a.saleGridCurrency(s)
+	// Чат — это Telegram: способы, снятые с него в «Доступности», не
+	// показываются.
+	tg := func(method string) bool { return a.payShown(method, false) }
 
 	var rows [][]models.InlineKeyboardButton
 	// У каждой кнопки — своя цена: без проверки P2P выдавал бы реквизиты с
 	// пустой суммой, а Stars вёл в тупик «оплата звёздами недоступна».
-	if p2p.Enabled && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" && gridCur {
+	if p2p.Enabled && tg(model.PayMethodP2P) && base != "" && a.saleFiat(s, model.PayMethodP2P) != "" && gridCur {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, model.PayMethodP2P)), "method:p2p")})
 	}
-	if yk.Enabled && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" && a.ykSaleCurrencyOK(s) {
+	if yk.Enabled && tg(model.PayMethodYooKassa) && base != "" && a.saleFiat(s, model.PayMethodYooKassa) != "" && a.ykSaleCurrencyOK(s) {
 		label := i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
-	if stars.Enabled && a.saleStars(s) > 0 && base != "" {
+	if stars.Enabled && tg(model.PayMethodStars) && a.saleStars(s) > 0 && base != "" {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", methodName(lang, model.PayMethodStars), a.saleStars(s)), "method:stars")})
 	}
 	// CryptoBot принимает не любую фиатную валюту: с чужой счёт не выставится,
 	// и кнопка вела бы в отказ.
 	_, cbCurOK := cbFiat(a.pricing().Currency)
-	if cb.Enabled && base != "" && gridCur && cbCurOK {
+	if cb.Enabled && tg(model.PayMethodCryptoBot) && base != "" && gridCur && cbCurOK {
 		label := i18n.T(lang, "method.cb_btn", methodName(lang, model.PayMethodCryptoBot), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:cb")})
 	}
-	if a.plConfig().Enabled && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
+	if a.plConfig().Enabled && tg(model.PayMethodPlatega) && a.saleFiat(s, model.PayMethodPlatega) != "" && gridCur && a.plGridCurrencyOK() {
 		label := i18n.T(lang, "method.pl_btn", methodName(lang, model.PayMethodPlatega), a.saleFiat(s, model.PayMethodPlatega)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:pl")})
 	}
-	if a.hlConfig().Enabled && base != "" && gridCur {
+	if a.hlConfig().Enabled && tg(model.PayMethodHeleket) && base != "" && gridCur {
 		label := i18n.T(lang, "method.hl_btn", methodName(lang, model.PayMethodHeleket), base+curSuffix(curSymbol(a.hlCurrency())))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:hl")})
 	}
 	// ЮMoney — только рубли и только при публичном адресе бота (ymSellable).
-	if a.ymSellable() && a.saleFiat(s, model.PayMethodYooMoney) != "" && gridCur && a.plGridCurrencyOK() {
+	if a.ymSellable() && tg(model.PayMethodYooMoney) && a.saleFiat(s, model.PayMethodYooMoney) != "" && gridCur && a.plGridCurrencyOK() {
 		label := i18n.T(lang, "method.ym_btn", methodName(lang, model.PayMethodYooMoney), a.saleFiat(s, model.PayMethodYooMoney)+curSuffix(curRUB))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:ym")})
 	}
 	// Tribute продаёт тариф своей подпиской: кнопка есть у тарифа с
 	// привязанной подпиской (у «Базового» — со ссылкой оплаты). Сравнивается
 	// код: «Базовый» с витрины приходит строкой тарифа, а не пустым Plan.
-	if url, _ := a.tributeOffer(lang, s.Plan, s.planCode()); url != "" {
+	if url, _ := a.tributeOffer(lang, s.Plan, s.planCode()); url != "" && tg(model.PayMethodTribute) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.trb_btn", methodName(lang, model.PayMethodTribute)), "method:trb")})
 	}
 
@@ -397,14 +400,14 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	}
 	if len(rows) == 0 {
 		empty := [][]models.InlineKeyboardButton{}
-		if a.topUpEnabled() {
+		if a.topUpOpen(false) {
 			empty = append(empty, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 		}
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "buy.no_methods"), append(empty, navBack(lang, cbPlanBack)))
 		return
 	}
 
-	if a.topUpEnabled() {
+	if a.topUpOpen(false) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	}
 	// «Назад» — к карточке тарифа, выбрать другой срок.
@@ -432,12 +435,32 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	a.sendPayKB(ctx, chatID, caption, rows)
 }
 
+// chatMethodFull — код кнопки способа в чате → способ оплаты.
+var chatMethodFull = map[string]string{
+	"p2p":   model.PayMethodP2P,
+	"stars": model.PayMethodStars,
+	"yk":    model.PayMethodYooKassa,
+	"cb":    model.PayMethodCryptoBot,
+	"pl":    model.PayMethodPlatega,
+	"ym":    model.PayMethodYooMoney,
+	"hl":    model.PayMethodHeleket,
+	"trb":   model.PayMethodTribute,
+}
+
 func (a *App) onMethod(ctx context.Context, chatID int64, val string) {
 	// Вторая точка гейта документов: кнопка способа оплаты могла пролежать в
 	// переписке с прошлого раза, а согласие за это время могли сбросить или
 	// гейт включить (тот же порядок, что у гейта доступности тарифа).
 	if a.legalRequired(ctx, chatID) {
 		a.askLegal(ctx, chatID)
+		return
+	}
+	// Кнопка могла пролежать в переписке, а способ за это время сняли с
+	// Telegram: вместо счёта — свежий список способов.
+	if m, ok := chatMethodFull[val]; ok && !a.payShown(m, false) {
+		if s := a.saleOrAskPrice(ctx, chatID, false); s != nil {
+			a.showMethodsSale(ctx, chatID, s)
+		}
 		return
 	}
 	switch val {

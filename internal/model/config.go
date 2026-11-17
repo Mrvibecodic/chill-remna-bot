@@ -196,6 +196,9 @@ type BotConfig struct {
 
 	Wallet WalletConfig `json:"wallet"`
 
+	// PayAccess — где показывать способы оплаты (Telegram или сайт).
+	PayAccess PayAccessConfig `json:"pay_access"`
+
 	// Texts — свои тексты админа (раздел «Тексты бота»).
 	Texts TextsConfig `json:"texts"`
 
@@ -1113,6 +1116,14 @@ type WalletConfig struct {
 	// HideForecast прячет блок «На сколько хватит» в кошельке. Нулевое
 	// значение — блок показан, как до появления настройки.
 	HideForecast bool `json:"hide_forecast,omitempty"`
+}
+
+// PayAccessConfig — способы оплаты, снятые с одного из мест: Telegram (чат и
+// мини-апп) или сайт (веб-кабинет). Хранятся именно снятые: у конфигов без
+// настройки списки пустые, и всё показывается везде, как раньше.
+type PayAccessConfig struct {
+	TelegramOff []string `json:"telegram_off,omitempty"`
+	WebOff      []string `json:"web_off,omitempty"`
 }
 
 // NormalizeWallet включает пополнение для всех, кто обновился с версии без

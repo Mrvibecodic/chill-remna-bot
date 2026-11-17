@@ -97,7 +97,7 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 	// Про вывод говорим прямо и всегда: баланс тратится только внутри бота.
 	caption += "\n" + i18n.T(lang, "balance.no_withdraw")
 	topRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")}
-	if a.topUpEnabled() {
+	if a.topUpOpen(false) {
 		topRow = append([]models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, topRow...)
 	}
 	a.sendPayKB(ctx, chatID, caption, [][]models.InlineKeyboardButton{
@@ -251,7 +251,7 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	if !a.topUpEnabled() {
+	if !a.topUpOpen(false) {
 		a.showBalance(ctx, chatID)
 		return
 	}
@@ -348,14 +348,26 @@ var topUpMethodFull = map[string]string{
 }
 
 // topUpMethods — включённые способы пополнения в порядке показа. Один список
-// на чат, мини-апп и кабинет.
-func (a *App) topUpMethods() []string {
+// на чат, мини-апп и кабинет; web — сайт, иначе Telegram: способы, снятые с
+// места в «Доступности», отсеиваются.
+func (a *App) topUpMethods(web bool) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := a.botCfg
 	if c == nil {
 		return nil
 	}
+	var out []string
+	for _, m := range a.topUpMethodsLocked(c) {
+		if payAccessLocked(c, topUpMethodFull[m], web) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// topUpMethodsLocked — включённые способы пополнения без учёта места.
+func (a *App) topUpMethodsLocked(c *model.BotConfig) []string {
 	var out []string
 	if c.P2P.Enabled {
 		out = append(out, model.PayMethodP2P)
@@ -378,8 +390,15 @@ func (a *App) topUpMethods() []string {
 	return out
 }
 
-func (a *App) topUpMethodOn(method string) bool {
-	for _, m := range a.topUpMethods() {
+// topUpOpen — пополнение есть в этом месте: включено и осталось хоть одним
+// способом. Решает только, показывать ли «Пополнить» и кошелёк в меню: сами
+// действия по-прежнему проверяют topUpEnabled и способ.
+func (a *App) topUpOpen(web bool) bool {
+	return a.topUpEnabled() && len(a.topUpMethods(web)) > 0
+}
+
+func (a *App) topUpMethodOn(method string, web bool) bool {
+	for _, m := range a.topUpMethods(web) {
 		if m == method {
 			return true
 		}
@@ -395,7 +414,7 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 		return
 	}
 	var rows [][]models.InlineKeyboardButton
-	for _, m := range a.topUpMethods() {
+	for _, m := range a.topUpMethods(false) {
 		full := topUpMethodFull[m]
 		if m == model.PayMethodP2P {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, full)), "top:m:"+m)})
@@ -426,7 +445,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	}
 	// Кнопка способа могла пролежать в переписке: за это время способ могли
 	// выключить, а согласие с документами — сбросить.
-	if !a.topUpMethodOn(method) {
+	if !a.topUpMethodOn(method, false) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "topup.unavailable"))
 		return
 	}
@@ -501,7 +520,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	}
 	// Выключенный способ не принимает пополнений, даже если ключи остались:
 	// кнопка могла сохраниться в старом сообщении.
-	if !a.topUpMethodOn(method) {
+	if !a.topUpMethodOn(method, web) {
 		return "", "", errUserText(i18n.T(lang, "topup.unavailable"))
 	}
 	rub := kopecksToRub(k)
@@ -761,7 +780,7 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "списание с баланса", res.err))
 	case balNoFunds:
 		rows := [][]models.InlineKeyboardButton{}
-		if a.topUpEnabled() {
+		if a.topUpOpen(false) {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 		}
 		rows = append(rows, homeRow(lang))

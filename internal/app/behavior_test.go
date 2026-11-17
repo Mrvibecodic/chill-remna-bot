@@ -2638,7 +2638,8 @@ func btnData(rows []models.InlineKeyboardButton) string {
 func TestNavRow(t *testing.T) {
 	a, _, fs := newTestApp(t)
 	a.store = fs
-	a.botCfg = &model.BotConfig{Installed: true, Language: "ru"}
+	// Пополнение включено по умолчанию и есть чем пополнить — кошелёк в меню.
+	a.botCfg = &model.BotConfig{Installed: true, Language: "ru", YooKassa: model.YooKassaConfig{Enabled: true}}
 	ctx := context.Background()
 	const user int64 = 555
 
@@ -2665,6 +2666,12 @@ func TestNavRow(t *testing.T) {
 	a.invalidateSubCache(user)
 	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
 		t.Fatalf("юзер с подпиской: %s", btnData(row))
+	}
+
+	// Пополнить в Telegram нечем — пустой кошелёк из меню убран.
+	a.botCfg.PayAccess.TelegramOff = []string{model.PayMethodYooKassa}
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|" {
+		t.Fatalf("пустой кошелёк без способов пополнения: %s", btnData(row))
 	}
 }
 
@@ -2755,7 +2762,8 @@ func TestStarsFlow(t *testing.T) {
 		t.Fatal("оплата не записана в лог")
 	}
 
-	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|menu:balance|" {
+	// Включены только Stars: пополнить кошелёк нечем, пустой кошелёк в меню не нужен.
+	if row := a.navRow(ctx, user); btnData(row) != "menu:mysubs|menu:buy|" {
 		t.Fatalf("после Stars-оплаты ожидались Мои подписки: %s", btnData(row))
 	}
 }

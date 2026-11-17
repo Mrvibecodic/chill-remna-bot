@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,7 +51,7 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		HasSub:         a.userHasSub(ctx, tgID),
 		TrialAvailable: a.trialAvailable(ctx, tgID),
 		ReferralOn:     a.referralCfg().Enabled,
-		TopUpOn:        a.topUpEnabled(),
+		TopUpOn:        a.topUpOpen(web_),
 		SupportURL:     a.supportURL(),
 	}
 	if dto.HasSub {
@@ -96,12 +97,18 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.Heleket.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodHeleket)
 		}
-		if c.Tribute.Enabled {
+		// Tribute выдаёт подписку по Telegram покупателя: аккаунту сайта без
+		// Telegram кнопка вела бы в отказ.
+		if c.Tribute.Enabled && !(web_ && tgID <= 0) {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodTribute)
 		}
 		if c.P2P.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodP2P)
 		}
+		// Способы, снятые с этого места в «Доступности».
+		dto.PayMethods = slices.DeleteFunc(dto.PayMethods, func(m string) bool {
+			return !payAccessLocked(c, m, web_)
+		})
 	}
 	a.mu.Unlock()
 	// Названия и описания способов — те же, что в чате (правятся в «Тексты
@@ -416,6 +423,12 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// miniPayURLCore, и проверка только там оставляла их без согласия.
 	if a.legalRequired(ctx, tgID) {
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.legal_first"))}
+	}
+	// Способ, снятый с этого места в «Доступности»: страница могла открыться
+	// до снятия галочки. Новый счёт не выставляется.
+	if method != model.PayMethodBalance && !a.payShown(method, web_) {
+		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s: способ скрыт в «Доступности»", miniSource(web_))
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.pay_method"))}
 	}
 	// Сверка показанной цены с сегодняшней — до всех способов. Список тарифов
 	// фронт кэширует до перезагрузки страницы, поэтому здесь окно расхождения

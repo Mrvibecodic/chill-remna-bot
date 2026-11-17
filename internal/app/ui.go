@@ -225,11 +225,11 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 	return row
 }
 
-// walletInMenu — кошелёк в главном меню: пока его можно пополнить или на
-// нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
+// walletInMenu — кошелёк в главном меню: пока его можно пополнить в Telegram
+// или на нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
 // пополнения в меню не нужен — промокод вводится и в витрине.
 func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
-	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
+	return a.topUpOpen(false) || a.userBalance(ctx, chatID) > 0
 }
 
 // renewEligible — кнопка «Продлить»: подписка куплена в боте, до конца 7 дней
@@ -498,6 +498,7 @@ func (a *App) showPayMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.pay_access"), "pacc:home")},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		navBack(lang, "menu:pay"),
 	)

@@ -75,6 +75,7 @@ const (
 	cbP2P       = "p2p"
 	cbAdm       = "adm"
 	cbStar      = "star"
+	cbPayAccess = "pacc"
 	cbYK        = "yk"
 	cbYKCheck   = "ykc"
 	cbCBCheck   = "cbc"
@@ -227,6 +228,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbStar:
 		if isAdmin {
 			a.onStars(ctx, chatID, val)
+		}
+	case cbPayAccess:
+		if isAdmin {
+			a.onPayAccess(ctx, chatID, val)
 		}
 	case cbYK:
 		if isAdmin {

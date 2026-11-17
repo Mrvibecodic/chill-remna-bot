@@ -318,7 +318,7 @@ func (a *App) MiniPromo(ctx context.Context, tgID int64, code string) web.MiniPr
 
 // MiniTopUpOptions returns the same preset amounts as the chat top-up screen,
 // plus the enabled top-up methods (YooKassa/CryptoBot/Heleket).
-func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOptionsDTO {
+func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64, web_ bool) web.MiniTopUpOptionsDTO {
 	var dto web.MiniTopUpOptionsDTO
 	if !a.topUpEnabled() {
 		return dto
@@ -329,7 +329,7 @@ func (a *App) MiniTopUpOptions(ctx context.Context, tgID int64) web.MiniTopUpOpt
 	}
 	// Своя сумма — с тем же потолком, что в чате.
 	dto.MaxKopecks = maxK
-	dto.Methods = a.topUpMethods()
+	dto.Methods = a.topUpMethods(web_)
 	return dto
 }
 
@@ -345,7 +345,7 @@ func (a *App) MiniTopUp(ctx context.Context, tgID int64, kopecks int64, method s
 		a.payLog(ctx, method, "", tgID, "topup_error", "недопустимая сумма kopecks=%d (максимум %d)", kopecks, maxK)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.bad_amount"))}
 	}
-	if !a.topUpMethodOn(method) {
+	if !a.topUpMethodOn(method, web_) {
 		a.payLog(ctx, method, "", tgID, "topup_error", "способ пополнения недоступен (kopecks=%d)", kopecks)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.topup_method"))}
 	}
