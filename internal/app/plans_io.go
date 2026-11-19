@@ -279,6 +279,12 @@ func checkPlanFileKind(p *model.Plan) error {
 	if t.AddSubStrategy != "" && !model.ValidStrategy(t.AddSubStrategy) {
 		return fmt.Errorf("%w: неизвестный сброс доп-подписки %q", errPlanFile, t.AddSubStrategy)
 	}
+	if t.RefGB < 0 || t.RefGB > model.PlanTrafficMaxGB {
+		return fmt.Errorf("%w: реферальный бонус вне 0…%d GB", errPlanFile, model.PlanTrafficMaxGB)
+	}
+	if t.RefTo != "" && !model.ValidRefTo(t.RefTo) {
+		return fmt.Errorf("%w: неизвестный получатель реферального бонуса %q", errPlanFile, t.RefTo)
+	}
 	if len(t.Packs) > model.PlanPacksMax {
 		return fmt.Errorf("%w: пакетов больше %d", errPlanFile, model.PlanPacksMax)
 	}

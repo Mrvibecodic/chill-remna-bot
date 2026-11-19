@@ -60,10 +60,11 @@ func trafficTerms(p *model.Plan) model.PlanTraffic {
 	return *p.Traffic
 }
 
-var trafficInputs = map[string]struct{ input, key string }{
-	"p": {"plan_t_price", "plans.ask_t_price"},
-	"s": {"plan_t_stars", "plans.ask_t_stars"},
-	"g": {"plan_t_gb", "plans.ask_t_gb"},
+var trafficInputs = map[string]struct{ input, key, back string }{
+	"p": {"plan_t_price", "plans.ask_t_price", "pln:pr:"},
+	"s": {"plan_t_stars", "plans.ask_t_stars", "pln:pr:"},
+	"g": {"plan_t_gb", "plans.ask_t_gb", "pln:pr:"},
+	"r": {"plan_t_refgb", "plans.ask_t_refgb", "pln:rf:"},
 }
 
 func (a *App) askTrafficInput(ctx context.Context, chatID int64, field, code string) {
@@ -76,12 +77,17 @@ func (a *App) askTrafficInput(ctx context.Context, chatID int64, field, code str
 		a.showPlanCard(ctx, chatID, code)
 		return
 	}
-	a.askPlanTextTo(ctx, chatID, code, spec.input, spec.key, "pln:pr:"+code)
+	a.askPlanTextTo(ctx, chatID, code, spec.input, spec.key, spec.back+code)
 }
 
 func parseGB(text string) (int, bool) {
+	n, ok := parseGBOrZero(text)
+	return n, ok && n > 0
+}
+
+func parseGBOrZero(text string) (int, bool) {
 	n, err := strconv.Atoi(normPriceStr(strings.TrimSpace(text)))
-	return n, err == nil && n > 0 && n <= model.PlanTrafficMaxGB
+	return n, err == nil && n >= 0 && n <= model.PlanTrafficMaxGB
 }
 
 func parsePlanPrice(text string) (string, error) {
@@ -106,7 +112,11 @@ func (a *App) applyTrafficInput(ctx context.Context, chatID int64, field, text s
 	ui.adminInput = ""
 	ui.planCode = ""
 	lang := a.lang(chatID)
-	back := [][]models.InlineKeyboardButton{navBack(lang, "pln:pr:"+code)}
+	done, backTo := a.showPlanPricing, "pln:pr:"+code
+	if field == "plan_t_refgb" {
+		done, backTo = a.showPlanRef, "pln:rf:"+code
+	}
+	back := [][]models.InlineKeyboardButton{navBack(lang, backTo)}
 	var apply func(p *model.Plan) error
 	switch field {
 	case "plan_t_price":
@@ -145,6 +155,19 @@ func (a *App) applyTrafficInput(ctx context.Context, chatID int64, field, text s
 			p.TrafficGB = n
 			return nil
 		}
+	case "plan_t_refgb":
+		n, ok := parseGBOrZero(text)
+		if !ok {
+			a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.ref_gb_invalid"), back)
+			return
+		}
+		apply = func(p *model.Plan) error {
+			if p.Traffic == nil {
+				p.Traffic = &model.PlanTraffic{}
+			}
+			p.Traffic.RefGB = n
+			return nil
+		}
 	default:
 		a.showPlanCard(ctx, chatID, code)
 		return
@@ -158,7 +181,7 @@ func (a *App) applyTrafficInput(ctx context.Context, chatID int64, field, text s
 		a.trafficEditFailed(ctx, chatID, code, err)
 		return
 	}
-	a.showPlanPricing(ctx, chatID, code)
+	done(ctx, chatID, code)
 }
 
 func (a *App) trafficEditFailed(ctx context.Context, chatID int64, code string, err error) {
@@ -493,4 +516,72 @@ func (a *App) setAddSubReset(ctx context.Context, chatID int64, code, strategy s
 		return
 	}
 	a.showPlanAddSub(ctx, chatID, code)
+}
+
+var refToCodes = map[string]string{"r": model.RefToReferrer, "i": model.RefToInvitee, "b": model.RefToBoth}
+
+var refToKeys = map[string]struct{ name, btn, screen string }{
+	model.RefToReferrer: {"plans.ref_to_referrer", "plans.btn_ref_to_referrer", "ref.traffic_gb_referrer"},
+	model.RefToInvitee:  {"plans.ref_to_invitee", "plans.btn_ref_to_invitee", "ref.traffic_gb_invitee"},
+	model.RefToBoth:     {"plans.ref_to_both", "plans.btn_ref_to_both", "ref.traffic_gb_both"},
+}
+
+func refToName(lang, to string) string {
+	return i18n.T(lang, refToKeys[to].name)
+}
+
+func refLine(lang string, t model.PlanTraffic) string {
+	if t.RefGB <= 0 {
+		return i18n.T(lang, "plans.ref_off")
+	}
+	return i18n.T(lang, "plans.ref_on", t.RefGB, refToName(lang, t.RefTo))
+}
+
+func (a *App) showPlanRef(ctx context.Context, chatID int64, code string) {
+	lang := a.lang(chatID)
+	p := a.planForEdit(ctx, chatID, code)
+	if p == nil {
+		return
+	}
+	if !p.IsTraffic() {
+		a.showPlanCard(ctx, chatID, code)
+		return
+	}
+	t := trafficTerms(p)
+	text := i18n.T(lang, "plans.ref_title", planTitleHTML(lang, p), refLine(lang, t))
+	if !a.referralCfg().Enabled {
+		text += i18n.T(lang, "plans.ref_program_off")
+	}
+	rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "plans.btn_ref_gb"), "pln:tin:r:"+code)}}
+	for _, k := range []string{"r", "i", "b"} {
+		label := i18n.T(lang, refToKeys[refToCodes[k]].btn)
+		if refToCodes[k] == t.RefTo {
+			label = "✅ " + label
+		}
+		rows = append(rows, []models.InlineKeyboardButton{btn(label, "pln:rft:"+k+":"+code)})
+	}
+	rows = append(rows, navBack(lang, "pln:open:"+code))
+	a.sendPayKB(ctx, chatID, text, rows)
+}
+
+func (a *App) setPlanRefTo(ctx context.Context, chatID int64, code, k string) {
+	to, ok := refToCodes[k]
+	if !ok {
+		a.showPlanRef(ctx, chatID, code)
+		return
+	}
+	if _, err := a.editPlan(ctx, code, func(p *model.Plan) error {
+		if !p.IsTraffic() {
+			return errPlanKind
+		}
+		if p.Traffic == nil {
+			p.Traffic = &model.PlanTraffic{}
+		}
+		p.Traffic.RefTo = to
+		return nil
+	}); err != nil {
+		a.trafficEditFailed(ctx, chatID, code, err)
+		return
+	}
+	a.showPlanRef(ctx, chatID, code)
 }

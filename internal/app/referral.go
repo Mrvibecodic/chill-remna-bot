@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -342,7 +343,7 @@ func (a *App) showReferral(ctx context.Context, chatID int64) {
 	if cfg.Percent > 0 {
 		extra += "\n" + i18n.T(lang, "ref.also_percent", cfg.Percent)
 	}
-	if note := a.referralTrafficNote(ctx, lang); note != "" {
+	if note := a.referralTrafficNote(ctx, chatID, lang); note != "" {
 		extra += "\n" + note
 	}
 	text := i18n.T(lang, "ref.user", bonus, when, extra, count, kopecksToRub(earned), link)
@@ -449,15 +450,40 @@ func (a *App) onReferralAdmin(ctx context.Context, chatID int64, val string) {
 	}
 }
 
-func (a *App) referralTrafficNote(ctx context.Context, lang string) string {
+func (a *App) referralTrafficNote(ctx context.Context, uid int64, lang string) string {
 	plans, err := a.planList(ctx)
 	if err != nil {
 		return ""
 	}
+	var lines []string
+	traffic := false
 	for i := range plans {
-		if plans[i].IsTraffic() && plans[i].Enabled {
-			return i18n.T(lang, "ref.no_traffic")
+		p := &plans[i]
+		if !p.IsTraffic() || !p.Enabled {
+			continue
+		}
+		switch model.NormalizeAvailability(p.Availability) {
+		case model.PlanAvailLink:
+			if a.userPlanCode(ctx, uid) != p.Code {
+				continue
+			}
+		case model.PlanAvailList:
+			if !a.planAccessibleFor(ctx, p, uid) {
+				continue
+			}
+		}
+		traffic = true
+		t := trafficTerms(p)
+		if t.RefGB > 0 {
+			lines = append(lines, i18n.T(lang, refToKeys[t.RefTo].screen, planTitleHTML(lang, p), t.RefGB))
 		}
 	}
-	return ""
+	switch {
+	case len(lines) > 0:
+		lines = append(lines, i18n.T(lang, "ref.traffic_only_gb"))
+	case traffic:
+		lines = append(lines, i18n.T(lang, "ref.no_traffic"))
+	}
+	lines = slices.DeleteFunc(lines, func(s string) bool { return s == "" })
+	return strings.Join(lines, "\n")
 }

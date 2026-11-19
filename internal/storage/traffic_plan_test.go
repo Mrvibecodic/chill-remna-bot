@@ -16,7 +16,7 @@ func TestTrafficPlanRoundTrip(t *testing.T) {
 			// Сроки у трафик-тарифа не хранятся никогда.
 			Durations: []model.PlanDuration{{Months: 1, Base: "100"}},
 			Traffic: &model.PlanTraffic{
-				Price: " 450 ", Stars: 300, AddSubStrategy: "DAY",
+				Price: " 450 ", Stars: 300, AddSubStrategy: "DAY", RefGB: 10, RefTo: model.RefToBoth,
 				Packs: []model.PlanPack{
 					{ID: "abc123", GB: 50, Price: "160", Stars: 110},
 					{ID: "abc123", GB: 10, Price: "1"}, // дубль ID — выброшен
@@ -37,7 +37,7 @@ func TestTrafficPlanRoundTrip(t *testing.T) {
 			t.Fatalf("инварианты трафик-тарифа не соблюдены: %+v", got)
 		}
 		tr := got.Traffic
-		if tr == nil || tr.Price != "450" || tr.Stars != 300 || tr.AddSubStrategy != "DAY" ||
+		if tr == nil || tr.Price != "450" || tr.Stars != 300 || tr.AddSubStrategy != "DAY" || tr.RefGB != 10 || tr.RefTo != model.RefToBoth ||
 			len(tr.Packs) != 2 || tr.Packs[0].ID != "abc123" || tr.Packs[1].GB != 100 {
 			t.Fatalf("условия трафика искажены: %+v", tr)
 		}

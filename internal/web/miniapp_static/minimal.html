@@ -1107,7 +1107,7 @@ SCREENS.ref=async function(a){
   if(r.invitee_value>0&&r.invitee_kind)h+='<div class="kv"><span class="k">'+esc(T('ref_friend'))+'</span><span class="v">'+esc(val(r.invitee_kind,r.invitee_value))+'</span></div>';
   if(r.percent>0)h+='<div class="kv"><span class="k">'+esc(T('ref_pct'))+'</span><span class="v">'+r.percent+'%</span></div>';
   h+='<div class="kv"><span class="k">'+esc(T('ref_count'))+'</span><span class="v">'+(r.count||0)+'</span></div><div class="kv"><span class="k">'+esc(T('ref_earned'))+'</span><span class="v">'+esc(rub(r.earned_kopecks||0))+'</span></div></div>';
-  if(r.note)h+='<div class="hint">'+esc(r.note)+'</div>';
+  if(r.note)h+='<div class="hint" style="white-space:pre-line">'+esc(r.note)+'</div>';
   var L=refLinks(r);
   if(L.length){var m=L[0];h+='<div class="link" onclick="copy(\''+jsq(m.u)+'\')"><code>'+esc(m.u)+'</code>'+IC.copy+'</div><div class="row2" style="margin-top:12px"><button class="btn" onclick="shareRef(\''+jsq(m.u)+'\','+(m.tg?1:0)+')">'+IC.send+esc(T('share'))+'</button><button class="btn sec" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+esc(T('copy'))+'</button></div>';}
   h+=refMore(L);
@@ -1133,7 +1133,7 @@ function refDesk(r){
   if(r.invitee_value>0&&r.invitee_kind)left+='<div class="kv"><span class="k">'+esc(T('ref_friend'))+'</span><span class="v">'+esc(val(r.invitee_kind,r.invitee_value))+'</span></div>';
   if(r.percent>0)left+='<div class="kv"><span class="k">'+esc(T('ref_pct'))+'</span><span class="v">'+r.percent+'%</span></div>';
   left+='</div>';
-  if(r.note)left+='<div class="hint">'+esc(r.note)+'</div>';
+  if(r.note)left+='<div class="hint" style="white-space:pre-line">'+esc(r.note)+'</div>';
   var right='',L=refLinks(r),m=L[0];
   if(m){
     right='<div class="card" style="margin-top:50px"><span class="lbl">'+esc(T('ref_link'))+'</span>'+

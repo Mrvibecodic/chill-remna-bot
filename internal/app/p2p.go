@@ -1784,7 +1784,7 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.applyPlanText(ctx, chatID, ui.adminInput, text)
 	case "plan_addsub_gb":
 		a.applyPlanAddSubGB(ctx, chatID, text)
-	case "plan_t_price", "plan_t_stars", "plan_t_gb":
+	case "plan_t_price", "plan_t_stars", "plan_t_gb", "plan_t_refgb":
 		a.applyTrafficInput(ctx, chatID, ui.adminInput, text)
 	case "plan_pk_add", "plan_pk_gb", "plan_pk_price", "plan_pk_stars":
 		a.applyPackInput(ctx, chatID, ui.adminInput, text)

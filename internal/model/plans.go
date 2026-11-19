@@ -86,7 +86,23 @@ type PlanTraffic struct {
 	Stars          int        `json:"stars,omitempty"`
 	Packs          []PlanPack `json:"packs,omitempty"`
 	AddSubStrategy string     `json:"addsub_strategy,omitempty"`
+	RefGB          int        `json:"ref_gb,omitempty"`
+	RefTo          string     `json:"ref_to,omitempty"`
 }
+
+const (
+	RefToReferrer = "referrer"
+	RefToInvitee  = "invitee"
+	RefToBoth     = "both"
+)
+
+func ValidRefTo(s string) bool {
+	return s == RefToReferrer || s == RefToInvitee || s == RefToBoth
+}
+
+func (t *PlanTraffic) RefForReferrer() bool { return t.RefGB > 0 && t.RefTo != RefToInvitee }
+
+func (t *PlanTraffic) RefForInvitee() bool { return t.RefGB > 0 && t.RefTo != RefToReferrer }
 
 type PlanPack struct {
 	ID    string `json:"id"`
@@ -341,6 +357,13 @@ func (p *Plan) normalizeTraffic() {
 	}
 	if t.AddSubStrategy != "" && !ValidStrategy(t.AddSubStrategy) {
 		t.AddSubStrategy = ""
+	}
+	t.RefGB = min(max(t.RefGB, 0), PlanTrafficMaxGB)
+	if !ValidRefTo(t.RefTo) {
+		t.RefTo = ""
+	}
+	if t.RefGB > 0 && t.RefTo == "" {
+		t.RefTo = RefToReferrer
 	}
 	seen := map[string]bool{}
 	packs := t.Packs[:0:0]

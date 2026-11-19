@@ -46,6 +46,24 @@ func TestPlanTrafficHelpers(t *testing.T) {
 	if (&Plan{}).AddSubStrategyOrDefault() != "" {
 		t.Fatal("у срочного тарифа своего сброса доп-подписки нет")
 	}
+	for _, c := range []struct {
+		gb, wantGB   int
+		to, wantTo   string
+		refr, invite bool
+	}{
+		{10, 10, "", RefToReferrer, true, false},
+		{10, 10, RefToInvitee, RefToInvitee, false, true},
+		{10, 10, RefToBoth, RefToBoth, true, true},
+		{10, 10, "x", RefToReferrer, true, false},
+		{-5, 0, RefToBoth, RefToBoth, false, false},
+		{PlanTrafficMaxGB + 1, PlanTrafficMaxGB, "", RefToReferrer, true, false},
+	} {
+		p := &Plan{Kind: PlanKindTraffic, Traffic: &PlanTraffic{RefGB: c.gb, RefTo: c.to}}
+		p.Normalize()
+		if tr := p.Traffic; tr.RefGB != c.wantGB || tr.RefTo != c.wantTo || tr.RefForReferrer() != c.refr || tr.RefForInvitee() != c.invite {
+			t.Fatalf("рефералка %+v → %+v", c, tr)
+		}
+	}
 	for id, ok := range map[string]bool{"abc123": true, "ABC123": false, "abc12": false, "abc1234": false, "ab-123": false} {
 		if ValidPackID(id) != ok {
 			t.Fatalf("ValidPackID(%q)", id)

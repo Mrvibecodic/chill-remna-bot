@@ -1236,7 +1236,7 @@ async function openMore(){
     if(ref.invitee_value>0&&ref.invitee_kind){var ib=(ref.invitee_kind==='days')?(ref.invitee_value+' дн.'):(ref.invitee_value+' ₽');h+=' Другу — подарок <b style="color:var(--text)">'+esc(ib)+'</b>.';}
     if(ref.percent>0)h+=' И ещё <b style="color:var(--text)">'+ref.percent+'%</b> с каждой его оплаты.';
     h+='</div>';
-    if(ref.note)h+='<div class="hint" style="margin-top:8px">'+esc(ref.note)+'</div>';
+    if(ref.note)h+='<div class="hint" style="margin-top:8px;white-space:pre-line">'+esc(ref.note)+'</div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13.5px"><span style="color:var(--muted)">Приглашено</span><b>'+(ref.count||0)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Заработано</span><b>'+rub(ref.earned_kopecks||0)+' ₽</b></div>';
     // Ссылки: в бота и на сайт кабинета; аккаунту без Telegram первой — на сайт.

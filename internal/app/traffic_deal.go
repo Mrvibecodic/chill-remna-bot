@@ -27,6 +27,7 @@ var (
 	errTrafficSnap   = errors.New("сделка трафика без условий трафика")
 	errPackNotOwner  = errors.New("тарифа пакета у покупателя нет")
 	errPackUnlimited = errors.New("у подписки безлимитный трафик")
+	errNoPanelUser   = errors.New("учётки в панели нет")
 )
 
 func (a *App) trafficSnapshotOf(p *model.Plan, pack *model.PlanPack) *model.PlanSnapshot {
@@ -175,6 +176,7 @@ func (a *App) closeTrafficDeal(ctx context.Context, telegramID int64, method, am
 	a.autoPayOffForTraffic(ctx, telegramID, method, applied)
 	if !grant {
 		a.notifyPlanGateBreach(ctx, telegramID, applied, breach)
+		a.trafficRefBonus(ctx, telegramID, method, extID, applied)
 	}
 	return d, nil
 }
@@ -328,39 +330,50 @@ func (a *App) finalizePack(ctx context.Context, telegramID int64, method, amount
 	return d, nil
 }
 
+// trafficGrowth — лимит владельца трафик-тарифа после прибавки gb ГБ. code —
+// его тариф; пустой — любой трафик-тариф.
+func (a *App) trafficGrowth(ctx context.Context, tgID int64, code string, gb int) (*remnawave.Client, *remnawave.PanelUser, int64, error) {
+	if owner := a.trafficOwner(ctx, tgID); owner == nil || (code != "" && owner.Code != code) {
+		return nil, nil, 0, errPackNotOwner
+	}
+	panel := a.panelClient()
+	if panel == nil {
+		return nil, nil, 0, errors.New("панель не подключена")
+	}
+	pu, err := panel.FindByTelegramID(ctx, tgID)
+	switch {
+	case err != nil:
+		return nil, nil, 0, err
+	case pu == nil:
+		return nil, nil, 0, errNoPanelUser
+	case pu.TrafficLimit <= 0:
+		return nil, nil, 0, errPackUnlimited
+	}
+	want := pu.TrafficLimit + int64(gb)<<30
+	if want < pu.TrafficLimit {
+		return nil, nil, 0, errors.New("переполнение лимита трафика")
+	}
+	return panel, pu, want, nil
+}
+
 func (a *App) applyPackLocked(ctx context.Context, telegramID int64, method, amount, extID string, snap *model.PlanSnapshot) (refund bool, err error) {
 	if snap.PackGB <= 0 || snap.PackGB > model.PlanTrafficMaxGB {
 		return false, errTrafficSnap
 	}
-	owner := a.trafficOwner(ctx, telegramID)
-	if owner == nil || owner.Code != snap.Code {
+	panel, pu, want, err := a.trafficGrowth(ctx, telegramID, snap.Code, snap.PackGB)
+	switch {
+	case errors.Is(err, errPackNotOwner):
 		a.payLog(ctx, method, extID, telegramID, "pack_refused", "пакет %s оплачен, а тарифа %s у покупателя нет", snap.PackID, snap.Code)
-		return true, errPackNotOwner
-	}
-	a.mu.Lock()
-	panel := a.panel
-	a.mu.Unlock()
-	if panel == nil {
-		a.payLog(ctx, method, extID, telegramID, "error", "панель не подключена")
-		return false, fmt.Errorf("панель не подключена")
-	}
-	pu, err := panel.FindByTelegramID(ctx, telegramID)
-	if err != nil {
+		return true, err
+	case errors.Is(err, errNoPanelUser), errors.Is(err, errPackUnlimited):
+		a.payLog(ctx, method, extID, telegramID, "pack_refused", "%v — прибавлять не к чему", err)
+		if errors.Is(err, errNoPanelUser) {
+			err = errPackNotOwner
+		}
+		return true, err
+	case err != nil:
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
 		return false, err
-	}
-	if pu == nil {
-		a.payLog(ctx, method, extID, telegramID, "pack_refused", "учётки в панели нет — прибавлять не к чему")
-		return true, errPackNotOwner
-	}
-	if pu.TrafficLimit <= 0 {
-		a.payLog(ctx, method, extID, telegramID, "pack_refused", "у подписки безлимитный трафик")
-		return true, errPackUnlimited
-	}
-	add := int64(snap.PackGB) * 1024 * 1024 * 1024
-	want := pu.TrafficLimit + add
-	if want < pu.TrafficLimit {
-		return false, errors.New("переполнение лимита трафика")
 	}
 	if !a.packTargetDone(ctx, extID, pu.TrafficLimit) {
 		a.payLog(ctx, method, extID, telegramID, packTargetStage, "+%d GB: limit=%d", snap.PackGB, want)

@@ -321,7 +321,7 @@ func (a *App) MiniReferral(ctx context.Context, tgID int64) web.MiniReferralDTO 
 		Percent:       cfg.Percent,
 		CabinetLink:   a.cabinetReferralLink(tgID),
 		CabinetFirst:  tgID < 0,
-		Note:          stripHTMLTags(a.referralTrafficNote(ctx, a.lang(tgID))),
+		Note:          stripHTMLTags(a.referralTrafficNote(ctx, tgID, a.lang(tgID))),
 	}
 }
 

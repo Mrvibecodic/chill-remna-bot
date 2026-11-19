@@ -243,6 +243,9 @@ func TestTrafficAdmin_ExportImport(t *testing.T) {
 	a.handleMessage(ctx, msgText(planAdmin, "450"))
 	planTap(t, a, "pln:pka:"+code)
 	a.handleMessage(ctx, msgText(planAdmin, "50 / 160 / 110"))
+	planTap(t, a, "pln:tin:r:"+code)
+	a.handleMessage(ctx, msgText(planAdmin, "7"))
+	planTap(t, a, "pln:rft:i:"+code)
 
 	planTap(t, a, "pln:exp:"+code)
 	data := fm.docs["plan_"+code+".json"]
@@ -263,7 +266,7 @@ func TestTrafficAdmin_ExportImport(t *testing.T) {
 	})
 	planTap(t, a, "pln:impok")
 	p, _ := fs.GetPlan(ctx, code)
-	if p == nil || !p.IsTraffic() || p.TrafficGB != 150 || p.Traffic.Price != "450" || len(p.Traffic.Packs) != 1 {
+	if p == nil || !p.IsTraffic() || p.TrafficGB != 150 || p.Traffic.Price != "450" || len(p.Traffic.Packs) != 1 || p.Traffic.RefGB != 7 || p.Traffic.RefTo != model.RefToInvitee {
 		t.Fatalf("импорт трафик-тарифа: %+v", p)
 	}
 
@@ -288,6 +291,9 @@ func TestTrafficAdmin_ExportImport(t *testing.T) {
 		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","kind":"traffic","durations":[{"months":1,"base":"1"}]}}`,
 		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","kind":"traffic","traffic":{"packs":[{"id":"abc123","gb":5}]}}}`,
 		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","traffic":{"price":"1"}}}`,
+		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","kind":"traffic","traffic":{"ref_gb":-1}}}`,
+		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","kind":"traffic","traffic":{"ref_gb":1000001}}}`,
+		`{"format":"remnabot-plan","version":3,"plan":{"code":"abcd","name":"x","kind":"traffic","traffic":{"ref_gb":5,"ref_to":"all"}}}`,
 	} {
 		if _, _, err := parsePlanFile([]byte(bad)); err == nil {
 			t.Errorf("принят неверный файл: %s", bad)

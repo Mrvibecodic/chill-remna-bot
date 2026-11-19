@@ -301,7 +301,7 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	var body string
 	if t := trafficTerms(p); p.IsTraffic() {
 		body = i18n.T(lang, "plans.card_traffic", planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc), limits,
-			html.EscapeString(priceShown(lang, t.Price, p.Currency)), starsShown(lang, t.Stars), len(t.Packs))
+			html.EscapeString(priceShown(lang, t.Price, p.Currency)), starsShown(lang, t.Stars), len(t.Packs), refLine(lang, t))
 	} else {
 		body = i18n.T(lang, "plans.card", planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc), limits,
 			html.EscapeString(planDurationsLine(lang, p)))
@@ -326,7 +326,9 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 		{btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code), btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
 	}
 	if p.IsTraffic() {
-		rows = slices.Insert(rows, 1, []models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_packs", len(trafficTerms(p).Packs)), "pln:pk:"+p.Code)})
+		rows = slices.Insert(rows, 1,
+			[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_packs", len(trafficTerms(p).Packs)), "pln:pk:"+p.Code)},
+			[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_ref"), "pln:rf:"+p.Code)})
 	}
 	// «Базовый» удалить нельзя: он мост к старой сетке цен, по которой продаёт
 	// предыдущий образ бота после откатa, и единственный тариф, который бот
@@ -538,6 +540,11 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		a.askTrafficInput(ctx, chatID, field, code)
 	case "pk":
 		a.showPlanPacks(ctx, chatID, arg)
+	case "rf":
+		a.showPlanRef(ctx, chatID, arg)
+	case "rft":
+		k, code, _ := strings.Cut(arg, ":")
+		a.setPlanRefTo(ctx, chatID, code, k)
 	case "pka":
 		a.askPackAdd(ctx, chatID, arg)
 	case "pke":
@@ -597,7 +604,7 @@ func (a *App) forgetPlanInput(chatID int64) {
 	switch ui.adminInput {
 	case "plan_name", "plan_desc", "plan_icon", "plan_access",
 		"plan_addsub_name", "plan_addsub_desc", "plan_addsub_gb",
-		"plan_t_price", "plan_t_stars", "plan_t_gb",
+		"plan_t_price", "plan_t_stars", "plan_t_gb", "plan_t_refgb",
 		"plan_pk_add", "plan_pk_gb", "plan_pk_price", "plan_pk_stars",
 		"baseprice", "price", "ykprice", "starprice",
 		"traffic_gb", "device_per", "device_limit", "currency",

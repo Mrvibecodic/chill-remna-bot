@@ -125,15 +125,20 @@ func trafficDealApp(t *testing.T) (*App, *fakeStore, *trafficPanel, *model.Plan)
 // двумя покупками заново выбирает пакет).
 func buyTrafficWithBalance(t *testing.T, a *App, code, packID string) {
 	t.Helper()
+	buyTrafficAs(t, a, trafficUID, code, packID)
+}
+
+func buyTrafficAs(t *testing.T, a *App, uid int64, code, packID string) {
+	t.Helper()
 	ctx := context.Background()
 	buySeq++
 	if err := a.storeRef().SetPurchaseIntent(ctx, &model.PurchaseIntent{
-		TelegramID: trafficUID, PlanCode: code, PackID: packID,
+		TelegramID: uid, PlanCode: code, PackID: packID,
 		CreatedAt: time.Now().UTC().Add(-time.Duration(buySeq) * time.Second).Format(time.RFC3339),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	a.payFromBalance(ctx, trafficUID)
+	a.payFromBalance(ctx, uid)
 }
 
 var buySeq int
@@ -283,6 +288,26 @@ func TestTrafficDeal_PackLostReply(t *testing.T) {
 	after, _ := fs.GetUser(ctx, trafficUID)
 	if after.Balance != before.Balance-16000 {
 		t.Fatalf("пакет не проведён: списано %d", before.Balance-after.Balance)
+	}
+}
+
+// Пакет чужого трафик-тарифа владельцу другого тарифа не прибавляется.
+func TestTrafficDeal_PackOfOtherPlanRefunded(t *testing.T) {
+	a, fs, panel, plan := trafficDealApp(t)
+	ctx := context.Background()
+	buyTrafficWithBalance(t, a, "trf150", "")
+	other := *plan
+	other.Code = "trf300"
+	if err := fs.SavePlan(ctx, &other); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := fs.GetPlan(ctx, other.Code)
+	d, err := a.closeTrafficDeal(ctx, trafficUID, model.PayMethodYooKassa, "160 ₽", "yk-pack-o", a.trafficSnapshotOf(got, got.Pack("pk5000")), false)
+	if err != nil || !d.refunded {
+		t.Fatalf("пакет чужого тарифа принят: %+v %v", d, err)
+	}
+	if _, limit, _, _ := panel.state(); limit != 150*gib {
+		t.Fatalf("лимит изменился: %d", limit)
 	}
 }
 

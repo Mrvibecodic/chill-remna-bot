@@ -131,6 +131,7 @@ var payErrorStages = map[string]bool{
 	"autopay_disabled":     true,
 	"precheckout_rejected": true,
 	"pack_refused":         true,
+	"ref_gb_error":         true,
 }
 
 const (
