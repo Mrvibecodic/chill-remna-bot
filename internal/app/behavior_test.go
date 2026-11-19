@@ -432,6 +432,7 @@ type fakeStore struct {
 	pays        map[int64]*model.Payment
 	media       map[string]string
 	pending     map[int64]*model.PendingInvoice
+	trafficInv  map[int64]*model.PendingInvoice
 	plans       map[string]*model.Plan
 	planAccess  map[string]model.PlanAccess
 	intents     map[int64]*model.PurchaseIntent
@@ -1178,7 +1179,7 @@ func (s *fakeStore) MostPopularPlan(_ context.Context) (int, int, error) {
 	counts := map[int]int{}
 	total := 0
 	for _, p := range s.pays {
-		if p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant {
+		if p.Status == model.PaymentPaid && p.Method != model.PayMethodGrant && !p.Snapshot.IsTraffic() {
 			counts[p.Months]++
 			total++
 		}
@@ -1757,6 +1758,7 @@ func (s *fakeStore) SavePlan(_ context.Context, p *model.Plan) error {
 		s.plans = map[string]*model.Plan{}
 	}
 	cp := *p
+	cp.Traffic = model.ClonePlanTraffic(p.Traffic)
 	cp.Normalize()
 	s.plans[cp.Code] = &cp
 	return nil
@@ -1769,13 +1771,16 @@ func (s *fakeStore) GetPlan(_ context.Context, code string) (*model.Plan, error)
 		return nil, nil
 	}
 	cp := *s.plans[code]
+	cp.Traffic = model.ClonePlanTraffic(cp.Traffic)
 	return &cp, nil
 }
 
 func (s *fakeStore) ListPlans(context.Context) ([]model.Plan, error) {
 	out := make([]model.Plan, 0, len(s.plans))
 	for _, p := range s.plans {
-		out = append(out, *p)
+		cp := *p
+		cp.Traffic = model.ClonePlanTraffic(p.Traffic)
+		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Order != out[j].Order {
@@ -2177,6 +2182,64 @@ func (s *fakeStore) PendingByExtID(_ context.Context, extID string) (*model.Pend
 		return nil, nil
 	}
 	for _, p := range s.pending {
+		if p.ExtID == extID {
+			cp := *p
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *fakeStore) AddTrafficInvoice(_ context.Context, p *model.PendingInvoice) error {
+	if s.trafficInv == nil {
+		s.trafficInv = map[int64]*model.PendingInvoice{}
+	}
+	if p.ID == 0 {
+		s.seq++
+		p.ID = s.seq
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	cp := *p
+	s.trafficInv[p.ID] = &cp
+	return nil
+}
+func (s *fakeStore) ListUnresolvedTraffic(_ context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error) {
+	var out []model.PendingInvoice
+	for _, p := range s.trafficInv {
+		if !p.Resolved && p.CreatedAt <= createdBefore {
+			out = append(out, *p)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (s *fakeStore) ResolveTraffic(_ context.Context, id int64) error {
+	if p, ok := s.trafficInv[id]; ok {
+		p.Resolved = true
+	}
+	return nil
+}
+func (s *fakeStore) ListUserTraffic(_ context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error) {
+	var out []model.PendingInvoice
+	for _, p := range s.trafficInv {
+		if !p.Resolved && p.TelegramID == telegramID && p.CreatedAt >= since {
+			out = append(out, *p)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (s *fakeStore) TrafficInvoiceByExtID(_ context.Context, extID string) (*model.PendingInvoice, error) {
+	if extID == "" {
+		return nil, nil
+	}
+	for _, p := range s.trafficInv {
 		if p.ExtID == extID {
 			cp := *p
 			return &cp, nil
