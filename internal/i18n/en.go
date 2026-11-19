@@ -1,6 +1,9 @@
 package i18n
 
 var en = map[string]string{
+	"btn.preview":                   "👁 Bot preview",
+	"btn.preview_exit":              "⚙️ Back to admin",
+	"menu.preview_note":             "👁 Preview: this is how a client sees the bot",
 	"plans.packs_full":              "⚠️ There are already %d packs — that's the maximum. Delete one to add a new one.",
 	"admin.pay_no_terms_traffic":    "⚠️ Payment %s was accepted, but the traffic plan or pack changed or was deleted meanwhile — nothing was provisioned.\nBuyer: %s\n\nThe Stars can be refunded with the button in the next message.",
 	"pay.no_terms_traffic":          "❌ Payment received, but the plan or pack changed meanwhile — it could not be provided. The administrator has been notified and will refund the Stars or contact you.",
@@ -337,7 +340,6 @@ var en = map[string]string{
 	"menu.cat_pay":            "💸 Sales",
 	"menu.cat_marketing":      "📣 Marketing",
 	"menu.cat_system":         "🛠 System",
-	"btn.storefront":          "🛒 Storefront",
 	"menu.admin_title":        "🛠 <b>Admin panel</b>\nChoose a section:",
 	"update.same_version":     "🔄 <b>The bot restarted</b>\n\nThe version did not change — there was nothing to update to, or the new image matched the current one.",
 	"update.done":             "✅ Bot updated and restarted.",

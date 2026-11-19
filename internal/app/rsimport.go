@@ -119,7 +119,7 @@ func (a *App) handleDocument(ctx context.Context, m *models.Message) {
 	if a.handleP2PDoc(ctx, m) {
 		return
 	}
-	if m.From == nil || m.From.ID != a.cfg.AdminID {
+	if m.From == nil || m.From.ID != a.cfg.AdminID || a.inPreview(chatID) {
 		return
 	}
 	ui := a.getUI(chatID)

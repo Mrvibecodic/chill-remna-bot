@@ -953,6 +953,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	// Команда админа ведёт в админку, даже если сейчас открыта витрина.
 	if isAdmin && strings.HasPrefix(text, "/") {
 		ctx = withAdminFlow(ctx)
+		a.getUI(chatID).preview = false
 	}
 
 	// Новый текст бота может начинаться с «/» (например, подсказка про
@@ -980,6 +981,9 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		a.msg.Delete(ctx, chatID, m.ID)
 		if isAdmin {
 			a.clearTextInput(ctx, chatID)
+		}
+		if a.inPreview(chatID) {
+			ctx = withClientFlow(ctx)
 		}
 		a.enterHome(ctx, chatID, isAdmin, firstName, username)
 		return
@@ -1086,7 +1090,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 		a.setTopUpCustom(ctx, chatID, text)
 		return
 	}
-	if !isAdmin {
+	if !isAdmin || a.inPreview(chatID) {
 		// Обычный человек прислал текст, которого никто не ждёт: раньше он
 		// исчезал молча. Чаще всего это ответ на просьбу ввести что-то, чьё
 		// ожидание не пережило перезапуск бота.

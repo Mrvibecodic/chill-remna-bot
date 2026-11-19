@@ -155,6 +155,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		} else {
 			ctx = withAdminFlow(ctx)
 		}
+		ctx = a.previewFlow(ctx, chatID, cq.Data)
 	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 	// Любая кнопка вне редактора текстов снимает ожидание нового текста:

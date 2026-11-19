@@ -344,7 +344,7 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 	return [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "menu.cat_pay"), "menu:pay"), btn(i18n.T(lang, "menu.cat_marketing"), "menu:marketing")},
 		{btn(i18n.T(lang, "menu.cat_iface"), "menu:iface"), btn(i18n.T(lang, "btn.users"), "menu:users")},
-		{btn(i18n.T(lang, "menu.cat_system"), "menu:system"), btn(i18n.T(lang, "btn.storefront"), "menu:buy")},
+		{btn(i18n.T(lang, "menu.cat_system"), "menu:system"), btn(i18n.T(lang, "btn.preview"), "menu:preview")},
 	}
 }
 
@@ -689,6 +689,7 @@ func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name str
 // она уже есть, а служебное сообщение для неё мелькало между «обновляем» и
 // главной.
 func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name, note string) {
+	isAdmin = isAdmin && !a.inPreview(chatID)
 	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
 	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
 	if !isAdmin && a.legalStartRequired(ctx, chatID) {
@@ -720,6 +721,9 @@ func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name
 			rows = append(rows, row)
 		}
 		rows = append(rows, a.contactRows()...)
+		if a.inPreview(chatID) {
+			caption, ents, rows = a.previewMenu(lang, caption, ents, rows)
+		}
 	}
 	if note != "" && len(ents) == 0 {
 		caption = note + "\n\n" + caption
@@ -881,7 +885,7 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 			a.showSquads(ctx, chatID)
 		}
 	case "trial":
-		if isAdmin {
+		if isAdmin && !a.inPreview(chatID) {
 			a.showTrialAdmin(ctx, chatID)
 		} else {
 			if a.legalGateOrAsk(ctx, chatID) {
@@ -924,6 +928,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "manage":
 		if isAdmin {
 			a.showMenu(ctx, chatID, true, name)
+		}
+	case "preview":
+		if isAdmin {
+			a.showMenu(ctx, chatID, false, name)
 		}
 	case "addsub":
 		if isAdmin {

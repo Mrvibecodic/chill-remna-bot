@@ -866,26 +866,33 @@ func (a *App) onP2PUser(ctx context.Context, chatID int64, val string) {
 
 func (a *App) handlePhoto(ctx context.Context, m *models.Message) {
 	chatID := m.Chat.ID
-	ui := a.getUI(chatID)
-	if ui.awaitLogo != "" && chatID == a.cfg.AdminID {
-		ph := m.Photo[len(m.Photo)-1]
-		a.setWebUILogoFile(ctx, chatID, ph.FileID, int64(ph.FileSize))
-		return
-	}
-	if ui.awaitSectionBanner != "" {
-		section := ui.awaitSectionBanner
-		ui.awaitSectionBanner = ""
-		a.setSectionBannerFile(ctx, chatID, section, m.Photo[len(m.Photo)-1].FileID)
-		return
-	}
-	if ui.welcomeAwait == "img" {
-		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
+	if !a.inPreview(chatID) && a.adminPhoto(ctx, chatID, m) {
 		return
 	}
 	if !a.awaitingReceipt(ctx, chatID) {
 		return
 	}
 	a.submitP2PReceipt(ctx, m, m.Photo[len(m.Photo)-1].FileID, false)
+}
+
+func (a *App) adminPhoto(ctx context.Context, chatID int64, m *models.Message) bool {
+	ui := a.getUI(chatID)
+	if ui.awaitLogo != "" && chatID == a.cfg.AdminID {
+		ph := m.Photo[len(m.Photo)-1]
+		a.setWebUILogoFile(ctx, chatID, ph.FileID, int64(ph.FileSize))
+		return true
+	}
+	if ui.awaitSectionBanner != "" {
+		section := ui.awaitSectionBanner
+		ui.awaitSectionBanner = ""
+		a.setSectionBannerFile(ctx, chatID, section, m.Photo[len(m.Photo)-1].FileID)
+		return true
+	}
+	if ui.welcomeAwait == "img" {
+		a.setWelcomeImageFile(ctx, chatID, m.Photo[len(m.Photo)-1].FileID)
+		return true
+	}
+	return false
 }
 
 // handleP2PDoc принимает чек об оплате, присланный файлом, а не фотографией:
