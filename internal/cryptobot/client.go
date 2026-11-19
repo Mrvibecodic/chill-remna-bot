@@ -87,23 +87,26 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 // CryptoBot, поэтому текст задаёт вызывающий: пополнению баланса не подходит
 // «подписка на N месяцев», а при N=0 получалось «подписка на 0 мес.».
 func (c *Client) CreateInvoice(ctx context.Context, amount, fiat, acceptedAssets, description string, telegramID int64, months int) (*Invoice, error) {
+	if description == "" {
+		description = fmt.Sprintf("VPN subscription %d mo", months)
+	}
+	return c.CreateInvoicePayload(ctx, amount, fiat, acceptedAssets, description, fmt.Sprintf("%d:%d", telegramID, months))
+}
+
+func (c *Client) CreateInvoicePayload(ctx context.Context, amount, fiat, acceptedAssets, description, payload string) (*Invoice, error) {
 	if acceptedAssets == "" {
 		acceptedAssets = "USDT"
 	}
 	if fiat == "" {
 		fiat = "RUB"
 	}
-	if description == "" {
-		description = fmt.Sprintf("VPN subscription %d mo", months)
-	}
-
 	body := map[string]any{
 		"currency_type":   "fiat",
 		"fiat":            fiat,
 		"amount":          amount,
 		"accepted_assets": acceptedAssets,
 		"description":     description,
-		"payload":         fmt.Sprintf("%d:%d", telegramID, months),
+		"payload":         payload,
 		"expires_in":      60 * 30,
 	}
 	var r response[Invoice]

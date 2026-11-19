@@ -501,3 +501,24 @@ func TestUpsertAddSubOnlyExisting(t *testing.T) {
 		t.Fatalf("доп-подписка не обновлена: done=%v posts=%v patches=%v", res.Done, p.posts, p.patches)
 	}
 }
+
+// Своя стратегия сброса доп-подписки (трафик-тариф) перекрывает стратегию
+// основной; без неё доп-подписка сбрасывается как основная.
+func TestUpsertAddSubOwnStrategy(t *testing.T) {
+	p := newAddSubPanel("vasya")
+	c := addSubClient(t, p)
+	if _, err := c.UpsertAddSub(context.Background(), 42, AddSubOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(p.posts[0]["trafficLimitStrategy"]); got != "MONTH" {
+		t.Fatalf("без своей стратегии — как у основной, получено %q", got)
+	}
+	p2 := newAddSubPanel("petya")
+	c2 := addSubClient(t, p2)
+	if _, err := c2.UpsertAddSub(context.Background(), 42, AddSubOptions{Strategy: "MONTH_ROLLING"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(p2.posts[0]["trafficLimitStrategy"]); got != "MONTH_ROLLING" {
+		t.Fatalf("своя стратегия доп-подписки не применилась: %q", got)
+	}
+}

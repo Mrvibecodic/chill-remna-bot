@@ -806,6 +806,7 @@ type AddSubOptions struct {
 	// OnlyExisting leaves users without an add-on alone: the pass rewrites the
 	// add-ons that already exist and creates none.
 	OnlyExisting bool
+	Strategy     string
 }
 
 // AddSubUpsert reports what an upsert actually did.
@@ -857,6 +858,9 @@ func (c *Client) UpsertAddSubForUser(ctx context.Context, main PanelUser, opt Ad
 		DeviceLimit:    main.DeviceLimit,
 		Strategy:       main.Strategy,
 		InternalSquads: opt.InternalSquads,
+	}
+	if opt.Strategy != "" {
+		limits.Strategy = opt.Strategy
 	}
 	existing, want, err := c.findAddSub(ctx, main.Username, main.TelegramID, opt.Suffix)
 	if err != nil {
@@ -1113,6 +1117,16 @@ type UserLimits struct {
 	InternalSquads []string
 	ExternalSquad  string
 	Strategy       string
+	FromNow        bool
+}
+
+func termBase(existing *panelUser, fromNow bool) *panelUser {
+	if !fromNow || existing == nil || !IsEternal(existing.ExpireAt) {
+		return existing
+	}
+	cp := *existing
+	cp.ExpireAt = ""
+	return &cp
 }
 
 // CreateOrUpdateUser продлевает (или создаёт) подписку на months календарных
@@ -1122,8 +1136,24 @@ type UserLimits struct {
 // обычное продление.
 func (c *Client) CreateOrUpdateUser(ctx context.Context, telegramID int64, months, extraDays int, limits UserLimits) (string, string, error) {
 	return c.grant(ctx, telegramID, limits, true, func(existing *panelUser) string {
-		return nextExpire(existing, months, extraDays)
+		return nextExpire(termBase(existing, limits.FromNow), months, extraDays)
 	})
+}
+
+const EternalExpire = "2099-07-01T00:00:00Z"
+
+func IsEternal(raw string) bool {
+	t, err := time.Parse(time.RFC3339, raw)
+	return err == nil && t.UTC().Year() >= 2099
+}
+
+func (c *Client) GrantTraffic(ctx context.Context, telegramID int64, limits UserLimits) (GrantResult, error) {
+	return c.grantCore(ctx, telegramID, limits, true, func(*panelUser) string { return EternalExpire })
+}
+
+type GrantResult struct {
+	Link, ExpireAt string
+	ResetErr       error
 }
 
 func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, days int, limits UserLimits) (string, string, error) {
@@ -1139,7 +1169,7 @@ func (c *Client) CreateOrUpdateUserDays(ctx context.Context, telegramID int64, d
 // месячный объём каждую неделю. Когда сбрасывать, решает вызывающий.
 func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, extraDays int, limits UserLimits, reset bool) (string, string, error) {
 	return c.grant(ctx, telegramID, limits, reset, func(existing *panelUser) string {
-		return nextExpireDays(existing, days, extraDays)
+		return nextExpireDays(termBase(existing, limits.FromNow), days, extraDays)
 	})
 }
 
@@ -1148,16 +1178,21 @@ func (c *Client) ExtendUserDays(ctx context.Context, telegramID int64, days, ext
 // считает expire от найденной учётки (nil — её нет). reset — сбросить ли
 // трафик продлённой учётке.
 func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits, reset bool, expire func(existing *panelUser) string) (string, string, error) {
+	r, err := c.grantCore(ctx, telegramID, limits, reset, expire)
+	return r.Link, r.ExpireAt, err
+}
+
+func (c *Client) grantCore(ctx context.Context, telegramID int64, limits UserLimits, reset bool, expire func(existing *panelUser) string) (GrantResult, error) {
 	existing, err := c.findByTelegram(ctx, telegramID)
 	if err != nil {
-		return "", "", err
+		return GrantResult{}, err
 	}
 	until := expire(existing)
 	email := c.emailToWrite(ctx, telegramID)
 
 	if existing != nil && !existing.ref().Empty() {
 		if !ownedByBot(existing, telegramID) {
-			return "", "", fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
+			return GrantResult{}, fmt.Errorf("аккаунт этого пользователя создан НЕ через бота — изменять его запрещено")
 		}
 		patch := existing.ref().apply(map[string]any{"expireAt": until})
 		// Учётке, заведённой до того, как бот стал вписывать почту, — при
@@ -1167,26 +1202,28 @@ func (c *Client) grant(ctx context.Context, telegramID int64, limits UserLimits,
 		}
 		lim, err := c.liveLimits(ctx, limits, false)
 		if err != nil {
-			return "", "", err
+			return GrantResult{}, err
 		}
 		applyLimits(patch, lim)
 		link, expireAt, err := c.upsertCall(ctx, http.MethodPatch, "/api/users", patch)
+		r := GrantResult{Link: link, ExpireAt: expireAt}
 		if err == nil && reset {
-			_ = c.ResetTraffic(ctx, existing.ref())
+			r.ResetErr = c.ResetTraffic(ctx, existing.ref())
 		}
-		return link, expireAt, err
+		return r, err
 	}
 
 	lim, err := c.liveLimits(ctx, limits, true)
 	if err != nil {
-		return "", "", err
+		return GrantResult{}, err
 	}
 	body := newUserBody(telegramID, until)
 	if email != "" {
 		body["email"] = email
 	}
 	applyLimits(body, lim)
-	return c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	link, expireAt, err := c.upsertCall(ctx, http.MethodPost, "/api/users", body)
+	return GrantResult{Link: link, ExpireAt: expireAt}, err
 }
 
 func applyLimits(body map[string]any, l UserLimits) {
