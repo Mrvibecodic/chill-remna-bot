@@ -154,13 +154,17 @@ func (a *App) saveAutoPayFromPayment(ctx context.Context, chatID int64, months i
 		})
 }
 
+func (a *App) autoPayFor(ctx context.Context, tgID int64) bool {
+	return a.autoPayAvailable() && !a.onTrafficPlan(ctx, tgID)
+}
+
 // autoPayRow — строка «🔁 Автопродление: вкл/выкл» для экранов подписки.
 // Показывается, если автопродление доступно в магазине или уже подключено у
 // этого пользователя (выключить его должно быть можно всегда, в том числе когда
 // подписка уже кончилась или заблокирована).
 func (a *App) autoPayRow(ctx context.Context, chatID int64, lang string) []models.InlineKeyboardButton {
 	on := a.autoPayOn(ctx, chatID)
-	if !a.autoPayAvailable() && !on {
+	if !a.autoPayFor(ctx, chatID) && !on {
 		return nil
 	}
 	state := i18n.T(lang, "ap.state_off")
@@ -187,8 +191,12 @@ func (a *App) showAutoPay(ctx context.Context, chatID int64) {
 	on := ap != nil && ap.Enabled && ap.MethodID != ""
 	back := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.back"), "menu:mysubs"), btn(i18n.T(lang, "btn.home"), "menu:home")}
 
-	if !a.autoPayAvailable() && !on {
-		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "ap.unavailable"),
+	if !a.autoPayFor(ctx, chatID) && !on {
+		key := "ap.unavailable"
+		if a.autoPayAvailable() {
+			key = "ap.traffic_none"
+		}
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, key),
 			[][]models.InlineKeyboardButton{back})
 		return
 	}
@@ -247,7 +255,7 @@ func (a *App) onAutoPayUser(ctx context.Context, chatID int64, val string) {
 			})
 	case "on":
 		ap := a.getAutoPay(ctx, chatID)
-		if ap == nil || ap.MethodID == "" || !a.autoPayAvailable() {
+		if ap == nil || ap.MethodID == "" || !a.autoPayFor(ctx, chatID) {
 			a.showAutoPay(ctx, chatID)
 			return
 		}
@@ -754,12 +762,15 @@ func (a *App) SetAutoPayEnabled(ctx context.Context, tgID int64, on bool) error 
 	if on && !a.autoPayAvailable() {
 		return fmt.Errorf("автопродление отключено администратором")
 	}
+	if on && a.onTrafficPlan(ctx, tgID) {
+		return errUserText(i18n.T(a.lang(tgID), "ap.traffic_none_plain"))
+	}
 	return a.store.SetAutoPayEnabled(ctx, tgID, on)
 }
 
 // AutoPayState отдаёт состояние автопродления наружу (мини-апп / кабинет).
 func (a *App) AutoPayState(ctx context.Context, tgID int64) (available, on bool, months int, title string) {
-	available = a.autoPayAvailable()
+	available = a.autoPayFor(ctx, tgID)
 	ap := a.getAutoPay(ctx, tgID)
 	if ap == nil {
 		return available, false, 0, ""

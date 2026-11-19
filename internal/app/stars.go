@@ -29,6 +29,10 @@ func (a *App) startStars(ctx context.Context, chatID int64) {
 	if s == nil {
 		return
 	}
+	if s.traffic() {
+		a.sendTrafficStarsInvoice(ctx, chatID, s)
+		return
+	}
 	months := s.Months
 	amount := a.saleStars(s)
 	// Базовая цена — признак того, что срок вообще продаётся: витрина, тариф и
@@ -71,6 +75,9 @@ func starsPayload(payload string) (months int, forID int64) {
 }
 
 func (a *App) handlePreCheckout(ctx context.Context, q *models.PreCheckoutQuery) {
+	if a.trafficPreCheckout(ctx, q) {
+		return
+	}
 	months, forID := starsPayload(q.InvoicePayload)
 	var fromID int64
 	if q.From != nil {
@@ -143,6 +150,9 @@ func (a *App) handleSuccessfulPayment(ctx context.Context, m *models.Message) {
 	months, _ := starsPayload(sp.InvoicePayload)
 	amount := strconv.Itoa(sp.TotalAmount) + " ⭐"
 	a.payLog(ctx, model.PayMethodStars, sp.TelegramPaymentChargeID, chatID, "payment_received", "total=%d payload=%s", sp.TotalAmount, sp.InvoicePayload)
+	if a.trafficStarsPaid(ctx, chatID, sp.InvoicePayload, sp.TelegramPaymentChargeID, sp.TotalAmount, false) {
+		return
+	}
 	if months <= 0 {
 		// Payload наш и проверен на предпроверке, так что сюда попасть можно
 		// только при испорченной доставке. Подставлять срок «по умолчанию»
@@ -318,6 +328,9 @@ func (a *App) formatStarPrices() string {
 var errStarsUnavailable = errors.New("оплата звёздами недоступна")
 
 func (a *App) starsInvoiceLink(ctx context.Context, chatID int64, s *sale) (string, error) {
+	if s.traffic() {
+		return a.trafficStarsLink(ctx, chatID, s)
+	}
 	months := s.Months
 	amount := a.saleStars(s)
 	// Тот же гейт, что и в чате: срок без базовой цены с продажи снят.

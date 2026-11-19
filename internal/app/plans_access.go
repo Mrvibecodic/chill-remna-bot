@@ -156,6 +156,10 @@ func (a *App) showRenew(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
+	if snap.IsTraffic() || p.IsTraffic() {
+		a.showTrafficPacks(ctx, chatID)
+		return
+	}
 	if p == nil || !p.Enabled || !planSellsAnything(p) || !a.planAccessibleFor(ctx, p, chatID) {
 		// Сценарий 3: тариф удалён, выключен или закрыт для покупателя.
 		a.sendKB(ctx, chatID, i18n.T(lang, "renew.plan_gone"), [][]models.InlineKeyboardButton{
@@ -330,10 +334,10 @@ func (a *App) notifyPlanGateBreach(ctx context.Context, tgID int64, snap *model.
 		return
 	}
 	alang := a.lang(a.cfg.AdminID)
-	name := snap.Name
-	if name == "" {
-		name = snap.Code
+	name, who := escapeName(snapTitle(snap)), a.userLabelByID(ctx, tgID)
+	if snap.IsTraffic() {
+		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "plans.breach_admin_traffic", name, who, reason))
+		return
 	}
-	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "plans.breach_admin",
-		escapeName(name), a.userLabelByID(ctx, tgID), snap.Months, reason))
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "plans.breach_admin", name, who, snap.Months, reason))
 }

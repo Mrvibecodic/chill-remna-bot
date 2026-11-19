@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -64,10 +65,10 @@ func cbFiat(cur string) (string, bool) {
 
 // cbExpired — счёт протух: ждать нечего, кнопку повторной проверки не
 // показываем и гасим счёт, чтобы сверка его больше не опрашивала.
-func (a *App) cbExpired(ctx context.Context, chatID int64, extID string, pendingID int64) {
+func (a *App) cbExpired(ctx context.Context, chatID int64, extID string, inv *model.PendingInvoice, traffic bool) {
 	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "expired", "счёт истёк — ожидание оплаты прекращено")
-	if a.store != nil && pendingID != 0 {
-		_ = a.store.ResolvePending(ctx, pendingID)
+	if a.store != nil {
+		resolveAny(ctx, a.store, inv, traffic)
 	}
 	lang := a.lang(chatID)
 	a.sendKB(ctx, chatID, i18n.T(lang, "cb.expired"), [][]models.InlineKeyboardButton{
@@ -119,12 +120,17 @@ func (a *App) startCryptoBot(ctx context.Context, chatID int64) {
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	payURL, invoiceID, err := a.cbCreateInvoiceSnap(ctx, chatID, months, price, false, a.saleSnapshot(s))
+	snap := a.saleSnapshot(s)
+	prompt := i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))
+	if s.traffic() {
+		prompt = i18n.T(lang, "pay.prompt_traffic", trafficInvoiceDesc(lang, snap), price+curSuffix(curSymbol(a.hlCurrency())))
+	}
+	payURL, invoiceID, err := a.cbCreateInvoiceSnap(ctx, chatID, months, price, false, snap)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "CryptoBot", err))
 		return
 	}
-	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodCryptoBot, i18n.T(lang, "cb.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodCryptoBot, prompt), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "cb.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "cb.btn_check"), "cbc:"+strconv.FormatInt(invoiceID, 10)+":"+strconv.Itoa(months))},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -151,8 +157,9 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 	}
 
 	var pending *model.PendingInvoice
+	var pendingTraffic bool
 	if a.store != nil {
-		pending, _ = a.store.PendingByExtID(ctx, extID)
+		pending, pendingTraffic = a.invoiceAny(ctx, a.store, extID)
 	}
 	inv, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
@@ -168,11 +175,7 @@ func (a *App) onCBCheck(ctx context.Context, chatID int64, val string) {
 		// Счёт CryptoBot живёт 30 минут, а кнопка «Проверить оплату» — вечно.
 		// «Оплата ещё не поступила, попробуйте через минуту» на мёртвом счёте —
 		// это предложение ждать того, чего не будет.
-		var pendingID int64
-		if pending != nil {
-			pendingID = pending.ID
-		}
-		a.cbExpired(ctx, chatID, extID, pendingID)
+		a.cbExpired(ctx, chatID, extID, pending, pendingTraffic)
 		return
 	}
 	if inv.Status != "paid" {
@@ -217,6 +220,20 @@ const (
 // «Проверить оплату»: кому, на какой срок и на каких условиях выдавать, оба
 // обязаны решать одинаково.
 func (a *App) settleCryptoBot(ctx context.Context, extID, payload, rawAmount string) (cbSettled, error) {
+	if inv := a.trafficInvoice(ctx, extID); inv != nil {
+		res, err := a.settleTraffic(ctx, inv, a.cryptoAmount(inv.Snapshot, 0, rawAmount))
+		switch res {
+		case trafficIssued:
+			return cbIssued, nil
+		case trafficAlready:
+			return cbAlready, nil
+		case trafficHeld:
+			return cbHeld, err
+		case trafficOrphan:
+			return cbOrphan, err
+		}
+		return cbFailed, err
+	}
 	var pending *model.PendingInvoice
 	if a.store != nil {
 		pending, _ = a.store.PendingByExtID(ctx, extID)
@@ -321,6 +338,10 @@ func (a *App) onCBAdmin(ctx context.Context, chatID int64, val string) {
 	}
 }
 
+func cbTrafficPayload(chatID int64) string {
+	return strconv.FormatInt(chatID, 10) + ":t"
+}
+
 // cbCreateInvoiceSnap creates a CryptoBot invoice + pending record and returns
 // the pay URL and invoice id. Shared by chat flow and Mini App. snap == nil означает
 // «Базовый по текущей сетке».
@@ -343,17 +364,29 @@ func (a *App) cbCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 			"валюта прайса %q не поддерживается CryptoBot — счёт не выставлен", a.pricing().Currency)
 		return "", 0, errors.New(i18n.T(a.lang(chatID), "cb.cur_unsupported"))
 	}
-	inv, err := client.CreateInvoice(ctx, price, fiat, cfg.Asset, "", chatID, months)
+	what := fmt.Sprintf("purchase months=%d", months)
+	var inv *cryptobot.Invoice
+	var err error
+	if snap.IsTraffic() {
+		what = trafficPurpose(snap) + " " + snap.Code
+		inv, err = client.CreateInvoicePayload(ctx, price, fiat, cfg.Asset, trafficInvoiceDesc(a.lang(chatID), snap), cbTrafficPayload(chatID))
+	} else {
+		inv, err = client.CreateInvoice(ctx, price, fiat, cfg.Asset, "", chatID, months)
+	}
 	if err != nil {
-		a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
+		a.payLog(ctx, model.PayMethodCryptoBot, "", chatID, "invoice_error", "%s: %v", what, err)
 		return "", 0, err
 	}
-	a.payLog(ctx, model.PayMethodCryptoBot, "cb:"+strconv.FormatInt(inv.InvoiceID, 10), chatID, "invoice_created", "purchase months=%d price=%s %s assets=%s", months, price, fiat, cfg.Asset)
-	if snap == nil {
-		snap = a.planSnapshot(months)
-	}
-	if a.store != nil {
-		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: "cb:" + strconv.FormatInt(inv.InvoiceID, 10), TelegramID: chatID, Months: months, Snapshot: snap})
+	extID := "cb:" + strconv.FormatInt(inv.InvoiceID, 10)
+	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "invoice_created", "%s price=%s %s assets=%s", what, price, fiat, cfg.Asset)
+	switch {
+	case snap.IsTraffic():
+		a.addTrafficInvoice(ctx, model.PayMethodCryptoBot, extID, chatID, 0, snap)
+	case a.store != nil:
+		if snap == nil {
+			snap = a.planSnapshot(months)
+		}
+		_ = a.store.AddPendingInvoice(ctx, &model.PendingInvoice{Method: model.PayMethodCryptoBot, ExtID: extID, TelegramID: chatID, Months: months, Snapshot: snap})
 	}
 	payURL := inv.MiniAppInvoiceURL
 	if web && inv.WebAppInvoiceURL != "" {

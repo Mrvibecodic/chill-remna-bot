@@ -241,7 +241,7 @@ func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
 		return false
 	}
 	u, _ := a.store.GetUser(ctx, chatID)
-	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" {
+	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" || u.Snapshot.IsTraffic() {
 		return false
 	}
 	if u.SubExpireAt == "" {
@@ -707,6 +707,9 @@ func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name
 		ctx = withAdminClosed(ctx)
 	} else {
 		rows = append(rows, a.navRow(ctx, chatID))
+		if row := a.buyTrafficRow(ctx, chatID); row != nil {
+			rows = append(rows, row)
+		}
 		if row := a.miniAppButtonRow(lang); row != nil {
 			rows = append(rows, row)
 		}

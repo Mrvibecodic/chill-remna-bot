@@ -7,10 +7,14 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"remnabot/internal/i18n"
+	"remnabot/internal/remnawave"
 )
 
 func (a *App) subActiveText(ctx context.Context, chatID int64, link, expireAt string) string {
 	lang := a.lang(chatID)
+	if remnawave.IsEternal(expireAt) {
+		return i18n.T(lang, "sub.active_eternal", a.displayNameByID(ctx, chatID), link, link)
+	}
 	return i18n.T(lang, "sub.active", a.displayNameByID(ctx, chatID), formatExpire(expireAt, lang), link, link)
 }
 
@@ -54,7 +58,7 @@ func (a *App) supportURL() string {
 var displayTZ = time.FixedZone("MSK", 3*60*60)
 
 func formatExpire(raw, lang string) string {
-	if raw == "" {
+	if raw == "" || remnawave.IsEternal(raw) {
 		return i18n.T(lang, "sub.no_expire")
 	}
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {

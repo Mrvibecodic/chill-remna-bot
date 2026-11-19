@@ -69,6 +69,9 @@ func (a *App) showPlanAddSub(ctx context.Context, chatID int64, code string) {
 	b.WriteString("\n\n")
 	b.WriteString(i18n.T(lang, "plans.addsub_terms",
 		a.planAddSubTrafficLabel(lang, p), html.EscapeString(a.planAddSubSquadsLabel(ctx, lang, p))))
+	if p.IsTraffic() {
+		b.WriteString(i18n.T(lang, "plans.addsub_reset_line", addSubResetName(lang, p.AddSubStrategyOrDefault())))
+	}
 	if !infraOn {
 		b.WriteString("\n\n")
 		b.WriteString(i18n.T(lang, "plans.addsub_infra_off"))
@@ -96,8 +99,11 @@ func (a *App) showPlanAddSub(ctx context.Context, chatID int64, code string) {
 			btn(i18n.T(lang, "plans.btn_addsub_gb"), "pln:ast:"+code),
 			btn(i18n.T(lang, "plans.btn_addsub_squads"), "pln:asq:"+code),
 		},
-		navBack(lang, "pln:open:"+code),
 	)
+	if p.IsTraffic() {
+		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_as_reset"), "pln:asr:"+code)})
+	}
+	rows = append(rows, navBack(lang, "pln:open:"+code))
 	a.sendPayKB(ctx, chatID, b.String(), rows)
 }
 

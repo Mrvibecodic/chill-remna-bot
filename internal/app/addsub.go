@@ -49,6 +49,11 @@ func applyAddSubSnap(opt *remnawave.AddSubOptions, snap *model.PlanSnapshot, liv
 	if snap == nil {
 		return false
 	}
+	if model.ValidStrategy(snap.AddSubStrategy) {
+		opt.Strategy = snap.AddSubStrategy
+	} else if snap.IsTraffic() {
+		opt.Strategy = model.DefaultAddSubStrategy
+	}
 	if snap.AddSubTrafficGB != nil && *snap.AddSubTrafficGB >= 0 {
 		opt.TrafficBytes = int64(*snap.AddSubTrafficGB) * 1024 * 1024 * 1024
 	}
@@ -135,7 +140,11 @@ func anySquadKnown(known []remnawave.SquadFull, ids []string) bool {
 func (a *App) addSubTermsText(ctx context.Context, lang string, p *model.Plan) string {
 	gb, g := a.addSubShown(ctx, p)
 	var lines []string
-	if line := i18n.T(lang, "buy.addsub_traffic", trafficValue(lang, p.Strategy, gb)); line != "" {
+	strategy := p.Strategy
+	if p.IsTraffic() {
+		strategy = p.AddSubStrategyOrDefault()
+	}
+	if line := i18n.T(lang, "buy.addsub_traffic", trafficValue(lang, strategy, gb)); line != "" {
 		lines = append(lines, line)
 	}
 	if len(g.countries) > 0 {
@@ -260,6 +269,8 @@ func (a *App) syncAddSubTrial(ctx context.Context, telegramID int64) {
 	}
 	snap.AddSubTrafficGB = nil
 	snap.AddSubSquads = nil
+	snap.AddSubStrategy = ""
+	snap.Kind = ""
 	a.syncAddSubSnap(ctx, telegramID, false, snap)
 }
 

@@ -74,9 +74,15 @@ func (a *App) rsPlanMap(ctx context.Context) (map[string]*model.Plan, error) {
 	}
 	out := make(map[string]*model.Plan, len(list))
 	for i := range list {
-		out[list[i].Code] = &list[i]
+		if rsLinkable(&list[i]) {
+			out[list[i].Code] = &list[i]
+		}
 	}
 	return out, nil
+}
+
+func rsLinkable(p *model.Plan) bool {
+	return p.KnownKind() && !p.IsTraffic()
 }
 
 // rsStorageFail — экран сбоя базы на шагах связывания.
@@ -175,6 +181,9 @@ func (a *App) showRSLinkPick(ctx context.Context, chatID, planID int64) {
 	var rows [][]models.InlineKeyboardButton
 	for j := range list {
 		bp := &list[j]
+		if !rsLinkable(bp) {
+			continue
+		}
 		title := planTitle(lang, bp)
 		items = append(items, i18n.T(lang, "rsimp.pick_item", html.EscapeString(title),
 			a.rsTerms(ctx, lang, &model.PlanSnapshot{IntSquads: bp.IntSquads, ExtSquad: bp.ExtSquad, TrafficGB: bp.TrafficGB, DeviceLimit: bp.DeviceLimit})))

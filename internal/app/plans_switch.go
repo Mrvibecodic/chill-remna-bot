@@ -39,6 +39,9 @@ func switchCredit(old *model.PlanSnapshot, subExpireAt string, newSnap *model.Pl
 	if old == nil || newSnap == nil || old.Code == "" || newSnap.Code == "" || old.Code == newSnap.Code {
 		return 0
 	}
+	if old.IsTraffic() || newSnap.IsTraffic() {
+		return 0
+	}
 	exp, err := time.Parse(time.RFC3339, subExpireAt)
 	if err != nil {
 		return 0
@@ -174,7 +177,7 @@ func dealValueK(s *model.PlanSnapshot) (int64, int) {
 func windowPaidAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model.PlanSnapshot) int64 {
 	paidNow, _ := dealValueK(newSnap)
 	var carried int64
-	if old != nil && newSnap != nil && sameCurrency(old, newSnap) {
+	if old != nil && newSnap != nil && !old.IsTraffic() && !newSnap.IsTraffic() && sameCurrency(old, newSnap) {
 		if exp, err := time.Parse(time.RFC3339, subExpireAt); err == nil {
 			if remaining := time.Until(exp).Hours() / 24; remaining > 0 {
 				if valK, window := windowValueK(old); valK > 0 && window > 0 {
@@ -201,7 +204,7 @@ func boughtDaysAfter(old *model.PlanSnapshot, subExpireAt string, newSnap *model
 	if newSnap != nil && newSnap.Days > 0 {
 		bought = newSnap.Days
 	}
-	if old == nil || newSnap == nil {
+	if old == nil || newSnap == nil || old.IsTraffic() || newSnap.IsTraffic() {
 		return bought
 	}
 	if exp, err := time.Parse(time.RFC3339, subExpireAt); err == nil {

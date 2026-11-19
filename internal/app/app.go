@@ -740,6 +740,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.pruneWebUsers(ctx)
 	a.notifyUpdated(ctx)
 	a.noticeRestored(ctx)
+	go a.noticeTrafficRollback(ctx)
 	a.resumeBroadcast(ctx)
 	a.cleanupWebhookApplyMsg(ctx)
 	a.cleanupBotPortMsg(ctx)

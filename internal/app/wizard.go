@@ -207,6 +207,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onPlanView(ctx, chatID, val)
 	case cbPlanBack:
 		a.onPlanBack(ctx, chatID)
+	case cbTraffic:
+		a.onTraffic(ctx, chatID, val)
 	case cbMethod:
 		a.onMethod(ctx, chatID, val)
 	case cbTop:

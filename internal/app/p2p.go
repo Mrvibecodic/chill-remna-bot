@@ -9,6 +9,7 @@ import (
 	"html"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -173,7 +174,12 @@ func (a *App) showPlans(ctx context.Context, chatID int64) {
 	for i := range plans {
 		p := &plans[i]
 		label := planTitle(lang, p)
-		if from, months := planMinPrice(p); from != "" {
+		if p.IsTraffic() {
+			t := trafficTerms(p)
+			if s := i18n.T(lang, "buy.traffic_price", a.trafficPriceLabel(p, t.Price, t.Stars)); s != "" {
+				label += " · " + s
+			}
+		} else if from, months := planMinPrice(p); from != "" {
 			// Приписку админ может убрать в «Текстах бота» — тогда без
 			// разделителя. Срок рядом с ценой: самая низкая цена — не всегда
 			// месячная.
@@ -234,6 +240,12 @@ func (a *App) storefrontPlans(ctx context.Context, tgID int64) (visible []model.
 
 // planSellsAnything — есть ли у тарифа хоть один продаваемый срок.
 func planSellsAnything(p *model.Plan) bool {
+	if p.IsTraffic() {
+		return trafficPlanSells(p)
+	}
+	if !p.KnownKind() {
+		return false
+	}
 	for i := range p.Durations {
 		if p.Durations[i].Months > 0 && p.Durations[i].Base != "" {
 			return true
@@ -354,7 +366,7 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 		label := i18n.T(lang, "method.yk_btn", methodName(lang, model.PayMethodYooKassa), a.saleFiat(s, model.PayMethodYooKassa)+curSuffix(a.curFor(model.PayMethodYooKassa)))
 		rows = append(rows, []models.InlineKeyboardButton{btn(label, "method:yk")})
 	}
-	if stars.Enabled && tg(model.PayMethodStars) && a.saleStars(s) > 0 && base != "" {
+	if stars.Enabled && tg(model.PayMethodStars) && a.saleStars(s) > 0 && (base != "" || s.traffic()) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.stars_btn", methodName(lang, model.PayMethodStars), a.saleStars(s)), "method:stars")})
 	}
 	// CryptoBot принимает не любую фиатную валюту: с чужой счёт не выставится,
@@ -410,9 +422,15 @@ func (a *App) showMethodsSale(ctx context.Context, chatID int64, s *sale) {
 	if a.topUpOpen(false) {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 	}
-	// «Назад» — к карточке тарифа, выбрать другой срок.
-	rows = append(rows, navBack(lang, cbPlanBack))
+	back := cbPlanBack
+	if s.Pack != nil {
+		back = cbTrafficPacks
+	}
+	rows = append(rows, navBack(lang, back))
 	caption := i18n.T(lang, "buy.choose_method", kopecksToRub(bal))
+	if s.traffic() {
+		caption = i18n.T(lang, "buy.traffic_line", html.EscapeString(trafficInvoiceDesc(lang, a.saleSnapshot(s))), a.trafficPriceLabel(s.Plan, base, a.saleStars(s))) + "\n\n" + caption
+	}
 	// Смена тарифа: показываем зачёт остатка теми же цифрами, которые применит
 	// финализация, — человек должен видеть сдвиг срока ДО оплаты.
 	if cred := a.switchCreditFor(ctx, chatID, s); cred != 0 {
@@ -566,7 +584,11 @@ func (a *App) issueCardSale(ctx context.Context, chatID int64, s *sale) error {
 		return err
 	}
 	idStr := strconv.FormatInt(reqID, 10)
-	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card)),
+	text := i18n.T(lang, "p2p.card", s.Months, price+curSuffix(curRUB), card)
+	if s.traffic() {
+		text = i18n.T(lang, "p2p.card_traffic", html.EscapeString(trafficInvoiceDesc(lang, a.saleSnapshot(s))), price+curSuffix(curRUB), card)
+	}
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodP2P, text),
 		[][]models.InlineKeyboardButton{{
 			btn(i18n.T(lang, "p2p.paid_btn"), "p2p:paid:"+idStr),
 			btn(i18n.T(lang, "btn.cancel"), "p2p:cancel:"+idStr),
@@ -638,6 +660,11 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 		if open.IsTopUp() {
 			return "", "", 0, &p2pBusyErr{req: open}
 		}
+		if open.Snapshot.IsTraffic() || s.traffic() {
+			if !sameTrafficDeal(open.Snapshot, s) {
+				return "", "", 0, &p2pBusyErr{req: open}
+			}
+		}
 		if open.Card != "" {
 			a.payLog(ctx, model.PayMethodP2P, p2pExt(open.ID), chatID, "request_reused", "months=%d price=%s", open.Months, open.Price)
 			return open.Card, open.Price, open.ID, nil
@@ -656,6 +683,9 @@ func (a *App) prepareP2PCardSale(ctx context.Context, chatID int64, s *sale) (ca
 	a.mu.Unlock()
 
 	req := &model.P2PRequest{TelegramID: chatID, Months: months, Price: price, Status: model.P2PAwaiting, Card: card, Snapshot: a.saleSnapshot(s)}
+	if s.traffic() {
+		req.Months, req.Purpose = 0, trafficPurpose(req.Snapshot)
+	}
 	if err = a.store.CreateP2PRequest(ctx, req); err != nil {
 		return "", "", 0, err
 	}
@@ -685,6 +715,9 @@ func (a *App) showOpenP2P(ctx context.Context, chatID int64, req *model.P2PReque
 func (a *App) p2pUserCardText(lang string, req *model.P2PRequest) string {
 	if req.IsTopUp() {
 		return i18n.T(lang, "p2p.topup_card", req.Price+curSuffix(curRUB), a.p2pReqCard(req))
+	}
+	if req.Snapshot.IsTraffic() {
+		return i18n.T(lang, "p2p.card_traffic", html.EscapeString(trafficInvoiceDesc(lang, req.Snapshot)), req.Price+curSuffix(curRUB), a.p2pReqCard(req))
 	}
 	return i18n.T(lang, "p2p.card", req.Months, req.Price+curSuffix(curRUB), a.p2pReqCard(req))
 }
@@ -982,6 +1015,10 @@ func (a *App) p2pCardText(ctx context.Context, req *model.P2PRequest, lang strin
 		return i18n.T(lang, "admin.topup_caption", a.userLabelByID(ctx, req.TelegramID),
 			req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 	}
+	if req.Snapshot.IsTraffic() {
+		return i18n.T(lang, "admin.payment_caption_traffic", a.userLabelByID(ctx, req.TelegramID),
+			html.EscapeString(trafficInvoiceDesc(lang, req.Snapshot)), req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
+	}
 	return i18n.T(lang, "admin.payment_caption", a.userLabelByID(ctx, req.TelegramID),
 		req.Months, req.Price+curSuffix(a.curFor(model.PayMethodP2P)), req.ID)
 }
@@ -1191,7 +1228,8 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 	}
 	// Пополнение без суммы и покупка без срока — битые заявки: одобрять их
 	// нечем (покупка на 0 месяцев ушла бы в панель как продление «ни на что»).
-	if (req.IsTopUp() && req.Kopecks <= 0) || (!req.IsTopUp() && req.Months <= 0) {
+	traffic := req.Snapshot.IsTraffic() && (req.Purpose == purposeTraffic || req.Purpose == purposePack)
+	if (req.IsTopUp() && req.Kopecks <= 0) || (!req.IsTopUp() && !traffic && req.Months <= 0) {
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.not_found"))
 		return
 	}
@@ -1217,7 +1255,14 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
 		return
 	}
-	link, expireAt, err := a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, p2pExt(req.ID), req.Snapshot)
+	var link, expireAt string
+	var d dealDone
+	if traffic {
+		d, err = a.closeTrafficDeal(ctx, req.TelegramID, model.PayMethodP2P, amount, p2pExt(req.ID), req.Snapshot, false)
+		link, expireAt = d.link, d.expireAt
+	} else {
+		link, expireAt, err = a.finalizePurchase(ctx, req.TelegramID, req.Months, model.PayMethodP2P, amount, p2pExt(req.ID), req.Snapshot)
+	}
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicateExtID) {
 			a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
@@ -1235,8 +1280,20 @@ func (a *App) adminApprovePayment(ctx context.Context, adminChat int64, arg stri
 		return
 	}
 	a.cleanupP2PUser(ctx, req.TelegramID)
-	a.sendSubActive(ctx, req.TelegramID, link, expireAt)
+	switch {
+	case traffic && !d.refunded:
+		a.notifyTrafficDone(ctx, req.TelegramID, req.Snapshot, d)
+	case !traffic:
+		a.sendSubActive(ctx, req.TelegramID, link, expireAt)
+	}
 	a.sendHome(ctx, adminChat, i18n.T(alang, "admin.done"))
+}
+
+func sameTrafficDeal(open *model.PlanSnapshot, s *sale) bool {
+	if !open.IsTraffic() || !s.traffic() {
+		return false
+	}
+	return open.Code == s.planCode() && open.PackID == s.packID()
 }
 
 // adminAskP2PAmount — админ исправляет сумму пополнения до одобрения.
@@ -1396,14 +1453,14 @@ func (a *App) orphanInvoice(ctx context.Context, method, extID string, telegramI
 	if st == nil || extID == "" {
 		return false
 	}
-	p, _ := st.PendingByExtID(ctx, extID)
+	p, traffic := a.invoiceAny(ctx, st, extID)
 	if p == nil {
 		return false
 	}
 	if u, err := st.GetUser(ctx, telegramID); err != nil || u != nil {
 		return false
 	}
-	_ = st.ResolvePending(ctx, p.ID)
+	resolveAny(ctx, st, p, traffic)
 	// Платёжка повторяет доставку, сверка приходит следом — администратору
 	// хватит одного сообщения. Отметка — в журнале: строка счёта к этому
 	// моменту могла быть закрыта и раньше (истёк срок сверки).
@@ -1438,6 +1495,7 @@ type dealDone struct {
 	applied        *model.PlanSnapshot
 	// autoPayMoved — включённое автосписание перешло на тариф этой сделки.
 	autoPayMoved bool
+	refunded     bool
 }
 
 // closeDeal — сделка целиком: ядро выдачи и шаги после него, общие для
@@ -1485,6 +1543,57 @@ func (a *App) closeDeal(ctx context.Context, telegramID int64, months int, metho
 	return d, err
 }
 
+func (a *App) lockDeal(ctx context.Context, telegramID int64, method, extID string) (unlock func(), dup bool) {
+	var ext *sync.Mutex
+	if extID != "" {
+		ext = &a.finalizeLk[extLockIndex(extID)]
+		ext.Lock()
+		if a.store != nil {
+			if done, _ := a.store.PaymentByExtID(ctx, extID); done {
+				ext.Unlock()
+				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж уже финализирован — пропуск")
+				return func() {}, true
+			}
+		}
+	}
+	ulk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(telegramID, 10))]
+	ulk.Lock()
+	return func() {
+		ulk.Unlock()
+		if ext != nil {
+			ext.Unlock()
+		}
+	}, false
+}
+
+// recordDeal пишет платёж — барьер идемпотентности. Не записался после выдачи:
+// счёт гасится, иначе сверка выдавала бы снова каждые две минуты.
+func (a *App) recordDeal(ctx context.Context, p *model.Payment, given string) error {
+	if a.store == nil {
+		return nil
+	}
+	err := a.store.AddPayment(ctx, p)
+	for i := 0; i < 2 && err != nil && !errors.Is(err, storage.ErrDuplicateExtID); i++ {
+		time.Sleep(200 * time.Millisecond)
+		err = a.store.AddPayment(ctx, p)
+	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, storage.ErrDuplicateExtID) && p.ExtID != "" {
+		a.payLog(ctx, p.Method, p.ExtID, p.TelegramID, "duplicate", "платёж с этим ext_id уже записан")
+		return err
+	}
+	a.payLog(ctx, p.Method, p.ExtID, p.TelegramID, "error", "%s, но платёж не записался (идемпотентность нарушена): %v", given, err)
+	a.log.Error("add payment failed after retries", "err", err, "ext", p.ExtID)
+	if p.ExtID != "" {
+		a.resolveExt(ctx, a.store, p.ExtID)
+	}
+	alang := a.lang(a.cfg.AdminID)
+	a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.payment_unrecorded", methodLabel(p.Method), p.ExtID, a.userLabelByID(ctx, p.TelegramID), p.Amount))
+	return nil
+}
+
 // finalizePurchaseCore — ядро выдачи по сделке. grant — подписку выдаёт
 // администратор без оплаты: та же выдача, зачёт и снимок, но без начислений
 // рефереру, без чека и без чужого выбора срока.
@@ -1499,23 +1608,14 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	if a.holdRestoredPayment(ctx, method, "", months, amount, telegramID, extID) {
 		return "", "", nil, a.restoreHeldErr(telegramID)
 	}
-	if extID != "" {
-		lk := &a.finalizeLk[extLockIndex(extID)]
-		lk.Lock()
-		defer lk.Unlock()
-		if a.store != nil {
-			if done, _ := a.store.PaymentByExtID(ctx, extID); done {
-				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж уже финализирован — пропуск")
-				return "", "", nil, storage.ErrDuplicateExtID
-			}
-		}
-	}
 	// Пер-пользовательская сериализация (строго ПОСЛЕ шардов ext_id): два
 	// разных платежа одного человека, финализируясь параллельно, считали бы
 	// зачёт остатка от одного снимка — и конвертировали бы его дважды.
-	ulk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(telegramID, 10))]
-	ulk.Lock()
-	defer ulk.Unlock()
+	unlock, dup := a.lockDeal(ctx, telegramID, method, extID)
+	if dup {
+		return "", "", nil, storage.ErrDuplicateExtID
+	}
+	defer unlock()
 	a.mu.Lock()
 	panel := a.panel
 	if snap == nil {
@@ -1574,6 +1674,7 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	}
 	extraDays := switchCredit(prevSnap, prevExpire, snap)
 	snap.SwitchDays = extraDays
+	limits.FromNow = prevSnap.IsTraffic()
 	if extraDays != 0 {
 		a.payLog(ctx, method, extID, telegramID, "switch_credit", "plan=%s days=%+d", snap.Code, extraDays)
 	}
@@ -1600,40 +1701,13 @@ func (a *App) finalizePurchaseCore(ctx context.Context, telegramID int64, months
 	a.payLog(ctx, method, extID, telegramID, "panel_ok", "expire=%s", expireAt)
 	link = a.rewriteSub(link)
 	a.invalidateSubCache(telegramID)
+	if err := a.recordDeal(ctx, &model.Payment{
+		TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
+		Snapshot: snap,
+	}, "подписка выдана"); err != nil {
+		return "", "", nil, err
+	}
 	if a.store != nil {
-		err := a.store.AddPayment(ctx, &model.Payment{
-			TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
-			Snapshot: snap,
-		})
-		// Запись платежа — барьер идемпотентности: по ней PaymentByExtID решает,
-		// финализировать ли повторно. Транзиентный сбой (database is locked,
-		// обрыв соединения) пробуем пережить повтором.
-		for i := 0; i < 2 && err != nil && !errors.Is(err, storage.ErrDuplicateExtID); i++ {
-			time.Sleep(200 * time.Millisecond)
-			err = a.store.AddPayment(ctx, &model.Payment{
-				TelegramID: telegramID, Method: method, Months: months, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
-				Snapshot: snap,
-			})
-		}
-		if err != nil {
-			if errors.Is(err, storage.ErrDuplicateExtID) && extID != "" {
-				a.payLog(ctx, method, extID, telegramID, "duplicate", "платёж с этим ext_id уже записан")
-				return "", "", nil, err
-			}
-			// Панель уже продлила подписку, а барьер записать не удалось. Раньше
-			// это молча глоталось — и реконсилятор, не видя платежа, продлевал бы
-			// подписку СНОВА каждые две минуты до суточного предела. Гасим pending,
-			// чтобы остановить цикл, и зовём админа сверить платёж вручную.
-			a.payLog(ctx, method, extID, telegramID, "error", "подписка выдана, но платёж не записался (идемпотентность нарушена): %v", err)
-			a.log.Error("add payment failed after retries", "err", err, "ext", extID)
-			if extID != "" {
-				if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
-					_ = a.store.ResolvePending(ctx, p.ID)
-				}
-			}
-			alang := a.lang(a.cfg.AdminID)
-			a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.payment_unrecorded", methodLabel(method), extID, a.userLabelByID(ctx, telegramID), amount))
-		}
 		_ = a.store.SetSubExpiry(ctx, telegramID, expireAt, "paid")
 		// Снимок действующей подписки: локальной сущности подписки у бота нет,
 		// а знать проданные условия нужно и сверке лимитов, и бонусным дням.
@@ -1703,6 +1777,10 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		a.applyPlanText(ctx, chatID, ui.adminInput, text)
 	case "plan_addsub_gb":
 		a.applyPlanAddSubGB(ctx, chatID, text)
+	case "plan_t_price", "plan_t_stars", "plan_t_gb":
+		a.applyTrafficInput(ctx, chatID, ui.adminInput, text)
+	case "plan_pk_add", "plan_pk_gb", "plan_pk_price", "plan_pk_stars":
+		a.applyPackInput(ctx, chatID, ui.adminInput, text)
 	case "plan_access":
 		a.applyPlanAccessInput(ctx, chatID, text)
 	case "cards":
@@ -1737,8 +1815,8 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		ui.priceMonths = 0
 		ui.planCode = ""
 		// Строгий разбор: раньше «100 ⭐» молча превращалось в 0 и стирало цену.
-		v, err := strconv.Atoi(strings.TrimSpace(text))
-		if err != nil || v < 0 {
+		v, ok := parseStars(text)
+		if !ok {
 			a.sendPayKB(ctx, chatID, i18n.T(a.lang(chatID), "stars.bad_price", text),
 				[][]models.InlineKeyboardButton{navBack(a.lang(chatID), "menu:stars")})
 			return

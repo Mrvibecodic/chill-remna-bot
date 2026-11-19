@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -56,12 +57,14 @@ const planCodeAlphabet = "23456789bcdfghjkmnpqrstvwxz"
 //
 // Остаток от деления брать нельзя: 256 на 27 не делится, и первые тринадцать
 // символов алфавита выпадали бы чаще остальных. Лишние значения отбрасываем.
-func newPlanCode() (string, error) {
+func newPlanCode() (string, error) { return newCode(planCodeLen) }
+
+func newCode(n int) (string, error) {
 	// Наибольшее кратное длине алфавита; всё, что выше, отбрасывается.
 	limit := 256 - 256%len(planCodeAlphabet)
-	out := make([]byte, 0, planCodeLen)
-	buf := make([]byte, planCodeLen)
-	for len(out) < planCodeLen {
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
 		if _, err := rand.Read(buf); err != nil {
 			return "", err
 		}
@@ -70,7 +73,7 @@ func newPlanCode() (string, error) {
 				continue
 			}
 			out = append(out, planCodeAlphabet[int(b)%len(planCodeAlphabet)])
-			if len(out) == planCodeLen {
+			if len(out) == n {
 				break
 			}
 		}
@@ -233,6 +236,9 @@ func planListLabel(lang string, p *model.Plan) string {
 		mark = "✅"
 	}
 	name := planTitle(lang, p)
+	if p.IsTraffic() {
+		return mark + " " + name + " · " + i18n.T(lang, "plans.traffic_short", len(trafficTerms(p).Packs))
+	}
 	return mark + " " + name + " · " + i18n.T(lang, "plans.durations_short", len(p.Durations))
 }
 
@@ -291,13 +297,23 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 	// описание, но и валюта со стратегией внутри строк лимитов и сроков.
 	// Незакрытый тег где угодно в тексте — это отказ Telegram отправить
 	// сообщение, то есть карточка, из которой уже не выбраться.
-	body := i18n.T(lang, "plans.card",
-		planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc),
-		html.EscapeString(a.planLimitsLine(ctx, lang, p)), html.EscapeString(planDurationsLine(lang, p)))
+	limits := html.EscapeString(a.planLimitsLine(ctx, lang, p))
+	var body string
+	if t := trafficTerms(p); p.IsTraffic() {
+		body = i18n.T(lang, "plans.card_traffic", planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc), limits,
+			html.EscapeString(priceShown(lang, t.Price, p.Currency)), starsShown(lang, t.Stars), len(t.Packs))
+	} else {
+		body = i18n.T(lang, "plans.card", planTitleHTML(lang, p), p.Code, state, p.Order, html.EscapeString(desc), limits,
+			html.EscapeString(planDurationsLine(lang, p)))
+	}
 	// Выключенный тариф или тариф без цены ни одного срока витрина не
 	// показывает — говорим об этом прямо, иначе он выглядел бы продающимся.
 	if !p.Enabled || !planSellsAnything(p) {
-		body += i18n.T(lang, "plans.note_idle")
+		idle := "plans.note_idle"
+		if p.IsTraffic() {
+			idle = "plans.note_idle_traffic"
+		}
+		body += i18n.T(lang, idle)
 	}
 
 	rows := [][]models.InlineKeyboardButton{
@@ -308,6 +324,9 @@ func (a *App) showPlanCard(ctx context.Context, chatID int64, code string) {
 		{btn(i18n.T(lang, "plans.btn_icon"), "pln:icon:"+p.Code), btn(i18n.T(lang, "plans.btn_up"), "pln:up:"+p.Code),
 			btn(i18n.T(lang, "plans.btn_down"), "pln:down:"+p.Code)},
 		{btn(i18n.T(lang, "plans.btn_dup"), "pln:dup:"+p.Code), btn(i18n.T(lang, "plans.btn_export"), "pln:exp:"+p.Code)},
+	}
+	if p.IsTraffic() {
+		rows = slices.Insert(rows, 1, []models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_packs", len(trafficTerms(p).Packs)), "pln:pk:"+p.Code)})
 	}
 	// «Базовый» удалить нельзя: он мост к старой сетке цен, по которой продаёт
 	// предыдущий образ бота после откатa, и единственный тариф, который бот
@@ -335,7 +354,11 @@ func (a *App) planLimitsLine(ctx context.Context, lang string, p *model.Plan) st
 	if p.ExtSquad != "" {
 		squads += " + 1"
 	}
-	return i18n.T(lang, "plans.limits", traffic, devices, p.Strategy, squads)
+	strategy := p.Strategy
+	if p.IsTraffic() {
+		strategy = i18n.T(lang, "plans.reset_none")
+	}
+	return i18n.T(lang, "plans.limits", traffic, devices, strategy, squads)
 }
 
 // planDurationsLine — что и по какой цене продаёт тариф.
@@ -369,7 +392,7 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 	// ушёл с экрана — и любой текст, присланный боту через час, молча
 	// переименовывает тариф.
 	switch action {
-	case "name", "desc", "icon":
+	case "name", "desc", "icon", "tin", "pka", "pki":
 	case "impok":
 		// Подтверждение импорта потребляет разобранный файл — сброс состояния
 		// здесь стёр бы его раньше времени.
@@ -397,14 +420,20 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 	case "icon":
 		a.askPlanText(ctx, chatID, arg, "plan_icon", "plans.ask_icon")
 	case "new":
-		a.createPlan(ctx, chatID, nil)
+		a.showPlanKindChoice(ctx, chatID)
+	case "newk":
+		kind := ""
+		if arg == "r" {
+			kind = model.PlanKindTraffic
+		}
+		a.createPlan(ctx, chatID, nil, kind)
 	case "dup":
 		src, err := a.planByCode(ctx, arg)
 		if err != nil || src == nil {
 			a.planEditFailed(ctx, chatID, arg, planGoneOr(err))
 			return
 		}
-		a.createPlan(ctx, chatID, src)
+		a.createPlan(ctx, chatID, src, src.Kind)
 	case "del":
 		p, err := a.planByCode(ctx, arg)
 		if err != nil || p == nil {
@@ -421,6 +450,9 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 		text := i18n.T(lang, "plans.del_confirm", planTitleHTML(lang, p))
 		if n := a.usersOnPlan(ctx, p.Code); n > 0 {
 			text += "\n\n" + i18n.T(lang, "plans.del_subs_note", n)
+		}
+		if p.IsTraffic() {
+			text += "\n\n" + i18n.T(lang, "plans.del_traffic_note")
 		}
 		if model.NormalizeAvailability(p.Availability) == model.PlanAvailList {
 			if list, lerr := a.planAccessList(ctx, p.Code); lerr == nil && len(list) > 0 {
@@ -501,6 +533,31 @@ func (a *App) onPlansAdmin(ctx context.Context, chatID int64, val string) {
 			return
 		}
 		a.showPlanAddSubSquads(ctx, chatID, arg)
+	case "tin":
+		field, code, _ := strings.Cut(arg, ":")
+		a.askTrafficInput(ctx, chatID, field, code)
+	case "pk":
+		a.showPlanPacks(ctx, chatID, arg)
+	case "pka":
+		a.askPackAdd(ctx, chatID, arg)
+	case "pke":
+		id, code, _ := strings.Cut(arg, ":")
+		a.showPlanPack(ctx, chatID, code, id)
+	case "pki":
+		field, rest, _ := strings.Cut(arg, ":")
+		id, code, _ := strings.Cut(rest, ":")
+		a.askPackInput(ctx, chatID, field, id, code)
+	case "pkx":
+		id, code, _ := strings.Cut(arg, ":")
+		a.askPackDelete(ctx, chatID, code, id)
+	case "pkxy":
+		id, code, _ := strings.Cut(arg, ":")
+		a.deletePack(ctx, chatID, code, id)
+	case "asr":
+		a.showAddSubReset(ctx, chatID, arg)
+	case "asrs":
+		strat, code, _ := strings.Cut(arg, ":")
+		a.setAddSubReset(ctx, chatID, code, strat)
 	case "exp":
 		a.exportPlan(ctx, chatID, arg)
 	case "imp":
@@ -540,6 +597,8 @@ func (a *App) forgetPlanInput(chatID int64) {
 	switch ui.adminInput {
 	case "plan_name", "plan_desc", "plan_icon", "plan_access",
 		"plan_addsub_name", "plan_addsub_desc", "plan_addsub_gb",
+		"plan_t_price", "plan_t_stars", "plan_t_gb",
+		"plan_pk_add", "plan_pk_gb", "plan_pk_price", "plan_pk_stars",
 		"baseprice", "price", "ykprice", "starprice",
 		"traffic_gb", "device_per", "device_limit", "currency",
 		"trb_plid", "trb_plurl":
@@ -548,6 +607,7 @@ func (a *App) forgetPlanInput(chatID int64) {
 		ui.priceMonths = 0
 	}
 	ui.planCode = ""
+	ui.planPack = ""
 	// Навигация по тарифам снимает и ожидание файла импорта: иначе документ,
 	// присланный через час по другому поводу, молча становился бы тарифом.
 	ui.awaitPlanImport = false
@@ -688,7 +748,10 @@ func (a *App) togglePlan(ctx context.Context, chatID int64, code string) {
 	// продаётся по пустой цене. Ровно поэтому новый тариф и создаётся
 	// выключенным — здесь тот же запрет с другой стороны.
 	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
-		if !p.Enabled && len(p.Durations) == 0 {
+		if !p.Enabled && p.IsTraffic() && !trafficPlanSells(p) {
+			return errPlanNoTraffic
+		}
+		if !p.Enabled && !p.IsTraffic() && len(p.Durations) == 0 {
 			// Отказ возвращается ошибкой, а не флагом: тогда строка тарифа не
 			// перезаписывается вообще — незачем трогать базу, чтобы ничего не
 			// изменить.
@@ -697,6 +760,11 @@ func (a *App) togglePlan(ctx context.Context, chatID int64, code string) {
 		p.Enabled = !p.Enabled
 		return nil
 	})
+	if errors.Is(err, errPlanNoTraffic) {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.enable_empty_traffic"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
+		return
+	}
 	if errors.Is(err, errPlanNoDurations) {
 		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.enable_empty"),
 			[][]models.InlineKeyboardButton{navBack(lang, "pln:open:"+code)})
@@ -772,7 +840,7 @@ func (a *App) movePlan(ctx context.Context, chatID int64, code string, delta int
 //
 // Новый тариф всегда выключён: включённый тариф с незаполненными ценами — это
 // либо пустая витрина, либо продажа по пустой цене.
-func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
+func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan, kind string) {
 	lang := a.lang(chatID)
 	code, err := newPlanCode()
 	if err != nil {
@@ -798,9 +866,14 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 		p.Name = clampRunes(i18n.T(lang, "plans.copy_name", clampRunes(strings.TrimSpace(src.Name), room)), planNameMaxLen)
 		p.IntSquads = append([]string(nil), src.IntSquads...)
 		p.Durations = clonePlanDurations(src.Durations)
+		p.Traffic = model.ClonePlanTraffic(src.Traffic)
 	} else {
 		p.Name = i18n.T(lang, "plans.new_name")
 		p.Currency = a.pricing().Currency
+		if kind == model.PlanKindTraffic {
+			p.Kind = model.PlanKindTraffic
+			p.Traffic = &model.PlanTraffic{}
+		}
 	}
 	p.Enabled = false
 	// Копия «Базового» ведомой не наследуется: пересобирается из конфига ровно
@@ -846,6 +919,8 @@ func (a *App) createPlan(ctx context.Context, chatID int64, src *model.Plan) {
 
 // errPlanCodeTaken — сгенерированный код уже занят.
 var errPlanCodeTaken = errors.New("код тарифа занят")
+
+var errPlanNoTraffic = errors.New("у трафик-тарифа нет трафика или цены")
 
 // errPlanNoDurations — у тарифа не заданы сроки, включать нечего.
 var errPlanNoDurations = errors.New("у тарифа нет длительностей")

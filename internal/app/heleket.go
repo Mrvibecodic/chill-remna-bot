@@ -88,8 +88,11 @@ func hlNonce() string {
 // вторая покупка того же тарифа молча уехала бы в уже оплаченный инвойс.
 func hlOrderID(chatID int64, n int64, purpose string) string {
 	kind := "hl"
-	if purpose == purposeTopUp {
+	switch purpose {
+	case purposeTopUp:
 		kind = "hlt"
+	case purposeTraffic, purposePack:
+		kind = "hlx"
 	}
 	return fmt.Sprintf("%s-%d-%d-%s", kind, chatID, n, hlNonce())
 }
@@ -205,6 +208,10 @@ func (a *App) hlCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	extID := hlExtPrefix + inv.UUID
 	a.payLog(ctx, model.PayMethodHeleket, extID, chatID, "invoice_created",
 		"%s months=%d kopecks=%d amount=%s %s subtract=%d", purposeOrBuy(purpose), months, kopecks, inv.Amount, inv.Currency, cfg.SubtractOrDefault())
+	if snap.IsTraffic() {
+		a.addTrafficInvoice(ctx, model.PayMethodHeleket, extID, chatID, 0, snap)
+		return inv.URL, inv.UUID, nil
+	}
 	if snap == nil {
 		snap = hlPurchaseSnapshot(a, purpose, months)
 	}
@@ -219,10 +226,10 @@ func (a *App) hlCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 }
 
 func purposeOrBuy(p string) string {
-	if p == purposeTopUp {
-		return "topup"
+	if p == "" {
+		return "purchase"
 	}
-	return "purchase"
+	return p
 }
 
 func (a *App) startHeleket(ctx context.Context, chatID int64) {
@@ -239,12 +246,17 @@ func (a *App) startHeleket(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "hl.no_price"))
 		return
 	}
-	payURL, uuid, err := a.hlCreateInvoiceSnap(ctx, chatID, months, price, "", 0, a.saleSnapshot(s))
+	snap := a.saleSnapshot(s)
+	purpose, prompt := "", i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))
+	if s.traffic() {
+		purpose, prompt = trafficPurpose(snap), i18n.T(lang, "pay.prompt_traffic", trafficInvoiceDesc(lang, snap), price+curSuffix(curSymbol(a.hlCurrency())))
+	}
+	payURL, uuid, err := a.hlCreateInvoiceSnap(ctx, chatID, months, price, purpose, 0, snap)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Heleket", err))
 		return
 	}
-	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodHeleket, i18n.T(lang, "hl.pay_prompt", months, price+curSuffix(curSymbol(a.hlCurrency())))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodHeleket, prompt), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "hl.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "hl.btn_check"), "hlc:"+uuid)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -353,6 +365,11 @@ func (a *App) finalizeHeleket(ctx context.Context, inv *heleket.Invoice) {
 		a.payLog(ctx, model.PayMethodHeleket, extID, 0, "overpaid",
 			"переплата: получено %s при счёте %s %s", amount, inv.Amount, inv.Currency)
 		a.hlNotifyAdmin(ctx, inv, "overpaid")
+	}
+
+	if tinv := a.trafficInvoice(ctx, extID); tinv != nil {
+		_, _ = a.settleTraffic(ctx, tinv, a.cryptoAmount(tinv.Snapshot, 0, amount))
+		return
 	}
 
 	if p, _ := a.store.PendingByExtID(ctx, extID); p != nil && p.Purpose == purposeTopUp {

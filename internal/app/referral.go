@@ -282,6 +282,10 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 	if pu == nil {
 		return false, false
 	}
+	if a.onTrafficPlan(ctx, ref) {
+		a.log.Info("бонусные дни: трафик-тариф, не начисляются", "tg_id", ref)
+		return false, false
+	}
 	_, expireAt, err := panel.CreateOrUpdateUserDays(ctx, ref, days, limits)
 	if err != nil {
 		a.log.Warn("бонусные дни: начисление", "tg_id", ref, "err", err)
@@ -337,6 +341,9 @@ func (a *App) showReferral(ctx context.Context, chatID int64) {
 	}
 	if cfg.Percent > 0 {
 		extra += "\n" + i18n.T(lang, "ref.also_percent", cfg.Percent)
+	}
+	if note := a.referralTrafficNote(ctx, lang); note != "" {
+		extra += "\n" + note
 	}
 	text := i18n.T(lang, "ref.user", bonus, when, extra, count, kopecksToRub(earned), link)
 	if cl := a.cabinetReferralLink(chatID); cl != "" {
@@ -440,4 +447,17 @@ func (a *App) onReferralAdmin(ctx context.Context, chatID int64, val string) {
 		a.getUI(chatID).adminInput = "ref_percent"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "refadm.ask_percent"), "menu:refadmin")
 	}
+}
+
+func (a *App) referralTrafficNote(ctx context.Context, lang string) string {
+	plans, err := a.planList(ctx)
+	if err != nil {
+		return ""
+	}
+	for i := range plans {
+		if plans[i].IsTraffic() && plans[i].Enabled {
+			return i18n.T(lang, "ref.no_traffic")
+		}
+	}
+	return ""
 }

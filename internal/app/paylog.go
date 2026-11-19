@@ -130,6 +130,7 @@ var payErrorStages = map[string]bool{
 	"autocharge_error":     true,
 	"autopay_disabled":     true,
 	"precheckout_rejected": true,
+	"pack_refused":         true,
 }
 
 const (

@@ -439,10 +439,16 @@ func (a *App) showUser(ctx context.Context, chatID, uid int64) {
 		if ok {
 			subExists = true
 			subBlocked = st == remnawave.StatusDisabled
-			if subBlocked {
+			switch {
+			case subBlocked:
 				subBlock = i18n.T(lang, "user.sub_blocked", a.rewriteSub(url))
-			} else {
+			case remnawave.IsEternal(exp):
+				subBlock = i18n.T(lang, "user.sub_active_eternal", a.rewriteSub(url))
+			default:
 				subBlock = i18n.T(lang, "user.sub_active", formatExpire(exp, lang), a.rewriteSub(url))
+			}
+			if !subBlocked && strings.EqualFold(st, remnawave.StatusLimited) {
+				subBlock += "\n" + i18n.T(lang, "user.sub_limited")
 			}
 		}
 	}
@@ -709,6 +715,8 @@ func (a *App) onUsers(ctx context.Context, chatID int64, val string, srcMsgID in
 		a.askGrantDays(ctx, chatID, uid)
 	case "grok":
 		a.confirmGrant(ctx, chatID, arg)
+	case "grk":
+		a.onGrantPack(ctx, chatID, arg)
 	case "pays":
 		uidStr, pageStr, _ := strings.Cut(arg, ":")
 		uid, _ := strconv.ParseInt(uidStr, 10, 64)
@@ -1095,18 +1103,26 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 	// ссылку, а единственной кнопкой был сброс устройств — её и нажимали,
 	// пытаясь починить, и теряли настроенные клиенты. Кнопки «Продлить» на
 	// этом экране не было вообще ни при каком статусе.
+	buyTraffic := a.buyTrafficRow(ctx, chatID)
 	if key := subDeadKey(status, expireAt); key != "" {
-		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.renew"), "menu:renew")})
+		first := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.renew"), "menu:renew")}
+		text := i18n.T(lang, key, formatExpire(expireAt, lang))
+		if buyTraffic != nil && key == "subs.limited" {
+			first, text = buyTraffic, i18n.T(lang, "subs.limited_traffic")
+		}
+		rows = append(rows, first)
 		if row := a.autoPayRow(ctx, chatID, lang); row != nil {
 			rows = append(rows, row)
 		}
 		rows = append(rows, home)
-		a.sendKBSection(ctx, chatID, assets.SectionMySubscription,
-			i18n.T(lang, key, formatExpire(expireAt, lang)), rows)
+		a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 		return
 	}
 	// Сам список устройств живёт на отдельном экране: здесь подпись под
 	// баннером, а в неё длинный список не влезает.
+	if buyTraffic != nil {
+		rows = append([][]models.InlineKeyboardButton{buyTraffic}, rows...)
+	}
 	devLine, devList := a.devicesLine(ctx, chatID, panel)
 	if devList {
 		rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "dev.btn_list"), "dev:list")})
@@ -1116,7 +1132,13 @@ func (a *App) showMySubs(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows, home)
-	text := a.subActiveText(ctx, chatID, url, expireAt) + a.planLine(ctx, lang, chatID) + trafficLine(lang, snap) + devLine + a.addSubLine(ctx, chatID)
+	tl := trafficLine(lang, snap)
+	if remnawave.IsEternal(expireAt) && snap.TrafficLimit > 0 && tl != "" && a.onTrafficPlan(ctx, chatID) {
+		if r := i18n.T(lang, "sub.traffic_noreset"); r != "" {
+			tl += "\n" + r
+		}
+	}
+	text := a.subActiveText(ctx, chatID, url, expireAt) + a.planLine(ctx, lang, chatID) + tl + devLine + a.addSubLine(ctx, chatID)
 	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, text, rows)
 }
 

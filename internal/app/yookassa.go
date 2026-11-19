@@ -70,7 +70,7 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "yk.no_price"))
 		return
 	}
-	if save && !a.autoPayAvailable() {
+	if save && (!a.autoPayAvailable() || s.traffic()) {
 		save = false
 	}
 	client := a.ykClient()
@@ -95,12 +95,19 @@ func (a *App) ykStart(ctx context.Context, chatID int64, save bool) {
 		currency = "RUB"
 	}
 	desc := i18n.T(lang, "yk.invoice_desc", months)
-	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save, a.saleSnapshot(s))
+	snap := a.saleSnapshot(s)
+	if s.traffic() {
+		desc = trafficInvoiceDesc(lang, snap)
+	}
+	payURL, extID, err := a.ykCreatePayment(ctx, chatID, months, value, currency, returnURL, desc, save, snap)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮKassa", err))
 		return
 	}
 	prompt := withPayNote(lang, model.PayMethodYooKassa, i18n.T(lang, "yk.pay_prompt", months, value+curSuffix(saleCur)))
+	if s.traffic() {
+		prompt = withPayNote(lang, model.PayMethodYooKassa, i18n.T(lang, "pay.prompt_traffic", desc, value+curSuffix(saleCur)))
+	}
 	if save {
 		prompt += "\n\n" + i18n.T(lang, "ap.pay_hint")
 	}
@@ -128,9 +135,7 @@ func (a *App) ykRefunded(ctx context.Context, extID string, chatID int64, pay *y
 	a.payLog(ctx, model.PayMethodYooKassa, extID, chatID, "refunded",
 		"по платежу возвращено %s — выдача не проводится", amount)
 	if a.store != nil {
-		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
-			_ = a.store.ResolvePending(ctx, p.ID)
-		}
+		a.resolveExt(ctx, a.store, extID)
 		if err := a.store.SetPaymentStatus(ctx, extID, model.PaymentRefunded); err != nil {
 			a.log.Warn("платёж не помечен возвращённым", "err", err, "ext_id", extID)
 		}
@@ -211,6 +216,20 @@ const (
 // выдавать, оба обязаны решать одинаково.
 func (a *App) settleYooKassa(ctx context.Context, pay *yookassa.Payment, payID string) (ykSettled, error) {
 	amount := pay.Amount.Value + " " + pay.Amount.Currency
+	if inv := a.trafficInvoice(ctx, payID); inv != nil {
+		res, err := a.settleTraffic(ctx, inv, amount)
+		switch res {
+		case trafficIssued:
+			return ykIssued, nil
+		case trafficAlready:
+			return ykAlready, nil
+		case trafficHeld:
+			return ykHeld, err
+		case trafficOrphan:
+			return ykOrphan, err
+		}
+		return ykFailed, err
+	}
 	var pending *model.PendingInvoice
 	if a.store != nil {
 		pending, _ = a.store.PendingByExtID(ctx, payID)
@@ -382,10 +401,20 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	if snap == nil {
 		snap = a.planSnapshot(months)
 	}
+	traffic := snap.IsTraffic()
+	what := fmt.Sprintf("purchase months=%d", months)
+	if traffic {
+		months, save, what = 0, false, trafficPurpose(snap)+" "+snap.Code
+	}
 	pay, err := client.CreatePaymentSaving(ctx, value, currency, desc, returnURL, chatID, months, snap.Code, save)
 	if err != nil {
-		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
+		a.payLog(ctx, model.PayMethodYooKassa, "", chatID, "invoice_error", "%s: %v", what, err)
 		return "", "", err
+	}
+	if traffic {
+		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "%s amount=%s %s", what, value, currency)
+		a.addTrafficInvoice(ctx, model.PayMethodYooKassa, pay.ID, chatID, 0, snap)
+		return pay.Confirmation.ConfirmationURL, pay.ID, nil
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
 	if a.store != nil {

@@ -424,7 +424,7 @@ func TestAddSubTerms_PlanFileVersion(t *testing.T) {
 		t.Fatalf("файл со своими условиями записан версией %d", v)
 	}
 
-	_, _, err := parsePlanFile([]byte(`{"format":"remnabot-plan","version":3,"plan":{"code":"abc","name":"x","future":1}}`))
+	_, _, err := parsePlanFile([]byte(`{"format":"remnabot-plan","version":4,"plan":{"code":"abc","name":"x","future":1}}`))
 	if err == nil || !strings.Contains(err.Error(), "более новой версии") {
 		t.Fatalf("файл новой версии отклонён невнятно: %v", err)
 	}

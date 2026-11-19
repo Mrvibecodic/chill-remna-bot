@@ -143,12 +143,18 @@ func (a *App) startPlatega(ctx context.Context, chatID int64) {
 	}
 	amount := float64(valueK) / 100
 	desc := i18n.T(lang, "pl.invoice_desc", months)
-	redirect, txID, err := a.plCreateTransactionSnap(ctx, chatID, months, amount, desc, returnURL, a.saleSnapshot(s))
+	snap := a.saleSnapshot(s)
+	prompt := i18n.T(lang, "pl.pay_prompt", months, value+curSuffix(curRUB))
+	if s.traffic() {
+		desc = trafficInvoiceDesc(lang, snap)
+		prompt = i18n.T(lang, "pay.prompt_traffic", desc, value+curSuffix(curRUB))
+	}
+	redirect, txID, err := a.plCreateTransactionSnap(ctx, chatID, months, amount, desc, returnURL, snap)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "Platega", err))
 		return
 	}
-	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodPlatega, i18n.T(lang, "pl.pay_prompt", months, value+curSuffix(curRUB))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodPlatega, prompt), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "pl.btn_pay"), URL: redirect}},
 		{btn(i18n.T(lang, "pl.btn_check"), "plc:"+txID)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -188,6 +194,10 @@ func (a *App) finalizePlatega(ctx context.Context, txID string, tx *platega.Tran
 		return
 	}
 	amount := fmt.Sprintf("%.2f %s", tx.Amount, tx.Currency)
+	if inv := a.trafficInvoice(ctx, txID); inv != nil {
+		_, _ = a.settleTraffic(ctx, inv, amount)
+		return
+	}
 	if p, _ := a.store.PendingByExtID(ctx, txID); p != nil && p.Purpose == "topup" {
 		// Зачисляется сумма счёта; расхождение с суммой Platega — в журнал.
 		if strings.EqualFold(tx.Currency, "RUB") && int64(math.Round(tx.Amount*100)) != p.Kopecks {
@@ -370,12 +380,21 @@ func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months 
 	if a.store != nil {
 		_ = a.store.UpsertUser(ctx, chatID)
 	}
-	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, plPayload(chatID, months), a.plBuyer(ctx, chatID))
+	payload, what := plPayload(chatID, months), fmt.Sprintf("purchase months=%d", months)
+	if snap.IsTraffic() {
+		payload = plPayload(chatID, 0) + "&kind=" + trafficPurpose(snap)
+		what = trafficPurpose(snap) + " " + snap.Code
+	}
+	tx, err := client.CreateTransaction(ctx, a.plMethod(), amount, "RUB", desc, returnURL, payload, a.plBuyer(ctx, chatID))
 	if err != nil {
-		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "purchase months=%d: %v", months, err)
+		a.payLog(ctx, model.PayMethodPlatega, "", chatID, "invoice_error", "%s: %v", what, err)
 		return "", "", err
 	}
-	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "purchase months=%d amount=%.2f RUB method=%d", months, amount, a.plMethod())
+	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "%s amount=%.2f RUB method=%d", what, amount, a.plMethod())
+	if snap.IsTraffic() {
+		a.addTrafficInvoice(ctx, model.PayMethodPlatega, tx.ID, chatID, 0, snap)
+		return tx.Redirect, tx.ID, nil
+	}
 	if snap == nil {
 		snap = a.planSnapshot(months)
 	}

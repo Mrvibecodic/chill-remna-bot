@@ -91,11 +91,12 @@ func (a *App) reconcileStarTx(ctx context.Context, tx *models.StarTransaction) {
 	if u.TransactionType != "" && u.TransactionType != "invoice_payment" {
 		return
 	}
-	if !strings.HasPrefix(u.InvoicePayload, "stars:") {
+	traffic := strings.HasPrefix(u.InvoicePayload, trafficStarsPrefix)
+	if !traffic && !strings.HasPrefix(u.InvoicePayload, "stars:") {
 		return
 	}
 	months, _ := starsPayload(u.InvoicePayload)
-	if months <= 0 {
+	if months <= 0 && !traffic {
 		return
 	}
 	payer := u.User.ID
@@ -111,11 +112,20 @@ func (a *App) reconcileStarTx(ctx context.Context, tx *models.StarTransaction) {
 	if a.restoredStarsWindow(time.Unix(int64(tx.Date), 0)) {
 		if !a.reviewNoted(ctx, tx.ID) {
 			id, amount := tx.ID, tx.Amount
-			a.addReview(model.PayMethodStars, "", months, strconv.Itoa(amount)+" ⭐", payer, id, func(c context.Context) {
+			purpose := ""
+			if _, pack, _, ok := parseTrafficStars(u.InvoicePayload); ok {
+				purpose = trafficPurpose(&model.PlanSnapshot{PackID: pack})
+			}
+			a.addReview(model.PayMethodStars, purpose, months, strconv.Itoa(amount)+" ⭐", payer, id, func(c context.Context) {
 				a.payLog(c, model.PayMethodStars, id, payer, stageReview,
 					"оплата %d⭐ до восстановления базы — на ручную проверку", amount)
 			})
 		}
+		return
+	}
+	if traffic {
+		a.payLog(ctx, model.PayMethodStars, tx.ID, payer, "reconcile", "оплата трафика найдена сверкой: %d ⭐", tx.Amount)
+		a.trafficStarsPaid(ctx, payer, u.InvoicePayload, tx.ID, tx.Amount, true)
 		return
 	}
 	snap, ok := a.starsSnapshotForAmount(ctx, payer, months, tx.Amount)

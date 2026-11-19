@@ -58,6 +58,10 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		a.log.Warn("reconciler: list pending", "err", err)
 		return
 	}
+	tlist, terr := st.ListUnresolvedTraffic(ctx, cutoff, reconcileBatch)
+	if terr != nil {
+		a.log.Warn("reconciler: list traffic", "err", terr)
+	}
 	defer a.flushReview(ctx)
 	for i := range list {
 		if a.paused() {
@@ -65,7 +69,14 @@ func (a *App) reconcileOnce(ctx context.Context) {
 		}
 		a.reconcileInvoice(ctx, st, &list[i])
 	}
-	a.reconPrune(list)
+	tq := trafficQueue{st}
+	for i := range tlist {
+		if a.paused() {
+			return
+		}
+		a.reconcileInvoice(ctx, tq, &tlist[i])
+	}
+	a.reconPrune(append(list, tlist...))
 }
 
 // reconPrune оставляет в памяти дедупликации только счета, которые всё ещё
@@ -154,7 +165,7 @@ func (a *App) reconcileYooKassa(ctx context.Context, st storage.Storage, pi *mod
 		// Платёж мог быть сделан с сохранением карты: если вебхук не дошёл и
 		// оплату добил реконсилятор, предложение про автопродление всё равно
 		// должно уйти — но ровно один раз, только когда подписка реально выдана.
-		if a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency) {
+		if a.reconcileFinalize(ctx, st, pi, pay.Amount.Value+" "+pay.Amount.Currency) && !pi.Snapshot.IsTraffic() {
 			a.saveAutoPayFromPayment(ctx, pi.TelegramID, pi.Months, pay, pi.Snapshot)
 		}
 	case pay.Status == "canceled":
@@ -304,6 +315,13 @@ func (a *App) reconcileFinalize(ctx context.Context, st storage.Storage, pi *mod
 	// останавливает finalizePurchase (orphanInvoice), пополнение —
 	// finalizeTopUp. Отдельной проверки здесь нет намеренно — вебхук и
 	// кнопка идут через те же две функции.
+	if pi.Snapshot.IsTraffic() && (pi.Purpose == purposeTraffic || pi.Purpose == purposePack) {
+		res, _ := a.settleTraffic(ctx, pi, amount)
+		if res == trafficIssued {
+			a.log.Info("reconciler: finalized late traffic payment", "method", pi.Method, "ext_id", pi.ExtID, "chat_id", pi.TelegramID)
+		}
+		return res == trafficIssued
+	}
 	if pi.Purpose == "topup" {
 		if err := a.finalizeTopUp(ctx, pi.TelegramID, pi.Kopecks, pi.Method, amount, pi.ExtID); err != nil &&
 			!errors.Is(err, storage.ErrDuplicateExtID) {

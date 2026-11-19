@@ -80,6 +80,9 @@ func (a *App) redeemPromo(ctx context.Context, chatID int64, raw string) (string
 	if done, _ := a.store.PromoRedeemedBy(ctx, code, chatID); done {
 		return i18n.T(lang, "promo.already"), false
 	}
+	if p.Kind == model.PromoKindDays && a.onTrafficPlan(ctx, chatID) {
+		return i18n.T(lang, "promo.days_traffic"), false
+	}
 	// Код закрепляется за пользователем ДО начисления: одновременные
 	// активации не пробьют лимит. Если начислить не удалось — закрепление
 	// снимается и код остаётся доступным.
@@ -305,6 +308,9 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 	// Запись о разовом подарке готовится ДО похода в панель: она же нужна и в
 	// ветке потерянного ответа, где патч мог примениться.
 	bonus := nextTrafficBonus(pu, add, carry, want, oneTime)
+	if strings.EqualFold(pu.Strategy, "NO_RESET") {
+		bonus = nil
+	}
 	if err := panel.SetTrafficLimit(ctx, pu.Ref, want); err != nil {
 		// Ошибка не означает, что панель НЕ применила патч: оборванный ответ,
 		// таймаут запроса и 502 от прокси выглядят одинаково. Отдать код

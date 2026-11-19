@@ -91,7 +91,7 @@ func clientData(data string) bool {
 	key, val, _ := strings.Cut(data, ":")
 	switch key {
 	case cbBuy, cbPlanBuy, cbPlanView, cbPlanBack, cbMethod, cbTop, cbP2P, cbYKCheck, cbAutoPay,
-		cbCBCheck, cbPLCheck, cbYMCheck, cbHLCheck, cbDevices, cbTerms:
+		cbCBCheck, cbPLCheck, cbYMCheck, cbHLCheck, cbDevices, cbTerms, cbTraffic:
 		return true
 	case cbPromo:
 		return promoUserData(val)

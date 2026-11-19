@@ -163,6 +163,9 @@ type forecastEntry struct {
 // по которому посчитано (nil — по сетке).
 func (a *App) forecastEntries(ctx context.Context, chatID int64) ([]forecastEntry, *model.Plan) {
 	var list []forecastEntry
+	if a.onTrafficPlan(ctx, chatID) {
+		return nil, nil
+	}
 	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
 		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
 			for i := range p.Durations {
@@ -220,6 +223,24 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 			}
 			mode := model.NormalizeAvailability(p.Availability)
 			hidden := mode == model.PlanAvailList || mode == model.PlanAvailLink
+			if p.IsTraffic() {
+				t := trafficTerms(p)
+				if k, ok := rubToKopecks(t.Price); ok && k > 0 {
+					if k > maxK {
+						maxK = k
+					}
+					if !hidden && !seen[k] {
+						seen[k] = true
+						amts = append(amts, k)
+					}
+				}
+				for _, pk := range t.Packs {
+					if k, ok := rubToKopecks(pk.Price); ok && k > maxK {
+						maxK = k
+					}
+				}
+				continue
+			}
 			for j := range p.Durations {
 				d := &p.Durations[j]
 				if d.Months <= 0 {
@@ -787,7 +808,13 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(res.kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
 	case balFailed:
 		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", a.clientErr(ctx, chatID, "оплата с баланса", res.err)))
+	case balRefunded:
+		a.showMySubs(ctx, chatID)
 	case balIssued:
+		if s.Pack != nil {
+			a.showPackDone(ctx, chatID, s.Pack.GB)
+			return
+		}
 		a.sendSubActive(ctx, chatID, res.link, res.expireAt)
 	}
 }
@@ -805,6 +832,7 @@ const (
 	balDeductFailed                    // списание не прошло, деньги не тронуты
 	balNoFunds                         // на балансе не хватает
 	balFailed                          // выдача не удалась, деньги возвращены
+	balRefunded                        // пакет некуда добавить: стоимость вернулась на баланс
 )
 
 type balanceResult struct {
@@ -837,7 +865,11 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 	if a.store == nil {
 		return balanceResult{kind: balNoStore}
 	}
-	buyKey := strconv.FormatInt(tgID, 10) + "|" + s.planCode() + "|" + strconv.Itoa(months)
+	keyCode := s.planCode()
+	if s.Pack != nil {
+		keyCode += "/" + s.Pack.ID
+	}
+	buyKey := strconv.FormatInt(tgID, 10) + "|" + keyCode + "|" + strconv.Itoa(months)
 	if concurrent {
 		// Ключ сделки ниже строится из состояния, ПРОЧИТАННОГО ДО списания, а
 		// оно сдвигается каждой выдачей: второй запрос, успевший прочитать его
@@ -853,7 +885,7 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 		}
 	}
 	// Ключ сделки — до списания: по нему отсекается двойное нажатие.
-	extID := balanceExtID(tgID, s.planCode(), months, discr())
+	extID := balanceExtID(tgID, keyCode, months, discr())
 	if extID != "" {
 		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
 			// Первое нажатие уже выдало подписку. Денег не трогаем вовсе —
@@ -874,7 +906,17 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 		return balanceResult{kind: balNoFunds, kopecks: kopecks}
 	}
 	a.payLog(ctx, "balance", extID, tgID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
+	var link, expireAt string
+	if s.traffic() {
+		var d dealDone
+		d, err = a.closeTrafficDeal(ctx, tgID, "balance", priceStr+curSuffix(curRUB), extID, snap, false)
+		link, expireAt = d.link, d.expireAt
+		if err == nil && d.refunded {
+			return balanceResult{kind: balRefunded}
+		}
+	} else {
+		link, expireAt, err = a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
+	}
 	if err != nil {
 		// Дубль поймало ядро выдачи (второе нажатие прошло проверку выше, пока
 		// первое ещё не записало платёж): деньги вернуть, но это не сбой —

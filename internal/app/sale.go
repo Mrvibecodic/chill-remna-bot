@@ -26,6 +26,7 @@ type sale struct {
 	// D — длительность тарифа на Months (для Plan != nil).
 	D      *model.PlanDuration
 	Months int
+	Pack   *model.PlanPack
 	// ShownPrice — цена, напечатанная на кнопках экрана способов оплаты в
 	// момент показа. Пусто — сверять не с чем (старое намерение, продажа не из
 	// намерения). См. priceMoved.
@@ -48,6 +49,8 @@ func (s *sale) planCode() string {
 	return s.Plan.Code
 }
 
+func (s *sale) traffic() bool { return s != nil && s.Plan.IsTraffic() }
+
 // baseSale — продажа «Базового» на months: путь всех старых экранов.
 func baseSale(months int) *sale {
 	return &sale{Months: months}
@@ -64,6 +67,9 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 	}
 	if in == nil {
 		return nil, nil
+	}
+	if in.Months == 0 && in.PlanCode != "" && in.PlanCode != model.PlanCodeBase {
+		return a.trafficSaleFor(ctx, chatID, in)
 	}
 	if in.PlanCode == "" || in.PlanCode == model.PlanCodeBase {
 		// Проверяем не только «выбор есть», но и «срок ещё продаётся» и «тариф
@@ -95,7 +101,7 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 	}
 	// Выключенный тариф не продаётся, каким бы ни был режим доступности: это
 	// та же проверка, что и непустая базовая цена у «Базового».
-	if p == nil || !p.Enabled {
+	if p == nil || !p.Enabled || !p.KnownKind() || p.IsTraffic() {
 		return nil, nil
 	}
 	d := p.Duration(in.Months)
@@ -106,6 +112,14 @@ func (a *App) saleFor(ctx context.Context, chatID int64) (*sale, error) {
 		return nil, nil
 	}
 	return &sale{Plan: p, D: d, Months: in.Months, ShownPrice: in.ShownPrice}, nil
+}
+
+func (a *App) trafficSaleFor(ctx context.Context, chatID int64, in *model.PurchaseIntent) (*sale, error) {
+	p, pk, err := a.trafficDeal(ctx, chatID, in.PlanCode, in.PackID)
+	if err != nil || p == nil {
+		return nil, err
+	}
+	return &sale{Plan: p, Pack: pk, ShownPrice: in.ShownPrice}, nil
 }
 
 // saleOrAsk — продажа из намерения; если продавать нечего, показывает витрину
@@ -171,12 +185,18 @@ func (a *App) askPriceMoved(ctx context.Context, chatID int64, s *sale) bool {
 		return false
 	}
 	lang := a.lang(chatID)
-	cur := curSuffix(curSymbol(a.pricing().Currency))
+	cur := curSuffix(curSymbol(a.saleCurrency(s)))
 	a.payLog(ctx, "", "", chatID, "price_changed", "было %s стало %s plan=%s months=%d",
 		s.ShownPrice, now, s.planCode(), s.Months)
 	a.notify(ctx, chatID, i18n.T(lang, "buy.price_changed", s.ShownPrice+cur, now+cur))
 	// Намерение переписываем новой ценой, чтобы следующее нажатие прошло.
-	if err := a.setBuyIntent(ctx, chatID, s.planCode(), s.Months, now); err != nil {
+	var err error
+	if s.traffic() {
+		err = a.setBuyIntentTraffic(ctx, chatID, s.planCode(), s.packID(), now)
+	} else {
+		err = a.setBuyIntent(ctx, chatID, s.planCode(), s.Months, now)
+	}
+	if err != nil {
 		a.log.Warn("намерение покупки не обновлено после смены цены", "err", err, "user", chatID)
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return true
@@ -194,7 +214,23 @@ func (a *App) saleBase(s *sale) string {
 	if s.Plan == nil {
 		return a.pricing().Base[s.Months]
 	}
+	if s.traffic() {
+		if s.Pack != nil {
+			return s.Pack.Price
+		}
+		return trafficTerms(s.Plan).Price
+	}
+	if s.D == nil {
+		return ""
+	}
 	return s.D.Base
+}
+
+func (s *sale) packID() string {
+	if s == nil || s.Pack == nil {
+		return ""
+	}
+	return s.Pack.ID
 }
 
 // saleFiat — цена продажи для способа оплаты (переопределение способа, иначе
@@ -206,6 +242,12 @@ func (a *App) saleFiat(s *sale, method string) string {
 	if s.Plan == nil {
 		return a.pricing().Fiat(method, s.Months)
 	}
+	if s.traffic() {
+		return a.saleBase(s)
+	}
+	if s.D == nil {
+		return ""
+	}
 	return s.D.Fiat(method)
 }
 
@@ -216,6 +258,15 @@ func (a *App) saleStars(s *sale) int {
 	}
 	if s.Plan == nil {
 		return a.pricing().StarPrice(s.Months)
+	}
+	if s.traffic() {
+		if s.Pack != nil {
+			return s.Pack.Stars
+		}
+		return trafficTerms(s.Plan).Stars
+	}
+	if s.D == nil {
+		return 0
 	}
 	return s.D.Stars
 }
@@ -263,6 +314,9 @@ func (a *App) saleSnapshot(s *sale) *model.PlanSnapshot {
 	}
 	if s.Plan == nil {
 		return a.planSnapshot(s.Months)
+	}
+	if s.traffic() {
+		return a.trafficSnapshotOf(s.Plan, s.Pack)
 	}
 	return a.planSnapshotOf(s.Plan, s.D, s.Months)
 }

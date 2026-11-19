@@ -63,9 +63,7 @@ func (a *App) HandleYooKassaWebhook(ctx context.Context, body []byte) (bool, err
 			return true, nil
 		}
 		if a.store != nil {
-			if p, _ := a.store.PendingByExtID(ctx, n.Object.ID); p != nil {
-				_ = a.store.ResolvePending(ctx, p.ID)
-			}
+			a.resolveExt(ctx, a.store, n.Object.ID)
 		}
 		a.payLog(ctx, model.PayMethodYooKassa, n.Object.ID, hintTG, "canceled", "платёж отменён (причина: %s)", reason)
 		return true, nil

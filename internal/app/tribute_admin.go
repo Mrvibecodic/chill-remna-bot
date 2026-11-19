@@ -196,6 +196,9 @@ func (a *App) showTributePlans(ctx context.Context, chatID int64) {
 			break
 		}
 		p := &plans[i]
+		if p.IsTraffic() {
+			continue
+		}
 		mark := "➖"
 		if a.tributePlanReady(p.Code) {
 			mark = "✅"
@@ -456,7 +459,7 @@ func (a *App) pickTributeSub(ctx context.Context, chatID int64, code string, id 
 func (a *App) bindTribute(ctx context.Context, chatID int64, code string, s tribute.Subscription) {
 	lang := a.lang(chatID)
 	p := a.tributePlanRow(ctx, code)
-	if p == nil {
+	if p == nil || p.IsTraffic() {
 		a.showTributePlans(ctx, chatID)
 		return
 	}

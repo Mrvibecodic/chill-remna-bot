@@ -169,6 +169,10 @@ func (a *App) showPlanOfferView(ctx context.Context, chatID int64, p *model.Plan
 	ui := a.getUI(chatID)
 	ui.pendingPlanOffer = ""
 	ui.lastOffer = &offerMemo{code: p.Code, view: view}
+	if p.IsTraffic() {
+		a.showTrafficOffer(ctx, chatID, p, view)
+		return
+	}
 
 	var rows [][]models.InlineKeyboardButton
 	cur := planCurrencyOr(p, a.pricing().Currency)
