@@ -24,7 +24,6 @@ func tap(a *App, data string) {
 	a.handleCallback(context.Background(), cb(trafficUID, data))
 }
 
-// Витрина, карточка трафик-тарифа и покупка с баланса — через кнопки.
 func TestTrafficUI_StorefrontCardAndBuy(t *testing.T) {
 	a, fs, panel, plan := trafficDealApp(t)
 	ctx := context.Background()
@@ -78,15 +77,12 @@ func TestTrafficUI_StorefrontCardAndBuy(t *testing.T) {
 		t.Fatalf("покупка кнопками: %s %d", exp, limit)
 	}
 
-	// Повторный показ карточки — с предупреждением: подписка уже идёт.
 	tap(a, "plo:"+plan.Code)
 	if !strings.Contains(fm.last(), "заменится") {
 		t.Fatalf("нет предупреждения о замене: %s", fm.last())
 	}
 }
 
-// Владелец: «Купить трафик» в главном меню и в «Мои подписки», пакеты,
-// покупка пакета с баланса, бессрочный срок на экране подписки.
 func TestTrafficUI_OwnerScreens(t *testing.T) {
 	a, _, panel, plan := trafficDealApp(t)
 	fm := a.msg.(*fakeMsg)
@@ -127,19 +123,16 @@ func TestTrafficUI_OwnerScreens(t *testing.T) {
 		t.Fatal("нет сообщения о добавленном трафике")
 	}
 
-	// Старая кнопка «Продлить» ведёт к пакетам.
 	tap(a, "menu:renew")
 	if !hasCallback(fm, "tfk:pb:pk5000") {
 		t.Fatalf("«Продлить» у трафик-тарифа: %s", fm.last())
 	}
-	// Чужой пакет и подделанный ID.
 	tap(a, "tfk:pb:zzzzzz")
 	if !strings.Contains(fm.joined(), "Этого пакета больше нет") {
 		t.Fatal("подделанный пакет не отклонён")
 	}
 }
 
-// Исчерпанный трафик: в подписке и в уведомлении — «Купить трафик».
 func TestTrafficUI_LimitedAndNotices(t *testing.T) {
 	a, _, panel, plan := trafficDealApp(t)
 	fm := a.msg.(*fakeMsg)
@@ -162,7 +155,6 @@ func TestTrafficUI_LimitedAndNotices(t *testing.T) {
 	assertPhoneFit(t, fm.lastKB)
 }
 
-// Не владелец: пакеты не показываются, кнопки в меню нет.
 func TestTrafficUI_NotOwner(t *testing.T) {
 	a, _, _, _ := trafficDealApp(t)
 	fm := a.msg.(*fakeMsg)
@@ -179,8 +171,6 @@ func TestTrafficUI_NotOwner(t *testing.T) {
 	}
 }
 
-// «Купить трафик» — только у подписки на существующий трафик-тариф: не у
-// срочного тарифа, не после удаления трафик-тарифа, не без подписки.
 func TestTrafficUI_BuyTrafficOnlyForTrafficPlans(t *testing.T) {
 	a, fs, panel, plan := trafficDealApp(t)
 	ctx := context.Background()
@@ -192,7 +182,6 @@ func TestTrafficUI_BuyTrafficOnlyForTrafficPlans(t *testing.T) {
 		}
 	}
 
-	// Срочный тариф: подписка есть, снимок — срочный.
 	timed := &model.PlanSnapshot{Code: "term01", Months: 1, TrafficGB: 50}
 	_ = fs.SetUserSnapshot(ctx, trafficUID, timed)
 	panel.mu.Lock()
@@ -206,22 +195,25 @@ func TestTrafficUI_BuyTrafficOnlyForTrafficPlans(t *testing.T) {
 	noButton("исчерпание на срочном тарифе")
 	a.pushTrafficThreshold(ctx, rwUserPayload{TelegramID: trafficUID, LastTriggeredThreshold: 80})
 	noButton("порог на срочном тарифе")
+	if a.MiniMenu(ctx, trafficUID, false).TrafficOwner {
+		t.Fatal("мини-апп: «Купить трафик» на срочном тарифе")
+	}
 
-	// Трафик-тариф: кнопка есть везде.
 	buyTrafficWithBalance(t, a, plan.Code, "")
 	tap(a, "menu:home")
-	if !hasCallback(fm, cbTrafficPacks) {
+	if !hasCallback(fm, cbTrafficPacks) || !a.MiniMenu(ctx, trafficUID, false).TrafficOwner {
 		t.Fatal("у владельца трафик-тарифа нет «Купить трафик»")
 	}
 
-	// Тариф удалён: пакеты не продаются — и кнопки нет.
 	_ = fs.DeletePlan(ctx, plan.Code)
 	tap(a, "menu:home")
 	noButton("меню после удаления тарифа")
 	tap(a, "menu:mysubs")
 	noButton("подписка после удаления тарифа")
+	if a.MiniMenu(ctx, trafficUID, false).TrafficOwner {
+		t.Fatal("мини-апп: «Купить трафик» после удаления тарифа")
+	}
 
-	// Подписки в панели нет (удалили руками): кнопки в меню нет.
 	_ = fs.SavePlan(ctx, plan)
 	panel.mu.Lock()
 	panel.exists = false

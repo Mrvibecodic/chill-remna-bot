@@ -512,7 +512,7 @@ func TestTributeIgnoresBotPriceChange(t *testing.T) {
 // E-mail-аккаунт кабинета получает понятный отказ, а не «сервис не отвечает».
 func TestTributeMiniEmailError(t *testing.T) {
 	a, _, _, _ := trbChatApp(t)
-	dto := a.MiniCheckout(context.Background(), -1000000014, model.PlanCodeBase, 1, model.PayMethodTribute, "", true, false)
+	dto := a.MiniCheckout(context.Background(), -1000000014, model.PlanCodeBase, 1, "", model.PayMethodTribute, "", true, false)
 	if !strings.Contains(dto.Error, "через Telegram") {
 		t.Fatalf("ответ кабинету: %+v", dto)
 	}
@@ -816,7 +816,7 @@ func TestTributeMiniTermsAndPrice(t *testing.T) {
 	if hint != "Подходят сроки: 1 месяц. Другой срок на странице Tribute выбирать не нужно — по нему доступ не выдастся." {
 		t.Fatalf("сроки Tribute в витрине: %q", hint)
 	}
-	dto := a.MiniCheckout(ctx, 1000000015, p.Code, 1, model.PayMethodTribute, "1", false, false)
+	dto := a.MiniCheckout(ctx, 1000000015, p.Code, 1, "", model.PayMethodTribute, "1", false, false)
 	if !dto.OK || dto.PayURL != trbVipURL {
 		t.Fatalf("Tribute отказал из-за цены бота: %+v", dto)
 	}

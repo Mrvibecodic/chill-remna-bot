@@ -65,8 +65,12 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 			}
 			currency = "RUB"
 		}
+		snap := a.saleSnapshot(s)
 		desc := miniDesc(months)
-		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable(), a.saleSnapshot(s))
+		if s.traffic() {
+			desc = trafficInvoiceDesc(a.lang(tgID), snap)
+		}
+		url, _, err := a.ykCreatePayment(ctx, tgID, months, value, currency, returnURL, desc, a.autoPayAvailable(), snap)
 		return url, false, err
 
 	case model.PayMethodCryptoBot:
@@ -91,7 +95,12 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		if !okV || valueK <= 0 {
 			return "", false, errors.New("оплата недоступна")
 		}
-		url, _, err := a.plCreateTransactionSnap(ctx, tgID, months, float64(valueK)/100, miniDesc(months), returnURL, a.saleSnapshot(s))
+		snap := a.saleSnapshot(s)
+		desc := miniDesc(months)
+		if s.traffic() {
+			desc = trafficInvoiceDesc(a.lang(tgID), snap)
+		}
+		url, _, err := a.plCreateTransactionSnap(ctx, tgID, months, float64(valueK)/100, desc, returnURL, snap)
 		return url, false, err
 
 	case model.PayMethodYooMoney:
@@ -111,10 +120,17 @@ func (a *App) miniPayURLCore(ctx context.Context, tgID int64, s *sale, method st
 		if !a.hlConfig().Enabled || price == "" || !a.saleGridCurrency(s) {
 			return "", false, errors.New("оплата криптовалютой недоступна")
 		}
-		url, _, err := a.hlCreateInvoiceSnap(ctx, tgID, months, price, "", 0, a.saleSnapshot(s))
+		snap, purpose := a.saleSnapshot(s), ""
+		if s.traffic() {
+			purpose = trafficPurpose(snap)
+		}
+		url, _, err := a.hlCreateInvoiceSnap(ctx, tgID, months, price, purpose, 0, snap)
 		return url, false, err
 
 	case model.PayMethodTribute:
+		if s.traffic() {
+			return "", false, errUserText(i18n.T(a.lang(tgID), "trb.plan_unavailable"))
+		}
 		// Tribute выдаёт подписку по telegram_user_id покупателя: аккаунту
 		// кабинета без Telegram (отрицательный ID) её не сопоставить.
 		if tgID <= 0 {
@@ -305,6 +321,7 @@ func (a *App) MiniReferral(ctx context.Context, tgID int64) web.MiniReferralDTO 
 		Percent:       cfg.Percent,
 		CabinetLink:   a.cabinetReferralLink(tgID),
 		CabinetFirst:  tgID < 0,
+		Note:          stripHTMLTags(a.referralTrafficNote(ctx, a.lang(tgID))),
 	}
 }
 

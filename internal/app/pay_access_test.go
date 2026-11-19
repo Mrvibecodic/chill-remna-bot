@@ -157,7 +157,7 @@ func TestPayAccess_MiniAndWeb(t *testing.T) {
 		{model.PayMethodCryptoBot, false},
 		{model.PayMethodStars, true},
 	} {
-		r := a.MiniCheckout(ctx, uid, p.Code, 1, c.method, "990", c.web, false)
+		r := a.MiniCheckout(ctx, uid, p.Code, 1, "", c.method, "990", c.web, false)
 		if r.Error != want {
 			t.Errorf("%s (сайт=%v): ждали отказ «%s», получили %+v", c.method, c.web, want, r)
 		}

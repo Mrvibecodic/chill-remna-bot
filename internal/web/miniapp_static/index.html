@@ -641,7 +641,7 @@ function passHTML(sub){
       '<div class="pl"><span class="brand">'+(sub.plan_title?'ТАРИФ · '+esc(String(sub.plan_title).toUpperCase()):'ДОСТУП · BOARDING')+'</span>'+(dead?'<span class="pstat '+dead.c+'"><span class="dot off"></span>'+dead.t+'</span>':'<span class="pstat"><span class="dot"></span>активно</span>')+'</div>'+
       '<div class="route"><span class="pt">Ты</span><span class="ln"></span><span class="pic">'+IC.plane+'</span><span class="ln"></span><span class="pt">Сеть</span></div></div>'+
       '<div class="perf"></div><div class="stub'+(dleft!==null&&dtext!==null&&atext!==null?' n4':'')+'">'+
-        '<div class="c"><div class="k">ДО</div><div class="v">'+esc(dshort)+'</div></div>'+
+        '<div class="c"><div class="k">'+(sub.eternal?'СРОК':'ДО')+'</div><div class="v">'+esc(dshort)+'</div></div>'+
         (dleft!==null?'<div class="c"><div class="k">ОСТАЛОСЬ</div><div class="v">'+dleft+' '+daysWord(dleft)+'</div></div>':'')+
         (dtext!==null?'<div class="c"><div class="k">УСТРОЙСТВА</div><div class="v">'+esc(dtext)+'</div></div>':'')+
         (atext!==null?'<div class="c"><div class="k">'+esc((sub.addsub_name||'Доп-сервер').toUpperCase())+'</div><div class="v">'+esc(atext)+'</div></div>':'')+
@@ -650,7 +650,7 @@ function passHTML(sub){
 }
 function render(me,menu,sub,plans){
   // Тариф, открытый по ссылке, витрина не показывает — держим его до перезагрузки.
-  var fresh=(plans&&plans.plans)||[];
+  var fresh=((plans&&plans.plans)||[]).concat(((plans&&plans.traffic)||[]).filter(function(p){return !webStarsOnly((p.durations||[])[0]);}));
   var extra=(STATE.plans||[]).filter(function(p){return p.link&&!fresh.some(function(q){return q.code===p.code;});});
   STATE.plans=fresh.concat(extra);
   STATE.plansNotice=(plans&&plans.notice)||'';
@@ -673,6 +673,7 @@ function render(me,menu,sub,plans){
     h+='<button class="btn sec" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button>';
     h+=autoPayBlock();
     if(renewShown(menu))h+='<button class="btn sec" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
+    if(menu.traffic_owner)h+='<button class="btn sec" onclick="openTraffic()">'+IC.bolt+'Купить трафик</button>';
   }else{
     if(ub)h+='<div class="acctgrp">'+ub+'</div>';
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>';
@@ -690,7 +691,7 @@ function render(me,menu,sub,plans){
     STATE.plans.forEach(function(p){
       h+='<div class="plan" onclick="openPlan(\''+jsq(p.code)+'\')">'+
         '<div class="pl"><span class="pm">'+esc(planTitle(p))+'</span>'+(p.own?'<span class="fbadge" style="align-self:flex-start;margin:2px 0">Ваш тариф</span>':'')+'<span class="ps">'+esc(planCardSub(p))+'</span></div>'+
-        '<span class="price">от '+esc(planMinLabel(p))+'</span></div>';
+        '<span class="price">'+(isTraffic(p)?'':'от ')+esc(planMinLabel(p))+'</span></div>';
     });
     h+='</div>';
   }else if(STATE.plansNotice){
@@ -718,6 +719,7 @@ function renderHomeDesk(menu,sub){
     right+=devicesCard(sub);
     var left=passHTML(sub)+trafficCard(sub)+autoPayBlock();
     if(renewShown(menu))left+='<button class="btn sec" style="margin-bottom:16px" onclick="openRenew()">'+IC.reset+'Продлить подписку</button>';
+    if(menu.traffic_owner)left+='<button class="btn sec" style="margin-bottom:16px" onclick="openTraffic()">'+IC.bolt+'Купить трафик</button>';
     h+='<div class="dgrid"><div class="c7">'+left+'</div><div class="c5">'+right+'</div></div>';
   }else{
     h+='<div class="card hero"><div class="top"><span class="status"><span class="dot off"></span>Нет активной подписки</span>'+IC.bolt+'</div>'+
@@ -764,7 +766,7 @@ function plansGridHTML(){
       '<div class="pn">'+esc(planTitle(p))+(p.own?'<span class="fbadge">Ваш тариф</span>':'')+'</div>'+
       '<div class="ps">'+esc(planCardSub(p))+'</div>'+
       (f.length?'<div class="pf">'+f.map(function(x){return '<span>'+esc(x)+'</span>';}).join('')+'</div>':'')+
-      '<div class="pp">от '+esc(planMinLabel(p))+'</div></div>';
+      '<div class="pp">'+(isTraffic(p)?'':'от ')+esc(planMinLabel(p))+'</div></div>';
   });
   return h+'</div>';
 }
@@ -924,6 +926,7 @@ function planCardSub(p){
 // «от X ₽» — минимальная цена по срокам тарифа. Пробелы-разделители тысяч
 // убираются до разбора: parseFloat('9 900') вернул бы 9.
 function planMinLabel(p){
+  if(isTraffic(p)){var d0=(p.durations||[])[0];return d0?priceLab(d0):'';}
   var best=null;
   (p.durations||[]).forEach(function(d){
     var v=parseFloat(String(d.price).replace(/[\s ]/g,'').replace(',','.'));
@@ -936,9 +939,9 @@ function planMinLabel(p){
 function durListHTML(p){
   var h='<div class="cols">';
   (p.durations||[]).forEach(function(d){
-    var lab=esc(d.price)+' '+esc(d.currency||'');
+    var lab=esc(priceLab(d));
     h+='<div class="plan'+(d.best?' best':'')+'" onclick="buyPlan(\''+jsq(p.code)+'\','+d.months+')">'+
-      '<div class="pl"><span class="pm">'+monthsWord(d.months)+'</span><span class="ps">'+esc(planSub(d))+(d.countries&&d.countries.length?(' · 🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран')):'')+(d.servers>0?(' · 🖥 Серверов: '+d.servers):'')+'</span></div>'+
+      '<div class="pl"><span class="pm">'+termWord(d.months)+'</span><span class="ps">'+esc(planSub(d)+(d.months===0?' · без сброса':''))+(d.countries&&d.countries.length?(' · 🌍 '+d.countries.length+' '+plural(d.countries.length,'страна','страны','стран')):'')+(d.servers>0?(' · 🖥 Серверов: '+d.servers):'')+'</span></div>'+
       '<span class="price">'+lab+(d.discount?'<span class="disc">'+esc(d.discount)+'</span>':'')+'</span></div>';
   });
   return h+'</div>';
@@ -965,8 +968,10 @@ function openPlan(code,renew){
   }
   if(DESK)h+=planInfoDesk(p);
   var hl=h;h='';
-  h+='<div class="sec-title">'+IC.tag+'Срок подписки</div>';
+  h+='<div class="sec-title">'+IC.tag+(isTraffic(p)?'Стоимость':'Срок подписки')+'</div>';
   h+=durListHTML(p);
+  if(p.traffic_note)h+='<div class="hint" style="margin-top:10px">'+esc(p.traffic_note)+'</div>';
+  if(p.replace_note)h+='<div class="card" style="margin-top:10px"><div class="hint">'+esc(p.replace_note)+'</div></div>';
   h=deskSplit(hl,h);
   // Тариф один — «Тарифы» открывают сразу его, и промокод здесь же.
   if(!renew&&!many)h+=promoCard();
@@ -975,6 +980,18 @@ function openPlan(code,renew){
 }
 function plural(n,one,few,many){n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return many;if(d>1&&d<5)return few;if(d===1)return one;return many;}
 function monthsWord(n){return n+' '+plural(n,'месяц','месяца','месяцев');}
+function webStarsOnly(d){return WEB&&!!d&&!String(d.price||'').trim();}
+function isTraffic(p){return !!(p&&p.kind==='traffic');}
+function termWord(n){return n>0?monthsWord(n):'Бессрочно';}
+function priceLab(d){return d&&String(d.price||'').trim()?(d.price+' '+(d.currency||'')).trim():(d&&d.stars>0?d.stars+' ⭐':'');}
+// Tribute продаёт тариф своей подпиской: кнопка только у тарифов, к которым
+// она привязана (сервер отмечает их полем tribute).
+function payMethods(p,d){
+  var out=[];if(STATE.balanceK>0)out.push('balance');
+  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&!p.tribute))out.push(m);});
+  return isTraffic(p)?trafficMethods(out,d):out;
+}
+function trafficMethods(list,d){var hp=!!String(d.price||'').trim();return list.filter(function(m){if(m==='tribute')return false;if(m==='stars')return d.stars>0;return hp;});}
 // Даты — по Москве, как в боте: по часам браузера у клиента западнее
 // Москвы сброс в 03:20 МСК выходил вчерашним числом.
 function shortDate(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
@@ -999,21 +1016,18 @@ function buyPlan(code,months){
   haptic('tap');
   var p=planByCode(code),d=durByMonths(p,months);
   if(!p||!d){boot();return;}
-  var methods=[];
-  if(STATE.balanceK>0)methods.push('balance');
-  // Tribute продаёт тариф своей подпиской: кнопка только у тарифов, к которым
-  // она привязана (сервер отмечает их полем tribute).
-  (STATE.methods||[]).forEach(function(m){if(m!=='balance'&&!(WEB&&m==='stars')&&!(m==='tribute'&&!p.tribute))methods.push(m);});
+  var methods=payMethods(p,d);
   if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
   // Согласие с документами: тот же гейт, что в чате (сервер всё равно откажет
   // в счёте, поэтому спрашиваем до выбора способа).
   if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalGate(code,months);return;}
-  var label=d.price+' '+(d.currency||'');
+  var label=priceLab(d);
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+
-    '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+monthsWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
+    '<div class="payhead"><div class="title">'+esc(planTitle(p))+' · '+termWord(months)+'</div><div class="bigprice">'+esc(label.trim())+'</div></div></div>';
   h+='<div class="sec-title">'+IC.check+'Что входит</div><div class="feat">';
   h+='<div class="frow"><span class="l">'+IC.bolt+'Трафик</span><b>'+esc(planTraffic(d))+'</b></div>';
   if(d.traffic_gb>0&&p.strategy&&STRAT_LABELS[p.strategy])h+='<div class="frow"><span class="l">'+IC.reset+'Сброс трафика</span><b>'+esc(STRAT_LABELS[p.strategy])+'</b></div>';
+  if(isTraffic(p))h+='<div class="frow"><span class="l">'+IC.check+'Срок</span><b>бессрочно</b></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="frow"><span class="l">'+IC.device+'Устройства (HWID)</span><b>'+(d.devices>0?d.devices:'без ограничений')+'</b></div>';
   if(d.countries&&d.countries.length)h+='<div class="frow"><span class="l">'+IC.globe+'Страны</span><b>'+d.countries.length+'</b></div>';
   if(d.servers>0)h+='<div class="frow"><span class="l">'+IC.layers+'Серверов</span><b>'+d.servers+'</b></div>';
@@ -1023,6 +1037,8 @@ function buyPlan(code,months){
   h+='</div>';
   if(d.switch_days)h+='<div class="hint">Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен, срок сдвинется на указанное число дней.</div>';
   if(p.addsub_name&&p.addsub_desc)h+='<div class="hint">'+esc(p.addsub_desc)+'</div>';
+  if(p.traffic_note)h+='<div class="hint">'+esc(p.traffic_note)+'</div>';
+  if(p.replace_note)h+='<div class="hint">'+esc(p.replace_note)+'</div>';
   if(d.countries&&d.countries.length){
     h+='<div class="sec-title">'+IC.globe+'Доступные страны</div><div class="chips">';
     d.countries.forEach(function(c){
@@ -1033,7 +1049,7 @@ function buyPlan(code,months){
   }
   var hl=h;h='';
   h+='<div class="sec-title">Способ оплаты</div>';
-  var apOn=STATE.ap&&STATE.ap.available;
+  var apOn=STATE.ap&&STATE.ap.available&&!isTraffic(p);
   if(DESK)h+='<div class="paygrid">';
   methods.forEach(function(m){
     if(DESK)h+='<div class="pcell">';
@@ -1051,6 +1067,52 @@ function buyPlan(code,months){
   h=deskSplit(hl,h);
   h+='<button class="btn ghost back" style="margin-top:16px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
   view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
+}
+async function openTraffic(){
+  haptic('tap');PAGE='plans';skSimple();setBack(boot);
+  var r;try{r=await api('/api/miniapp/traffic');}catch(e){toast('Ошибка: '+e.message,'err');boot();return;}
+  r.packs=(r.packs||[]).filter(function(pk){return !webStarsOnly(pk);});
+  STATE.traffic=r;
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Трафик</span>'+IC.bolt+'</div>'+
+    '<div class="title">Купить трафик</div>';
+  if(r.limit_ok)h+='<div class="hint" style="margin-top:4px">Осталось '+esc(gbText(Math.max(0,r.limit-r.used)))+' из '+esc(gbText(r.limit))+'</div>';
+  if(r.owner&&r.packs&&r.packs.length)h+='<div class="hint" style="margin-top:6px">Пакет добавляется к остатку и не сгорает. Покупать можно сколько угодно раз.</div>';
+  h+='</div>';
+  if(r.owner&&r.packs&&r.packs.length){
+    h+='<div class="sec-title">'+IC.tag+'Пакеты</div><div class="cols">';
+    r.packs.forEach(function(pk){
+      h+='<div class="plan" onclick="buyPack(\''+jsq(pk.id)+'\')"><div class="pl"><span class="pm">+ '+pk.gb+' ГБ</span></div>'+
+        '<span class="price">'+esc(priceLab(pk))+'</span></div>';
+    });
+    h+='</div>';
+  }
+  if(r.notice)h+='<div class="card"><div class="hint center">'+esc(r.notice)+'</div></div>';
+  if(!r.owner)h+='<button class="btn" onclick="openPlans()">'+IC.tag+'Тарифы</button>';
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="boot()">← Назад</button></div>';
+  view(h,boot);
+}
+function buyPack(id){
+  PAGE='plans';haptic('tap');
+  var r=STATE.traffic||{},pk=(r.packs||[]).filter(function(x){return x.id===id;})[0];
+  if(!pk){openTraffic();return;}
+  var methods=payMethods({kind:'traffic'},pk);
+  if(!methods.length){toast('Оплата временно недоступна. Попробуйте через бота.','err');return;}
+  if(STATE.menu&&STATE.menu.legal_accept&&legalDocs().length){legalGateFor(function(){buyPack(id);},openTraffic);return;}
+  var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status"><span class="dot"></span>Оформление</span>'+IC.bolt+'</div>'+
+    '<div class="payhead"><div class="title">+ '+pk.gb+' ГБ трафика</div><div class="bigprice">'+esc(priceLab(pk))+'</div></div></div>';
+  h+='<div class="hint">Гигабайты добавятся к остатку подписки и не сгорают.</div>';
+  var hl=h;h='';
+  h+='<div class="sec-title">Способ оплаты</div>';
+  if(DESK)h+='<div class="paygrid">';
+  methods.forEach(function(m){
+    if(DESK)h+='<div class="pcell">';
+    h+='<button class="btn sec paym" onclick="pay(\''+jsq(r.code)+'\',0,\''+m+'\',this,\''+jsq(String(pk.price||''))+'\',\''+jsq(pk.id)+'\')">'+payBody(m,METHOD_LABELS[m]||m,'')+'</button>';
+    if(DESK)h+='</div>';
+  });
+  if(DESK)h+='</div>';
+  h=deskSplit(hl,h);
+  h+='<button class="btn ghost back" style="margin-top:16px" onclick="openTraffic()">← Назад</button></div>';
+  view(h,openTraffic);
 }
 function renderP2PCard(card,amount,reqID,topup){
   PAGE=topup?'wallet':'plans';
@@ -1099,13 +1161,13 @@ async function p2pCancel(reqID,el){
 // адрес подставляется, когда счёт готов.
 function payTab(){if(!WEB)return null;try{var w=window.open('','_blank');if(w){try{w.opener=null;}catch(e){}}return w;}catch(e){return null;}}
 function payTabGo(w,u){if(!w||w.closed||!/^(https?:|tg:)/i.test(String(u||'')))return false;try{w.location.href=u;return true;}catch(e){return false;}}
-async function pay(plan,months,method,el,shownPrice){
+async function pay(plan,months,method,el,shownPrice,pack){
   haptic('tap');busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   // p2p_inapp: реквизиты перевода и чек принимаются прямо здесь, а не в чате.
-  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true});
+  try{const r=await post('/api/miniapp/checkout',{plan:plan,months:months,method:method,price:shownPrice||'',p2p_inapp:true,pack:pack||''});
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;openWait(r.pay_url,r.issued_at);return;}
-    if(r.ok&&r.sub_url){haptic('ok');boot();return;}
+    if(r.ok&&(r.sub_url||r.done)){haptic('ok');if(r.message)toast(r.message,'ok');boot();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message,'ok');renderP2PCard(r.p2p_card,r.p2p_amount,r.p2p_req_id,r.p2p_topup);return;}
     if(r.ok&&r.pay_url){
       payGuardOn();
@@ -1174,6 +1236,7 @@ async function openMore(){
     if(ref.invitee_value>0&&ref.invitee_kind){var ib=(ref.invitee_kind==='days')?(ref.invitee_value+' дн.'):(ref.invitee_value+' ₽');h+=' Другу — подарок <b style="color:var(--text)">'+esc(ib)+'</b>.';}
     if(ref.percent>0)h+=' И ещё <b style="color:var(--text)">'+ref.percent+'%</b> с каждой его оплаты.';
     h+='</div>';
+    if(ref.note)h+='<div class="hint" style="margin-top:8px">'+esc(ref.note)+'</div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13.5px"><span style="color:var(--muted)">Приглашено</span><b>'+(ref.count||0)+'</b></div>';
     h+='<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:13.5px"><span style="color:var(--muted)">Заработано</span><b>'+rub(ref.earned_kopecks||0)+' ₽</b></div>';
     // Ссылки: в бота и на сайт кабинета; аккаунту без Telegram первой — на сайт.
@@ -1255,15 +1318,18 @@ function legalStartGate(){
   view(h,null);
 }
 function legalGate(code,months){
+  legalGateFor(function(){buyPlan(code,months);},STATE.plans.length>1?function(){openPlan(code);}:boot);
+}
+function legalGateFor(then,back){
   PAGE='plans';
-  STATE.legalBack=function(){buyPlan(code,months);};
+  STATE.legalBack=then;STATE.legalThen=then;STATE.legalOut=back;
   var h='<div class="stagger"><div class="card hero glow"><div class="top"><span class="status">📜 Документы</span></div>'+
     '<div class="title">Перед оплатой</div>'+
     '<div class="hint" style="margin-top:8px">Ознакомьтесь с документами сервиса — согласие нужно дать один раз.</div></div>';
   h+=legalRows();
-  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,function(){buyPlan(\''+jsq(code)+'\','+months+');})">✅ Принимаю</button>';
-  h+='<button class="btn ghost back" style="margin-top:10px" onclick="'+(STATE.plans.length>1?'openPlan(\''+jsq(code)+'\')':'boot()')+'">← Назад</button></div>';
-  view(h,STATE.plans.length>1?function(){openPlan(code);}:boot);
+  h+='<button class="btn" style="margin-top:12px" onclick="legalAccept(this,STATE.legalThen)">✅ Принимаю</button>';
+  h+='<button class="btn ghost back" style="margin-top:10px" onclick="STATE.legalOut()">← Назад</button></div>';
+  view(h,back);
 }
 
 /* ---- top-up ---- */
@@ -1676,7 +1742,8 @@ async function handleStart(s){
   }
   if(plan){
     try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(plan.slice(5)));
-      if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;
+      var lr=(r.plans||[]).concat(r.traffic||[]);
+      if(lr.length){var lp=lr[0];lp.link=true;
         STATE.plans=(STATE.plans||[]).filter(function(x){return x.code!==lp.code;}).concat([lp]);
         openPlan(lp.code);return true;}
       toast(r.notice||'Тариф по этой ссылке недоступен','err');

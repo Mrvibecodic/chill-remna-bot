@@ -55,10 +55,10 @@ func TestMiniLinkPlan_OwnAndOpened(t *testing.T) {
 	if has(other) {
 		t.Fatal("чужой тариф «по ссылке» на витрине")
 	}
-	if a.miniSale(ctx, own, p.Code, 1) == nil {
+	if a.miniSale(ctx, own, p.Code, 1, "") == nil {
 		t.Fatal("продление своего тарифа закрыто")
 	}
-	if a.miniSale(ctx, other, p.Code, 1) != nil {
+	if a.miniSale(ctx, other, p.Code, 1, "") != nil {
 		t.Fatal("тариф по ссылке продаётся без открытия ссылки")
 	}
 	if m := a.MiniMenu(ctx, own, false); m.OwnPlan != p.Code || m.RenewGone {
@@ -69,7 +69,7 @@ func TestMiniLinkPlan_OwnAndOpened(t *testing.T) {
 	if len(dto.Plans) != 1 || dto.Plans[0].Code != p.Code {
 		t.Fatalf("ссылка тарифа не открыла его: %+v", dto)
 	}
-	if a.miniSale(ctx, other, p.Code, 1) == nil {
+	if a.miniSale(ctx, other, p.Code, 1, "") == nil {
 		t.Fatal("открытый по ссылке тариф не продаётся")
 	}
 }
@@ -89,7 +89,7 @@ func TestMiniPlanLink_Throttle(t *testing.T) {
 	if d := a.MiniPlanLink(ctx, uid, p.Code); len(d.Plans) != 0 {
 		t.Fatal("после лимита перебора тариф открылся")
 	}
-	if a.miniSale(ctx, uid, p.Code, 1) != nil {
+	if a.miniSale(ctx, uid, p.Code, 1, "") != nil {
 		t.Fatal("после лимита перебора тариф продаётся")
 	}
 }

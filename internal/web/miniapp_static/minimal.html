@@ -347,6 +347,7 @@ var L={ru:{
  connect:'Подключить',renew:'Продлить',
  no_sub:'Нет активной подписки',no_sub_hint:'Выберите тариф — подключение займёт минуту.',
  try_free:'Попробовать бесплатно',choose_plan:'Выбрать тариф',trial_fail:'Не удалось активировать пробный период',trial_ok:'Пробный период активирован',
+ term_eternal:'Бессрочно',buy_traffic:'Купить трафик',traffic_left:'Осталось %s из %s',packs:'Пакеты',pack_title:'Пакет трафика',pack_hint:'Добавится к остатку и не сгорает',price_lbl:'Стоимость',term:'Срок',
  plans:'Тарифы',other_plans:'К другим тарифам',from:'от',per_mo:'/мес',per_n:'/{n} мес',your_plan:'Ваш тариф',best:'Выгодно',period:'Срок',whats_in:'Что входит',
  traffic:'Трафик',traffic_unl:'Безлимит',reset:'Сброс трафика',countries:'Страны',cn1:'страна',cn2:'страны',cn5:'стран',servers:'Серверов',hwid:'Устройств',hwid_unl:'без ограничений',dev_unl:'без лимита устройств',included:'включено',
  switch_credit:'Зачёт остатка',switch_hint:'Остаток текущего тарифа не сгорает: он пересчитан в дни этого тарифа по соотношению цен.',
@@ -401,6 +402,7 @@ var L={ru:{
  connect:'Connect',renew:'Renew',
  no_sub:'No active subscription',no_sub_hint:'Pick a plan — connecting takes a minute.',
  try_free:'Try for free',choose_plan:'Choose a plan',trial_fail:'Could not activate the trial',trial_ok:'Trial activated',
+ term_eternal:'No expiry',buy_traffic:'Buy traffic',traffic_left:'Left: %s of %s',packs:'Packs',pack_title:'Traffic pack',pack_hint:'Added to what you have left, never expires',price_lbl:'Price',term:'Term',
  plans:'Plans',other_plans:'Other plans',from:'from',per_mo:'/mo',per_n:'/{n} mo',your_plan:'Your plan',best:'Best value',period:'Period',whats_in:'What’s included',
  traffic:'Traffic',traffic_unl:'Unlimited',reset:'Traffic reset',countries:'Countries',cn1:'country',cn2:'countries',cn5:'countries',servers:'Servers',hwid:'Devices',hwid_unl:'unlimited',dev_unl:'unlimited devices',included:'included',
  switch_credit:'Remaining credit',switch_hint:'The rest of your current plan is not lost: it is converted into days of this plan by price ratio.',
@@ -451,6 +453,9 @@ var L={ru:{
 function T(k){var d=L[STATE.lang]||L.ru;var s=(k in d)?d[k]:(L.ru[k]||k);for(var i=1;i<arguments.length;i++)s=s.replace('%s',arguments[i]);return s;}
 function plural(n,a,b,c){if(STATE.lang==='en')return Math.abs(n)===1?a:c;n=Math.abs(n)%100;var d=n%10;if(n>10&&n<20)return c;if(d>1&&d<5)return b;if(d===1)return a;return c;}
 function monthsW(n){return n+' '+plural(n,T('month1'),T('month2'),T('month5'));}
+function webStarsOnly(d){return WEB&&!!d&&!String(d.price||'').trim();}
+function isTraffic(p){return !!(p&&p.kind==='traffic');}
+function termW(n){return n>0?monthsW(n):T('term_eternal');}
 function daysW(n){return plural(n,T('day1'),T('day2'),T('day5'));}
 
 /* ---------- утилиты ---------- */
@@ -465,7 +470,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){retur
 function loc(){return STATE.lang==='en'?'en-US':'ru-RU';}
 function rub(k){return (Math.round(k)/100).toLocaleString(loc())+' ₽';}
 function num(s){var v=parseFloat(String(s==null?'':s).replace(/[\s\u00a0]/g,'').replace(',','.'));return isFinite(v)?v:NaN;}
-function price(d){return (String(d.price||'')+' '+(d.currency||'')).trim();}
+function price(d){var v=String(d.price||'').trim();return v?(v+' '+(d.currency||'')).trim():(d.stars>0?d.stars+' ⭐':'');}
 // Даты — по Москве, как в боте: по часам браузера у клиента западнее
 // Москвы сброс в 03:20 МСК выходил вчерашним числом.
 function dateS(ts){var d=new Date(ts*1000+3*3600000),p=function(n){return(n<10?'0':'')+n;};return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+'.'+d.getUTCFullYear();}
@@ -586,7 +591,7 @@ function rerender(){if(CUR)SCREENS[CUR.name](CUR.arg);}
 function startGate(x){return x&&x.name==='legalgate'&&!x.arg;}
 function sideOn(){if(DESK&&TOKEN&&BOOTING&&!STATE.me)return true;return !!(DESK&&TOKEN&&STATE.me&&CUR&&CUR.name!=='login'&&CUR.name!=='forgot'&&!startGate(CUR)&&!STACK.some(startGate));}
 // Раздел меню для открытого экрана; экран без своего раздела оставляет прежний.
-var SECTS={home:'home',plans:'plans',plan:'plans',checkout:'plans',wallet:'wallet',promo:'wallet',connect:'connect',devices:'devices',ref:'ref',account:'account',docs:'docs',doc:'docs',theme:'account'};
+var SECTS={traffic:'home',packpay:'home',home:'home',plans:'plans',plan:'plans',checkout:'plans',wallet:'wallet',promo:'wallet',connect:'connect',devices:'devices',ref:'ref',account:'account',docs:'docs',doc:'docs',theme:'account'};
 // К списку тарифов с экрана тарифа: пришли из списка — просто назад, иначе
 // список встаёт на место тарифа, и «Назад» в нём ведёт туда же, куда вёл бы.
 function toPlans(){var t=STACK[STACK.length-1];if(t&&t.name==='plans'){goBack();return;}go('plans',undefined,{replace:true});}
@@ -653,7 +658,7 @@ function confirmAsk(msg,yes,cb){
 /* ---------- данные ---------- */
 function planBy(c){for(var i=0;i<STATE.plans.length;i++)if(STATE.plans[i].code===c)return STATE.plans[i];return null;}
 function durBy(p,m){var l=(p&&p.durations)||[];for(var i=0;i<l.length;i++)if(l[i].months==m)return l[i];return null;}
-function planMin(p){var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)+(d.months>1?T('per_n').replace('{n}',d.months):d.months===1?T('per_mo'):'')};});return b?b.l:'';}
+function planMin(p){if(isTraffic(p)){var d0=(p.durations||[])[0];return d0?price(d0):'';}var b=null;(p.durations||[]).forEach(function(d){var v=num(d.price);if(!isFinite(v))return;if(!b||v<b.v)b={v:v,l:price(d)+(d.months>1?T('per_n').replace('{n}',d.months):d.months===1?T('per_mo'):'')};});return b?b.l:'';}
 function addsubBits(p){
   var b=[];
   if(typeof p.addsub_traffic_gb==='number')b.push(trafficT({traffic_gb:p.addsub_traffic_gb}));
@@ -662,11 +667,12 @@ function addsubBits(p){
 }
 function trafficT(d){return d&&d.traffic_gb>0?d.traffic_gb+' '+T('gb'):T('traffic_unl');}
 function planSubT(d){return trafficT(d)+(!d?'':d.devices>0?' · '+d.devices+' '+plural(d.devices,T('dev1'),T('dev2'),T('dev5')):d.devices_unlim?' · '+T('dev_unl'):'');}
-function methods(p){
+function methods(p,d){
   var out=[];if(STATE.balanceK>0)out.push('balance');
   (STATE.methods||[]).forEach(function(m){if(m==='balance')return;if(WEB&&m==='stars')return;if(m==='tribute'&&!p.tribute)return;out.push(m);});
-  return out;
+  return isTraffic(p)&&d?trafficMethods(out,d):out;
 }
+function trafficMethods(list,d){var hp=!!String(d.price||'').trim();return list.filter(function(m){if(m==='tribute')return false;if(m==='stars')return d.stars>0;return hp;});}
 function apWhen(){var ap=STATE.ap||{};if(!ap.days||ap.days<=0)return T('ap_day');return T('ap_before',ap.days+' '+daysW(ap.days));}
 function gb(b){var g=(Number(b)||0)/1073741824,s=g.toFixed(1);return (s.slice(-2)==='.0'?s.slice(0,-2):s)+' '+T('gb');}
 function addsubT(s){if(!s.addsub_ok)return null;if(s.addsub_off)return T('addsub_off');if(s.addsub_exhausted)return T('addsub_out');if(!s.addsub_limit)return T('unlimited');var l=Number(s.addsub_limit)-Number(s.addsub_used||0);return gb(l>0?l:0);}
@@ -683,7 +689,8 @@ function subCard(){
   var s=STATE.sub||{},m=STATE.menu||{},h='';
   if(s.active){
     h+='<div class="card sub"><div class="st"><span class="lbl">'+esc(T('sub'))+'</span>'+statusBadge(s)+'</div>';
-    if(s.expire_ts){var dl=daysLeft(s.expire_ts);h+='<div class="days"><b>'+dl+'</b><span>'+esc(daysW(dl))+' '+esc(T('days_left'))+'</span></div><div class="muted small">'+esc(T('until'))+' '+esc(dateS(s.expire_ts))+'</div>';}
+    if(s.eternal)h+='<div class="h2" style="margin-top:10px">'+esc(T('term_eternal'))+'</div>';
+    else if(s.expire_ts){var dl=daysLeft(s.expire_ts);h+='<div class="days"><b>'+dl+'</b><span>'+esc(daysW(dl))+' '+esc(T('days_left'))+'</span></div><div class="muted small">'+esc(T('until'))+' '+esc(dateS(s.expire_ts))+'</div>';}
     else if(s.expire_at)h+='<div class="h2" style="margin-top:10px">'+esc(T('until'))+' '+esc(s.expire_at)+'</div>';
     var meta='';
     if(s.plan_title)meta+='<span>'+esc(T('plan_cur'))+': <b>'+esc(s.plan_title)+'</b></span>';
@@ -695,6 +702,7 @@ function subCard(){
       h+='<div class="stack" style="margin-top:14px"><button class="btn" onclick="go(\'connect\')">'+IC.download+esc(T('connect'))+'</button>';
       // «Продлить» — как в чате: платная подписка, до конца 7 дней и меньше.
       if(m.can_renew)h+='<button class="btn sec" onclick="openRenew()">'+IC.repeat+esc(T('renew'))+'</button>';
+      if(m.traffic_owner)h+='<button class="btn sec" onclick="go(\'traffic\')">'+IC.bolt+esc(T('buy_traffic'))+'</button>';
       h+='</div>';
     }
     h+='</div>';
@@ -773,7 +781,7 @@ function planCards(){
   STATE.plans.forEach(function(p){
     var d=(p.durations||[])[0],meta='';
     if(DESK&&d){if(d.countries&&d.countries.length)meta+='<span>'+esc(T('countries'))+': '+d.countries.length+'</span>';if(d.servers>0)meta+='<span>'+esc(T('servers'))+': '+d.servers+'</span>';}
-    h+='<button class="plan" onclick="go(\'plan\',{code:\''+jsq(p.code)+'\'})"><div class="pt"><span class="pn">'+esc(planTitle(p))+'</span><span class="pp">'+esc(T('from'))+' '+esc(planMin(p))+'</span></div>'+
+    h+='<button class="plan" onclick="go(\'plan\',{code:\''+jsq(p.code)+'\'})"><div class="pt"><span class="pn">'+esc(planTitle(p))+'</span><span class="pp">'+(isTraffic(p)?'':esc(T('from'))+' ')+esc(planMin(p))+'</span></div>'+
       '<div class="pd">'+esc(p.description||(d?planSubT(d):''))+'</div>'+(meta?'<div class="pmeta">'+meta+'</div>':'')+(p.own?'<div style="margin-top:8px"><span class="badge acc">'+esc(T('your_plan'))+'</span></div>':'')+'</button>';
   });
   return h;
@@ -818,16 +826,17 @@ SCREENS.plan=function(a){
   var h=top+'<div style="margin-top:8px"><div class="h1">'+esc(planTitle(p))+'</div>'+(p.description?'<div class="hint">'+esc(p.description)+'</div>':'')+'</div>';
   if(p.own&&a.renew&&STATE.menu.renew_note)h+='<div class="note">'+esc(STATE.menu.renew_note)+'</div>';
   var hHead=h;h='';
-  h+='<div class="sect">'+esc(T('period'))+'</div>';
+  h+='<div class="sect">'+esc(T(isTraffic(p)?'price_lbl':'period'))+'</div>';
   ds.forEach(function(x){
     var pm='';var v=num(x.price);if(x.months>1&&isFinite(v))pm=T('per_month',(Math.round(v/x.months*100)/100).toLocaleString(loc())+' '+(x.currency||''));
     if(x.discount)pm=pm?pm+' · '+x.discount:x.discount;
-    h+='<button class="opt'+(x.months===sel?' on':'')+'" onclick="pickDur(\''+jsq(p.code)+'\','+x.months+')"><span class="rd"></span><span class="tx"><div class="t">'+esc(monthsW(x.months))+(x.best?' <span class="badge acc" style="margin-left:6px;padding:2px 8px">'+esc(T('best'))+'</span>':'')+'</div>'+(pm?'<div class="s">'+esc(pm)+'</div>':'')+'</span><span class="p">'+esc(price(x))+'</span></button>';
+    h+='<button class="opt'+(x.months===sel?' on':'')+'" onclick="pickDur(\''+jsq(p.code)+'\','+x.months+')"><span class="rd"></span><span class="tx"><div class="t">'+esc(termW(x.months))+(x.best?' <span class="badge acc" style="margin-left:6px;padding:2px 8px">'+esc(T('best'))+'</span>':'')+'</div>'+(pm?'<div class="s">'+esc(pm)+'</div>':'')+'</span><span class="p">'+esc(price(x))+'</span></button>';
   });
   var hPer=h;h='';
   h+='<div class="sect">'+esc(T('whats_in'))+'</div><div class="list">';
   h+='<div class="kv"><span class="k">'+esc(T('traffic'))+'</span><span class="v">'+esc(trafficT(d))+'</span></div>';
   if(d.traffic_gb>0&&p.strategy&&L.ru['strat_'+p.strategy])h+='<div class="kv"><span class="k">'+esc(T('reset'))+'</span><span class="v">'+esc(T('strat_'+p.strategy))+'</span></div>';
+  if(isTraffic(p))h+='<div class="kv"><span class="k">'+esc(T('term'))+'</span><span class="v">'+esc(T('term_eternal'))+'</span></div>';
   if(d.devices>0||d.devices_unlim)h+='<div class="kv"><span class="k">'+esc(T('hwid'))+'</span><span class="v">'+(d.devices>0?d.devices:esc(T('hwid_unl')))+'</span></div>';
   if(d.servers>0)h+='<div class="kv"><span class="k">'+esc(T('servers'))+'</span><span class="v">'+d.servers+'</span></div>';
   if(p.addsub_name)h+='<div class="kv"><span class="k">'+esc(p.addsub_name)+'</span><span class="v">'+esc(addsubBits(p).join(' · ')||T('included'))+'</span></div>';
@@ -835,6 +844,8 @@ SCREENS.plan=function(a){
   h+='</div>';
   if(d.switch_days)h+='<div class="hint">'+esc(T('switch_hint'))+'</div>';
   if(p.addsub_name&&p.addsub_desc)h+='<div class="hint">'+esc(p.addsub_desc)+'</div>';
+  if(p.traffic_note)h+='<div class="hint">'+esc(p.traffic_note)+'</div>';
+  if(p.replace_note)h+='<div class="note">'+esc(p.replace_note)+'</div>';
   if(d.countries&&d.countries.length){
     h+='<div class="sect">'+esc(T('countries'))+' · '+d.countries.length+'</div><div class="chips">';
     d.countries.forEach(function(c){h+='<span class="chip">'+(c.code?'<img class="flag" loading="lazy" alt="" src="/flags/'+esc(c.code)+'.svg" onerror="this.remove()">':esc(c.flag||''))+esc(c.name||c.flag||'')+'</span>';});
@@ -855,7 +866,7 @@ SCREENS.plan=function(a){
 function pickDur(code,m){haptic();CUR.arg.months=m;rerender();}
 function toCheckout(code,months){
   var p=planBy(code);if(!p)return;
-  if(!methods(p).length){toast(T('no_methods'),'err');return;}
+  if(!methods(p,durBy(p,months)).length){toast(T('no_methods'),'err');return;}
   if(STATE.menu.legal_accept&&legalDocs().length){go('legalgate',{code:code,months:months});return;}
   go('checkout',{code:code,months:months});
 }
@@ -866,13 +877,13 @@ function mNote(m){var N=(STATE.menu&&STATE.menu.pay_notes)||{};return N[m]||'';}
 var M_IC={balance:'wallet',stars:'star',yookassa:'card',cryptobot:'coins',platega:'card',heleket:'coins',tribute:'card',yoomoney:'wallet',ym:'wallet',p2p:'send'};
 SCREENS.checkout=function(a){
   var p=planBy(a.code),d=durBy(p,a.months);if(!p||!d){goHome();return;}
-  var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(planTitle(p))+' · '+esc(monthsW(a.months))+'</span><div class="big">'+esc(price(d))+'</div></div>';
+  var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(planTitle(p))+' · '+esc(termW(a.months))+'</span><div class="big">'+esc(price(d))+'</div></div>';
   var hl=h+(DESK?whatsList(p,d):'');h='';
   h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list"'+(DESK?' style="margin-top:0"':'')+'>';
-  methods(p).forEach(function(m){
+  methods(p,d).forEach(function(m){
     var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
     if(m==='tribute'&&p.tribute_hint)sub=(sub?sub+'\n':'')+p.tribute_hint;
-    if(m==='yookassa'&&STATE.ap&&STATE.ap.available)sub=(sub?sub+'\n':'')+T('ap_hint',apWhen());
+    if(m==='yookassa'&&STATE.ap&&STATE.ap.available&&!isTraffic(p))sub=(sub?sub+'\n':'')+T('ap_hint',apWhen());
     h+='<button class="item" onclick="pay(\''+jsq(a.code)+'\','+a.months+',\''+jsq(m)+'\',this,\''+jsq(String(d.price||''))+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
   });
   h+='</div>';
@@ -894,13 +905,13 @@ function payTabGo(w,url){
   if(!w||w.closed||!safeURL(url))return false;
   try{w.location.href=url;return true;}catch(e){return false;}
 }
-async function pay(code,months,method,el,shown){
+async function pay(code,months,method,el,shown,pack){
   haptic();busy(el,true);
   var tab=(method==='balance'||method==='p2p')?null:payTab();
   try{
-    var r=await post('/api/miniapp/checkout',{plan:code,months:months,method:method,price:shown||'',p2p_inapp:true});
+    var r=await post('/api/miniapp/checkout',{plan:code,months:months,method:method,price:shown||'',p2p_inapp:true,pack:pack||''});
     if(r.ok&&r.pay_url&&payTabGo(tab,r.pay_url)){tab=null;guardOn();go('wait',{url:r.pay_url,since:r.issued_at});return;}
-    if(r.ok&&r.sub_url){toast(T('paid_ok'),'ok');await refresh();goHome();return;}
+    if(r.ok&&(r.sub_url||r.done)){toast(r.message||T('paid_ok'),'ok');await refresh();goHome();return;}
     if(r.ok&&r.p2p_card){if(r.message)toast(r.message);go('p2p',{card:r.p2p_card,amount:r.p2p_amount,req:r.p2p_req_id,topup:!!r.p2p_topup},{replace:true});return;}
     if(r.ok&&r.pay_url){
       guardOn();
@@ -914,6 +925,38 @@ async function pay(code,months,method,el,shown){
   }catch(e){toast(e.message||T('error'),'err');}
   finally{payTabDrop(tab);busy(el,false);}
 }
+
+SCREENS.traffic=async function(a){
+  a=a||{};CUR.arg=a;
+  if(!a.r){view(backBtn()+'<div class="sk" style="height:220px"></div>');try{a.r=await api('/api/miniapp/traffic');}catch(e){toast(e.message||T('error'),'err');goBack();return;}if(!CUR||CUR.arg!==a)return;}
+  var r=a.r;r.packs=(r.packs||[]).filter(function(pk){return !webStarsOnly(pk);});STATE.traffic=r;
+  var h=backBtn()+'<div style="margin-top:8px"><div class="h1">'+esc(T('buy_traffic'))+'</div>'+(r.limit_ok?'<div class="hint">'+esc(T('traffic_left',gb(Math.max(0,r.limit-r.used)),gb(r.limit)))+'</div>':'')+(r.owner&&r.packs&&r.packs.length?'<div class="hint">'+esc(T('pack_hint'))+'</div>':'')+'</div>';
+  if(r.owner&&r.packs&&r.packs.length){
+    h+='<div class="sect">'+esc(T('packs'))+'</div><div class="list">';
+    r.packs.forEach(function(pk){h+=item(IC.bolt,'+ '+pk.gb+' '+T('gb'),'',price(pk),'toPackPay(\''+jsq(pk.id)+'\')');});
+    h+='</div>';
+  }
+  if(r.notice)h+='<div class="note info">'+esc(r.notice)+'</div>';
+  if(!r.owner)h+='<div style="margin-top:14px"><button class="btn" onclick="openPlans()">'+IC.bolt+esc(T('plans'))+'</button></div>';
+  view(h);
+};
+function toPackPay(id){
+  if(STATE.menu.legal_accept&&legalDocs().length){go('legalgate',{pack:id});return;}
+  go('packpay',{id:id});
+}
+SCREENS.packpay=function(a){
+  var r=STATE.traffic||{},pk=null;(r.packs||[]).forEach(function(x){if(x.id===a.id)pk=x;});
+  if(!pk){goBack();return;}
+  var ms=methods({kind:'traffic'},pk);
+  var h=backBtn()+'<div class="card" style="margin-top:8px"><span class="lbl">'+esc(T('pack_title'))+' · + '+pk.gb+' '+esc(T('gb'))+'</span><div class="big">'+esc(price(pk))+'</div><div class="hint">'+esc(T('pack_hint'))+'</div></div>';
+  if(!ms.length){view(h+'<div class="note info">'+esc(T('no_methods'))+'</div>');return;}
+  h+='<div class="sect">'+esc(T('pay_with'))+'</div><div class="list">';
+  ms.forEach(function(m){
+    var sub=m==='balance'?T('m_balance_s',rub(STATE.balanceK)):mNote(m);
+    h+='<button class="item" onclick="pay(\''+jsq(r.code)+'\',0,\''+jsq(m)+'\',this,\''+jsq(String(pk.price||''))+'\',\''+jsq(pk.id)+'\')"><span class="ic">'+IC[M_IC[m]||'card']+'</span><span class="tx"><div class="t">'+esc(mName(m))+'</div>'+(sub?'<div class="s" style="white-space:pre-line;overflow-wrap:anywhere">'+esc(sub)+'</div>':'')+'</span>'+CHEV+'</button>';
+  });
+  view(h+'</div>');
+};
 
 /* ---------- ожидание оплаты ---------- */
 function stopPoll(){if(POLL){clearInterval(POLL);POLL=null;}}
@@ -1064,6 +1107,7 @@ SCREENS.ref=async function(a){
   if(r.invitee_value>0&&r.invitee_kind)h+='<div class="kv"><span class="k">'+esc(T('ref_friend'))+'</span><span class="v">'+esc(val(r.invitee_kind,r.invitee_value))+'</span></div>';
   if(r.percent>0)h+='<div class="kv"><span class="k">'+esc(T('ref_pct'))+'</span><span class="v">'+r.percent+'%</span></div>';
   h+='<div class="kv"><span class="k">'+esc(T('ref_count'))+'</span><span class="v">'+(r.count||0)+'</span></div><div class="kv"><span class="k">'+esc(T('ref_earned'))+'</span><span class="v">'+esc(rub(r.earned_kopecks||0))+'</span></div></div>';
+  if(r.note)h+='<div class="hint">'+esc(r.note)+'</div>';
   var L=refLinks(r);
   if(L.length){var m=L[0];h+='<div class="link" onclick="copy(\''+jsq(m.u)+'\')"><code>'+esc(m.u)+'</code>'+IC.copy+'</div><div class="row2" style="margin-top:12px"><button class="btn" onclick="shareRef(\''+jsq(m.u)+'\','+(m.tg?1:0)+')">'+IC.send+esc(T('share'))+'</button><button class="btn sec" onclick="copy(\''+jsq(m.u)+'\')">'+IC.copy+esc(T('copy'))+'</button></div>';}
   h+=refMore(L);
@@ -1089,6 +1133,7 @@ function refDesk(r){
   if(r.invitee_value>0&&r.invitee_kind)left+='<div class="kv"><span class="k">'+esc(T('ref_friend'))+'</span><span class="v">'+esc(val(r.invitee_kind,r.invitee_value))+'</span></div>';
   if(r.percent>0)left+='<div class="kv"><span class="k">'+esc(T('ref_pct'))+'</span><span class="v">'+r.percent+'%</span></div>';
   left+='</div>';
+  if(r.note)left+='<div class="hint">'+esc(r.note)+'</div>';
   var right='',L=refLinks(r),m=L[0];
   if(m){
     right='<div class="card" style="margin-top:50px"><span class="lbl">'+esc(T('ref_link'))+'</span>'+
@@ -1220,9 +1265,9 @@ SCREENS.doc=function(i){
 };
 function legalGate(){STACK=[];CUR={name:'legalgate',arg:null};SCREENS.legalgate(null);}
 SCREENS.legalgate=function(t){
-  if(DESK&&t){view(dsplit('<div class="h1" style="margin-top:8px">'+esc(t.code?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+
+  if(DESK&&t){view(dsplit('<div class="h1" style="margin-top:8px">'+esc(t.code||t.pack?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+
     '<button class="btn" style="margin-top:16px" onclick="legalAccept(this)">'+IC.check+esc(T('accept'))+'</button>','<div style="margin-top:44px">'+legalItems()+'</div>'));return;}
-  var h=backBtn()+'<div class="h1" style="margin-top:'+(STACK.length?'8':'18')+'px">'+esc(t&&t.code?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+legalItems()+
+  var h=backBtn()+'<div class="h1" style="margin-top:'+(STACK.length?'8':'18')+'px">'+esc(t&&(t.code||t.pack)?T('docs_pay'):T('docs_gate'))+'</div><div class="hint">'+esc(T('docs_gate_text'))+'</div>'+legalItems()+
     '<button class="btn" style="margin-top:16px" onclick="legalAccept(this)">'+IC.check+esc(T('accept'))+'</button>';
   if(WEB&&!t)h+='<button class="btn ghost" style="margin-top:8px" onclick="logout()">'+esc(T('logout'))+'</button>';
   view(h);
@@ -1235,7 +1280,7 @@ async function legalAccept(el){
       // ждущий подтверждения почты, остаётся ждать.
       if(WEB&&!(CUR&&CUR.arg)&&!(STATE.acct&&STATE.acct.money_blocked))store('cab_start',null);
       if(STATE.pendingPromo){var pc=STATE.pendingPromo;STATE.pendingPromo='';promoApply(null,pc);}
-      var t=CUR&&CUR.arg;if(t&&t.code){go('checkout',t,{replace:true});}else if(t&&t.act){toast(T('done'),'ok');goBack();}else{goHome();}return;}
+      var t=CUR&&CUR.arg;if(t&&t.code){go('checkout',t,{replace:true});}else if(t&&t.pack){go('packpay',{id:t.pack},{replace:true});}else if(t&&t.act){toast(T('done'),'ok');goBack();}else{goHome();}return;}
     toast(r.error||T('error'),'err');
   }catch(e){toast(e.message||T('error'),'err');}
   finally{busy(el,false);}
@@ -1384,8 +1429,9 @@ function dropQuery(){try{history.replaceState({},'',location.pathname);}catch(e)
 async function refresh(){
   var r=await Promise.all([api('/api/miniapp/me').then(function(m){mountChat(m.chat_src);return m;}),api('/api/miniapp/menu'),api('/api/miniapp/subscription'),api('/api/miniapp/plans')]);
   var me=r[0],menu=r[1],sub=r[2],plans=r[3];
-  var extra=(STATE.plans||[]).filter(function(p){return p.link&&!(plans.plans||[]).some(function(q){return q.code===p.code;});});
-  STATE.me=me;STATE.menu=menu||{};STATE.sub=sub||{};STATE.plans=((plans&&plans.plans)||[]).concat(extra);STATE.plansNotice=(plans&&plans.notice)||'';
+  var fresh=((plans&&plans.plans)||[]).concat(((plans&&plans.traffic)||[]).filter(function(p){return !webStarsOnly((p.durations||[])[0]);}));
+  var extra=(STATE.plans||[]).filter(function(p){return p.link&&!fresh.some(function(q){return q.code===p.code;});});
+  STATE.me=me;STATE.menu=menu||{};STATE.sub=sub||{};STATE.plans=fresh.concat(extra);STATE.plansNotice=(plans&&plans.notice)||'';
   STATE.balanceK=me.balance_kopecks||0;STATE.methods=menu.pay_methods||[];STATE.me_name=me.name||'';STATE.me_email=me.email||'';
   if(me.lang&&L[me.lang])STATE.lang=me.lang;
   try{STATE.ap=await api('/api/miniapp/autopay');}catch(e){STATE.ap=null;}
@@ -1405,7 +1451,8 @@ async function handleStart(s){
   }
   if(plan){
     try{var r=await api('/api/miniapp/plans?link='+encodeURIComponent(plan.slice(5)));
-      if(r.plans&&r.plans.length){var lp=r.plans[0];lp.link=true;STATE.plans=STATE.plans.filter(function(x){return x.code!==lp.code;}).concat([lp]);STACK=[{name:'home'}];CUR={name:'plan',arg:{code:lp.code}};SCREENS.plan(CUR.arg);return true;}
+      var lr=(r.plans||[]).concat(r.traffic||[]);
+      if(lr.length){var lp=lr[0];lp.link=true;STATE.plans=STATE.plans.filter(function(x){return x.code!==lp.code;}).concat([lp]);STACK=[{name:'home'}];CUR={name:'plan',arg:{code:lp.code}};SCREENS.plan(CUR.arg);return true;}
       toast(r.notice||T('plan_link_fail'),'err');
     }catch(e){toast(e.message||T('error'),'err');}
   }

@@ -55,7 +55,8 @@ type MiniProvider interface {
 	// p2pInApp — перевод на карту оформляется прямо в мини-аппе (реквизиты и
 	// загрузка чека на странице), а не уводом в чат. Старый фронт его не
 	// присылает и получает прежнее поведение.
-	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web, p2pInApp bool) MiniActionDTO
+	MiniCheckout(ctx context.Context, tgID int64, plan string, months int, pack, method string, shownPrice string, web, p2pInApp bool) MiniActionDTO
+	MiniTraffic(ctx context.Context, tgID int64) MiniTrafficDTO
 	// MiniPlanLink открывает тариф по его ссылке (start-параметр plan_<код>):
 	// тот же лимит перебора и тот же единственный ответ «недоступен», что в
 	// чате. Открытый тариф после этого можно купить.
@@ -181,7 +182,8 @@ type MiniReferralDTO struct {
 	// Telegram); пусто, когда кабинет выключен.
 	CabinetLink string `json:"cabinet_link,omitempty"`
 	// CabinetFirst — у аккаунта нет Telegram: ссылку на кабинет показать первой.
-	CabinetFirst bool `json:"cabinet_first,omitempty"`
+	CabinetFirst bool   `json:"cabinet_first,omitempty"`
+	Note         string `json:"note,omitempty"`
 }
 
 type MiniPromoDTO struct {
@@ -248,6 +250,7 @@ type MiniActionDTO struct {
 	// IssuedAt — когда выставлен счёт по PayURL (unix, время сервера): экран
 	// ожидания спрашивает, была ли оплата после этого момента.
 	IssuedAt int64 `json:"issued_at,omitempty"`
+	Done     bool  `json:"done,omitempty"`
 }
 
 // MiniAutoPayDTO describes automatic renewal for the current user: whether the
@@ -342,6 +345,8 @@ type MiniMenuDTO struct {
 	OwnPlan   string `json:"own_plan,omitempty"`
 	RenewNote string `json:"renew_note,omitempty"`
 	RenewGone bool   `json:"renew_gone,omitempty"`
+
+	TrafficOwner bool `json:"traffic_owner,omitempty"`
 }
 
 // MiniLegalDTO — один документ сервиса: ссылка на страницу и/или текст,
@@ -358,6 +363,7 @@ type MiniSubDTO struct {
 	Status      string `json:"status"`
 	ExpireAt    string `json:"expire_at"`
 	ExpireTS    int64  `json:"expire_ts,omitempty"`
+	Eternal     bool   `json:"eternal,omitempty"`
 	SubURL      string `json:"sub_url"`
 	DevicesUsed int    `json:"devices_used"`
 	DeviceLimit int    `json:"device_limit"`
@@ -425,7 +431,10 @@ type MiniPlanDTO struct {
 	Durations []MiniDurationDTO `json:"durations"`
 	// Own — тариф последней покупки человека (показывается и тогда, когда
 	// витрина прячет его режимом «по ссылке»: продление своего не отрезается).
-	Own bool `json:"own,omitempty"`
+	Own         bool   `json:"own,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	TrafficNote string `json:"traffic_note,omitempty"`
+	ReplaceNote string `json:"replace_note,omitempty"`
 }
 
 // MiniDurationDTO — один срок тарифа.
@@ -433,6 +442,7 @@ type MiniDurationDTO struct {
 	Months   int    `json:"months"`
 	Price    string `json:"price"`
 	Currency string `json:"currency"`
+	Stars    int    `json:"stars,omitempty"`
 	// TrafficGB is the duration's traffic allowance in GB; 0 means unlimited.
 	TrafficGB int `json:"traffic_gb"`
 	// Devices — лимит устройств срока: свой у тарифа, а без него — по
@@ -460,6 +470,25 @@ type MiniDurationDTO struct {
 	SwitchDays int `json:"switch_days,omitempty"`
 }
 
+type MiniTrafficDTO struct {
+	Owner   bool          `json:"owner"`
+	Notice  string        `json:"notice,omitempty"`
+	Plan    string        `json:"plan,omitempty"`
+	Code    string        `json:"code,omitempty"`
+	LimitOK bool          `json:"limit_ok,omitempty"`
+	Used    int64         `json:"used,omitempty"`
+	Limit   int64         `json:"limit,omitempty"`
+	Packs   []MiniPackDTO `json:"packs,omitempty"`
+}
+
+type MiniPackDTO struct {
+	ID       string `json:"id"`
+	GB       int    `json:"gb"`
+	Price    string `json:"price,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	Stars    int    `json:"stars,omitempty"`
+}
+
 // MiniCountryDTO is one destination country available to a plan.
 type MiniCountryDTO struct {
 	Flag string `json:"flag,omitempty"`
@@ -468,7 +497,8 @@ type MiniCountryDTO struct {
 }
 
 type MiniPlansDTO struct {
-	Plans []MiniPlanDTO `json:"plans"`
+	Plans   []MiniPlanDTO `json:"plans"`
+	Traffic []MiniPlanDTO `json:"traffic,omitempty"`
 	// Notice — почему витрина пуста (активный триал), текст для экрана.
 	Notice string `json:"notice,omitempty"`
 }
@@ -796,7 +826,8 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 		// фронта из кэша: тогда сверять не с чем и поведение прежнее.
 		Price string `json:"price"`
 		// P2PInApp — фронт умеет принять реквизиты перевода и чек на месте.
-		P2PInApp bool `json:"p2p_inapp"`
+		P2PInApp bool   `json:"p2p_inapp"`
+		Pack     string `json:"pack"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -805,11 +836,21 @@ func (s *Server) handleMiniCheckout(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	issued := time.Now().Unix()
-	res := s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Method, req.Price, web, req.P2PInApp)
+	res := s.mini.MiniCheckout(ctx, id, req.Plan, req.Months, req.Pack, req.Method, req.Price, web, req.P2PInApp)
 	if res.PayURL != "" {
 		res.IssuedAt = issued
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleMiniTraffic(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniTraffic(ctx, id))
 }
 
 // handleMiniAutoPay returns the user's automatic-renewal state.
