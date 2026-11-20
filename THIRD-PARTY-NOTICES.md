@@ -19,7 +19,7 @@
 | github.com/dustin/go-humanize | v1.0.1 | MIT |
 | github.com/go-telegram/bot | v1.22.0 | MIT |
 | github.com/google/uuid | v1.6.0 | BSD-3-Clause |
-| github.com/heleket/go-sdk | v0.3.0 | MIT |
+| github.com/heleket/go-sdk | v0.4.0 | MIT |
 | github.com/jackc/pgpassfile | v1.0.0 | MIT |
 | github.com/jackc/pgservicefile | v0.0.0-20240606120523-5a60cdf6a761 | MIT |
 | github.com/jackc/pgx/v5 | v5.10.0 | MIT |
@@ -339,7 +339,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### github.com/heleket/go-sdk v0.3.0
+### github.com/heleket/go-sdk v0.4.0
 
 Лицензия: **MIT**
 
