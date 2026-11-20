@@ -1,6 +1,8 @@
 package i18n
 
 var en = map[string]string{
+	"sales.plan_users":              "\n\n👥 <b>Subscribed: %d</b>\n%s🎁 Trial — <b>%d</b>\n❔ Plan unknown — <b>%d</b> (subscription from the panel or a migration, bought before plans, plan deleted)",
+	"sales.plan_users_line":         "• %s — <b>%d</b>\n",
 	"ref.traffic_gb_referrer":       "🎁 A friend buys «%s» — you get <b>+%d GB</b> if you have a “Traffic” plan with a limit.",
 	"ref.traffic_gb_invitee":        "🎁 For buying «%s» your friend gets <b>+%d GB</b> on that plan.",
 	"ref.traffic_gb_both":           "🎁 A friend buys «%s» — <b>+%d GB</b> each to them and to you (to you — if you have a “Traffic” plan with a limit).",

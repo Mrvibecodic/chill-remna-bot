@@ -75,6 +75,8 @@ type Storage interface {
 	// BroadcastAudience — те же получатели, что у AllUserIDs, с полями для
 	// выбора по подписке: срок, вид срока и снимок сделки.
 	BroadcastAudience(ctx context.Context) ([]model.User, error)
+	// PlanAudience — то же без отметки «бот заблокирован»: для сводки по тарифам.
+	PlanAudience(ctx context.Context) ([]model.User, error)
 	// SetUnreachable помечает, что Telegram ответил «чат недоступен». Это НЕ
 	// бан: доступ к боту не закрывается, метка только выводит человека из
 	// рассылки и снимается любым его сообщением.
@@ -2541,9 +2543,18 @@ func (b *base) AllUserIDs(ctx context.Context) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+const audienceQuery = "SELECT telegram_id, sub_expire_at, notify_kind, plan_snapshot FROM users WHERE blocked = 0"
+
 func (b *base) BroadcastAudience(ctx context.Context) ([]model.User, error) {
-	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, sub_expire_at, notify_kind, plan_snapshot FROM users WHERE blocked = 0 AND unreachable_at = ''")
+	return b.audience(ctx, audienceQuery+" AND unreachable_at = ''")
+}
+
+func (b *base) PlanAudience(ctx context.Context) ([]model.User, error) {
+	return b.audience(ctx, audienceQuery)
+}
+
+func (b *base) audience(ctx context.Context, query string) ([]model.User, error) {
+	rows, err := b.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

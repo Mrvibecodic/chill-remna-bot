@@ -53,5 +53,17 @@ func TestBroadcastAudience(t *testing.T) {
 		if _, ok := got[9102]; !ok {
 			t.Fatal("без подписки потерялся")
 		}
+
+		all, err := st.PlanAudience(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[int64]bool{}
+		for _, u := range all {
+			ids[u.TelegramID] = true
+		}
+		if len(ids) != 4 || !ids[9104] || ids[9103] {
+			t.Fatalf("сводка по тарифам: %v", ids)
+		}
 	})
 }

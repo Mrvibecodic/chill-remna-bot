@@ -2009,6 +2009,15 @@ func (s *fakeStore) BroadcastAudience(_ context.Context) ([]model.User, error) {
 	}
 	return out, nil
 }
+func (s *fakeStore) PlanAudience(_ context.Context) ([]model.User, error) {
+	var out []model.User
+	for id, u := range s.users {
+		if !u.Blocked {
+			out = append(out, model.User{TelegramID: id, SubExpireAt: u.SubExpireAt, NotifyKind: u.NotifyKind, Snapshot: u.Snapshot})
+		}
+	}
+	return out, nil
+}
 func (s *fakeStore) CountReferrals(_ context.Context, ref int64) (int, error) {
 	n := 0
 	for _, u := range s.users {

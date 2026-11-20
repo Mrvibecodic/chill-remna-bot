@@ -440,6 +440,7 @@ func (a *App) showPayPlans(ctx context.Context, chatID int64) {
 		}
 		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
 	}
+	title += a.planUsersBlock(ctx, lang)
 	// Лимиты и сквады — сводка, копировать из неё нечего.
 	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
@@ -449,6 +450,48 @@ func (a *App) showPayPlans(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		navBack(lang, "menu:pay"),
 	})
+}
+
+// planUsersBlock — сколько людей с действующей подпиской на каждом тарифе, по
+// базе бота.
+func (a *App) planUsersBlock(ctx context.Context, lang string) string {
+	st := a.storeRef()
+	if st == nil {
+		return ""
+	}
+	users, err := st.PlanAudience(ctx)
+	if err != nil {
+		return ""
+	}
+	plans, err := st.ListPlans(ctx)
+	if err != nil {
+		return ""
+	}
+	byPlan := map[string]int{}
+	trial := 0
+	for i := range users {
+		switch {
+		case !panelSubAlive(users[i].SubExpireAt):
+		case users[i].NotifyKind == "trial":
+			trial++
+		default:
+			byPlan[planCodeOf(users[i].Snapshot)]++
+		}
+	}
+	var lines strings.Builder
+	total := trial
+	for i := range plans {
+		n := byPlan[plans[i].Code]
+		delete(byPlan, plans[i].Code)
+		total += n
+		lines.WriteString(i18n.T(lang, "sales.plan_users_line", planTitleHTML(lang, &plans[i]), n))
+	}
+	other := 0
+	for _, n := range byPlan {
+		other += n
+	}
+	total += other
+	return i18n.T(lang, "sales.plan_users", total, lines.String(), trial, other)
 }
 
 // payMethodItem — способ оплаты в меню «Способы оплаты».
