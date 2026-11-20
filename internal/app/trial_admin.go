@@ -428,6 +428,14 @@ func (a *App) trialOnce(ctx context.Context, chatID int64) (link, expireAt strin
 	lk := &a.finalizeUserLk[extLockIndex(strconv.FormatInt(chatID, 10))]
 	lk.Lock()
 	defer lk.Unlock()
+	// Строка пользователя — место, где живут отметка о триале и срок. Гость
+	// мини-аппа мог ещё ни разу не написать боту, и тогда записи нет: UPDATE
+	// отметки молчал бы, а каждый повторный запрос выдавал бы новые дни.
+	if a.store != nil {
+		if err := a.store.UpsertUser(ctx, chatID); err != nil {
+			return "", "", true, err
+		}
+	}
 	if !a.trialAvailable(ctx, chatID) {
 		return "", "", false, nil
 	}

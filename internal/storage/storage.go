@@ -669,10 +669,18 @@ func (b *base) SetTrialUsed(ctx context.Context, telegramID int64, ts string) er
 	if ts == "" {
 		return nil
 	}
-	_, err := b.db.ExecContext(ctx,
+	res, err := b.db.ExecContext(ctx,
 		"UPDATE users SET trial_used_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		ts, telegramID)
-	return err
+	if err != nil {
+		return err
+	}
+	// Ноль строк — записи нет: молчаливый успех означал бы, что триал не
+	// отмечен и выдастся ещё раз (см. trialOnce).
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("пользователь %d не найден", telegramID)
+	}
+	return nil
 }
 
 func (b *base) SetSubExpiry(ctx context.Context, telegramID int64, expireAt, kind string) error {

@@ -84,6 +84,27 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// Отметка о триале не должна «теряться» на несуществующей строке: молчаливый
+// успех UPDATE-а разрешал выдавать триал повторно.
+func TestSetTrialUsedMissingUser(t *testing.T) {
+	ctx := context.Background()
+	st := openSQLiteTest(t)
+
+	if err := st.SetTrialUsed(ctx, 999, "2026-01-01T00:00:00Z"); err == nil {
+		t.Fatal("отметка на несуществующем пользователе прошла без ошибки")
+	}
+	if err := st.UpsertUser(ctx, 999); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTrialUsed(ctx, 999, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.GetUser(ctx, 999)
+	if err != nil || u == nil || u.TrialUsedAt == "" {
+		t.Fatalf("отметка не записалась: %+v err=%v", u, err)
+	}
+}
+
 func TestTransferSQLiteToSQLite(t *testing.T) {
 	ctx := context.Background()
 	src := openSQLiteTest(t)
