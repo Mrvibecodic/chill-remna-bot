@@ -233,7 +233,7 @@ func (a *App) reconcileHeleket(ctx context.Context, st storage.Storage, pi *mode
 	a.reconLog(ctx, pi, "reconcile", inv.Status, "status=%s", inv.Status)
 	switch {
 	case heleket.Successful(inv.Status):
-		a.reconcileFinalize(ctx, st, pi, a.hlAmountLabel(inv))
+		a.reconcileFinalize(ctx, st, pi, a.cryptoAmount(pi.Snapshot, pi.Months, a.hlAmountLabel(inv)))
 	case inv.IsFinal || heleket.Final(inv.Status):
 		// Вебхук мог не дойти — ради этого реконсилятор и нужен, поэтому про
 		// недоплату и AML-заморозку админа зовём и отсюда.
