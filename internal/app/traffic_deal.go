@@ -279,24 +279,49 @@ func snapTitle(s *model.PlanSnapshot) string {
 	return s.Code
 }
 
-const packTargetStage = "pack_target"
+const (
+	packRefundComment = "pack_refund"
+	packManualComment = "pack_manual"
+)
 
-func (a *App) packTargetDone(ctx context.Context, extID string, limit int64) bool {
+const (
+	packTargetStage = "pack_target"
+	packVoidStage   = "pack_void"
+	packUnsureStage = "pack_unsure"
+)
+
+// packPast — что журнал помнит о прошлых доставках этой оплаты. done — потолок
+// уже доведён до limit: цель записана, и панель её не отвергла (до того же
+// числа потолок мог дойти и другой покупкой). unsure — после одной из записей
+// панель не ответила ни на неё, ни на перечитывание.
+func (a *App) packPast(ctx context.Context, extID string, limit int64) (done, unsure bool) {
 	if extID == "" || a.store == nil {
-		return false
+		return false, false
 	}
 	logs, err := a.store.PayLogs(ctx, extID, 0, 0)
 	if err != nil {
-		return false
+		return false, false
 	}
 	want := "limit=" + strconv.FormatInt(limit, 10)
 	for i := range logs {
+		if logs[i].ExtID != extID {
+			continue
+		}
+		if logs[i].Stage == packUnsureStage {
+			unsure = true
+		}
 		// Суффикс, а не подстрока: «limit=1» входит в «limit=10».
-		if logs[i].ExtID == extID && logs[i].Stage == packTargetStage && strings.HasSuffix(strings.TrimSpace(logs[i].Detail), want) {
-			return true
+		if !strings.HasSuffix(strings.TrimSpace(logs[i].Detail), want) {
+			continue
+		}
+		switch logs[i].Stage {
+		case packTargetStage:
+			done = true
+		case packVoidStage:
+			done = false
 		}
 	}
-	return false
+	return done, unsure
 }
 
 func (a *App) finalizePack(ctx context.Context, telegramID int64, method, amount, extID string, snap *model.PlanSnapshot, grant bool) (dealDone, error) {
@@ -316,7 +341,8 @@ func (a *App) finalizePack(ctx context.Context, telegramID int64, method, amount
 		return d, errPackNotOwner
 	case refund:
 		d.refunded = true
-		return d, a.refundPackToBalance(ctx, telegramID, method, amount, extID, snap)
+		d.manual, err = a.refundPackToBalance(ctx, telegramID, method, amount, extID, snap)
+		return d, err
 	case err != nil:
 		return d, err
 	}
@@ -375,10 +401,17 @@ func (a *App) applyPackLocked(ctx context.Context, telegramID int64, method, amo
 		a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
 		return false, err
 	}
-	if !a.packTargetDone(ctx, extID, pu.TrafficLimit) {
+	done, unsure := a.packPast(ctx, extID, pu.TrafficLimit)
+	if !done {
 		a.payLog(ctx, method, extID, telegramID, packTargetStage, "+%d GB: limit=%d", snap.PackGB, want)
 		if err := panel.SetTrafficLimit(ctx, pu.Ref, want); err != nil {
-			if !a.bonusTrafficApplied(telegramID, want) {
+			now, known := a.trafficLimitNow(telegramID)
+			if !known || now < want {
+				stage, note := packUnsureStage, "исход записи неизвестен"
+				if known {
+					stage, note = packVoidStage, "панель не применила"
+				}
+				a.payLog(ctx, method, extID, telegramID, stage, "%s: limit=%d", note, want)
 				a.payLog(ctx, method, extID, telegramID, "panel_error", "%v", err)
 				return false, err
 			}
@@ -397,28 +430,47 @@ func (a *App) applyPackLocked(ctx context.Context, telegramID int64, method, amo
 		return false, err
 	}
 	a.payLog(ctx, method, extID, telegramID, "done", "пакет трафика выдан")
+	if unsure {
+		a.notify(ctx, a.cfg.AdminID, i18n.T(a.lang(a.cfg.AdminID), "admin.pack_unsure",
+			a.userLabelByID(ctx, telegramID), snap.PackGB, formatGB(want)))
+	}
 	return false, nil
 }
 
-func (a *App) refundPackToBalance(ctx context.Context, telegramID int64, method, amount, extID string, snap *model.PlanSnapshot) error {
+// refundPackToBalance возвращает стоимость невыданного пакета на баланс.
+// manual — вернуть нечем (цена не в рублях или только в звёздах): деньги
+// разбирает администратор.
+func (a *App) refundPackToBalance(ctx context.Context, telegramID int64, method, amount, extID string, snap *model.PlanSnapshot) (manual bool, err error) {
 	alang := a.lang(a.cfg.AdminID)
 	kopecks, ok := rubToKopecks(snap.Price)
 	if !ok || kopecks <= 0 || !rubCurrency(snap.Currency) || a.store == nil {
+		// Запись об отказе — отметка «разобрано»: повторная доставка и сверка
+		// звёзд к этой оплате не возвращаются.
+		if a.store != nil && extID != "" {
+			err := a.store.AddPayment(ctx, &model.Payment{
+				TelegramID: telegramID, Method: method, Amount: amount, Status: model.PaymentRejected, ExtID: extID,
+				Comment: packManualComment, Snapshot: snap,
+			})
+			if errors.Is(err, storage.ErrDuplicateExtID) {
+				return false, nil
+			}
+		}
 		a.payLog(ctx, method, extID, telegramID, "error", "пакет не выдан и на баланс не зачислен: %s", amount)
 		a.notify(ctx, a.cfg.AdminID, i18n.T(alang, "admin.pack_refund_manual",
 			a.userLabelByID(ctx, telegramID), escapeName(amount), escapeName(methodLabel(method)), escapeName(extID)))
-		return nil
+		a.notify(ctx, telegramID, i18n.T(a.lang(telegramID), "pack.manual"))
+		return true, nil
 	}
-	err := a.store.AddPaymentAndBalance(ctx, &model.Payment{
+	err = a.store.AddPaymentAndBalance(ctx, &model.Payment{
 		TelegramID: telegramID, Method: method, Amount: amount, Status: model.PaymentPaid, ExtID: extID,
-		Comment: "pack_refund", Snapshot: snap,
+		Comment: packRefundComment, Snapshot: snap,
 	}, kopecks)
 	if errors.Is(err, storage.ErrDuplicateExtID) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
 		a.payLog(ctx, method, extID, telegramID, "error", "возврат стоимости пакета на баланс: %v", err)
-		return err
+		return false, err
 	}
 	a.payLog(ctx, method, extID, telegramID, "pack_refund", "пакет не выдан: %d коп. на баланс", kopecks)
 	if method == model.PayMethodYooKassa {
@@ -429,7 +481,7 @@ func (a *App) refundPackToBalance(ctx context.Context, telegramID int64, method,
 	if hasChat(telegramID) {
 		a.notify(ctx, telegramID, i18n.T(a.lang(telegramID), "pack.refunded", kopecksToRub(kopecks)))
 	}
-	return nil
+	return false, nil
 }
 
 func (a *App) showPackDone(ctx context.Context, chatID int64, gb int) {

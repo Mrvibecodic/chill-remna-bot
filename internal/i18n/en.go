@@ -42,6 +42,7 @@ var en = map[string]string{
 	"user.sub_limited":              "📊 Traffic used up",
 	"upay.term_pack":                "pack + %d GB",
 	"upay.pack_refund":              "↩️ The pack was paid for but there was nothing to add it to — its price went to the balance.",
+	"upay.pack_manual":              "⚠️ The pack was paid for but not issued, and its price was not credited to the balance.",
 	"grant.term_eternal":            "no expiry",
 	"grant.now_eternal":             "<b>%s</b>, no expiry",
 	"grant.btn_eternal":             "♾ No expiry",
@@ -93,6 +94,8 @@ var en = map[string]string{
 	"admin.pack_refund_manual":      "🚨 %s paid for a traffic pack (%s, %s, <code>%s</code>), but they no longer have the pack's plan and the bot couldn't refund it to the balance. Handle it manually.",
 	"admin.pack_refunded":           "ℹ️ %s paid for a traffic pack (%s), but no longer has the “%s” plan — the pack price was credited to their balance.",
 	"pack.refunded":                 "ℹ️ The traffic pack was not added: you no longer have the plan it belongs to. The pack price — %s ₽ — was credited to your balance.",
+	"pack.manual":                   "❌ Your payment was received, but the traffic pack could not be added. The administrator has been notified and will refund the payment or get in touch.",
+	"admin.pack_unsure":             "⚠️ %s: the +%d GB pack was issued on a retry. On the previous attempt the panel answered neither the write nor the check, so the bot does not know whether it was applied. Check the traffic limit in the panel — it is %s GB now.",
 	"pack.done":                     "✅ <b>Traffic added: + %d GB</b>%s\n\nNo need to reconnect — your subscription keeps working.",
 	"pack.left":                     "\n\n📊 Left: <b>%s of %s GB</b>",
 	"bk.review_traffic":             "traffic plan",
@@ -137,7 +140,7 @@ var en = map[string]string{
 	"plans.pack_gone":               "This pack is gone.",
 	"plans.btn_as_reset":            "♻️ Traffic reset",
 	"plans.addsub_reset_line":       "\n♻️ Traffic reset: %s",
-	"plans.as_reset_title":          "♻️ <b>Add-on traffic reset — %s</b>\n\nThe main subscription of a traffic plan never resets; the add-on resets on its own period. Add-on traffic can't be topped up.\n\nNew buyers get the new period, everyone else — via “Sync” in the add-on settings.",
+	"plans.as_reset_title":          "♻️ <b>Add-on traffic reset — %s</b>\n\nThe main subscription of a traffic plan never resets; the add-on resets on its own period. Add-on traffic can't be topped up.\n\nNew buyers get the new period, everyone else — via “🔄 Sync” in the add-on settings.",
 	"plans.del_traffic_note":        "📦 Packs of this plan will no longer be sold to its owners.",
 	"setup.welcome": "👋 Hi! This is the Remnawave bot setup wizard.\n\n" +
 		"I'll ask a few questions with explanations — after each answer we move to the next step.\n\n" +

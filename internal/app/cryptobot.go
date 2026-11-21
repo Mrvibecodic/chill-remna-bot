@@ -381,7 +381,9 @@ func (a *App) cbCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	a.payLog(ctx, model.PayMethodCryptoBot, extID, chatID, "invoice_created", "%s price=%s %s assets=%s", what, price, fiat, cfg.Asset)
 	switch {
 	case snap.IsTraffic():
-		a.addTrafficInvoice(ctx, model.PayMethodCryptoBot, extID, chatID, 0, snap)
+		if err := a.addTrafficInvoice(ctx, model.PayMethodCryptoBot, extID, chatID, 0, snap); err != nil {
+			return "", 0, err
+		}
 	case a.store != nil:
 		if snap == nil {
 			snap = a.planSnapshot(months)

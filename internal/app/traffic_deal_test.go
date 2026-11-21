@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot/models"
+
 	"remnabot/internal/model"
 	"remnabot/internal/remnawave"
 )
@@ -28,8 +30,14 @@ type trafficPanel struct {
 	resets   int
 	// loseReply — следующая запись применяется, но ответ теряется (500).
 	loseReply bool
-	writes    []map[string]any
-	srv       *httptest.Server
+	// refuse — следующая запись отклоняется и не применяется (400).
+	refuse bool
+	// blindAfterWrite — после следующей записи панель не отвечает на одно
+	// чтение (502): исход записи узнать нельзя.
+	blindAfterWrite bool
+	blind           int
+	writes          []map[string]any
+	srv             *httptest.Server
 }
 
 func newTrafficPanel(t *testing.T) *trafficPanel {
@@ -47,6 +55,9 @@ func newTrafficPanel(t *testing.T) *trafficPanel {
 			}
 		}
 		switch {
+		case strings.Contains(r.URL.Path, "/by-telegram-id/") && p.blind > 0:
+			p.blind--
+			w.WriteHeader(http.StatusBadGateway)
 		case strings.Contains(r.URL.Path, "/by-telegram-id/"):
 			list := []map[string]any{}
 			if p.exists {
@@ -60,6 +71,15 @@ func newTrafficPanel(t *testing.T) *trafficPanel {
 		case r.URL.Path == "/api/users" && (r.Method == http.MethodPatch || r.Method == http.MethodPost):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			if p.blindAfterWrite {
+				p.blindAfterWrite, p.blind = false, 1
+			}
+			if p.refuse {
+				p.refuse = false
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"message":"refused"}`))
+				return
+			}
 			p.writes = append(p.writes, body)
 			p.exists = true
 			if v, ok := body["expireAt"].(string); ok {
@@ -230,10 +250,10 @@ func TestTrafficDeal_PackTargetExactMatch(t *testing.T) {
 	a, _, _, _ := trafficDealApp(t)
 	ctx := context.Background()
 	a.payLog(ctx, model.PayMethodYooKassa, "yk-pack-9", trafficUID, packTargetStage, "+9 GB: limit=%d", 10*gib)
-	if a.packTargetDone(ctx, "yk-pack-9", 1*gib) {
+	if done, _ := a.packPast(ctx, "yk-pack-9", 1*gib); done {
 		t.Fatal("1 ГБ принят за применённый потолок 10 ГБ")
 	}
-	if !a.packTargetDone(ctx, "yk-pack-9", 10*gib) {
+	if done, _ := a.packPast(ctx, "yk-pack-9", 10*gib); !done {
 		t.Fatal("применённый потолок не опознан")
 	}
 }
@@ -483,5 +503,140 @@ func TestTrafficStars_ChangedTermsText(t *testing.T) {
 	}
 	if !admin || !client {
 		t.Fatalf("тексты: %q", fm.texts)
+	}
+}
+
+// Панель отказала на первой оплате пакета, а до её повтора потолок дошёл до
+// того же числа другой покупкой: повтор прибавляет свой пакет, а не считает
+// его уже выданным.
+func TestTrafficDeal_PackRefusedThenSamePack(t *testing.T) {
+	a, fs, panel, plan := trafficDealApp(t)
+	ctx := context.Background()
+	buyTrafficWithBalance(t, a, "trf150", "")
+	snap := a.trafficSnapshotOf(plan, plan.Pack("pk5000"))
+
+	panel.mu.Lock()
+	panel.refuse = true
+	panel.mu.Unlock()
+	if _, err := a.closeTrafficDeal(ctx, trafficUID, model.PayMethodYooKassa, "160 ₽", "yk-pack-a", snap, false); err == nil {
+		t.Fatal("отказ панели принят за выдачу")
+	}
+	buyTrafficWithBalance(t, a, "trf150", "pk5000")
+	if _, limit, _, _ := panel.state(); limit != 200*gib {
+		t.Fatalf("второй пакет не выдан: %d", limit)
+	}
+
+	again := *snap
+	if _, err := a.closeTrafficDeal(ctx, trafficUID, model.PayMethodYooKassa, "160 ₽", "yk-pack-a", &again, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, limit, _, _ := panel.state(); limit != 250*gib {
+		t.Fatalf("оплачено два пакета, лимит %d ГБ", limit/gib)
+	}
+	if done, _ := fs.PaymentByExtID(ctx, "yk-pack-a"); !done {
+		t.Fatal("платёж повтора не записан")
+	}
+}
+
+// Панель не ответила ни на запись пакета, ни на проверку. Повтор решает по
+// нынешнему потолку — прибавляет, если записи не было, и не прибавляет, если
+// она прошла, — а администратор получает просьбу сверить лимит.
+func TestTrafficDeal_PackUnsure(t *testing.T) {
+	for _, applied := range []bool{false, true} {
+		a, fs, panel, plan := trafficDealApp(t)
+		ctx := context.Background()
+		fm := a.msg.(*fakeMsg)
+		buyTrafficWithBalance(t, a, "trf150", "")
+		snap := a.trafficSnapshotOf(plan, plan.Pack("pk5000"))
+
+		panel.mu.Lock()
+		panel.blindAfterWrite = true
+		panel.refuse, panel.loseReply = !applied, applied
+		panel.mu.Unlock()
+		if _, err := a.closeTrafficDeal(ctx, trafficUID, model.PayMethodYooKassa, "160 ₽", "yk-unsure", snap, false); err == nil {
+			t.Fatalf("applied=%v: неизвестный исход принят за выдачу", applied)
+		}
+		if done, _ := fs.PaymentByExtID(ctx, "yk-unsure"); done {
+			t.Fatalf("applied=%v: платёж записан при неизвестном исходе", applied)
+		}
+
+		again := *snap
+		if _, err := a.closeTrafficDeal(ctx, trafficUID, model.PayMethodYooKassa, "160 ₽", "yk-unsure", &again, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, limit, _, _ := panel.state(); limit != 200*gib {
+			t.Fatalf("applied=%v: лимит после повтора %d ГБ", applied, limit/gib)
+		}
+		if n := strings.Count(fm.joined(), "Сверьте лимит трафика"); n != 1 {
+			t.Fatalf("applied=%v: администратора о неизвестном исходе позвали %d раз", applied, n)
+		}
+	}
+}
+
+// Пакет только за звёзды на баланс не вернуть: администратор получает одно
+// сообщение и кнопку возврата звёзд, покупатель — своё, запись остаётся
+// отказом, сверка звёзд к этой оплате не возвращается.
+func TestTrafficStars_PackManualOnce(t *testing.T) {
+	a, fs, panel, plan := trafficDealApp(t)
+	ctx := context.Background()
+	fm := a.msg.(*fakeMsg)
+	a.botCfg.Stars.Enabled = true
+	buyTrafficWithBalance(t, a, plan.Code, "")
+	plan.Traffic.Packs[0].Price = ""
+	if err := fs.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	panel.mu.Lock()
+	panel.limit = 0
+	panel.mu.Unlock()
+
+	tx := models.StarTransaction{ID: "ch-manual", Amount: 110, Date: int(time.Now().Unix()),
+		Source: &models.TransactionPartner{Type: models.TransactionPartnerTypeUser, User: &models.TransactionPartnerUser{
+			User: models.User{ID: trafficUID}, InvoicePayload: trafficStarsPayload(plan.Code, "pk5000", trafficUID)}}}
+	for i := 0; i < 3; i++ {
+		a.reconcileStarTx(ctx, &tx)
+	}
+	all := fm.joined()
+	for _, want := range []string{"вернуть деньги на баланс бот не смог", "Можно вернуть звёзды", "пакет трафика добавить не удалось"} {
+		if n := strings.Count(all, want); n != 1 {
+			t.Fatalf("«%s» отправлено %d раз", want, n)
+		}
+	}
+	pays, _, _ := fs.ListUserPayments(ctx, trafficUID, 50, 0)
+	var rec *model.Payment
+	for i := range pays {
+		if pays[i].ExtID == "ch-manual" {
+			rec = &pays[i]
+		}
+	}
+	if rec == nil || rec.Status != model.PaymentRejected || payKindOf(rec) == payKindTopUp {
+		t.Fatalf("невыданный пакет записан не отказом: %+v", rec)
+	}
+	rec.Status = model.PaymentRefunded
+	if payKindOf(rec) == payKindTopUp || !payIsPack(rec) {
+		t.Fatal("после возврата звёзд невыданный пакет показан пополнением")
+	}
+	logs, _ := fs.PayLogs(ctx, "ch-manual", 0, 0)
+	n := 0
+	for i := range logs {
+		if logs[i].Stage == "reconcile" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("строк сверки в журнале: %d", n)
+	}
+
+	// Оплата, не сошедшаяся с условиями, строк «найдена сверкой» не копит.
+	odd := tx
+	odd.ID, odd.Amount = "ch-odd", 111
+	for i := 0; i < 3; i++ {
+		a.reconcileStarTx(ctx, &odd)
+	}
+	logs, _ = fs.PayLogs(ctx, "ch-odd", 0, 0)
+	for i := range logs {
+		if logs[i].Stage == "reconcile" {
+			t.Fatal("несошедшаяся оплата записана как найденная сверкой")
+		}
 	}
 }

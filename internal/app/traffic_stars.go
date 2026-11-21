@@ -145,6 +145,9 @@ func (a *App) trafficStarsPaid(ctx context.Context, payerID int64, payload, char
 		a.notify(ctx, payerID, i18n.T(a.lang(payerID), "pay.no_terms_traffic"))
 		return true
 	}
+	if recon {
+		a.payLog(ctx, model.PayMethodStars, chargeID, payerID, "reconcile", "оплата трафика найдена сверкой: %d ⭐", total)
+	}
 	snap := a.trafficSnapshotOf(p, pk)
 	d, err := a.closeTrafficDeal(ctx, payerID, model.PayMethodStars, amount, chargeID, snap, false)
 	switch {
@@ -158,6 +161,9 @@ func (a *App) trafficStarsPaid(ctx context.Context, payerID int64, payload, char
 			a.notify(ctx, payerID, i18n.T(a.lang(payerID), "stars.fail", a.clientErr(ctx, payerID, "выдача по звёздам", err)))
 		}
 		return true
+	}
+	if d.manual {
+		a.starsOfferRefund(ctx, payerID, chargeID, total)
 	}
 	if !d.refunded {
 		a.notifyTrafficDone(ctx, payerID, snap, d)

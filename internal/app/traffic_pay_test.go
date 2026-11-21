@@ -245,3 +245,40 @@ func TestTrafficPay_Reconcile(t *testing.T) {
 		t.Fatal("сверка не закрыла счёт трафика")
 	}
 }
+
+// Отклонённая заявка на перевод за пакет остаётся в платежах пакетом, а не
+// пополнением.
+func TestTrafficPay_P2PRejectedKeepsDeal(t *testing.T) {
+	a, fs, _, plan := trafficDealApp(t)
+	ctx := context.Background()
+	a.botCfg.P2P = model.P2PConfig{Enabled: true, OpenForAll: true, Cards: []string{"0000 1111"}, Currency: "₽"}
+	buyTrafficWithBalance(t, a, plan.Code, "")
+	_ = a.setBuyIntentTraffic(ctx, trafficUID, plan.Code, "pk5000", "")
+	s, _ := a.saleFor(ctx, trafficUID)
+	_, _, reqID, err := a.prepareP2PCardSale(ctx, trafficUID, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.getUI(100).rejectReq = reqID
+	a.handleAdminText(ctx, 100, "перевод не пришёл")
+
+	pays, _, _ := fs.ListUserPayments(ctx, trafficUID, 50, 0)
+	var rejected *model.Payment
+	for i := range pays {
+		if pays[i].Status == model.PaymentRejected {
+			rejected = &pays[i]
+		}
+	}
+	if rejected == nil || !rejected.Snapshot.IsTraffic() || rejected.Snapshot.PackGB != 50 {
+		t.Fatalf("запись об отказе без условий заявки: %+v", rejected)
+	}
+	if payKindOf(rejected) == payKindTopUp || !payIsPack(rejected) {
+		t.Fatal("отклонённый пакет показан пополнением")
+	}
+	if payKindOf(&model.Payment{Method: model.PayMethodP2P, Status: model.PaymentRejected, Snapshot: a.trafficSnapshotOf(plan, nil)}) == payKindTopUp {
+		t.Fatal("отклонённая заявка на трафик-тариф показана пополнением")
+	}
+	if payKindOf(&model.Payment{Method: model.PayMethodP2P, Status: model.PaymentRejected}) != payKindTopUp {
+		t.Fatal("отклонённое пополнение перестало быть пополнением")
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
@@ -16,16 +17,21 @@ func trafficPurpose(snap *model.PlanSnapshot) string {
 	return purposeTraffic
 }
 
-func (a *App) addTrafficInvoice(ctx context.Context, method, extID string, chatID int64, kopecks int64, snap *model.PlanSnapshot) {
+// addTrafficInvoice пишет строку счёта — единственный носитель условий сделки.
+// Не записалась — счёт покупателю не отдаётся: оплату по нему было бы не к чему
+// привязать.
+func (a *App) addTrafficInvoice(ctx context.Context, method, extID string, chatID int64, kopecks int64, snap *model.PlanSnapshot) error {
 	st := a.storeRef()
 	if st == nil || extID == "" {
-		return
+		return nil
 	}
 	if err := st.AddTrafficInvoice(ctx, &model.PendingInvoice{
 		Method: method, ExtID: extID, TelegramID: chatID, Purpose: trafficPurpose(snap), Kopecks: kopecks, Snapshot: snap,
 	}); err != nil {
-		a.log.Warn("счёт трафика не поставлен в очередь", "err", err, "method", method, "ext_id", extID)
+		a.payLog(ctx, method, extID, chatID, "invoice_error", "строка счёта трафика: %v", err)
+		return fmt.Errorf("строка счёта: %w", err)
 	}
+	return nil
 }
 
 func (a *App) trafficInvoice(ctx context.Context, extID string) *model.PendingInvoice {

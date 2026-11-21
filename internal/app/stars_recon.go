@@ -124,7 +124,6 @@ func (a *App) reconcileStarTx(ctx context.Context, tx *models.StarTransaction) {
 		return
 	}
 	if traffic {
-		a.payLog(ctx, model.PayMethodStars, tx.ID, payer, "reconcile", "оплата трафика найдена сверкой: %d ⭐", tx.Amount)
 		a.trafficStarsPaid(ctx, payer, u.InvoicePayload, tx.ID, tx.Amount, true)
 		return
 	}

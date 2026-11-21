@@ -392,7 +392,9 @@ func (a *App) plCreateTransactionSnap(ctx context.Context, chatID int64, months 
 	}
 	a.payLog(ctx, model.PayMethodPlatega, tx.ID, chatID, "invoice_created", "%s amount=%.2f RUB method=%d", what, amount, a.plMethod())
 	if snap.IsTraffic() {
-		a.addTrafficInvoice(ctx, model.PayMethodPlatega, tx.ID, chatID, 0, snap)
+		if err := a.addTrafficInvoice(ctx, model.PayMethodPlatega, tx.ID, chatID, 0, snap); err != nil {
+			return "", "", err
+		}
 		return tx.Redirect, tx.ID, nil
 	}
 	if snap == nil {

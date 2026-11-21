@@ -1503,6 +1503,8 @@ type dealDone struct {
 	// autoPayMoved — включённое автосписание перешло на тариф этой сделки.
 	autoPayMoved bool
 	refunded     bool
+	// manual — стоимость невыданного пакета на баланс не вернулась.
+	manual bool
 }
 
 // closeDeal — сделка целиком: ядро выдачи и шаги после него, общие для
@@ -1761,10 +1763,14 @@ func (a *App) handleAdminText(ctx context.Context, chatID int64, text string) {
 		req.DecidedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = a.store.UpdateP2PRequest(ctx, req)
 		a.payLog(ctx, model.PayMethodP2P, p2pExt(req.ID), req.TelegramID, "rejected", "%s", text)
-		_ = a.store.AddPayment(ctx, &model.Payment{
+		rejected := &model.Payment{
 			TelegramID: req.TelegramID, Method: model.PayMethodP2P, Months: req.Months,
 			Amount: req.Price + curSuffix(a.curFor(model.PayMethodP2P)), Status: model.PaymentRejected, Comment: text,
-		})
+		}
+		if req.Snapshot.IsTraffic() {
+			rejected.Snapshot = req.Snapshot
+		}
+		_ = a.store.AddPayment(ctx, rejected)
 		a.cleanupP2PUser(ctx, req.TelegramID)
 		if hasChat(req.TelegramID) {
 			a.notify(ctx, req.TelegramID, i18n.T(a.lang(req.TelegramID), "p2p.user_paid_rejected", html.EscapeString(text)))

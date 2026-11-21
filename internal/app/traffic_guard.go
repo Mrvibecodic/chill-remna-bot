@@ -51,7 +51,7 @@ func (a *App) hadTrafficDeal(ctx context.Context, uid int64) bool {
 		return false
 	}
 	for i := range pays {
-		if pays[i].Snapshot.IsTraffic() {
+		if pays[i].Status == model.PaymentPaid && pays[i].Snapshot.IsTraffic() {
 			return true
 		}
 	}

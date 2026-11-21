@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -244,5 +245,34 @@ func TestMiniTraffic_PayCheck(t *testing.T) {
 	}
 	if exp, limit, _, _ := panel.state(); exp != remnawave.EternalExpire || limit != 150*gib {
 		t.Fatalf("тариф не выдан проверкой: %s %d", exp, limit)
+	}
+}
+
+type noTrafficInvoiceStore struct{ *fakeStore }
+
+func (noTrafficInvoiceStore) AddTrafficInvoice(context.Context, *model.PendingInvoice) error {
+	return errors.New("db down")
+}
+
+// Строка счёта не записалась — ссылка на оплату не отдаётся: по оплате не
+// узнать, что именно купили.
+func TestMiniTraffic_NoInvoiceRowNoPayLink(t *testing.T) {
+	a, fs, _, plan := trafficDealApp(t)
+	ctx := context.Background()
+	yk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"yk-lost","status":"pending","confirmation":{"type":"redirect","confirmation_url":"https://pay.example.com/yk-lost"}}`))
+	}))
+	defer yk.Close()
+	oldBase := yookassa.BaseURL
+	yookassa.BaseURL = yk.URL
+	defer func() { yookassa.BaseURL = oldBase }()
+	a.mu.Lock()
+	a.botCfg.YooKassa = model.YooKassaConfig{Enabled: true, ShopID: "shop", SecretKey: "sec", ReturnURL: "https://t.me"}
+	a.store = noTrafficInvoiceStore{fs}
+	a.mu.Unlock()
+
+	r := a.MiniCheckout(ctx, trafficUID, plan.Code, 0, "", model.PayMethodYooKassa, "450", false, false)
+	if r.OK || r.PayURL != "" || r.Error == "" {
+		t.Fatalf("ссылка на оплату без строки счёта: %+v", r)
 	}
 }

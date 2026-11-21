@@ -38,8 +38,10 @@ const (
 	payKindBalance                // покупка с баланса
 )
 
+// payIsPack — запись о пакете трафика: выданном, отклонённом или невыданном.
+// Возврат его стоимости на баланс — пополнение.
 func payIsPack(p *model.Payment) bool {
-	return p.Snapshot.IsTraffic() && p.Snapshot.PackID != "" && p.Comment == purposePack
+	return p.Snapshot.IsTraffic() && p.Snapshot.PackID != "" && p.Comment != packRefundComment
 }
 
 func payKindOf(p *model.Payment) payKind {
@@ -48,7 +50,8 @@ func payKindOf(p *model.Payment) payKind {
 		return payKindTrial
 	case p.Method == model.PayMethodGrant:
 		return payKindGrant
-	case p.Months <= 0 && !payIsPack(p):
+	// У отклонённой заявки на трафик-тариф месяцев тоже нет.
+	case p.Months <= 0 && (!p.Snapshot.IsTraffic() || p.Comment == packRefundComment):
 		return payKindTopUp
 	case p.Method == model.PayMethodBalance:
 		return payKindBalance
@@ -408,8 +411,10 @@ func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int, 
 	case p.Comment == "remnashop":
 		lines = append(lines, "", i18n.T(lang, "upay.imported"))
 	case p.Comment == purposePack || p.Comment == purposeTraffic:
-	case p.Comment == "pack_refund":
+	case p.Comment == packRefundComment:
 		lines = append(lines, "", i18n.T(lang, "upay.pack_refund"))
+	case p.Comment == packManualComment:
+		lines = append(lines, "", i18n.T(lang, "upay.pack_manual"))
 	case p.Comment != "":
 		lines = append(lines, "", i18n.T(lang, "upay.comment", html.EscapeString(p.Comment)))
 	}

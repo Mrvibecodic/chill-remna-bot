@@ -277,6 +277,8 @@ var editableList = []Editable{
 		Vars: []EditVar{
 			{Name: "rubles", Ru: "рублей", Desc: [2]string{"стоимость пакета в рублях — число", "pack price in rubles — number"}, Example: [2]string{"160", "160"}},
 		}},
+	{Key: "pack.manual", Section: "buy", Kind: KindHTML,
+		Where: [2]string{"Пакет оплачен, но не добавлен, и стоимость на баланс не вернуть — разбирает администратор", "Pack paid but not added and its price cannot go to the balance — handled by the administrator"}},
 	{Key: "buy.traffic", Section: "buy", Kind: KindHTML,
 		Where: [2]string{"Карточка тарифа — строка «Трафик»", "Plan card — «Traffic» line"},
 		Vars: []EditVar{

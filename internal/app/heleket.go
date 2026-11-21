@@ -209,7 +209,9 @@ func (a *App) hlCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	a.payLog(ctx, model.PayMethodHeleket, extID, chatID, "invoice_created",
 		"%s months=%d kopecks=%d amount=%s %s subtract=%d", purposeOrBuy(purpose), months, kopecks, inv.Amount, inv.Currency, cfg.SubtractOrDefault())
 	if snap.IsTraffic() {
-		a.addTrafficInvoice(ctx, model.PayMethodHeleket, extID, chatID, 0, snap)
+		if err := a.addTrafficInvoice(ctx, model.PayMethodHeleket, extID, chatID, 0, snap); err != nil {
+			return "", "", err
+		}
 		return inv.URL, inv.UUID, nil
 	}
 	if snap == nil {

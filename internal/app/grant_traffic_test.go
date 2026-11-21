@@ -164,6 +164,9 @@ func TestTrafficRollbackNotice(t *testing.T) {
 	_ = fs.UpsertUser(ctx, 1000000002)
 	_ = fs.SetUserSnapshot(ctx, 1000000002, timed)
 	_ = fs.SetSubExpiry(ctx, 1000000002, "2099-12-31T00:00:00Z", "paid")
+	// Отклонённая заявка на трафик-тариф сделкой не считается.
+	_ = fs.AddPayment(ctx, &model.Payment{TelegramID: 1000000002, Method: model.PayMethodP2P, Amount: "450 ₽",
+		Status: model.PaymentRejected, Snapshot: a.trafficSnapshotOf(plan, nil)})
 
 	a.noticeTrafficRollback(ctx)
 	msg := fm.joined()

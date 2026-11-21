@@ -334,15 +334,21 @@ func (a *App) addBonusTraffic(ctx context.Context, tgID int64, gb int, oneTime b
 // bonusTrafficApplied перечитывает потолок в панели после неудачного ответа:
 // true — прибавка на месте, начисление считать состоявшимся.
 func (a *App) bonusTrafficApplied(tgID int64, want int64) bool {
+	limit, ok := a.trafficLimitNow(tgID)
+	return ok && limit >= want
+}
+
+// trafficLimitNow — потолок трафика в панели; ok=false — панель не ответила.
+func (a *App) trafficLimitNow(tgID int64) (limit int64, ok bool) {
 	panel := a.panelClient()
 	if panel == nil {
-		return false
+		return 0, false
 	}
 	pu, err := panel.FindByTelegramID(a.bgContext(), tgID)
 	if err != nil || pu == nil {
-		return false
+		return 0, false
 	}
-	return pu.TrafficLimit >= want
+	return pu.TrafficLimit, true
 }
 
 func isTrafficKind(kind string) bool {

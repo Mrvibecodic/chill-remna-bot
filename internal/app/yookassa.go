@@ -413,7 +413,9 @@ func (a *App) ykCreatePayment(ctx context.Context, chatID int64, months int, val
 	}
 	if traffic {
 		a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "%s amount=%s %s", what, value, currency)
-		a.addTrafficInvoice(ctx, model.PayMethodYooKassa, pay.ID, chatID, 0, snap)
+		if err := a.addTrafficInvoice(ctx, model.PayMethodYooKassa, pay.ID, chatID, 0, snap); err != nil {
+			return "", "", err
+		}
 		return pay.Confirmation.ConfirmationURL, pay.ID, nil
 	}
 	a.payLog(ctx, model.PayMethodYooKassa, pay.ID, chatID, "invoice_created", "purchase months=%d amount=%s %s autopay=%v", months, value, currency, save)
