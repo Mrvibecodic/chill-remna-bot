@@ -2384,3 +2384,35 @@ func classifyHTTP(resp *http.Response) error {
 		return fmt.Errorf("панель вернула HTTP %d: %s", resp.StatusCode, snippet)
 	}
 }
+
+// DeleteHwidDevice removes one HWID registration from the user's subscription.
+// It does not rotate credentials: the other devices keep working and only the
+// freed slot is returned to the user. found=false when the panel does not know
+// the user.
+func (c *Client) DeleteHwidDevice(ctx context.Context, telegramID int64, hwid string) (found bool, err error) {
+	hwid = strings.TrimSpace(hwid)
+	if hwid == "" {
+		return false, fmt.Errorf("пустой HWID")
+	}
+	u, err := c.findByTelegram(ctx, telegramID)
+	if err != nil {
+		return false, err
+	}
+	if u == nil || u.ref().Empty() {
+		return false, nil
+	}
+	if !ownedByBot(u, telegramID) {
+		return false, fmt.Errorf("аккаунт <code>%d</code> создан НЕ через бота — управлять им запрещено", telegramID)
+	}
+	body := u.ref().hwidBody()
+	body["hwid"] = hwid
+	resp, err := c.do(ctx, http.MethodPost, "/api/hwid/devices/delete", body)
+	if err != nil {
+		return true, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return true, fmt.Errorf("панель удаления устройства: HTTP %d", resp.StatusCode)
+	}
+	return true, nil
+}

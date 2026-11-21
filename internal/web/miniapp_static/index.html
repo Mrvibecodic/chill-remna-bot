@@ -179,9 +179,11 @@ input[type=file].field::file-selector-button:hover{background:var(--surface)}
 .frow:only-child{border-radius:14px}
 .frow .l{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
 .frow b{font-size:14.5px;font-variant-numeric:tabular-nums;text-align:right}
-.frow.dev{display:block}
+.frow.dev{display:block;position:relative;padding-right:48px}
 .frow.dev .dn{font-size:14px;font-weight:600;line-height:1.35}
 .frow.dev .dm{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.35}
+.frow.dev .devx{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;border:1px solid var(--stroke);background:var(--soft);color:var(--muted);font-size:15px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.frow.dev .devx:active{color:var(--bad);border-color:var(--bad)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
 .chip2{max-width:100%;overflow-wrap:anywhere;display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--stroke);backdrop-filter:blur(10px)}
 .flag{width:21px;height:15px;border-radius:3px;object-fit:cover;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
@@ -592,8 +594,8 @@ function devicesBlock(s){
   var list=(s&&s.devices)||[];
   if(!list.length)return '';
   var h='<div class="sec-title">'+IC.device+'Подключённые устройства</div><div class="feat">';
-  list.forEach(function(d){
-    h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'</div>';
+  list.forEach(function(d,i){
+    h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'<button class="devx" onclick="askDelDev('+i+')" aria-label="Отключить">✕</button></div>';
   });
   return h+'</div>';
 }
@@ -750,7 +752,7 @@ function devicesCard(sub){
   var h='<div class="card dcard"><div class="dhead"><span class="status">'+IC.device+'Устройства</span>'+(dt!==null?'<b>'+esc(dt)+'</b>':'')+'</div>';
   if(list.length){
     h+='<div class="feat">';
-    list.forEach(function(d){h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'</div>';});
+    list.forEach(function(d,i){h+='<div class="frow dev"><div class="dn">'+esc(d.name||'')+'</div>'+(d.meta?'<div class="dm">'+esc(d.meta)+'</div>':'')+'<button class="devx" onclick="askDelDev('+i+')" aria-label="Отключить">✕</button></div>';});
     h+='</div>';
   }
   return h+'<button class="btn sec" style="margin-top:14px" onclick="askResetDevices(this)">'+IC.device+'Сбросить устройства</button></div>';
@@ -891,6 +893,21 @@ async function doResetDevices(el){
     if(r.ok){haptic('ok');toast('Готово. Обновите подписку на устройствах','ok');boot();}
     else{haptic('err');toast(r.error||'Не удалось сбросить устройства','err');busy(el,false);}
   }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');busy(el,false);}
+}
+
+function askDelDev(i){
+  var s=STATE.sub||{},d=(s.devices||[])[i];if(!d||!d.id)return;
+  haptic('tap');
+  confirmAsk('Отключить это устройство?\n\n'+esc(d.name||'')+'\n\nОстальные устройства и ключи не изменятся.',function(ok){
+    if(ok)doDelDev(i);
+  },{yes:'Отключить',no:'Отмена'});
+}
+async function doDelDev(i){
+  var s=STATE.sub||{},d=(s.devices||[])[i];if(!d||!d.id)return;
+  try{const r=await post('/api/miniapp/devices/delete',{id:d.id});
+    if(r.ok){haptic('ok');toast('Устройство отключено','ok');boot();}
+    else{haptic('err');toast(r.error||'Не удалось отключить устройство','err');}
+  }catch(e){haptic('err');toast('Ошибка: '+e.message,'err');}
 }
 
 var STRAT_LABELS={NO_RESET:'не сбрасывается',DAY:'каждый день',WEEK:'каждый понедельник',MONTH:'1-го числа каждого месяца',MONTH_ROLLING:'каждый месяц в день подключения'};

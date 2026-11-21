@@ -106,6 +106,7 @@ func (s *Server) mux() *http.ServeMux {
 	mux.HandleFunc("POST /api/miniapp/topup", s.handleMiniTopUp)
 	mux.HandleFunc("GET /api/miniapp/connect", s.handleMiniConnect)
 	mux.HandleFunc("POST /api/miniapp/devices/reset", s.handleMiniResetDevices)
+	mux.HandleFunc("POST /api/miniapp/devices/delete", s.handleMiniDeleteDevice)
 	mux.HandleFunc("GET /api/miniapp/autopay", s.handleMiniAutoPay)
 	mux.HandleFunc("POST /api/miniapp/autopay", s.handleMiniSetAutoPay)
 	mux.HandleFunc("GET /api/miniapp/wallet", s.handleMiniWallet)
