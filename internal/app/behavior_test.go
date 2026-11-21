@@ -2012,7 +2012,7 @@ func (s *fakeStore) BroadcastAudience(_ context.Context) ([]model.User, error) {
 func (s *fakeStore) PlanAudience(_ context.Context) ([]model.User, error) {
 	var out []model.User
 	for id, u := range s.users {
-		if !u.Blocked {
+		if !u.Blocked && u.SubExpireAt != "" {
 			out = append(out, model.User{TelegramID: id, SubExpireAt: u.SubExpireAt, NotifyKind: u.NotifyKind, Snapshot: u.Snapshot})
 		}
 	}

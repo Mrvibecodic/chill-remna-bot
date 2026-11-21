@@ -26,6 +26,11 @@ func TestBroadcastAudience(t *testing.T) {
 		if err := st.SetUserSnapshot(ctx, 1000000001, &model.PlanSnapshot{Code: "vip", Months: 1}); err != nil {
 			t.Fatal(err)
 		}
+		for _, id := range []int64{9103, 9104} {
+			if err := st.SetSubExpiry(ctx, id, exp, "paid"); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := st.SetBlocked(ctx, 9103, true); err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +67,8 @@ func TestBroadcastAudience(t *testing.T) {
 		for _, u := range all {
 			ids[u.TelegramID] = true
 		}
-		if len(ids) != 4 || !ids[9104] || ids[9103] {
+		// Недоступный в счёте, забаненный и не имевший подписки — нет.
+		if len(ids) != 3 || !ids[9104] || ids[9103] || ids[9102] {
 			t.Fatalf("сводка по тарифам: %v", ids)
 		}
 	})
