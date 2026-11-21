@@ -684,8 +684,7 @@ func (b *base) SetTrialUsed(ctx context.Context, telegramID int64, ts string) er
 	if err != nil {
 		return err
 	}
-	// Ноль строк — записи нет: молчаливый успех означал бы, что триал не
-	// отмечен и выдастся ещё раз (см. trialOnce).
+	// Без строки отметка теряется, и триал выдался бы снова.
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return fmt.Errorf("пользователь %d не найден", telegramID)
 	}

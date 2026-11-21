@@ -1346,9 +1346,14 @@ func (s *fakeStore) ResetTermsAccepted(_ context.Context) error {
 func (s *fakeStore) SetTrialUsed(_ context.Context, telegramID int64, ts string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if u, ok := s.users[telegramID]; ok {
-		u.TrialUsedAt = ts
+	u, ok := s.users[telegramID]
+	if !ok {
+		if ts == "" {
+			return nil
+		}
+		return fmt.Errorf("пользователь %d не найден", telegramID)
 	}
+	u.TrialUsedAt = ts
 	return nil
 }
 func (s *fakeStore) SetSubExpiry(_ context.Context, telegramID int64, expireAt, kind string) error {
