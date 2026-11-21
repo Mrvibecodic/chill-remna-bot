@@ -946,3 +946,46 @@ func TestTributeTermsTextIsShared(t *testing.T) {
 		t.Fatalf("витрина с убранным текстом: %q", hint)
 	}
 }
+
+// Трафик-тариф и Tribute не пересекаются: экраны привязки его не открывают, а
+// оплата Tribute его не выдаёт, даже окажись у него привязка.
+func TestTribute_TrafficPlanExcluded(t *testing.T) {
+	a, fs, fm, _, patched := trbSaleApp(t)
+	ctx := context.Background()
+	traffic := &model.Plan{Code: "trf150", Name: "Трафик 150", Enabled: true, Kind: model.PlanKindTraffic,
+		TrafficGB: 150, Currency: "₽", Availability: model.PlanAvailAll, Traffic: &model.PlanTraffic{Price: "450"}}
+	if err := fs.SavePlan(ctx, traffic); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, data := range []string{"trb:id:trf150", "trb:u:trf150"} {
+		a.handleCallback(ctx, cb(100, data))
+		if in := a.getUI(100).adminInput; in != "" {
+			t.Fatalf("%s: бот ждёт ввод %q для трафик-тарифа", data, in)
+		}
+	}
+	a.setTributeLinkField(ctx, 100, "trf150", "trb_plid", "77")
+	if l := a.tributeCfg().LinkFor("trf150"); l != nil {
+		t.Fatalf("подписка привязана к трафик-тарифу: %+v", l)
+	}
+
+	a.mu.Lock()
+	a.botCfg.Tribute.Links = []model.TributeLink{{Plan: "trf150", SubID: 42, URL: trbVipURL}}
+	a.mu.Unlock()
+	if url, _ := a.tributeOffer("ru", traffic, "trf150"); url != "" {
+		t.Fatalf("у трафик-тарифа есть кнопка Tribute: %s", url)
+	}
+	a.handleCallback(ctx, cb(100, "trb:plans"))
+	if data := fm.allCallbackData(); hasCB(data, "trb:pl:trf150") {
+		t.Fatalf("трафик-тариф в списке привязок: %v", data)
+	}
+	if handled, err := tributeEvent(t, a, trbPaid(42, "monthly", 555)); err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if *patched != nil {
+		t.Fatal("по подписке Tribute выдан трафик-тариф")
+	}
+	if !strings.Contains(fm.joined(), "через Tribute он не продаётся") {
+		t.Fatalf("причина отказа не названа:\n%s", fm.joined())
+	}
+}
