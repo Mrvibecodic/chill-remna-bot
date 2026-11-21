@@ -16,25 +16,25 @@
 | Feather Icons (иконки Mini App) | — | MIT |
 | Lucide (иконки Mini App) | — | ISC |
 | Unicode CLDR (названия стран) | 32 | Unicode-3.0 |
-| github.com/dustin/go-humanize | v1.0.1 | MIT |
-| github.com/go-telegram/bot | v1.22.0 | MIT |
+| github.com/dustin/go-humanize | v1.1.0 | MIT |
+| github.com/go-telegram/bot | v1.28.0 | MIT |
 | github.com/google/uuid | v1.6.0 | BSD-3-Clause |
 | github.com/heleket/go-sdk | v0.4.0 | MIT |
 | github.com/jackc/pgpassfile | v1.0.0 | MIT |
 | github.com/jackc/pgservicefile | v0.0.0-20240606120523-5a60cdf6a761 | MIT |
-| github.com/jackc/pgx/v5 | v5.10.0 | MIT |
-| github.com/jackc/puddle/v2 | v2.2.2 | MIT |
+| github.com/jackc/pgx/v5 | v5.13.0 | MIT |
+| github.com/jackc/puddle/v2 | v2.2.3 | MIT |
 | github.com/remyoudompheng/bigfft | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause |
-| golang.org/x/crypto | v0.54.0 | BSD-3-Clause |
-| golang.org/x/net | v0.56.0 | BSD-3-Clause |
-| golang.org/x/sync | v0.22.0 | BSD-3-Clause |
-| golang.org/x/sys | v0.47.0 | BSD-3-Clause |
-| golang.org/x/text | v0.40.0 | BSD-3-Clause |
+| golang.org/x/crypto | v0.59.0 | BSD-3-Clause |
+| golang.org/x/net | v0.62.0 | BSD-3-Clause |
+| golang.org/x/sync | v0.25.0 | BSD-3-Clause |
+| golang.org/x/sys | v0.50.0 | BSD-3-Clause |
+| golang.org/x/text | v0.44.0 | BSD-3-Clause |
 | gopkg.in/yaml.v3 | v3.0.1 | MIT AND Apache-2.0 |
-| modernc.org/libc | v1.73.4 | BSD-3-Clause + сторонние (MIT musl и др.) |
+| modernc.org/libc | v1.80.1 | BSD-3-Clause + сторонние (MIT musl и др.) |
 | modernc.org/mathutil | v1.7.1 | BSD-3-Clause |
-| modernc.org/memory | v1.11.0 | BSD-3-Clause (+ LICENSE-GO, LICENSE-MMAP-GO) |
-| modernc.org/sqlite | v1.53.0 | BSD-3-Clause (код SQLite — public domain) |
+| modernc.org/memory | v1.12.1 | BSD-3-Clause (+ LICENSE-GO, LICENSE-MMAP-GO) |
+| modernc.org/sqlite | v1.62.0 | BSD-3-Clause (код SQLite — public domain) |
 
 ## Что НЕ входит в этот список
 
@@ -243,7 +243,7 @@ SPDX-License-Identifier: Unicode-3.0
 
 ## Модули Go
 
-### github.com/dustin/go-humanize v1.0.1
+### github.com/dustin/go-humanize v1.1.0
 
 Лицензия: **MIT**
 
@@ -273,7 +273,7 @@ SOFTWARE.
 <http://www.opensource.org/licenses/mit-license.php>
 ```
 
-### github.com/go-telegram/bot v1.22.0
+### github.com/go-telegram/bot v1.28.0
 
 Лицензия: **MIT**
 
@@ -431,7 +431,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### github.com/jackc/pgx/v5 v5.10.0
+### github.com/jackc/pgx/v5 v5.13.0
 
 Лицензия: **MIT**
 
@@ -462,7 +462,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### github.com/jackc/puddle/v2 v2.2.2
+### github.com/jackc/puddle/v2 v2.2.3
 
 Лицензия: **MIT**
 
@@ -529,7 +529,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### golang.org/x/crypto v0.54.0
+### golang.org/x/crypto v0.59.0
 
 Лицензия: **BSD-3-Clause**
 
@@ -592,7 +592,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ```
 
-### golang.org/x/net v0.56.0
+### golang.org/x/net v0.62.0
 
 Лицензия: **BSD-3-Clause**
 
@@ -655,7 +655,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ```
 
-### golang.org/x/sync v0.22.0
+### golang.org/x/sync v0.25.0
 
 Лицензия: **BSD-3-Clause**
 
@@ -718,7 +718,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ```
 
-### golang.org/x/sys v0.47.0
+### golang.org/x/sys v0.50.0
 
 Лицензия: **BSD-3-Clause**
 
@@ -781,7 +781,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ```
 
-### golang.org/x/text v0.40.0
+### golang.org/x/text v0.44.0
 
 Лицензия: **BSD-3-Clause**
 
@@ -920,7 +920,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### modernc.org/libc v1.73.4
+### modernc.org/libc v1.80.1
 
 Лицензия: **BSD-3-Clause + сторонние (MIT musl и др.)**
 
@@ -1302,7 +1302,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### modernc.org/memory v1.11.0
+### modernc.org/memory v1.12.1
 
 Лицензия: **BSD-3-Clause (+ LICENSE-GO, LICENSE-MMAP-GO)**
 
@@ -1399,7 +1399,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### modernc.org/sqlite v1.53.0
+### modernc.org/sqlite v1.62.0
 
 Лицензия: **BSD-3-Clause (код SQLite — public domain)**
 
