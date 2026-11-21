@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+// «Запущена» уходит текстом, хотя предпросмотр — подпись под картинкой
+// раздела: иначе итог не смог бы править её на месте.
+func TestBroadcast_StartedIsTextScreen(t *testing.T) {
+	a, _ := bcastSegApp(t, false)
+	planTap(t, a, "bc:new")
+	a.handleMessage(context.Background(), msgText(planAdmin, "msg"))
+	if a.getScreenSection(planAdmin) == "" {
+		t.Fatal("предпросмотр без картинки раздела — проверять нечего")
+	}
+	planTap(t, a, "bc:send")
+	waitFor(t, func() bool { return !a.bcastRunning.Load() })
+	if sec := a.getScreenSection(planAdmin); sec != "" {
+		t.Fatalf("«запущена» осталась подписью под картинкой раздела %q", sec)
+	}
+}
+
 func noticed(a *App, chatID int64, id int) bool {
 	a.scrMu.Lock()
 	defer a.scrMu.Unlock()

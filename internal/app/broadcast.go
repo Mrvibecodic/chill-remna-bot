@@ -57,7 +57,9 @@ func (a *App) onBroadcast(ctx context.Context, chatID int64, val string) {
 			return
 		}
 		a.bcastStop.Store(false)
-		a.sendKB(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{
+		// Текстом, без картинки раздела: итог правит это сообщение на месте, а
+		// подпись под картинкой текстом не правится.
+		a.sendKBText(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "bcast.btn_stop"), "bc:stop")},
 			navBack(lang, "menu:marketing"),
 		})
