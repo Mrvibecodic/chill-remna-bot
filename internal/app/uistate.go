@@ -3,7 +3,6 @@ package app
 import "remnabot/internal/model"
 
 type uiState struct {
-	preview      bool
 	topUpKopecks int64
 	awaitTopUp   bool
 	awaitPromo   bool

@@ -164,3 +164,17 @@ func TestPreviewMenuShiftsEntities(t *testing.T) {
 		t.Fatalf("смещение %d при префиксе %q", got[0].Offset, prefix)
 	}
 }
+
+// Превью включает только администратор: флаг один на бота.
+func TestPreview_OnlyAdminSwitches(t *testing.T) {
+	a, _, _ := planAdminApp(t)
+	ctx := context.Background()
+	a.previewFlow(ctx, 777, "menu:preview")
+	if a.preview.Load() || a.inPreview(planAdmin) {
+		t.Fatal("превью включил не администратор")
+	}
+	a.previewFlow(ctx, planAdmin, "menu:preview")
+	if !a.inPreview(planAdmin) || a.inPreview(777) {
+		t.Fatal("превью администратора не включилось")
+	}
+}

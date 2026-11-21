@@ -10,24 +10,26 @@ import (
 )
 
 func (a *App) inPreview(chatID int64) bool {
-	return a.cfg != nil && chatID == a.cfg.AdminID && a.getUI(chatID).preview
+	return a.cfg != nil && chatID == a.cfg.AdminID && a.preview.Load()
 }
 
 // previewFlow — нажатие админа в превью: экраны клиента остаются в превью,
 // любая кнопка админки выходит из него.
 func (a *App) previewFlow(ctx context.Context, chatID int64, data string) context.Context {
-	ui := a.getUI(chatID)
-	if data == "menu:preview" {
-		ui.preview = true
+	if a.cfg == nil || chatID != a.cfg.AdminID {
+		return ctx
 	}
-	if !ui.preview {
+	if data == "menu:preview" {
+		a.preview.Store(true)
+	}
+	if !a.preview.Load() {
 		return ctx
 	}
 	switch data {
 	case "menu:preview", "menu:home", "menu:trial", cbClose + ":home":
 		return withClientFlow(ctx)
 	case cbInput + ":cancel":
-		if ui.inputBack == "" {
+		if a.getUI(chatID).inputBack == "" {
 			return withClientFlow(ctx)
 		}
 	case cbClose + ":close":
@@ -36,7 +38,7 @@ func (a *App) previewFlow(ctx context.Context, chatID int64, data string) contex
 	if flowOf(ctx) == "client" {
 		return ctx
 	}
-	ui.preview = false
+	a.preview.Store(false)
 	return ctx
 }
 

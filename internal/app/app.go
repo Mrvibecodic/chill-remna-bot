@@ -231,6 +231,9 @@ type App struct {
 	// Раньше остановить её было нельзя вообще — только погасив контейнер.
 	bcastRunning atomic.Bool
 	bcastStop    atomic.Bool
+	// preview — админ смотрит бот глазами клиента. Админ один, флаг читают и
+	// запросы мини-аппа.
+	preview atomic.Bool
 
 	// finalizeUserLk serializes finalizePurchase per USER (striped): два
 	// РАЗНЫХ платежа одного человека (P2P-заявка + вебхук) иначе считали бы
@@ -953,7 +956,7 @@ func (a *App) handleMessage(ctx context.Context, m *models.Message) {
 	// Команда админа ведёт в админку, даже если сейчас открыта витрина.
 	if isAdmin && strings.HasPrefix(text, "/") {
 		ctx = withAdminFlow(ctx)
-		a.getUI(chatID).preview = false
+		a.preview.Store(false)
 	}
 
 	// Новый текст бота может начинаться с «/» (например, подсказка про
