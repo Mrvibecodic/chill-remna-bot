@@ -7,6 +7,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/storage"
 	"remnabot/internal/web"
 )
 
@@ -183,12 +184,15 @@ func (a *App) MiniPlanLink(ctx context.Context, tgID int64, code string) web.Min
 		return unknown
 	}
 	a.linkPlanOpen(tgID, p.Code)
+	if p.IsTraffic() {
+		return web.MiniPlansDTO{Traffic: []web.MiniPlanDTO{pd}}
+	}
 	return web.MiniPlansDTO{Plans: []web.MiniPlanDTO{pd}}
 }
 
-// MiniWallet — кошелёк: баланс и доступно ли пополнение.
-func (a *App) MiniWallet(ctx context.Context, tgID int64) web.MiniWalletDTO {
-	return web.MiniWalletDTO{TopUpOn: a.topUpEnabled(), BalanceK: a.userBalance(ctx, tgID)}
+// MiniWallet — кошелёк: баланс и доступно ли пополнение в этом месте.
+func (a *App) MiniWallet(ctx context.Context, tgID int64, web_ bool) web.MiniWalletDTO {
+	return web.MiniWalletDTO{TopUpOn: a.topUpOpen(web_), BalanceK: a.userBalance(ctx, tgID)}
 }
 
 // MiniPayCheck — «Проверить оплату» из мини-аппа и кабинета: незакрытые счета
@@ -230,18 +234,26 @@ func (a *App) MiniPayCheck(ctx context.Context, tgID, sinceUnix int64) web.MiniP
 	// Оплаты до восстановления базы сверка кладёт в список админу — его
 	// нужно отправить, как в обычном проходе.
 	defer a.flushReview(rctx)
-	for i := range list {
-		pi := &list[i]
-		if !busy {
-			// Сверка сама закрывает уже оплаченный счёт и добивает недошедший.
-			a.reconcileInvoice(rctx, st, pi)
-		}
-		if done, _ := st.PaymentByExtID(rctx, pi.ExtID); done {
-			dto.Paid = true
+	check := func(q storage.Storage, list []model.PendingInvoice) {
+		for i := range list {
+			pi := &list[i]
+			if !busy {
+				// Сверка сама закрывает уже оплаченный счёт и добивает недошедший.
+				a.reconcileInvoice(rctx, q, pi)
+			}
+			if done, _ := st.PaymentByExtID(rctx, pi.ExtID); done {
+				dto.Paid = true
+			}
 		}
 	}
+	check(st, list)
+	tlist, _ := st.ListUserTraffic(rctx, tgID, since, payCheckMax)
+	check(trafficQueue{st}, tlist)
 	if left, err := st.ListUserPending(rctx, tgID, since, payCheckMax); err == nil {
 		dto.Pending = len(left)
+	}
+	if left, err := st.ListUserTraffic(rctx, tgID, since, payCheckMax); err == nil {
+		dto.Pending += len(left)
 	}
 	// Счёт, оплату которого уже провёл вебхук, закрыт и выше не виден: об
 	// оплате говорит запись платежа после выставления счёта. Метку времени

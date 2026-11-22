@@ -57,6 +57,9 @@ func (a *App) tributeURLFor(code string) string {
 // не выдаётся: такая оплата ушла бы в отказ. Сроки пустые — периоды
 // подписки неизвестны (ID введён вручную или у «Базового» подписки нет).
 func (a *App) tributeOffer(lang string, p *model.Plan, code string) (string, []string) {
+	if p.IsTraffic() {
+		return "", nil
+	}
 	url := a.tributeURLFor(code)
 	if url == "" {
 		return "", nil
@@ -443,6 +446,9 @@ func (a *App) tributePlanFor(ctx context.Context, cfg model.TributeConfig, subID
 	}
 	if p == nil {
 		return nil, fmt.Sprintf("подписка Tribute #%d привязана к тарифу %q, которого больше нет", subID, l.Plan), nil
+	}
+	if p.IsTraffic() {
+		return nil, fmt.Sprintf("подписка Tribute #%d привязана к тарифу «Трафик» %q — через Tribute он не продаётся", subID, l.Plan), nil
 	}
 	return p, "", nil
 }

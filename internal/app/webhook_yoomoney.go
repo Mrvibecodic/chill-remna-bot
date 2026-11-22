@@ -93,7 +93,7 @@ func (a *App) HandleYooMoneyWebhook(ctx context.Context, form url.Values) (bool,
 	if a.store == nil {
 		return true, nil
 	}
-	p, _ := a.store.PendingByExtID(ctx, n.Label)
+	p, _ := a.invoiceAny(ctx, a.store, n.Label)
 	if done, _ := a.store.PaymentByExtID(ctx, n.Label); done {
 		// Платёж уже записан (этим уведомлением раньше, кнопкой или сверкой).
 		// Зачтённую операцию все пути выбирают одним правилом (ymPickOp);

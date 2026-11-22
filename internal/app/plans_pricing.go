@@ -95,6 +95,23 @@ func (a *App) showPlanPricing(ctx context.Context, chatID int64, code string) {
 	if p.ExtSquad != "" {
 		squads += " + 1"
 	}
+	if p.IsTraffic() {
+		t := trafficTerms(p)
+		gb := i18n.T(lang, "admin.none")
+		if p.TrafficGB > 0 {
+			gb = strconv.Itoa(p.TrafficGB) + " GB"
+		}
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.tpr_title",
+			planTitleHTML(lang, p), html.EscapeString(priceShown(lang, t.Price, p.Currency)), starsShown(lang, t.Stars),
+			gb, devlim, squads, html.EscapeString(cur)),
+			[][]models.InlineKeyboardButton{
+				{btn(i18n.T(lang, "plans.btn_t_price"), "pln:tin:p:"+p.Code), btn(i18n.T(lang, "plans.btn_t_stars"), "pln:tin:s:"+p.Code)},
+				{btn(i18n.T(lang, "plans.btn_t_gb"), "pln:tin:g:"+p.Code), btn(i18n.T(lang, "plans.btn_devlimit"), "pln:dvl:"+p.Code)},
+				{btn(i18n.T(lang, "plans.btn_currency"), "pln:cur:"+p.Code), btn(i18n.T(lang, "plans.btn_plan_squads"), "pln:sqm:0:"+p.Code)},
+				navBack(lang, "pln:open:"+p.Code),
+			})
+		return
+	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.pr_title",
 		planTitleHTML(lang, p), html.EscapeString(cur), p.Strategy, devlim, squads), rows)
 }
@@ -107,7 +124,7 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 	if p == nil {
 		return
 	}
-	if !monthEditable(p, mo) {
+	if p.IsTraffic() || !monthEditable(p, mo) {
 		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
@@ -227,7 +244,7 @@ func (a *App) askPlanPriceInput(ctx context.Context, chatID int64, kind string, 
 	if p == nil {
 		return
 	}
-	if !monthEditable(p, mo) {
+	if p.IsTraffic() || !monthEditable(p, mo) {
 		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
@@ -428,6 +445,10 @@ func (a *App) showPlanStrategy(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
 	p := a.planForEdit(ctx, chatID, code)
 	if p == nil {
+		return
+	}
+	if p.IsTraffic() {
+		a.showPlanPricing(ctx, chatID, code)
 		return
 	}
 	a.getUI(chatID).planEdit = p.Code

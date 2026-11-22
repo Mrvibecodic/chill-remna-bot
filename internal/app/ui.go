@@ -225,23 +225,23 @@ func (a *App) navRow(ctx context.Context, chatID int64) []models.InlineKeyboardB
 	return row
 }
 
-// walletInMenu — кошелёк в главном меню: пока его можно пополнить или на
-// нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
+// walletInMenu — кошелёк в главном меню: пока его можно пополнить в Telegram
+// или на нём есть деньги (рефералка, промокод на баланс). Пустой кошелёк без
 // пополнения в меню не нужен — промокод вводится и в витрине.
 func (a *App) walletInMenu(ctx context.Context, chatID int64) bool {
-	return a.topUpEnabled() || a.userBalance(ctx, chatID) > 0
+	return a.topUpOpen(false) || a.userBalance(ctx, chatID) > 0
 }
 
-// renewEligible — кнопка «Продлить»: подписка куплена в боте, до конца 7 дней
-// и меньше. Триал не продлевают — с него переходят на тариф через витрину; без
-// покупки в боте (подписка из панели, перенесённая) продлевать нечего — тоже
-// витрина. Одно правило для чата, мини-аппа и кабинета.
+// renewEligible — кнопка «Продлить»: у подписки есть тариф бота, до конца 7
+// дней и меньше. Триал не продлевают — с него переходят на тариф через
+// витрину; у трафик-тарифа срока нет. Одно правило для чата, мини-аппа и
+// кабинета.
 func (a *App) renewEligible(ctx context.Context, chatID int64) bool {
 	if a.store == nil {
 		return false
 	}
 	u, _ := a.store.GetUser(ctx, chatID)
-	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" {
+	if u == nil || u.NotifyKind == "trial" || planCodeOf(u.Snapshot) == "" || u.Snapshot.IsTraffic() {
 		return false
 	}
 	if u.SubExpireAt == "" {
@@ -344,7 +344,7 @@ func (a *App) adminMenuRows(lang string) [][]models.InlineKeyboardButton {
 	return [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "menu.cat_pay"), "menu:pay"), btn(i18n.T(lang, "menu.cat_marketing"), "menu:marketing")},
 		{btn(i18n.T(lang, "menu.cat_iface"), "menu:iface"), btn(i18n.T(lang, "btn.users"), "menu:users")},
-		{btn(i18n.T(lang, "menu.cat_system"), "menu:system"), btn(i18n.T(lang, "btn.storefront"), "menu:buy")},
+		{btn(i18n.T(lang, "menu.cat_system"), "menu:system"), btn(i18n.T(lang, "btn.preview"), "menu:preview")},
 	}
 }
 
@@ -440,6 +440,7 @@ func (a *App) showPayPlans(ctx context.Context, chatID int64) {
 		}
 		title += i18n.T(lang, "subsetup.addsub_block", traffic, addsubInt)
 	}
+	title += a.planUsersBlock(ctx, lang)
 	// Лимиты и сквады — сводка, копировать из неё нечего.
 	a.sendKBSection(withAdminClosed(ctx), chatID, assets.SectionBuySubscription, title, [][]models.InlineKeyboardButton{
 		{btn(i18n.T(lang, "btn.plans"), "menu:plans")},
@@ -449,6 +450,48 @@ func (a *App) showPayPlans(ctx context.Context, chatID int64) {
 		{btn(i18n.T(lang, "btn.addsub"), "menu:addsub")},
 		navBack(lang, "menu:pay"),
 	})
+}
+
+// planUsersBlock — сколько людей с действующей подпиской на каждом тарифе, по
+// базе бота.
+func (a *App) planUsersBlock(ctx context.Context, lang string) string {
+	st := a.storeRef()
+	if st == nil {
+		return ""
+	}
+	users, err := st.PlanAudience(ctx)
+	if err != nil {
+		return ""
+	}
+	plans, err := st.ListPlans(ctx)
+	if err != nil {
+		return ""
+	}
+	byPlan := map[string]int{}
+	trial := 0
+	for i := range users {
+		switch {
+		case !panelSubAlive(users[i].SubExpireAt):
+		case users[i].NotifyKind == "trial":
+			trial++
+		default:
+			byPlan[planCodeOf(users[i].Snapshot)]++
+		}
+	}
+	var lines strings.Builder
+	total := trial
+	for i := range plans {
+		n := byPlan[plans[i].Code]
+		delete(byPlan, plans[i].Code)
+		total += n
+		lines.WriteString(i18n.T(lang, "sales.plan_users_line", planTitleHTML(lang, &plans[i]), n))
+	}
+	other := 0
+	for _, n := range byPlan {
+		other += n
+	}
+	total += other
+	return i18n.T(lang, "sales.plan_users", total, lines.String(), trial, other)
 }
 
 // payMethodItem — способ оплаты в меню «Способы оплаты».
@@ -498,6 +541,7 @@ func (a *App) showPayMethods(ctx context.Context, chatID int64) {
 		rows = append(rows, row)
 	}
 	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.pay_access"), "pacc:home")},
 		[]models.InlineKeyboardButton{btn(i18n.T(lang, "btn.wallet"), "menu:wallet"), btn(i18n.T(lang, "btn.moynalog"), "menu:moynalog")},
 		navBack(lang, "menu:pay"),
 	)
@@ -679,12 +723,16 @@ func (a *App) welcomeContent(name string) (models.InputFile, string, []models.Me
 }
 
 func (a *App) showMenu(ctx context.Context, chatID int64, isAdmin bool, name string) {
+	a.ensureHomeKey(ctx, chatID)
 	a.showMenuNote(ctx, chatID, isAdmin, name, "")
 }
 
 // showMenuNote — главное меню со строкой note над ним (итог обновления).
+// Нижнюю кнопку «Главная» не ставит: итогу обновления она не нужна — у админа
+// она уже есть, а служебное сообщение для неё мелькало между «обновляем» и
+// главной.
 func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name, note string) {
-	a.ensureHomeKey(ctx, chatID)
+	isAdmin = isAdmin && !a.inPreview(chatID)
 	// Гейт согласия на входе стоит здесь, а не только в enterHome: в меню
 	// ведёт и кнопка «🏠 На главную» с любого экрана, включая сами документы.
 	if !isAdmin && a.legalStartRequired(ctx, chatID) {
@@ -703,6 +751,9 @@ func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name
 		ctx = withAdminClosed(ctx)
 	} else {
 		rows = append(rows, a.navRow(ctx, chatID))
+		if row := a.buyTrafficRow(ctx, chatID); row != nil {
+			rows = append(rows, row)
+		}
 		if row := a.miniAppButtonRow(lang); row != nil {
 			rows = append(rows, row)
 		}
@@ -713,6 +764,9 @@ func (a *App) showMenuNote(ctx context.Context, chatID int64, isAdmin bool, name
 			rows = append(rows, row)
 		}
 		rows = append(rows, a.contactRows()...)
+		if a.inPreview(chatID) {
+			caption, ents, rows = a.previewMenu(lang, caption, ents, rows)
+		}
 	}
 	if note != "" && len(ents) == 0 {
 		caption = note + "\n\n" + caption
@@ -874,7 +928,7 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 			a.showSquads(ctx, chatID)
 		}
 	case "trial":
-		if isAdmin {
+		if isAdmin && !a.inPreview(chatID) {
 			a.showTrialAdmin(ctx, chatID)
 		} else {
 			if a.legalGateOrAsk(ctx, chatID) {
@@ -917,6 +971,10 @@ func (a *App) onMenu(ctx context.Context, chatID int64, val string, isAdmin bool
 	case "manage":
 		if isAdmin {
 			a.showMenu(ctx, chatID, true, name)
+		}
+	case "preview":
+		if isAdmin {
+			a.showMenu(ctx, chatID, false, name)
 		}
 	case "addsub":
 		if isAdmin {

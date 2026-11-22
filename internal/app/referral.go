@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -282,6 +283,10 @@ func (a *App) addReferralDays(ctx context.Context, ref int64, days int) (ok, fou
 	if pu == nil {
 		return false, false
 	}
+	if a.onTrafficPlan(ctx, ref) {
+		a.log.Info("бонусные дни: трафик-тариф, не начисляются", "tg_id", ref)
+		return false, false
+	}
 	_, expireAt, err := panel.CreateOrUpdateUserDays(ctx, ref, days, limits)
 	if err != nil {
 		a.log.Warn("бонусные дни: начисление", "tg_id", ref, "err", err)
@@ -337,6 +342,9 @@ func (a *App) showReferral(ctx context.Context, chatID int64) {
 	}
 	if cfg.Percent > 0 {
 		extra += "\n" + i18n.T(lang, "ref.also_percent", cfg.Percent)
+	}
+	if note := a.referralTrafficNote(ctx, chatID, lang); note != "" {
+		extra += "\n" + note
 	}
 	text := i18n.T(lang, "ref.user", bonus, when, extra, count, kopecksToRub(earned), link)
 	if cl := a.cabinetReferralLink(chatID); cl != "" {
@@ -440,4 +448,42 @@ func (a *App) onReferralAdmin(ctx context.Context, chatID int64, val string) {
 		a.getUI(chatID).adminInput = "ref_percent"
 		a.askInput(ctx, chatID, i18n.T(a.lang(chatID), "refadm.ask_percent"), "menu:refadmin")
 	}
+}
+
+func (a *App) referralTrafficNote(ctx context.Context, uid int64, lang string) string {
+	plans, err := a.planList(ctx)
+	if err != nil {
+		return ""
+	}
+	var lines []string
+	traffic := false
+	for i := range plans {
+		p := &plans[i]
+		if !p.IsTraffic() || !p.Enabled {
+			continue
+		}
+		switch model.NormalizeAvailability(p.Availability) {
+		case model.PlanAvailLink:
+			if a.userPlanCode(ctx, uid) != p.Code {
+				continue
+			}
+		case model.PlanAvailList:
+			if !a.planAccessibleFor(ctx, p, uid) {
+				continue
+			}
+		}
+		traffic = true
+		t := trafficTerms(p)
+		if t.RefGB > 0 {
+			lines = append(lines, i18n.T(lang, refToKeys[t.RefTo].screen, planTitleHTML(lang, p), t.RefGB))
+		}
+	}
+	switch {
+	case len(lines) > 0:
+		lines = append(lines, i18n.T(lang, "ref.traffic_only_gb"))
+	case traffic:
+		lines = append(lines, i18n.T(lang, "ref.no_traffic"))
+	}
+	lines = slices.DeleteFunc(lines, func(s string) bool { return s == "" })
+	return strings.Join(lines, "\n")
 }

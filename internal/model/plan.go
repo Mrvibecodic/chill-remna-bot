@@ -76,7 +76,14 @@ type PlanSnapshot struct {
 	// при этой сделке (0 — тариф не менялся). Только для истории платежей —
 	// в отпечаток не входит.
 	SwitchDays int `json:"switch_days,omitempty"`
+
+	Kind           string `json:"kind,omitempty"`
+	AddSubStrategy string `json:"addsub_strategy,omitempty"`
+	PackID         string `json:"pack_id,omitempty"`
+	PackGB         int    `json:"pack_gb,omitempty"`
 }
+
+func (s *PlanSnapshot) IsTraffic() bool { return s != nil && s.Kind == PlanKindTraffic }
 
 // AddSubSold — продана ли доп-подписка этой сделкой. Отсутствие снимка или
 // поля — «как раньше»: опция есть, пока включена глобально.
@@ -129,6 +136,8 @@ func (s *PlanSnapshot) Fingerprint() string {
 	cond.BoughtDays = 0
 	cond.WindowPaidK = 0
 	cond.SwitchDays = 0
+	cond.PackID = ""
+	cond.PackGB = 0
 	// Доп-подписка «есть» канонизируется в отсутствие поля: старые снимки без
 	// поля означают ровно это, и первое обновление бота не должно рассылать
 	// «условия изменились» всем, у кого ничего не изменилось. В отпечатке

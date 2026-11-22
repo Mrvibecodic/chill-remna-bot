@@ -38,13 +38,20 @@ const (
 	payKindBalance                // покупка с баланса
 )
 
+// payIsPack — запись о пакете трафика: выданном, отклонённом или невыданном.
+// Возврат его стоимости на баланс — пополнение.
+func payIsPack(p *model.Payment) bool {
+	return p.Snapshot.IsTraffic() && p.Snapshot.PackID != "" && p.Comment != packRefundComment
+}
+
 func payKindOf(p *model.Payment) payKind {
 	switch {
 	case p.Method == model.PayMethodTrial:
 		return payKindTrial
 	case p.Method == model.PayMethodGrant:
 		return payKindGrant
-	case p.Months <= 0:
+	// У отклонённой заявки на трафик-тариф месяцев тоже нет.
+	case p.Months <= 0 && (!p.Snapshot.IsTraffic() || p.Comment == packRefundComment):
 		return payKindTopUp
 	case p.Method == model.PayMethodBalance:
 		return payKindBalance
@@ -63,6 +70,12 @@ func payStamp(raw string) (time.Time, bool) {
 
 // payTermLabel — срок сделки: дни, если они известны точнее месяцев.
 func payTermLabel(lang string, p *model.Payment) string {
+	if p.Snapshot.IsTraffic() {
+		if p.Snapshot.PackID != "" {
+			return i18n.T(lang, "upay.term_pack", p.Snapshot.PackGB)
+		}
+		return i18n.T(lang, "grant.term_eternal")
+	}
 	if p.Snapshot != nil && p.Snapshot.Days > 0 {
 		return i18n.T(lang, "grant.days", p.Snapshot.Days)
 	}
@@ -125,6 +138,9 @@ func (a *App) userPayLabel(ctx context.Context, lang string, p *model.Payment, c
 	default:
 		l.plan = a.payPlanName(ctx, lang, p.Snapshot, cache)
 		l.term = payTermLabel(lang, p)
+		if payIsPack(p) {
+			l.term = i18n.T(lang, "upay.term_pack_short", p.Snapshot.PackGB)
+		}
 		switch payKindOf(p) {
 		case payKindGrant:
 			l.icon, l.money = "🎁", i18n.T(lang, "upay.row_grant")
@@ -394,6 +410,11 @@ func (a *App) showUserPayment(ctx context.Context, chatID, pid int64, page int, 
 	switch {
 	case p.Comment == "remnashop":
 		lines = append(lines, "", i18n.T(lang, "upay.imported"))
+	case p.Comment == purposePack || p.Comment == purposeTraffic:
+	case p.Comment == packRefundComment:
+		lines = append(lines, "", i18n.T(lang, "upay.pack_refund"))
+	case p.Comment == packManualComment:
+		lines = append(lines, "", i18n.T(lang, "upay.pack_manual"))
 	case p.Comment != "":
 		lines = append(lines, "", i18n.T(lang, "upay.comment", html.EscapeString(p.Comment)))
 	}

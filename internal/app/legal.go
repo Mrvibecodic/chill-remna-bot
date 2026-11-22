@@ -51,8 +51,9 @@ func (a *App) legalAccepted(ctx context.Context, chatID int64) bool {
 	u, err := a.store.GetUser(ctx, chatID)
 	if err != nil || u == nil {
 		// Пользователя ещё нет в базе (или база недоступна) — гейт не вешаем:
-		// иначе первая же ошибка хранилища закрывала бы бота целиком.
-		return true
+		// иначе первая же ошибка хранилища закрывала бы бота целиком. Админ в
+		// превью без записи — как новичок, которому документы показывают.
+		return err != nil || !a.inPreview(chatID)
 	}
 	return u.TermsAcceptedAt != ""
 }
@@ -418,6 +419,9 @@ func (a *App) onTerms(ctx context.Context, chatID int64, val, firstName, usernam
 	switch {
 	case val == "accept":
 		fromStart := a.getUI(chatID).pendingLegalHome
+		if a.store != nil && a.inPreview(chatID) {
+			_ = a.store.UpsertUser(ctx, chatID)
+		}
 		if a.store != nil {
 			if err := a.store.SetTermsAccepted(ctx, chatID, time.Now().UTC().Format(time.RFC3339)); err != nil {
 				// Не записалось — дальше пускать нельзя: гейт всё равно

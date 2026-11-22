@@ -21,6 +21,7 @@ var Tables = []string{
 	"promocodes",
 	"promocode_activations",
 	"transactions",
+	"plans",
 }
 
 // Поддерживается схема remnashop v0.8.0+: дочерние таблицы ссылаются на
@@ -53,6 +54,44 @@ type User struct {
 	RefEarnedKopecks int64
 	ReferredBy       int64
 	CreatedAt        string
+	// SubTrial — самый поздний срок дала пробная подписка.
+	SubTrial bool
+	// Sub — текущая подписка в remnashop: по её плану админ связывает
+	// человека с тарифом бота. nil — подписки нет или она удалена.
+	Sub *Sub
+
+	curSubID int64
+}
+
+// Sub — текущая подписка пользователя remnashop и её фактические условия.
+type Sub struct {
+	// PlanID — номер плана remnashop; NoPlan — подписку remnashop сам
+	// подтянул из панели, плана у неё нет.
+	PlanID    int64
+	Trial     bool
+	Squads    []string
+	ExtSquad  string
+	TrafficGB int
+	Devices   int
+	Strategy  string
+
+	planName string
+}
+
+// NoPlan — номер плана у подписок, которые remnashop подтянул из панели.
+const NoPlan = -1
+
+// Plan — план remnashop, по которому у переносимых есть подписки (кроме
+// пробных и подписок без плана).
+type Plan struct {
+	ID   int64
+	Name string
+	// Deleted — плана уже нет в remnashop, имя взято из подписки.
+	Deleted bool
+	Subs    int
+	// Terms — условия плана (из таблицы plans, без неё — первой подписки):
+	// подсказка админу при выборе тарифа.
+	Terms Sub
 }
 
 // Promo — промокод remnashop, сведённый к нашим видам (дни / баланс).
@@ -99,8 +138,22 @@ type Data struct {
 	WithBalance int
 	Referrals   int
 
+	// Plans — планы remnashop с подписками переносимых, по номеру.
+	Plans []Plan
+	// TrialSubs и NoPlanSubs — текущие подписки пробные и без плана: тариф
+	// им не записывается.
+	TrialSubs  int
+	NoPlanSubs int
+
+	// Links — выбор админа: номер плана remnashop → код тарифа бота
+	// (LinkSkip — не связывать). Заполняет бот до импорта.
+	Links map[int64]string
+
 	Warnings []string
 }
+
+// LinkSkip — план сознательно не связан с тарифом.
+const LinkSkip = "-"
 
 // gatewayMethods переводит платёжные шлюзы remnashop в методы нашего бота.
 // Незнакомое имя остаётся как есть — история платежей всё равно read-only.
@@ -178,6 +231,7 @@ func Build(tables map[string]*Table) (*Data, error) {
 	blockedIdx := ut.Col("is_blocked")
 	trialIdx := ut.Col("is_trial_available")
 	createdIdx := ut.Col("created_at")
+	curSubIdx := ut.Col("current_subscription_id")
 
 	for _, row := range ut.Rows {
 		d.TotalUsers++
@@ -203,6 +257,9 @@ func Build(tables map[string]*Table) (*Data, error) {
 			u.BalanceKopecks = pts * 100
 			u.RefEarnedKopecks = pts * 100
 		}
+		if v, ok := cellInt(row, curSubIdx); ok {
+			u.curSubID = v
+		}
 		if id, ok := cellInt(row, idIdx); ok {
 			b[id] = u
 		}
@@ -210,6 +267,7 @@ func Build(tables map[string]*Table) (*Data, error) {
 	}
 
 	applySubscriptions(tables["subscriptions"], b, d)
+	collectPlans(tables["plans"], order, d)
 	applyReferrals(tables["referrals"], tables["referral_rewards"], b, d)
 
 	for _, u := range order {
@@ -242,6 +300,19 @@ func applySubscriptions(st *Table, b binder, d *Data) {
 		d.Warnings = append(d.Warnings, "в subscriptions нет ссылки на пользователя или expire_at — сроки подписок пропущены")
 		return
 	}
+	cols := subCols{
+		id:       st.Col("id"),
+		trial:    st.Col("is_trial"),
+		traffic:  st.Col("traffic_limit"),
+		devices:  st.Col("device_limit"),
+		squads:   st.Col("internal_squads"),
+		ext:      st.Col("external_squad"),
+		strategy: st.Col("traffic_limit_strategy"),
+		snap:     st.Col("plan_snapshot"),
+	}
+	// Текущая подписка — та, на которую указывает users.current_subscription_id;
+	// без ссылки — с самым поздним сроком.
+	latest := map[*User]string{}
 	for _, row := range st.Rows {
 		u := b.user(row, userIdx)
 		if u == nil {
@@ -254,13 +325,127 @@ func applySubscriptions(st *Table, b binder, d *Data) {
 		if exp == "" {
 			continue
 		}
+		sub := cols.sub(row)
 		if u.SubExpireAt == "" || exp > u.SubExpireAt {
 			u.SubExpireAt = exp
+			u.SubTrial = sub.Trial
+		}
+		id, _ := cellInt(row, cols.id)
+		switch {
+		case u.curSubID != 0 && id == u.curSubID:
+			u.Sub = sub
+		case u.curSubID == 0 && exp > latest[u]:
+			u.Sub = sub
+			latest[u] = exp
 		}
 		// Была подписка — значит, стартовый триал у нас тоже считается
 		// использованным (иначе после переезда его выдадут второй раз).
 		u.TrialUsed = true
 	}
+}
+
+type subCols struct {
+	id, trial, traffic, devices, squads, ext, strategy, snap int
+}
+
+// sub — подписка из строки subscriptions. Условия — из самой подписки (в
+// них и правки админа remnashop), план — из её снимка.
+func (c subCols) sub(row []*string) *Sub {
+	var snap struct {
+		ID      *int64 `json:"id"`
+		Name    string `json:"name"`
+		IsTrial bool   `json:"is_trial"`
+	}
+	if c.snap >= 0 {
+		_ = json.Unmarshal([]byte(cellStr(row, c.snap)), &snap)
+	}
+	s := &Sub{PlanID: NoPlan, Trial: snap.IsTrial, planName: strings.TrimSpace(snap.Name)}
+	if snap.ID != nil && *snap.ID > 0 {
+		s.PlanID = *snap.ID
+	}
+	// Колонка есть во всех версиях, а в снимках старых подписок признака нет.
+	if c.trial >= 0 {
+		s.Trial = cellBool(row, c.trial)
+	}
+	if v, ok := cellInt(row, c.traffic); ok && v > 0 {
+		s.TrafficGB = int(v)
+	}
+	if v, ok := cellInt(row, c.devices); ok && v > 0 {
+		s.Devices = int(v)
+	}
+	s.Squads = pgArray(cellStr(row, c.squads))
+	s.ExtSquad = cellStr(row, c.ext)
+	s.Strategy = strings.ToUpper(cellStr(row, c.strategy))
+	return s
+}
+
+// pgArray разбирает массив Postgres из COPY: {a,b}. Значения без кавычек —
+// здесь это uuid.
+func pgArray(s string) []string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '{' || s[len(s)-1] != '}' {
+		return nil
+	}
+	var out []string
+	for _, v := range strings.Split(s[1:len(s)-1], ",") {
+		if v = strings.Trim(strings.TrimSpace(v), `"`); v != "" && !strings.EqualFold(v, "NULL") {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// collectPlans считает планы remnashop по текущим подпискам переносимых.
+// Имя — из таблицы plans; плана там нет — из снимка подписки, с пометкой.
+func collectPlans(pt *Table, users []*User, d *Data) {
+	names := map[int64]string{}
+	terms := map[int64]Sub{}
+	if pt != nil {
+		idIdx, nameIdx := pt.Col("id"), pt.Col("name")
+		c := subCols{id: -1, trial: -1, snap: -1, traffic: pt.Col("traffic_limit"), devices: pt.Col("device_limit"),
+			squads: pt.Col("internal_squads"), ext: pt.Col("external_squad"), strategy: pt.Col("traffic_limit_strategy")}
+		full := c.squads >= 0 && c.traffic >= 0 && c.devices >= 0
+		for _, row := range pt.Rows {
+			if id, ok := cellInt(row, idIdx); ok {
+				names[id] = cellStr(row, nameIdx)
+				if full {
+					terms[id] = *c.sub(row)
+				}
+			}
+		}
+	}
+	idx := map[int64]int{}
+	for _, u := range users {
+		s := u.Sub
+		switch {
+		case s == nil:
+		case s.Trial:
+			d.TrialSubs++
+		case s.PlanID == NoPlan:
+			d.NoPlanSubs++
+		default:
+			i, ok := idx[s.PlanID]
+			if !ok {
+				name, known := names[s.PlanID]
+				if name == "" {
+					name = s.planName
+				}
+				if name == "" {
+					name = "#" + strconv.FormatInt(s.PlanID, 10)
+				}
+				tm, ok := terms[s.PlanID]
+				if !ok {
+					tm = *s
+				}
+				tm.PlanID, tm.Trial, tm.planName = s.PlanID, false, ""
+				i = len(d.Plans)
+				idx[s.PlanID] = i
+				d.Plans = append(d.Plans, Plan{ID: s.PlanID, Name: name, Deleted: pt != nil && !known, Terms: tm})
+			}
+			d.Plans[i].Subs++
+		}
+	}
+	sort.Slice(d.Plans, func(i, j int) bool { return d.Plans[i].ID < d.Plans[j].ID })
 }
 
 // applyReferrals переносит связи «кто кого привёл» и сумму уже выплаченных

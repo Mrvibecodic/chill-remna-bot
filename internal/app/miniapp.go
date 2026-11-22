@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,11 +51,12 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		HasSub:         a.userHasSub(ctx, tgID),
 		TrialAvailable: a.trialAvailable(ctx, tgID),
 		ReferralOn:     a.referralCfg().Enabled,
-		TopUpOn:        a.topUpEnabled(),
+		TopUpOn:        a.topUpOpen(web_),
 		SupportURL:     a.supportURL(),
 	}
 	if dto.HasSub {
 		dto.CanRenew = a.renewEligible(ctx, tgID)
+		dto.TrafficOwner = a.trafficOwner(ctx, tgID) != nil
 	}
 	// Кому триал не выдаётся (см. handleMiniTrial), тому и не предлагается.
 	if dto.TrialAvailable && !a.CabinetTrialAllowed(ctx, tgID) {
@@ -96,12 +98,18 @@ func (a *App) MiniMenu(ctx context.Context, tgID int64, web_ bool) web.MiniMenuD
 		if c.Heleket.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodHeleket)
 		}
-		if c.Tribute.Enabled {
+		// Tribute выдаёт подписку по Telegram покупателя: аккаунту сайта без
+		// Telegram кнопка вела бы в отказ.
+		if c.Tribute.Enabled && !(web_ && tgID <= 0) {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodTribute)
 		}
 		if c.P2P.Enabled {
 			dto.PayMethods = append(dto.PayMethods, model.PayMethodP2P)
 		}
+		// Способы, снятые с этого места в «Доступности».
+		dto.PayMethods = slices.DeleteFunc(dto.PayMethods, func(m string) bool {
+			return !payAccessLocked(c, m, web_)
+		})
 	}
 	a.mu.Unlock()
 	// Названия и описания способов — те же, что в чате (правятся в «Тексты
@@ -140,7 +148,9 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 	if !strings.EqualFold(snap.Status, remnawave.StatusDisabled) && subDeadKey(snap.Status, expireAt) == "" {
 		dto.PlanTitle = a.clientPlanTitle(ctx, a.lang(tgID), tgID)
 	}
-	if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
+	if remnawave.IsEternal(expireAt) {
+		dto.Eternal = true
+	} else if t, err := time.Parse(time.RFC3339, expireAt); err == nil {
 		dto.ExpireTS = t.Unix()
 	}
 	if info, dok := panel.DevicesByTelegramID(ctx, tgID); dok {
@@ -198,7 +208,12 @@ func (a *App) MiniPlans(ctx context.Context, tgID int64) web.MiniPlansDTO {
 		plans = append(plans, *own)
 	}
 	for i := range plans {
-		if pd, ok := a.miniPlanDTO(ctx, tgID, &plans[i], pc); ok {
+		pd, ok := a.miniPlanDTO(ctx, tgID, &plans[i], pc)
+		switch {
+		case !ok:
+		case plans[i].IsTraffic():
+			dto.Traffic = append(dto.Traffic, pd)
+		default:
 			dto.Plans = append(dto.Plans, pd)
 		}
 	}
@@ -241,6 +256,9 @@ func (a *App) miniPlanCtx(ctx context.Context, tgID int64) miniPlanCtxT {
 // miniPlanDTO — один тариф витрины со сроками и условиями. false — продавать
 // у тарифа нечего.
 func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc miniPlanCtxT) (web.MiniPlanDTO, bool) {
+	if !p.KnownKind() || (p.IsTraffic() && !trafficPlanSells(p)) {
+		return web.MiniPlanDTO{}, false
+	}
 	lang := pc.lang
 	pd := web.MiniPlanDTO{
 		Code:        p.Code,
@@ -249,6 +267,7 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 		Icon:        p.Icon,
 		Strategy:    p.Strategy,
 		Own:         pc.own != "" && pc.own == p.Code,
+		Kind:        p.Kind,
 	}
 	if a.planAddSubOn(p) {
 		pd.AddSubName, pd.AddSubDesc = a.addSubTexts(lang, p)
@@ -263,6 +282,9 @@ func (a *App) miniPlanDTO(ctx context.Context, tgID int64, p *model.Plan, pc min
 				pd.AddSubCountries = append(pd.AddSubCountries, web.MiniCountryDTO{Flag: c.Flag, Code: c.Code, Name: c.label(pc.geoLang)})
 			}
 		}
+	}
+	if p.IsTraffic() {
+		return a.miniTrafficTerms(ctx, tgID, p, pc, pd), true
 	}
 	// Аккаунту кабинета без Telegram Tribute не выдаст подписку: её
 	// получатель — telegram_user_id покупателя.
@@ -345,11 +367,11 @@ func (a *App) MiniTrial(ctx context.Context, tgID int64) web.MiniActionDTO {
 // продажу. nil — продавать нечего: неизвестный код, срок снят с продажи,
 // тариф выключен или закрыт этому покупателю. Правила зеркалят чат: витрина
 // такого не предлагает, значит и счёт по прямому запросу не создаётся.
-func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int) *sale {
+func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int, pack string) *sale {
 	if code == "" || code == model.PlanCodeBase {
 		// Пустой код — старый фронт из кэша: он знает только «Базовый».
 		// Тот же признак, что у витрины: срок без базовой цены снят с продажи.
-		if !a.periodOnSale(months) {
+		if pack != "" || !a.periodOnSale(months) {
 			return nil
 		}
 		// Гейт здесь — baseSaleAllowed: «Базовый» в режиме «по ссылке»
@@ -360,7 +382,13 @@ func (a *App) miniSale(ctx context.Context, tgID int64, code string, months int)
 		return baseSale(months)
 	}
 	p, err := a.planByCode(ctx, code)
-	if err != nil || p == nil || !p.Enabled {
+	if err != nil || p == nil {
+		return nil
+	}
+	if p.IsTraffic() {
+		return a.miniTrafficSale(ctx, tgID, p, months, pack)
+	}
+	if !p.Enabled || pack != "" || !p.KnownKind() {
 		return nil
 	}
 	// «По ссылке» продаётся только тому, кто открыл ссылку тарифа (в чате или
@@ -400,7 +428,7 @@ func (a *App) MiniLegalRequired(ctx context.Context, tgID int64) bool {
 // MiniCheckout buys/renews a plan duration. Only the "balance" method
 // completes in-app (reuses finalizePurchase, the same provisioning core as
 // the chat flow); other methods return a payment URL or Redirect=true.
-func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, method string, shownPrice string, web_, p2pInApp bool) web.MiniActionDTO {
+func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months int, pack, method string, shownPrice string, web_, p2pInApp bool) web.MiniActionDTO {
 	if expireAt, locked := a.trialBuyLock(ctx, tgID); locked {
 		lang := a.lang(tgID)
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "buy.trial_locked_plain", formatExpire(expireAt, lang)))}
@@ -408,7 +436,7 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// Вторая точка гейта доступности: создание счёта. Без неё авторизованный
 	// пользователь покупал бы тариф, недоступный ему по режиму, прямым
 	// запросом мимо витрины.
-	s := a.miniSale(ctx, tgID, plan, months)
+	s := a.miniSale(ctx, tgID, plan, months, pack)
 	if s == nil {
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.plan_unavailable"))}
 	}
@@ -416,6 +444,12 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 	// miniPayURLCore, и проверка только там оставляла их без согласия.
 	if a.legalRequired(ctx, tgID) {
 		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.legal_first"))}
+	}
+	// Способ, снятый с этого места в «Доступности»: страница могла открыться
+	// до снятия галочки. Новый счёт не выставляется.
+	if method != model.PayMethodBalance && !a.payShown(method, web_) {
+		a.payLog(ctx, method, "", tgID, "checkout_error", "источник=%s: способ скрыт в «Доступности»", miniSource(web_))
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.pay_method"))}
 	}
 	// Сверка показанной цены с сегодняшней — до всех способов. Список тарифов
 	// фронт кэширует до перезагрузки страницы, поэтому здесь окно расхождения
@@ -446,16 +480,20 @@ func (a *App) MiniCheckout(ctx context.Context, tgID int64, plan string, months 
 
 	// Намерения покупки здесь нет (счёт из мини-аппа намеренно не перебивает
 	// выбор в чате), поэтому сделки различает конец срока ДО покупки.
-	res := a.payBalance(ctx, tgID, s, true, func() string {
-		if u, uerr := a.store.GetUser(ctx, tgID); uerr == nil && u != nil {
-			return "exp:" + u.SubExpireAt
-		}
-		return "none"
-	})
+	if a.store == nil {
+		return web.MiniActionDTO{Error: "хранилище недоступно"}
+	}
+	res := a.payBalance(ctx, tgID, s, true, a.miniBalanceDiscr(ctx, tgID, s))
 	lang := a.lang(tgID)
 	switch res.kind {
 	case balIssued:
-		return web.MiniActionDTO{OK: true, SubURL: res.link, ExpireAt: formatExpire(res.expireAt, lang)}
+		out := web.MiniActionDTO{OK: true, Done: true, SubURL: res.link, ExpireAt: formatExpire(res.expireAt, lang)}
+		if s.Pack != nil {
+			out.Message = stripHTMLTags(i18n.T(lang, "mini.pack_done", s.Pack.GB))
+		}
+		return out
+	case balRefunded:
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(lang, "mini.pack_refunded"))}
 	case balNoStore:
 		return web.MiniActionDTO{Error: "хранилище недоступно"}
 	case balJustBought:

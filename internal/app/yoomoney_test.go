@@ -341,7 +341,7 @@ func TestYooMoney_TopUp(t *testing.T) {
 	ctx := context.Background()
 	const u int64 = 556
 	_ = fs.UpsertUser(ctx, u)
-	if !a.topUpMethodOn("ym") {
+	if !a.topUpMethodOn("ym", false) {
 		t.Fatal("ЮMoney нет среди способов пополнения")
 	}
 	payURL, label, err := a.topUpCreate(ctx, u, 12345, "ym", false)
@@ -370,7 +370,7 @@ func TestYooMoney_TopUp(t *testing.T) {
 	}
 	// Без публичного адреса способ пополнения исчезает, счёт не выставить.
 	a.botCfg.Webhook.PublicBaseURL = ""
-	if a.topUpMethodOn("ym") {
+	if a.topUpMethodOn("ym", false) {
 		t.Fatal("ЮMoney предлагается без публичного адреса")
 	}
 	if _, _, err := a.topUpCreate(ctx, u, 100, "ym", false); err == nil {

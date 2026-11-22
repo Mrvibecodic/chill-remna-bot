@@ -196,6 +196,7 @@ var accountTables = []struct{ table, col string }{
 	{"payment_log", "telegram_id"},
 	{"p2p_requests", "telegram_id"},
 	{"pending_invoices", "telegram_id"},
+	{"traffic_invoices", "telegram_id"},
 	{"purchase_intents", "telegram_id"},
 	{"invoice_snapshots", "telegram_id"},
 	{"promo_redemptions", "telegram_id"},

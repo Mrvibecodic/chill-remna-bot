@@ -74,6 +74,122 @@ type Plan struct {
 
 	CreatedAt string
 	UpdatedAt string
+
+	Kind    string
+	Traffic *PlanTraffic
+}
+
+const PlanKindTraffic = "traffic"
+
+type PlanTraffic struct {
+	Price          string     `json:"price,omitempty"`
+	Stars          int        `json:"stars,omitempty"`
+	Packs          []PlanPack `json:"packs,omitempty"`
+	AddSubStrategy string     `json:"addsub_strategy,omitempty"`
+	RefGB          int        `json:"ref_gb,omitempty"`
+	RefTo          string     `json:"ref_to,omitempty"`
+}
+
+const (
+	RefToReferrer = "referrer"
+	RefToInvitee  = "invitee"
+	RefToBoth     = "both"
+)
+
+func ValidRefTo(s string) bool {
+	return s == RefToReferrer || s == RefToInvitee || s == RefToBoth
+}
+
+func (t *PlanTraffic) RefForReferrer() bool { return t.RefGB > 0 && t.RefTo != RefToInvitee }
+
+func (t *PlanTraffic) RefForInvitee() bool { return t.RefGB > 0 && t.RefTo != RefToReferrer }
+
+type PlanPack struct {
+	ID    string `json:"id"`
+	GB    int    `json:"gb"`
+	Price string `json:"price,omitempty"`
+	Stars int    `json:"stars,omitempty"`
+}
+
+const (
+	PlanTrafficMaxGB = 1000000
+	PlanPackIDLen    = 6
+	PlanPacksMax     = 20
+)
+
+func (p *Plan) IsTraffic() bool { return p != nil && p.Kind == PlanKindTraffic }
+
+func (p *Plan) KnownKind() bool {
+	return p != nil && (p.Kind == "" || p.Kind == PlanKindTraffic)
+}
+
+func (p *Plan) Pack(id string) *PlanPack {
+	if !p.IsTraffic() || p.Traffic == nil || id == "" {
+		return nil
+	}
+	for i := range p.Traffic.Packs {
+		if p.Traffic.Packs[i].ID == id {
+			return &p.Traffic.Packs[i]
+		}
+	}
+	return nil
+}
+
+func (p *Plan) AddSubStrategyOrDefault() string {
+	if !p.IsTraffic() {
+		return ""
+	}
+	if p.Traffic != nil && ValidStrategy(p.Traffic.AddSubStrategy) {
+		return p.Traffic.AddSubStrategy
+	}
+	return DefaultAddSubStrategy
+}
+
+const DefaultAddSubStrategy = "MONTH_ROLLING"
+
+func ValidPackID(id string) bool {
+	if len(id) != PlanPackIDLen {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func EncodePlanTraffic(t *PlanTraffic) string {
+	if t == nil {
+		return ""
+	}
+	b, err := json.Marshal(t)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func DecodePlanTraffic(raw string) *PlanTraffic {
+	if raw == "" {
+		return nil
+	}
+	var t PlanTraffic
+	if err := json.Unmarshal([]byte(raw), &t); err != nil {
+		return nil
+	}
+	return &t
+}
+
+func ClonePlanTraffic(t *PlanTraffic) *PlanTraffic {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	if t.Packs != nil {
+		c.Packs = append([]PlanPack(nil), t.Packs...)
+	}
+	return &c
 }
 
 // PlanDuration — одна длительность тарифа с ценами по способам оплаты.
@@ -203,6 +319,9 @@ func (p *Plan) Normalize() {
 		p.AddSubSquads = nil
 	}
 	p.Strategy = normalizeStrategy(p.Strategy)
+	if p.IsTraffic() {
+		p.normalizeTraffic()
+	}
 	for i := range p.Durations {
 		d := &p.Durations[i]
 		if d.Months < 0 {
@@ -220,6 +339,52 @@ func (p *Plan) Normalize() {
 			d.Stars = 0
 		}
 	}
+}
+
+func (p *Plan) normalizeTraffic() {
+	p.Strategy = "NO_RESET"
+	p.Durations = nil
+	if p.TrafficGB > PlanTrafficMaxGB {
+		p.TrafficGB = PlanTrafficMaxGB
+	}
+	if p.Traffic == nil {
+		p.Traffic = &PlanTraffic{}
+	}
+	t := p.Traffic
+	t.Price = strings.TrimSpace(t.Price)
+	if t.Stars < 0 {
+		t.Stars = 0
+	}
+	if t.AddSubStrategy != "" && !ValidStrategy(t.AddSubStrategy) {
+		t.AddSubStrategy = ""
+	}
+	t.RefGB = min(max(t.RefGB, 0), PlanTrafficMaxGB)
+	if !ValidRefTo(t.RefTo) {
+		t.RefTo = ""
+	}
+	if t.RefGB > 0 && t.RefTo == "" {
+		t.RefTo = RefToReferrer
+	}
+	seen := map[string]bool{}
+	packs := t.Packs[:0:0]
+	for _, pk := range t.Packs {
+		if !ValidPackID(pk.ID) || seen[pk.ID] || pk.GB <= 0 || pk.GB > PlanTrafficMaxGB {
+			continue
+		}
+		seen[pk.ID] = true
+		pk.Price = strings.TrimSpace(pk.Price)
+		if pk.Stars < 0 {
+			pk.Stars = 0
+		}
+		packs = append(packs, pk)
+		if len(packs) == PlanPacksMax {
+			break
+		}
+	}
+	if len(packs) == 0 {
+		packs = nil
+	}
+	t.Packs = packs
 }
 
 // ValidStrategy — допустимая для панели стратегия сброса трафика.
@@ -402,6 +567,7 @@ type PurchaseIntent struct {
 	Months     int
 	Days       int
 	CreatedAt  string
+	PackID     string
 	// ShownPrice — цена, напечатанная на кнопках экрана способов оплаты.
 	// Списание сверяется с ней: между показом и нажатием админ мог поменять
 	// прайс, а молча списать другую сумму нельзя. Пусто у намерений, снятых до

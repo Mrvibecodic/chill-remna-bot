@@ -16,6 +16,7 @@ import (
 
 	"remnabot/internal/i18n"
 	"remnabot/internal/model"
+	"remnabot/internal/remnawave"
 	"remnabot/internal/storage"
 )
 
@@ -43,7 +44,10 @@ type grantSel struct {
 	nonce string
 	// fp — отпечаток условий, показанных на подтверждении: тариф могли
 	// поменять, пока экран висел.
-	fp string
+	fp      string
+	eternal bool
+	pack    string
+	gb      int
 }
 
 var (
@@ -83,7 +87,7 @@ func (a *App) plansOnSale(ctx context.Context) ([]model.Plan, error) {
 	out := list[:0]
 	for i := range list {
 		p := &list[i]
-		if p.Enabled && len(a.grantTerms(p)) > 0 {
+		if p.Enabled && p.KnownKind() && (len(a.grantTerms(p)) > 0 || trafficPlanSells(p)) {
 			out = append(out, *p)
 		}
 	}
@@ -120,8 +124,14 @@ func (a *App) grantSnapshot(ctx context.Context, code string, months, days int) 
 	if err != nil {
 		return nil, nil, err
 	}
-	if p == nil || !p.Enabled {
+	if p == nil || !p.Enabled || !p.KnownKind() {
 		return nil, nil, errGrantPlanGone
+	}
+	if p.IsTraffic() {
+		if months != 0 || days != 0 || !trafficPlanSells(p) {
+			return nil, nil, errGrantPlanGone
+		}
+		return a.trafficSnapshotOf(p, nil), p, nil
 	}
 	terms := a.grantTerms(p)
 	if len(terms) == 0 {
@@ -218,6 +228,9 @@ func (a *App) showGrantPlans(ctx context.Context, chatID, uid int64) {
 	a.getUI(chatID).grant = &grantSel{uid: uid}
 	id := strconv.FormatInt(uid, 10)
 	var rows [][]models.InlineKeyboardButton
+	if row := a.grantPackRow(ctx, lang, uid); row != nil {
+		rows = append(rows, row)
+	}
 	cur := a.pricing().Currency
 	for i := range plans {
 		p := &plans[i]
@@ -228,7 +241,9 @@ func (a *App) showGrantPlans(ctx context.Context, chatID, uid int64) {
 		case model.PlanAvailList:
 			label = "🎟 " + label
 		}
-		if price, m := planMinPrice(p); price != "" {
+		if p.IsTraffic() {
+			label += " · " + i18n.T(lang, "grant.term_eternal")
+		} else if price, m := planMinPrice(p); price != "" {
 			label += " · " + i18n.T(lang, "buy.from_price", price+curSuffix(planCurrencyOr(p, cur))) + termSuffix(lang, m)
 		}
 		rows = append(rows, []models.InlineKeyboardButton{
@@ -241,6 +256,12 @@ func (a *App) showGrantPlans(ctx context.Context, chatID, uid int64) {
 
 // grantNowLine — что у человека сейчас: тариф и срок по зеркалу бота.
 func (a *App) grantNowLine(ctx context.Context, lang string, u *model.User) string {
+	if remnawave.IsEternal(u.SubExpireAt) {
+		if t := a.clientPlanTitle(ctx, lang, u.TelegramID); t != "" {
+			return i18n.T(lang, "grant.now_eternal", html.EscapeString(t))
+		}
+		return i18n.T(lang, "grant.term_eternal")
+	}
 	exp, err := time.Parse(time.RFC3339, u.SubExpireAt)
 	if err != nil || !exp.After(time.Now()) {
 		return i18n.T(lang, "grant.now_none")
@@ -277,6 +298,10 @@ func (a *App) pickGrantPlan(ctx context.Context, chatID int64, arg string) {
 
 // showGrantTerms — шаг 2: условия тарифа и срок.
 func (a *App) showGrantTerms(ctx context.Context, chatID, uid int64, p *model.Plan) {
+	if p.IsTraffic() {
+		a.showGrantTrafficTerms(ctx, chatID, uid, p)
+		return
+	}
 	lang := a.lang(chatID)
 	id := strconv.FormatInt(uid, 10)
 	var rows [][]models.InlineKeyboardButton
@@ -324,11 +349,17 @@ func (a *App) pickGrantTerm(ctx context.Context, chatID int64, arg string) {
 	uid, _ := strconv.ParseInt(uidStr, 10, 64)
 	months, _ := strconv.Atoi(mStr)
 	g := a.grantSelFor(chatID, uid)
-	if g == nil || months <= 0 {
+	if g == nil || months < 0 || g.pack != "" {
 		a.grantStale(ctx, chatID, uid)
 		return
 	}
-	g.months, g.days = months, 0
+	p, _ := a.planByCode(ctx, g.code)
+	traffic := p.IsTraffic()
+	if (months == 0) != traffic {
+		a.grantStale(ctx, chatID, uid)
+		return
+	}
+	g.months, g.days, g.eternal = months, 0, traffic
 	a.showGrantConfirm(ctx, chatID, uid, "")
 }
 
@@ -354,7 +385,7 @@ func (a *App) applyGrantDays(ctx context.Context, chatID int64, text string) {
 	ui := a.getUI(chatID)
 	ui.adminInput = ""
 	g := ui.grant
-	if g == nil || g.code == "" {
+	if g == nil || g.code == "" || g.eternal {
 		a.sendHome(ctx, chatID, i18n.T(a.lang(chatID), "grant.stale"))
 		return
 	}
@@ -375,7 +406,7 @@ func (a *App) applyGrantDays(ctx context.Context, chatID int64, text string) {
 func (a *App) showGrantConfirm(ctx context.Context, chatID, uid int64, note string) {
 	lang := a.lang(chatID)
 	g := a.grantSelFor(chatID, uid)
-	if g == nil || (g.months <= 0 && g.days <= 0) {
+	if g == nil || (g.months <= 0 && g.days <= 0 && !g.eternal) {
 		a.grantStale(ctx, chatID, uid)
 		return
 	}
@@ -385,7 +416,7 @@ func (a *App) showGrantConfirm(ctx context.Context, chatID, uid int64, note stri
 		a.sendUsrKB(ctx, chatID, msg, [][]models.InlineKeyboardButton{navBack(lang, back)})
 		return
 	}
-	snap, p, err := a.grantSnapshot(ctx, g.code, g.months, g.days)
+	snap, p, err := a.grantSnap(ctx, g)
 	if errors.Is(err, errGrantPlanGone) {
 		a.getUI(chatID).grant = nil
 		a.noticeThen(ctx, chatID, i18n.T(lang, "grant.plan_gone"), func() { a.showGrantPlans(ctx, chatID, uid) })
@@ -407,6 +438,10 @@ func (a *App) showGrantConfirm(ctx context.Context, chatID, uid int64, note stri
 	}
 	g.nonce = newGrantNonce()
 	g.fp = snap.Fingerprint()
+	if snap.IsTraffic() {
+		a.showGrantConfirmTraffic(ctx, chatID, u, g, snap, p, note)
+		return
+	}
 
 	var b strings.Builder
 	if note != "" {
@@ -424,7 +459,7 @@ func (a *App) showGrantConfirm(ctx context.Context, chatID, uid int64, note stri
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(i18n.T(lang, "grant.confirm_until", formatExpire(grantEstimate(u.SubExpireAt, g.months, g.days, extra).Format(time.RFC3339), lang)))
+	b.WriteString(i18n.T(lang, "grant.confirm_until", formatExpire(grantEstimate(u.SubExpireAt, g.months, g.days, extra, u.Snapshot.IsTraffic()).Format(time.RFC3339), lang)))
 	if lines := a.snapTermsLines(ctx, lang, snap); len(lines) > 0 {
 		b.WriteString("\n\n")
 		b.WriteString(strings.Join(lines, "\n"))
@@ -447,10 +482,10 @@ func (a *App) showGrantConfirm(ctx context.Context, chatID, uid int64, note stri
 
 // grantEstimate — ожидаемый конец срока по зеркалу бота, той же формулой, что
 // панель-клиент (nextExpire / nextExpireDays). Точную дату назовёт панель.
-func grantEstimate(subExpireAt string, months, days, extra int) time.Time {
+func grantEstimate(subExpireAt string, months, days, extra int, fromNow bool) time.Time {
 	now := time.Now().UTC()
 	base := now
-	if t, err := time.Parse(time.RFC3339, subExpireAt); err == nil && t.After(base) {
+	if t, err := time.Parse(time.RFC3339, subExpireAt); err == nil && t.After(base) && !(fromNow && remnawave.IsEternal(subExpireAt)) {
 		base = t
 	}
 	if days > 0 {
@@ -479,8 +514,13 @@ func (a *App) grantWarnings(ctx context.Context, lang string, u *model.User, p *
 			out = append(out, i18n.T(lang, "grant.info_list"))
 		}
 	}
-	if ap := a.getAutoPay(ctx, u.TelegramID); ap != nil && ap.Enabled && autoPayFollows(ap, snap.Code) {
-		out = append(out, i18n.T(lang, "grant.warn_autopay", planTitleHTML(lang, p)))
+	if ap := a.getAutoPay(ctx, u.TelegramID); ap != nil && ap.Enabled {
+		switch {
+		case snap.IsTraffic():
+			out = append(out, i18n.T(lang, "grant.warn_autopay_off"))
+		case autoPayFollows(ap, snap.Code):
+			out = append(out, i18n.T(lang, "grant.warn_autopay", planTitleHTML(lang, p)))
+		}
 	}
 	if st := a.storeRef(); st != nil {
 		if last, err := st.LastPaidSubPayment(ctx, u.TelegramID); err == nil && last != nil && last.Method == model.PayMethodTribute {
@@ -589,7 +629,7 @@ func (a *App) confirmGrant(ctx context.Context, chatID int64, arg string) {
 		a.sendUsrKB(ctx, chatID, msg, [][]models.InlineKeyboardButton{navBack(lang, "usr:view:"+uidStr)})
 		return
 	}
-	snap, p, err := a.grantSnapshot(ctx, g.code, g.months, g.days)
+	snap, p, err := a.grantSnap(ctx, g)
 	if errors.Is(err, errGrantPlanGone) {
 		a.getUI(chatID).grant = nil
 		a.noticeThen(ctx, chatID, i18n.T(lang, "grant.plan_gone"), func() { a.showGrantPlans(ctx, chatID, uid) })
@@ -599,7 +639,7 @@ func (a *App) confirmGrant(ctx context.Context, chatID int64, arg string) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "err.storage"))
 		return
 	}
-	if snap.Fingerprint() != g.fp {
+	if snap.Fingerprint() != g.fp || snap.PackGB != g.gb {
 		a.showGrantConfirm(ctx, chatID, uid, i18n.T(lang, "grant.changed"))
 		return
 	}
@@ -643,14 +683,20 @@ const (
 // списку», сообщение клиенту.
 func (a *App) runGrant(ctx context.Context, sel grantSel, snap *model.PlanSnapshot, p *model.Plan) (grantResult, error) {
 	var r grantResult
-	d, err := a.closeDeal(ctx, sel.uid, snap.Months, model.PayMethodGrant, "—", grantExtID(sel.uid, sel.nonce), snap, true)
+	var d dealDone
+	var err error
+	if snap.IsTraffic() {
+		d, err = a.closeTrafficDeal(ctx, sel.uid, model.PayMethodGrant, "—", grantExtID(sel.uid, sel.nonce), snap, true)
+	} else {
+		d, err = a.closeDeal(ctx, sel.uid, snap.Months, model.PayMethodGrant, "—", grantExtID(sel.uid, sel.nonce), snap, true)
+	}
 	if err != nil {
 		return r, err
 	}
 	r.expireAt = d.expireAt
 	r.autoPayMoved = d.autoPayMoved
 	r.list = grantListNone
-	if model.NormalizeAvailability(p.Availability) == model.PlanAvailList {
+	if sel.pack == "" && model.NormalizeAvailability(p.Availability) == model.PlanAvailList {
 		r.list = a.grantListAccess(ctx, sel.uid, p.Code)
 	}
 	r.client = a.grantNotifyClient(ctx, sel, p, d.expireAt)
@@ -668,8 +714,16 @@ func (a *App) grantNotifyClient(ctx context.Context, sel grantSel, p *model.Plan
 	if name == "" {
 		name = p.Code
 	}
-	id := a.notifyKB(ctx, sel.uid, i18n.T(lang, "grant.client", escapeName(name),
-		grantTermWords(lang, sel.months, sel.days), formatExpire(expireAt, lang)),
+	var text string
+	switch {
+	case sel.pack != "":
+		text = i18n.T(lang, "grant.client_pack", sel.gb)
+	case sel.eternal:
+		text = i18n.T(lang, "grant.client_traffic", escapeName(name))
+	default:
+		text = i18n.T(lang, "grant.client", escapeName(name), grantTermWords(lang, sel.months, sel.days), formatExpire(expireAt, lang))
+	}
+	id := a.notifyKB(ctx, sel.uid, text,
 		[][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")}})
 	if id == 0 {
 		return grantClientFailed
@@ -679,7 +733,16 @@ func (a *App) grantNotifyClient(ctx context.Context, sel grantSel, p *model.Plan
 
 // grantReport — итог выдачи администратору.
 func grantReport(lang string, p *model.Plan, sel grantSel, r grantResult) string {
-	lines := []string{i18n.T(lang, "grant.done", planTitleHTML(lang, p), grantTermLabel(lang, sel.months, sel.days), formatExpire(r.expireAt, lang))}
+	var first string
+	switch {
+	case sel.pack != "":
+		first = i18n.T(lang, "grant.pack_done", sel.gb, planTitleHTML(lang, p))
+	case sel.eternal:
+		first = i18n.T(lang, "grant.done_traffic", planTitleHTML(lang, p))
+	default:
+		first = i18n.T(lang, "grant.done", planTitleHTML(lang, p), grantTermLabel(lang, sel.months, sel.days), formatExpire(r.expireAt, lang))
+	}
+	lines := []string{first}
 	switch r.client {
 	case grantClientSent:
 		lines = append(lines, i18n.T(lang, "grant.res_client_sent"))

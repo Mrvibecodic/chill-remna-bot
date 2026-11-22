@@ -75,6 +75,9 @@ type Storage interface {
 	// BroadcastAudience — те же получатели, что у AllUserIDs, с полями для
 	// выбора по подписке: срок, вид срока и снимок сделки.
 	BroadcastAudience(ctx context.Context) ([]model.User, error)
+	// PlanAudience — для сводки по тарифам: без отметки «бот заблокирован» и
+	// только те, у кого был срок подписки.
+	PlanAudience(ctx context.Context) ([]model.User, error)
 	// SetUnreachable помечает, что Telegram ответил «чат недоступен». Это НЕ
 	// бан: доступ к боту не закрывается, метка только выводит человека из
 	// рассылки и снимается любым его сообщением.
@@ -230,6 +233,12 @@ type Storage interface {
 	ResolvePending(ctx context.Context, id int64) error
 
 	PendingByExtID(ctx context.Context, extID string) (*model.PendingInvoice, error)
+
+	AddTrafficInvoice(ctx context.Context, p *model.PendingInvoice) error
+	ListUnresolvedTraffic(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error)
+	ResolveTraffic(ctx context.Context, id int64) error
+	TrafficInvoiceByExtID(ctx context.Context, extID string) (*model.PendingInvoice, error)
+	ListUserTraffic(ctx context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error)
 
 	AddPayLog(ctx context.Context, e *model.PayLogEntry) error
 	PayLogs(ctx context.Context, extID string, telegramID int64, limit int) ([]model.PayLogEntry, error)
@@ -669,10 +678,17 @@ func (b *base) SetTrialUsed(ctx context.Context, telegramID int64, ts string) er
 	if ts == "" {
 		return nil
 	}
-	_, err := b.db.ExecContext(ctx,
+	res, err := b.db.ExecContext(ctx,
 		"UPDATE users SET trial_used_at = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2),
 		ts, telegramID)
-	return err
+	if err != nil {
+		return err
+	}
+	// Без строки отметка теряется, и триал выдался бы снова.
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("пользователь %d не найден", telegramID)
+	}
+	return nil
 }
 
 func (b *base) SetSubExpiry(ctx context.Context, telegramID int64, expireAt, kind string) error {
@@ -1101,11 +1117,14 @@ func (b *base) GetPayment(ctx context.Context, id int64) (*model.Payment, error)
 // тариф», и в признак «пользователь платил».
 const subPaymentCond = " AND months > 0"
 
+const trafficSnapLike = `%"kind":"traffic"%`
+
 func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
+	cond := subPaymentCond + " AND method <> " + b.ph(2) + " AND plan_snapshot NOT LIKE " + b.ph(3)
 	var total int
 	if err := b.db.QueryRowContext(ctx,
-		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1)+subPaymentCond+" AND method <> "+b.ph(2),
-		model.PaymentPaid, model.PayMethodGrant).Scan(&total); err != nil {
+		"SELECT COUNT(1) FROM payments WHERE status = "+b.ph(1)+cond,
+		model.PaymentPaid, model.PayMethodGrant, trafficSnapLike).Scan(&total); err != nil {
 		return 0, 0, err
 	}
 	if total == 0 {
@@ -1113,9 +1132,9 @@ func (b *base) MostPopularPlan(ctx context.Context) (int, int, error) {
 	}
 	var months int
 	err := b.db.QueryRowContext(ctx,
-		"SELECT months FROM payments WHERE status = "+b.ph(1)+subPaymentCond+" AND method <> "+b.ph(2)+
+		"SELECT months FROM payments WHERE status = "+b.ph(1)+cond+
 			" GROUP BY months ORDER BY COUNT(1) DESC, months ASC LIMIT 1",
-		model.PaymentPaid, model.PayMethodGrant).Scan(&months)
+		model.PaymentPaid, model.PayMethodGrant, trafficSnapLike).Scan(&months)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, total, nil
 	}
@@ -1449,8 +1468,9 @@ type Snapshot struct {
 	// AutoPays и Pendings раньше в снимок не входили: после переезда базы
 	// или восстановления из бэкапа подключённые автосписания пропадали, а
 	// незакрытые счета переставали добиваться реконсилятором.
-	AutoPays []model.AutoPay
-	Pendings []model.PendingInvoice
+	AutoPays        []model.AutoPay
+	Pendings        []model.PendingInvoice
+	TrafficInvoices []model.PendingInvoice
 	// Plans — справочник тарифов. В снимок входит с самого появления таблицы:
 	// без него переезд базы стирал бы всю тарифную сетку.
 	Plans []model.Plan
@@ -1649,7 +1669,7 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	for intentRows.Next() {
 		var in model.PurchaseIntent
-		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt, &in.ShownPrice); err != nil {
+		if err := intentRows.Scan(&in.TelegramID, &in.PlanCode, &in.Months, &in.Days, &in.CreatedAt, &in.ShownPrice, &in.PackID); err != nil {
 			_ = intentRows.Close()
 			return nil, err
 		}
@@ -1783,6 +1803,24 @@ func (b *base) Export(ctx context.Context) (*Snapshot, error) {
 	}
 	_ = irows.Close()
 
+	trows, err := b.db.QueryContext(ctx, "SELECT "+trafficInvCols+" FROM traffic_invoices")
+	if err != nil {
+		return nil, err
+	}
+	for trows.Next() {
+		p, err := scanTrafficInvoice(trows)
+		if err != nil {
+			_ = trows.Close()
+			return nil, err
+		}
+		snap.TrafficInvoices = append(snap.TrafficInvoices, *p)
+	}
+	if err := trows.Err(); err != nil {
+		_ = trows.Close()
+		return nil, err
+	}
+	_ = trows.Close()
+
 	return snap, nil
 }
 
@@ -1901,6 +1939,11 @@ func (b *base) Import(ctx context.Context, s *Snapshot) error {
 			"INSERT INTO pending_invoices (id, method, ext_id, telegram_id, months, created_at, resolved, purpose, kopecks, plan_snapshot) "+
 				"VALUES ("+b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+", "+b.ph(10)+")",
 			p.ID, p.Method, p.ExtID, p.TelegramID, p.Months, p.CreatedAt, boolToInt(p.Resolved), p.Purpose, p.Kopecks, p.Snapshot.Encode()); err != nil && !isUniqueViolation(err) {
+			return err
+		}
+	}
+	for i := range s.TrafficInvoices {
+		if err := b.AddTrafficInvoice(ctx, &s.TrafficInvoices[i]); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}
@@ -2350,6 +2393,94 @@ func (b *base) PendingByExtID(ctx context.Context, extID string) (*model.Pending
 	return p, nil
 }
 
+const trafficInvCols = "id, method, ext_id, telegram_id, purpose, kopecks, plan_snapshot, created_at, resolved"
+
+func (b *base) AddTrafficInvoice(ctx context.Context, p *model.PendingInvoice) error {
+	if p.ID == 0 {
+		p.ID = time.Now().UnixNano()
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = nowStr()
+	}
+	_, err := b.db.ExecContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"INSERT INTO traffic_invoices ("+trafficInvCols+") VALUES ("+
+			b.ph(1)+", "+b.ph(2)+", "+b.ph(3)+", "+b.ph(4)+", "+b.ph(5)+", "+b.ph(6)+", "+b.ph(7)+", "+b.ph(8)+", "+b.ph(9)+")",
+		p.ID, p.Method, p.ExtID, p.TelegramID, p.Purpose, p.Kopecks, p.Snapshot.Encode(), p.CreatedAt, boolToInt(p.Resolved))
+	return err
+}
+
+func scanTrafficInvoice(row scanRow) (*model.PendingInvoice, error) {
+	var p model.PendingInvoice
+	var snapRaw string
+	var resolved int
+	if err := row.Scan(&p.ID, &p.Method, &p.ExtID, &p.TelegramID, &p.Purpose, &p.Kopecks, &snapRaw, &p.CreatedAt, &resolved); err != nil {
+		return nil, err
+	}
+	p.Snapshot = model.DecodePlanSnapshot(snapRaw)
+	p.Resolved = resolved != 0
+	return &p, nil
+}
+
+func (b *base) ListUnresolvedTraffic(ctx context.Context, createdBefore string, limit int) ([]model.PendingInvoice, error) {
+	rows, err := b.db.QueryContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значения передаются биндовыми параметрами
+		"SELECT "+trafficInvCols+" FROM traffic_invoices WHERE resolved = 0 AND created_at <= "+b.ph(1)+
+			" ORDER BY created_at ASC LIMIT "+b.ph(2), createdBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.PendingInvoice
+	for rows.Next() {
+		p, err := scanTrafficInvoice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) ResolveTraffic(ctx context.Context, id int64) error {
+	_, err := b.db.ExecContext(ctx,
+		"UPDATE traffic_invoices SET resolved = 1 WHERE id = "+b.ph(1), id)
+	return err
+}
+
+func (b *base) ListUserTraffic(ctx context.Context, telegramID int64, since string, limit int) ([]model.PendingInvoice, error) {
+	rows, err := b.db.QueryContext(ctx,
+		"SELECT "+trafficInvCols+" FROM traffic_invoices WHERE resolved = 0 AND telegram_id = "+b.ph(1)+
+			" AND created_at >= "+b.ph(2)+" ORDER BY created_at DESC LIMIT "+b.ph(3),
+		telegramID, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.PendingInvoice
+	for rows.Next() {
+		p, err := scanTrafficInvoice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, rows.Err()
+}
+
+func (b *base) TrafficInvoiceByExtID(ctx context.Context, extID string) (*model.PendingInvoice, error) {
+	if extID == "" {
+		return nil, nil
+	}
+	p, err := scanTrafficInvoice(b.db.QueryRowContext(ctx,
+		// #nosec G202 -- b.ph выдаёт только placeholder драйвера ($1/?), значение передаётся биндовым параметром
+		"SELECT "+trafficInvCols+" FROM traffic_invoices WHERE ext_id = "+b.ph(1)+" ORDER BY id DESC LIMIT 1", extID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
 func (b *base) SetReferredBy(ctx context.Context, telegramID, referrerID int64) error {
 	_, err := b.db.ExecContext(ctx,
 		"UPDATE users SET referred_by = "+b.ph(1)+" WHERE telegram_id = "+b.ph(2)+" AND referred_by = 0",
@@ -2420,9 +2551,18 @@ func (b *base) AllUserIDs(ctx context.Context) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+const audienceQuery = "SELECT telegram_id, sub_expire_at, notify_kind, plan_snapshot FROM users WHERE blocked = 0"
+
 func (b *base) BroadcastAudience(ctx context.Context) ([]model.User, error) {
-	rows, err := b.db.QueryContext(ctx,
-		"SELECT telegram_id, sub_expire_at, notify_kind, plan_snapshot FROM users WHERE blocked = 0 AND unreachable_at = ''")
+	return b.audience(ctx, audienceQuery+" AND unreachable_at = ''")
+}
+
+func (b *base) PlanAudience(ctx context.Context) ([]model.User, error) {
+	return b.audience(ctx, audienceQuery+" AND sub_expire_at <> ''")
+}
+
+func (b *base) audience(ctx context.Context, query string) ([]model.User, error) {
+	rows, err := b.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

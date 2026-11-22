@@ -57,7 +57,9 @@ func (a *App) onBroadcast(ctx context.Context, chatID int64, val string) {
 			return
 		}
 		a.bcastStop.Store(false)
-		a.sendKB(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{
+		// Текстом, без картинки раздела: итог правит это сообщение на месте, а
+		// подпись под картинкой текстом не правится.
+		a.sendKBText(ctx, chatID, i18n.T(lang, "bcast.started"), [][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "bcast.btn_stop"), "bc:stop")},
 			navBack(lang, "menu:marketing"),
 		})
@@ -271,9 +273,23 @@ func (a *App) bcastFinish(ctx context.Context, job *bcastJob, text string) {
 	a.dropBcastJob()
 	doneText := a.applyPremium(text)
 	doneRows := [][]models.InlineKeyboardButton{navBack(a.lang(job.Admin), "menu:marketing")}
-	if job.StatusID == 0 || !a.msg.EditText(ctx, job.Admin, job.StatusID, doneText, doneRows) {
-		a.msg.SendKB(ctx, job.Admin, doneText, doneRows)
+	a.bcastStatus(ctx, job.Admin, job.StatusID, doneText, doneRows)
+}
+
+// bcastStatus — сообщение админу о ходе рассылки: правит прежнее, а если его
+// уже нет — приходит новым. Рассылка идёт в фоне, админ за это время уходит
+// на другие экраны, и такое сообщение уже не экран: оно учитывается как
+// уведомление, иначе «Назад» и «Главная» под ним открывали экран, а оно само
+// оставалось висеть. Возвращает id сообщения (0 — не доставлено).
+func (a *App) bcastStatus(ctx context.Context, admin int64, statusID int, text string, rows [][]models.InlineKeyboardButton) int {
+	id := statusID
+	if id == 0 || !a.msg.EditText(ctx, admin, id, text, rows) {
+		id = a.msg.SendKB(ctx, admin, text, rows)
 	}
+	if id != 0 && !a.isScreen(ctx, admin, id) {
+		a.addNotice(admin, id)
+	}
+	return id
 }
 
 // chatUnreachable — Telegram окончательно отказал: чата с человеком нет.
@@ -414,8 +430,8 @@ func (a *App) resumeBroadcast(ctx context.Context) {
 		{btn(i18n.T(lang, "bcast.btn_stop"), "bc:stop")},
 		navBack(lang, "menu:marketing"),
 	}
-	if job.StatusID == 0 || !a.msg.EditText(ctx, job.Admin, job.StatusID, resumed, rows) {
-		job.StatusID = a.msg.SendKB(ctx, job.Admin, resumed, rows)
+	if id := a.bcastStatus(ctx, job.Admin, job.StatusID, resumed, rows); id != job.StatusID {
+		job.StatusID = id
 		a.saveBcastJob(&job)
 	}
 	go func() {

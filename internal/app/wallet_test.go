@@ -72,7 +72,7 @@ func TestWallet_TopUpCreateRefused(t *testing.T) {
 	if dto := a.MiniTopUp(context.Background(), 700, 10000, "yk", false); dto.Error == "" {
 		t.Fatal("мини-апп должен отказывать в пополнении")
 	}
-	if dto := a.MiniTopUpOptions(context.Background(), 700); len(dto.Amounts) != 0 || len(dto.Methods) != 0 {
+	if dto := a.MiniTopUpOptions(context.Background(), 700, false); len(dto.Amounts) != 0 || len(dto.Methods) != 0 {
 		t.Fatalf("мини-апп не должен предлагать пополнение: %+v", dto)
 	}
 }

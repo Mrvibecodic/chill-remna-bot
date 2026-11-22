@@ -426,6 +426,7 @@ func (a *App) addSubByPlan(ctx context.Context, snap *model.PlanSnapshot) (*mode
 	sold := true
 	out.AddSub = &sold
 	out.AddSubTrafficGB, out.AddSubSquads = planAddSubTerms(p)
+	out.AddSubStrategy = p.AddSubStrategyOrDefault()
 	return &out, nil
 }
 
@@ -453,6 +454,7 @@ func (a *App) grantAddSub(ctx context.Context, tgID int64, granted *model.PlanSn
 	snap := *u.Snapshot
 	snap.AddSub = granted.AddSub
 	snap.AddSubTrafficGB, snap.AddSubSquads = granted.AddSubTrafficGB, granted.AddSubSquads
+	snap.AddSubStrategy = granted.AddSubStrategy
 	return st.SetUserSnapshot(ctx, tgID, &snap)
 }
 

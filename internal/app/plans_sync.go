@@ -293,19 +293,13 @@ func (a *App) setPlanPrice(ctx context.Context, code string, months int, kind, v
 	if months <= 0 {
 		return nil
 	}
-	val = strings.TrimSpace(val)
-	if val == "-" {
-		val = ""
-	}
 	// Цена — число. Пробелы-разделители тысяч убираются сразу («9 900» →
 	// «9900»), а непарсимая строка не пускается в тариф: витрина её показала
 	// бы, но подсветка «выгодного», оплата с баланса и лимиты пополнения на
 	// такой цене молча ломаются.
-	val = normPriceStr(val)
-	if val != "" {
-		if k, ok := rubToKopecks(val); !ok || k <= 0 {
-			return errPlanPriceInvalid
-		}
+	val, err := parsePlanPrice(val)
+	if err != nil {
+		return err
 	}
 	return a.editPlanPricing(ctx, code, func(p *model.Plan) error {
 		d := durationFor(p, months, val != "")

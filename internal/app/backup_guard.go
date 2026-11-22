@@ -397,8 +397,13 @@ func (a *App) autoPayExpiryConfirmed(ctx context.Context, ap *model.AutoPay, exp
 func (a *App) addReview(method, purpose string, months int, amount string, userID int64, extID string, onSent func(context.Context)) {
 	lang := a.lang(a.cfg.AdminID)
 	what := i18n.T(lang, "bk.review_months", months)
-	if purpose == model.P2PPurposeTopUp {
+	switch purpose {
+	case model.P2PPurposeTopUp:
 		what = i18n.T(lang, "bk.review_topup")
+	case purposeTraffic:
+		what = i18n.T(lang, "bk.review_traffic")
+	case purposePack:
+		what = i18n.T(lang, "bk.review_pack")
 	}
 	line := i18n.T(lang, "bk.review_line", html.EscapeString(methodLabel(method)), what,
 		html.EscapeString(amount), userID, html.EscapeString(extID))
@@ -465,7 +470,7 @@ func (a *App) holdRestoredPayment(ctx context.Context, method, purpose string, m
 	}
 	// Счёт после восстановления записан всегда. Нет строки — значит, счёт
 	// выставлен после даты файла и до восстановления.
-	p, _ := st.PendingByExtID(ctx, extID)
+	p, traffic := a.invoiceAny(ctx, st, extID)
 	if p != nil {
 		if t, ok := parseStamp(p.CreatedAt); !ok || !t.Before(at) {
 			return false
@@ -473,16 +478,11 @@ func (a *App) holdRestoredPayment(ctx context.Context, method, purpose string, m
 	}
 	a.payLog(ctx, method, extID, userID, stageHeld, "счёт до восстановления базы: %s — не выдано, решает админ", amount)
 	if !a.reviewNoted(ctx, extID) {
-		var pid int64
-		if p != nil {
-			pid = p.ID
-		}
+		inv := p
 		a.addReview(method, purpose, months, amount, userID, extID, func(c context.Context) {
 			a.payLog(c, method, extID, userID, stageReview,
 				"оплата по счёту до восстановления базы: %s — на ручную проверку", amount)
-			if pid != 0 {
-				_ = st.ResolvePending(c, pid)
-			}
+			resolveAny(c, st, inv, traffic)
 		})
 		a.flushReview(ctx)
 	}

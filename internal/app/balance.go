@@ -97,7 +97,7 @@ func (a *App) showBalance(ctx context.Context, chatID int64) {
 	// Про вывод говорим прямо и всегда: баланс тратится только внутри бота.
 	caption += "\n" + i18n.T(lang, "balance.no_withdraw")
 	topRow := []models.InlineKeyboardButton{btn(i18n.T(lang, "btn.buy"), "menu:buy")}
-	if a.topUpEnabled() {
+	if a.topUpOpen(false) {
 		topRow = append([]models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")}, topRow...)
 	}
 	a.sendPayKB(ctx, chatID, caption, [][]models.InlineKeyboardButton{
@@ -163,6 +163,9 @@ type forecastEntry struct {
 // по которому посчитано (nil — по сетке).
 func (a *App) forecastEntries(ctx context.Context, chatID int64) ([]forecastEntry, *model.Plan) {
 	var list []forecastEntry
+	if a.onTrafficPlan(ctx, chatID) {
+		return nil, nil
+	}
 	if code := a.userPlanCode(ctx, chatID); code != "" && code != model.PlanCodeBase {
 		if p, err := a.planByCode(ctx, code); err == nil && p != nil && p.Enabled && a.saleGridCurrency(&sale{Plan: p}) {
 			for i := range p.Durations {
@@ -220,6 +223,24 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 			}
 			mode := model.NormalizeAvailability(p.Availability)
 			hidden := mode == model.PlanAvailList || mode == model.PlanAvailLink
+			if p.IsTraffic() {
+				t := trafficTerms(p)
+				if k, ok := rubToKopecks(t.Price); ok && k > 0 {
+					if k > maxK {
+						maxK = k
+					}
+					if !hidden && !seen[k] {
+						seen[k] = true
+						amts = append(amts, k)
+					}
+				}
+				for _, pk := range t.Packs {
+					if k, ok := rubToKopecks(pk.Price); ok && k > maxK {
+						maxK = k
+					}
+				}
+				continue
+			}
 			for j := range p.Durations {
 				d := &p.Durations[j]
 				if d.Months <= 0 {
@@ -251,7 +272,7 @@ func (a *App) topUpAmounts(ctx context.Context) ([]int64, int64) {
 
 func (a *App) showTopUp(ctx context.Context, chatID int64) {
 	lang := a.lang(chatID)
-	if !a.topUpEnabled() {
+	if !a.topUpOpen(false) {
 		a.showBalance(ctx, chatID)
 		return
 	}
@@ -348,14 +369,26 @@ var topUpMethodFull = map[string]string{
 }
 
 // topUpMethods — включённые способы пополнения в порядке показа. Один список
-// на чат, мини-апп и кабинет.
-func (a *App) topUpMethods() []string {
+// на чат, мини-апп и кабинет; web — сайт, иначе Telegram: способы, снятые с
+// места в «Доступности», отсеиваются.
+func (a *App) topUpMethods(web bool) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := a.botCfg
 	if c == nil {
 		return nil
 	}
+	var out []string
+	for _, m := range a.topUpMethodsLocked(c) {
+		if payAccessLocked(c, topUpMethodFull[m], web) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// topUpMethodsLocked — включённые способы пополнения без учёта места.
+func (a *App) topUpMethodsLocked(c *model.BotConfig) []string {
 	var out []string
 	if c.P2P.Enabled {
 		out = append(out, model.PayMethodP2P)
@@ -378,8 +411,15 @@ func (a *App) topUpMethods() []string {
 	return out
 }
 
-func (a *App) topUpMethodOn(method string) bool {
-	for _, m := range a.topUpMethods() {
+// topUpOpen — пополнение есть в этом месте: включено и осталось хоть одним
+// способом. Решает только, показывать ли «Пополнить» и кошелёк в меню: сами
+// действия по-прежнему проверяют topUpEnabled и способ.
+func (a *App) topUpOpen(web bool) bool {
+	return a.topUpEnabled() && len(a.topUpMethods(web)) > 0
+}
+
+func (a *App) topUpMethodOn(method string, web bool) bool {
+	for _, m := range a.topUpMethods(web) {
 		if m == method {
 			return true
 		}
@@ -395,7 +435,7 @@ func (a *App) showTopUpMethods(ctx context.Context, chatID int64) {
 		return
 	}
 	var rows [][]models.InlineKeyboardButton
-	for _, m := range a.topUpMethods() {
+	for _, m := range a.topUpMethods(false) {
 		full := topUpMethodFull[m]
 		if m == model.PayMethodP2P {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "method.p2p_btn", methodName(lang, full)), "top:m:"+m)})
@@ -426,7 +466,7 @@ func (a *App) startTopUp(ctx context.Context, chatID int64, method string) {
 	}
 	// Кнопка способа могла пролежать в переписке: за это время способ могли
 	// выключить, а согласие с документами — сбросить.
-	if !a.topUpMethodOn(method) {
+	if !a.topUpMethodOn(method, false) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "topup.unavailable"))
 		return
 	}
@@ -501,7 +541,7 @@ func (a *App) topUpCreate(ctx context.Context, chatID int64, k int64, method str
 	}
 	// Выключенный способ не принимает пополнений, даже если ключи остались:
 	// кнопка могла сохраниться в старом сообщении.
-	if !a.topUpMethodOn(method) {
+	if !a.topUpMethodOn(method, web) {
 		return "", "", errUserText(i18n.T(lang, "topup.unavailable"))
 	}
 	rub := kopecksToRub(k)
@@ -761,14 +801,20 @@ func (a *App) payFromBalance(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "списание с баланса", res.err))
 	case balNoFunds:
 		rows := [][]models.InlineKeyboardButton{}
-		if a.topUpEnabled() {
+		if a.topUpOpen(false) {
 			rows = append(rows, []models.InlineKeyboardButton{btn(i18n.T(lang, "balance.btn_topup"), "menu:topup")})
 		}
 		rows = append(rows, homeRow(lang))
 		a.sendKB(ctx, chatID, i18n.T(lang, "balance.not_enough", kopecksToRub(res.kopecks), kopecksToRub(a.userBalance(ctx, chatID))), rows)
 	case balFailed:
 		a.sendHome(ctx, chatID, i18n.T(lang, "balance.pay_fail", a.clientErr(ctx, chatID, "оплата с баланса", res.err)))
+	case balRefunded:
+		a.showMySubs(ctx, chatID)
 	case balIssued:
+		if s.Pack != nil {
+			a.showPackDone(ctx, chatID, s.Pack.GB)
+			return
+		}
 		a.sendSubActive(ctx, chatID, res.link, res.expireAt)
 	}
 }
@@ -786,6 +832,7 @@ const (
 	balDeductFailed                    // списание не прошло, деньги не тронуты
 	balNoFunds                         // на балансе не хватает
 	balFailed                          // выдача не удалась, деньги возвращены
+	balRefunded                        // пакет некуда добавить: стоимость вернулась на баланс
 )
 
 type balanceResult struct {
@@ -818,7 +865,11 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 	if a.store == nil {
 		return balanceResult{kind: balNoStore}
 	}
-	buyKey := strconv.FormatInt(tgID, 10) + "|" + s.planCode() + "|" + strconv.Itoa(months)
+	keyCode := s.planCode()
+	if s.Pack != nil {
+		keyCode += "/" + s.Pack.ID
+	}
+	buyKey := strconv.FormatInt(tgID, 10) + "|" + keyCode + "|" + strconv.Itoa(months)
 	if concurrent {
 		// Ключ сделки ниже строится из состояния, ПРОЧИТАННОГО ДО списания, а
 		// оно сдвигается каждой выдачей: второй запрос, успевший прочитать его
@@ -834,7 +885,7 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 		}
 	}
 	// Ключ сделки — до списания: по нему отсекается двойное нажатие.
-	extID := balanceExtID(tgID, s.planCode(), months, discr())
+	extID := balanceExtID(tgID, keyCode, months, discr())
 	if extID != "" {
 		if done, derr := a.store.PaymentByExtID(ctx, extID); derr == nil && done {
 			// Первое нажатие уже выдало подписку. Денег не трогаем вовсе —
@@ -855,7 +906,17 @@ func (a *App) payBalance(ctx context.Context, tgID int64, s *sale, concurrent bo
 		return balanceResult{kind: balNoFunds, kopecks: kopecks}
 	}
 	a.payLog(ctx, "balance", extID, tgID, "balance_deducted", "kopecks=%d plan=%s months=%d", kopecks, s.planCode(), months)
-	link, expireAt, err := a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
+	var link, expireAt string
+	if s.traffic() {
+		var d dealDone
+		d, err = a.closeTrafficDeal(ctx, tgID, "balance", priceStr+curSuffix(curRUB), extID, snap, false)
+		link, expireAt = d.link, d.expireAt
+		if err == nil && d.refunded {
+			return balanceResult{kind: balRefunded}
+		}
+	} else {
+		link, expireAt, err = a.finalizePurchase(ctx, tgID, months, "balance", priceStr+curSuffix(curRUB), extID, snap)
+	}
 	if err != nil {
 		// Дубль поймало ядро выдачи (второе нажатие прошло проверку выше, пока
 		// первое ещё не записало платёж): деньги вернуть, но это не сбой —

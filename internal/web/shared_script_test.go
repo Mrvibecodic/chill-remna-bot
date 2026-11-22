@@ -103,3 +103,24 @@ func TestCustomPageWithMarkerGetsSharedScript(t *testing.T) {
 		t.Fatalf("своя страница с меткой: код %d, тело %.200s", w.Code, body)
 	}
 }
+
+// Строки рефералки о трафик-тарифах приходят с переносами — оба дизайна их
+// показывают, а не склеивают в одну строку.
+func TestReferralNoteKeepsLines(t *testing.T) {
+	note := regexp.MustCompile(`class="hint"[^>]*>'\+esc\((?:ref|r)\.note\)`)
+	for page, want := range map[string]int{"index.html": 1, "minimal.html": 2} {
+		raw, err := miniStaticFS.ReadFile("miniapp_static/" + page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := note.FindAllString(string(raw), -1)
+		if len(found) != want {
+			t.Fatalf("%s: мест вывода строки рефералки %d, ждали %d", page, len(found), want)
+		}
+		for _, f := range found {
+			if !strings.Contains(f, "white-space:pre-line") {
+				t.Errorf("%s: строка рефералки без переносов: %s", page, f)
+			}
+		}
+	}
+}

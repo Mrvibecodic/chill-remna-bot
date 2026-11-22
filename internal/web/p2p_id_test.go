@@ -19,7 +19,7 @@ type p2pIDMini struct {
 	cancelled []int64
 }
 
-func (f *p2pIDMini) MiniCheckout(context.Context, int64, string, int, string, string, bool, bool) MiniActionDTO {
+func (f *p2pIDMini) MiniCheckout(context.Context, int64, string, int, string, string, string, bool, bool) MiniActionDTO {
 	return MiniActionDTO{OK: true, P2PCard: "2200 0000 0000 0001", P2PAmount: "500 ₽", P2PReqID: f.reqID}
 }
 

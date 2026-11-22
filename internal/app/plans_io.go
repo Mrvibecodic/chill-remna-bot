@@ -25,8 +25,9 @@ const (
 	// planFileVersion — новейшая версия файла, которую этот бот читает. Файл
 	// без своих условий доп-подписки пишется версией 1: его читают и прежние
 	// версии бота.
-	planFileVersion     = 2
-	planFileVersionBase = 1
+	planFileVersion       = 3
+	planFileVersionBase   = 1
+	planFileVersionAddSub = 2
 	// planImportMaxBytes — предел размера файла импорта. Тариф с большим
 	// списком допущенных занимает десятки килобайт; мегабайты — это не тариф.
 	planImportMaxBytes = 256 << 10
@@ -63,6 +64,8 @@ type planFilePlan struct {
 	ExtSquad        string               `json:"ext_squad,omitempty"`
 	Currency        string               `json:"currency,omitempty"`
 	Durations       []model.PlanDuration `json:"durations,omitempty"`
+	Kind            string               `json:"kind,omitempty"`
+	Traffic         *model.PlanTraffic   `json:"traffic,omitempty"`
 }
 
 type planFileAccess struct {
@@ -97,7 +100,11 @@ func (a *App) exportPlan(ctx context.Context, chatID int64, code string) {
 		},
 	}
 	if p.AddSubTrafficGB != nil || len(p.AddSubSquads) > 0 {
+		f.Version = planFileVersionAddSub
+	}
+	if p.IsTraffic() {
 		f.Version = planFileVersion
+		f.Plan.Kind, f.Plan.Traffic, f.Plan.Durations = p.Kind, p.Traffic, nil
 	}
 	for _, e := range access {
 		f.Access = append(f.Access, planFileAccess{TelegramID: e.TelegramID, Email: e.Email})
@@ -161,6 +168,7 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 		DeviceLimit: f.Plan.DeviceLimit, Strategy: f.Plan.Strategy,
 		IntSquads: f.Plan.IntSquads, ExtSquad: f.Plan.ExtSquad,
 		Currency: f.Plan.Currency, Durations: f.Plan.Durations,
+		Kind: f.Plan.Kind, Traffic: f.Plan.Traffic,
 	}
 	if !model.ValidPlanCode(p.Code) {
 		return nil, nil, fmt.Errorf("%w: недопустимый код тарифа %q", errPlanFile, p.Code)
@@ -185,6 +193,9 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 	}
 	if n := len([]rune(p.Icon)); n > planIconMaxLen {
 		return nil, nil, fmt.Errorf("%w: значок длиннее %d символов", errPlanFile, planIconMaxLen)
+	}
+	if err := checkPlanFileKind(p); err != nil {
+		return nil, nil, err
 	}
 	seen := map[int]bool{}
 	for i := range p.Durations {
@@ -231,6 +242,74 @@ func parsePlanFile(data []byte) (*model.Plan, []model.PlanAccess, error) {
 	return p, access, nil
 }
 
+var errPlanImportKind = errors.New("вид тарифа в файле не совпадает")
+
+func checkPlanFileKind(p *model.Plan) error {
+	switch p.Kind {
+	case "":
+		if p.Traffic != nil {
+			return fmt.Errorf("%w: условия трафика у срочного тарифа", errPlanFile)
+		}
+		return nil
+	case model.PlanKindTraffic:
+	default:
+		return fmt.Errorf("%w: неизвестный вид тарифа %q", errPlanFile, p.Kind)
+	}
+	if p.Code == model.PlanCodeBase {
+		return fmt.Errorf("%w: «Базовый» не может быть трафик-тарифом", errPlanFile)
+	}
+	if len(p.Durations) > 0 {
+		return fmt.Errorf("%w: у трафик-тарифа не бывает сроков", errPlanFile)
+	}
+	if p.TrafficGB < 0 || p.TrafficGB > model.PlanTrafficMaxGB {
+		return fmt.Errorf("%w: трафик тарифа вне 0…%d GB", errPlanFile, model.PlanTrafficMaxGB)
+	}
+	t := p.Traffic
+	if t == nil {
+		return nil
+	}
+	price, err := parsePlanPrice(t.Price)
+	if err != nil {
+		return fmt.Errorf("%w: цена %q не разобрана как число", errPlanFile, t.Price)
+	}
+	t.Price = price
+	if t.Stars < 0 {
+		return fmt.Errorf("%w: отрицательная цена в звёздах", errPlanFile)
+	}
+	if t.AddSubStrategy != "" && !model.ValidStrategy(t.AddSubStrategy) {
+		return fmt.Errorf("%w: неизвестный сброс доп-подписки %q", errPlanFile, t.AddSubStrategy)
+	}
+	if t.RefGB < 0 || t.RefGB > model.PlanTrafficMaxGB {
+		return fmt.Errorf("%w: реферальный бонус вне 0…%d GB", errPlanFile, model.PlanTrafficMaxGB)
+	}
+	if t.RefTo != "" && !model.ValidRefTo(t.RefTo) {
+		return fmt.Errorf("%w: неизвестный получатель реферального бонуса %q", errPlanFile, t.RefTo)
+	}
+	if len(t.Packs) > model.PlanPacksMax {
+		return fmt.Errorf("%w: пакетов больше %d", errPlanFile, model.PlanPacksMax)
+	}
+	ids := map[string]bool{}
+	for i := range t.Packs {
+		pk := &t.Packs[i]
+		if !model.ValidPackID(pk.ID) || ids[pk.ID] {
+			return fmt.Errorf("%w: пакет с неверным или повторным ID %q", errPlanFile, pk.ID)
+		}
+		ids[pk.ID] = true
+		if pk.GB <= 0 || pk.GB > model.PlanTrafficMaxGB {
+			return fmt.Errorf("%w: объём пакета вне 1…%d GB", errPlanFile, model.PlanTrafficMaxGB)
+		}
+		price, err := parsePlanPrice(pk.Price)
+		if err != nil {
+			return fmt.Errorf("%w: цена пакета %q не разобрана как число", errPlanFile, pk.Price)
+		}
+		pk.Price = price
+		if pk.Stars < 0 || !packSells(pk) {
+			return fmt.Errorf("%w: у пакета + %d GB нет цены", errPlanFile, pk.GB)
+		}
+	}
+	return nil
+}
+
 // handlePlanImportDoc принимает файл тарифа, показывает предпросмотр и ждёт
 // подтверждения.
 func (a *App) handlePlanImportDoc(ctx context.Context, m *models.Message) {
@@ -272,9 +351,19 @@ func (a *App) handlePlanImportDoc(ctx context.Context, m *models.Message) {
 		// истиной, зеркало перепишет сетку цен в конфиге.
 		kind += "\n\n" + i18n.T(lang, "plans.import_base_warn")
 	}
+	if existing != nil && existing.Kind != p.Kind {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.import_kind"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
+		ui.planImport, ui.planImportAccess = nil, nil
+		return
+	}
+	terms := i18n.T(lang, "plans.durations_short", len(p.Durations))
+	if p.IsTraffic() {
+		terms = i18n.T(lang, "plans.traffic_short", len(trafficTerms(p).Packs))
+	}
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.import_preview",
 		planTitleHTML(lang, p), p.Code, availModeName(lang, p.Availability),
-		len(p.Durations), len(access), kind),
+		terms, len(access), kind),
 		[][]models.InlineKeyboardButton{
 			{btn(i18n.T(lang, "plans.btn_import_yes"), "pln:impok")},
 			navBack(lang, "pln:list"),
@@ -310,6 +399,9 @@ func (a *App) applyPlanImport(ctx context.Context, chatID int64) {
 		if err != nil {
 			return err
 		}
+		if existing != nil && existing.Kind != p.Kind {
+			return errPlanImportKind
+		}
 		if existing != nil {
 			p.Enabled = existing.Enabled
 			p.Order = existing.Order
@@ -339,6 +431,11 @@ func (a *App) applyPlanImport(ctx context.Context, chatID int64) {
 		}
 		return nil
 	}()
+	if errors.Is(err, errPlanImportKind) {
+		a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.import_kind"),
+			[][]models.InlineKeyboardButton{navBack(lang, "pln:list")})
+		return
+	}
 	if err != nil {
 		a.planEditFailed(ctx, chatID, p.Code, err)
 		return

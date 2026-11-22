@@ -113,7 +113,7 @@ func TestMiniCheckoutBalance_NoDoubleCharge(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			oks[i] = a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false).OK
+			oks[i] = a.MiniCheckout(ctx, uid, p.Code, 1, "", model.PayMethodBalance, "", false, false).OK
 		}(i)
 	}
 	wg.Wait()
@@ -176,7 +176,7 @@ func TestMiniBalancePurchaseIsJournaled(t *testing.T) {
 	_ = fs.AddBalance(ctx, uid, 99000)
 	p := vipPlan(t, fs, model.PlanAvailAll)
 
-	if r := a.MiniCheckout(ctx, uid, p.Code, 1, model.PayMethodBalance, "", false, false); !r.OK {
+	if r := a.MiniCheckout(ctx, uid, p.Code, 1, "", model.PayMethodBalance, "", false, false); !r.OK {
 		t.Fatalf("покупка не прошла: %+v", r)
 	}
 	logs, _ := fs.PayLogs(ctx, "", uid, 0)

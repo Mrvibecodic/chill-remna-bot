@@ -212,3 +212,9 @@ func TestVerifyWebhookWithEscapedSlashes(t *testing.T) {
 		t.Fatalf("подпись с экранированными слешами не сошлась: %v", err)
 	}
 }
+
+func TestDefaultBaseURL(t *testing.T) {
+	if sdk.DefaultBaseURL != "https://api.heleket.hk" {
+		t.Fatalf("адрес API: %q", sdk.DefaultBaseURL)
+	}
+}

@@ -56,7 +56,7 @@ func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, erro
 		if uuid != "" && a.store != nil {
 			if done, _ := a.store.PaymentByExtID(ctx, hlExtPrefix+uuid); done {
 				known = true
-			} else if p, _ := a.store.PendingByExtID(ctx, hlExtPrefix+uuid); p != nil {
+			} else if p, _ := a.invoiceAny(ctx, a.store, hlExtPrefix+uuid); p != nil {
 				known = true
 			}
 		}
@@ -111,9 +111,7 @@ func (a *App) HandleHeleketWebhook(ctx context.Context, body []byte) (bool, erro
 	// Промежуточные статусы pending НЕ гасят: переход check → paid легален, и
 	// снятие счёта здесь потеряло бы последующую оплату.
 	if (inv.IsFinal || heleket.Final(inv.Status)) && a.store != nil {
-		if p, _ := a.store.PendingByExtID(ctx, extID); p != nil {
-			_ = a.store.ResolvePending(ctx, p.ID)
-		}
+		a.resolveExt(ctx, a.store, extID)
 	}
 	a.log.Info("heleket webhook: not paid", "uuid", uuid, "status", inv.Status)
 	return true, nil

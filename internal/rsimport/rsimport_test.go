@@ -270,3 +270,134 @@ func TestBuildPayments(t *testing.T) {
 		t.Fatalf("ext_id должен быть помечен источником: %q", p.ExtID)
 	}
 }
+
+const planDump = `COPY public.users (id, telegram_id, username, name, is_blocked, current_subscription_id, is_trial_available, created_at) FROM stdin;
+1	1000000011	a	A	f	11	f	2026-01-01 10:00:00+00
+2	1000000012	b	B	f	22	f	2026-01-01 10:00:00+00
+3	1000000013	c	C	f	33	f	2026-01-01 10:00:00+00
+4	1000000014	d	D	f	44	f	2026-01-01 10:00:00+00
+5	1000000015	e	E	f	55	f	2026-01-01 10:00:00+00
+6	1000000016	f	F	f	\N	f	2026-01-01 10:00:00+00
+7	\N	web	W	f	77	f	2026-01-01 10:00:00+00
+8	1000000018	h	H	f	\N	f	2026-01-01 10:00:00+00
+\.
+
+COPY public.subscriptions (id, status, is_trial, traffic_limit, device_limit, internal_squads, expire_at, plan_snapshot, external_squad, traffic_limit_strategy, user_id) FROM stdin;
+11	ACTIVE	f	100	10	{11111111-1111-4111-8111-111111111111}	2026-12-17 11:46:25+00	{"id": 1, "name": "Старт", "is_trial": false, "device_limit": 3}	\N	NO_RESET	1
+21	DELETED	f	100	3	{11111111-1111-4111-8111-111111111111}	2027-06-01 00:00:00+00	{"id": 1, "name": "Старт"}	\N	NO_RESET	2
+22	ACTIVE	f	0	5	{11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}	2026-12-17 00:00:00+00	{"id": 2, "name": "Про"}	33333333-3333-4333-8333-333333333333	MONTH	2
+33	ACTIVE	t	10	0	{33333333-3333-4333-8333-333333333333}	2026-11-20 00:00:00+00	{"id": 4, "name": "Пробный"}	\N	NO_RESET	3
+44	ACTIVE	f	0	2	{11111111-1111-4111-8111-111111111111}	2026-12-07 00:00:00+00	{"id": -1, "name": "IMPORTED"}	\N	NO_RESET	4
+55	EXPIRED	f	0	5	{}	2025-01-01 00:00:00+00	{"id": 9, "name": "Старый"}	\N	NO_RESET	5
+61	EXPIRED	f	100	3	{11111111-1111-4111-8111-111111111111}	2025-03-01 00:00:00+00	{"id": 1, "name": "Старт"}	\N	NO_RESET	6
+62	DISABLED	f	100	3	{11111111-1111-4111-8111-111111111111}	2026-03-01 00:00:00+00	{"id": 1, "name": "Старт"}	\N	NO_RESET	6
+77	ACTIVE	f	0	5	{}	2026-12-17 00:00:00+00	{"id": 2, "name": "Про"}	\N	NO_RESET	7
+81	ACTIVE	t	10	0	{33333333-3333-4333-8333-333333333333}	2027-01-01 00:00:00+00	{"id": 4}	\N	NO_RESET	8
+\.
+
+COPY public.plans (id, name, traffic_limit, device_limit, internal_squads, external_squad, traffic_limit_strategy) FROM stdin;
+1	Старт	100	3	{11111111-1111-4111-8111-111111111111}	\N	NO_RESET
+2	Про	0	5	{11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}	\N	NO_RESET
+4	Пробный	10	0	{33333333-3333-4333-8333-333333333333}	\N	NO_RESET
+\.
+`
+
+// Текущая подписка, её план и фактические условия; планы с числом подписок.
+func TestBuildPlans(t *testing.T) {
+	d, err := Load(strings.NewReader(planDump))
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[int64]User{}
+	for _, u := range d.Users {
+		by[u.TelegramID] = u
+	}
+	cases := []struct {
+		id    int64
+		plan  int64
+		trial bool
+		sq    int
+		gb    int
+		dev   int
+		ext   string
+		strat string
+	}{
+		{1000000011, 1, false, 1, 100, 10, "", "NO_RESET"},                               // условия из подписки, а не из плана
+		{1000000012, 2, false, 2, 0, 5, "33333333-3333-4333-8333-333333333333", "MONTH"}, // удалённая не в счёт
+		{1000000013, 4, true, 1, 10, 0, "", "NO_RESET"},
+		{1000000014, NoPlan, false, 1, 0, 2, "", "NO_RESET"},
+		{1000000015, 9, false, 0, 0, 5, "", "NO_RESET"},   // истёкшая тоже текущая
+		{1000000016, 1, false, 1, 100, 3, "", "NO_RESET"}, // без ссылки — с самым поздним сроком
+		{1000000018, 4, true, 1, 10, 0, "", "NO_RESET"},   // признак триала из колонки
+	}
+	for _, c := range cases {
+		u, ok := by[c.id]
+		if !ok || u.Sub == nil {
+			t.Fatalf("%d: нет текущей подписки", c.id)
+		}
+		s := u.Sub
+		if s.PlanID != c.plan || s.Trial != c.trial || len(s.Squads) != c.sq || s.TrafficGB != c.gb || s.Devices != c.dev || s.ExtSquad != c.ext || s.Strategy != c.strat {
+			t.Fatalf("%d: %+v", c.id, *s)
+		}
+	}
+	if u := by[1000000016]; u.Sub.Strategy != "NO_RESET" || u.SubExpireAt != "2026-03-01T00:00:00Z" {
+		t.Fatalf("без ссылки взята не та подписка: %+v %s", *u.Sub, u.SubExpireAt)
+	}
+	if !by[1000000013].SubTrial || by[1000000011].SubTrial {
+		t.Fatal("тип подписки по самому позднему сроку")
+	}
+	want := []Plan{{ID: 1, Name: "Старт", Subs: 2}, {ID: 2, Name: "Про", Subs: 1}, {ID: 9, Name: "Старый", Deleted: true, Subs: 1}}
+	if len(d.Plans) != len(want) {
+		t.Fatalf("планы: %+v", d.Plans)
+	}
+	for i := range want {
+		got := d.Plans[i]
+		if got.ID != want[i].ID || got.Name != want[i].Name || got.Deleted != want[i].Deleted || got.Subs != want[i].Subs {
+			t.Fatalf("план %d: %+v, ждали %+v", i, got, want[i])
+		}
+	}
+	// Условия плана — из таблицы plans, без неё — из подписки.
+	if tm := d.Plans[0].Terms; tm.Devices != 3 || tm.TrafficGB != 100 || len(tm.Squads) != 1 {
+		t.Fatalf("условия «Старт» не из plans: %+v", tm)
+	}
+	if tm := d.Plans[2].Terms; tm.Devices != 5 || tm.PlanID != 9 {
+		t.Fatalf("условия удалённого плана: %+v", tm)
+	}
+	if d.TrialSubs != 2 || d.NoPlanSubs != 1 {
+		t.Fatalf("пробных %d, без плана %d", d.TrialSubs, d.NoPlanSubs)
+	}
+}
+
+// Текущая подписка удалена — тарифа нет; без таблицы plans план не «удалён».
+func TestBuildPlans_DeletedCurrentAndNoPlansTable(t *testing.T) {
+	dump := `COPY public.users (id, telegram_id, username, name, current_subscription_id) FROM stdin;
+1	1000000011	a	A	11
+2	1000000012	b	B	22
+\.
+
+COPY public.subscriptions (id, status, is_trial, expire_at, plan_snapshot, user_id) FROM stdin;
+10	ACTIVE	f	2026-06-01 00:00:00+00	{"id": 1, "name": "Старт"}	1
+11	DELETED	f	2026-12-01 00:00:00+00	{"id": 2, "name": "Про"}	1
+22	ACTIVE	f	2026-12-01 00:00:00+00	{"name": "Без номера"}	2
+\.
+`
+	d, err := Load(strings.NewReader(dump))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range d.Users {
+		switch u.TelegramID {
+		case 1000000011:
+			if u.Sub != nil {
+				t.Fatalf("удалённая текущая подписка взята: %+v", *u.Sub)
+			}
+		case 1000000012:
+			if u.Sub == nil || u.Sub.PlanID != NoPlan {
+				t.Fatalf("подписка без номера плана: %+v", u.Sub)
+			}
+		}
+	}
+	if len(d.Plans) != 0 || d.NoPlanSubs != 1 {
+		t.Fatalf("планы %+v, без плана %d", d.Plans, d.NoPlanSubs)
+	}
+}

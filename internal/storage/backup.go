@@ -60,6 +60,7 @@ var backupTables = []string{
 	"email_tokens",
 	"payments",
 	"pending_invoices",
+	"traffic_invoices",
 	"payment_log",
 	"p2p_requests",
 	"autopay",

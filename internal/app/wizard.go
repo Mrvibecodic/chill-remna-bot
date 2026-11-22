@@ -75,6 +75,7 @@ const (
 	cbP2P       = "p2p"
 	cbAdm       = "adm"
 	cbStar      = "star"
+	cbPayAccess = "pacc"
 	cbYK        = "yk"
 	cbYKCheck   = "ykc"
 	cbCBCheck   = "cbc"
@@ -154,6 +155,7 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		} else {
 			ctx = withAdminFlow(ctx)
 		}
+		ctx = a.previewFlow(ctx, chatID, cq.Data)
 	}
 	key, val, _ := strings.Cut(cq.Data, ":")
 	// Любая кнопка вне редактора текстов снимает ожидание нового текста:
@@ -206,6 +208,8 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 		a.onPlanView(ctx, chatID, val)
 	case cbPlanBack:
 		a.onPlanBack(ctx, chatID)
+	case cbTraffic:
+		a.onTraffic(ctx, chatID, val)
 	case cbMethod:
 		a.onMethod(ctx, chatID, val)
 	case cbTop:
@@ -227,6 +231,10 @@ func (a *App) handleCallback(ctx context.Context, cq *models.CallbackQuery) {
 	case cbStar:
 		if isAdmin {
 			a.onStars(ctx, chatID, val)
+		}
+	case cbPayAccess:
+		if isAdmin {
+			a.onPayAccess(ctx, chatID, val)
 		}
 	case cbYK:
 		if isAdmin {

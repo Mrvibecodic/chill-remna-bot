@@ -70,7 +70,7 @@ func TestPlansAdmin_NewPlanIsDisabledAndOwnCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	planTap(t, a, "pln:new")
+	planTap(t, a, "pln:newk:t")
 	list, _ := fs.ListPlans(ctx)
 	if len(list) != 2 {
 		t.Fatalf("ожидался второй тариф, есть %d", len(list))
@@ -412,7 +412,7 @@ func TestPlansAdmin_FieldLimits(t *testing.T) {
 func TestPlansAdmin_CannotEnableEmptyPlan(t *testing.T) {
 	ctx := context.Background()
 	a, fm, fs := planAdminApp(t)
-	planTap(t, a, "pln:new")
+	planTap(t, a, "pln:newk:t")
 	list, _ := fs.ListPlans(ctx)
 	code := list[0].Code
 
@@ -517,7 +517,7 @@ func TestPlansAdmin_NotForRegularUser(t *testing.T) {
 	before, _ := fs.ListPlans(ctx)
 
 	a.handleCallback(ctx, cb(777, "menu:plans"))
-	a.handleCallback(ctx, cb(777, "pln:new"))
+	a.handleCallback(ctx, cb(777, "pln:newk:t"))
 	a.handleCallback(ctx, cb(777, "pln:toggle:"+model.PlanCodeBase))
 	a.handleCallback(ctx, cb(777, "pln:delyes:"+model.PlanCodeBase))
 

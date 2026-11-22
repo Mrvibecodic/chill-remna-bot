@@ -141,7 +141,8 @@ func (a *App) setTributeField(ctx context.Context, chatID int64, field, text str
 }
 
 // tributePlanRow — тариф для экранов привязки. «Базовый» без строки (сбой
-// стартовой синхронизации) собирается из сетки, как в витрине.
+// стартовой синхронизации) собирается из сетки, как в витрине. Трафик-тарифа
+// для Tribute нет: срока у него нет, подпиской он не продаётся.
 func (a *App) tributePlanRow(ctx context.Context, code string) *model.Plan {
 	if !model.ValidPlanCode(code) {
 		return nil
@@ -149,6 +150,9 @@ func (a *App) tributePlanRow(ctx context.Context, code string) *model.Plan {
 	p, err := a.planOrBase(ctx, code)
 	if err != nil {
 		a.log.Warn("tribute: тариф не прочитан", "err", err, "plan", code)
+		return nil
+	}
+	if p.IsTraffic() {
 		return nil
 	}
 	return p
@@ -196,6 +200,9 @@ func (a *App) showTributePlans(ctx context.Context, chatID int64) {
 			break
 		}
 		p := &plans[i]
+		if p.IsTraffic() {
+			continue
+		}
 		mark := "➖"
 		if a.tributePlanReady(p.Code) {
 			mark = "✅"

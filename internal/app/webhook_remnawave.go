@@ -226,9 +226,11 @@ func (a *App) pushTrafficLimited(ctx context.Context, u rwUserPayload) bool {
 		return true
 	}
 	lang := a.lang(u.TelegramID)
-	ok := a.notifyKB(ctx, u.TelegramID, i18n.T(lang, "rw.limited"), [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.buy"), "menu:buy")},
-	}) != 0
+	text, rows := i18n.T(lang, "rw.limited"), [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.buy"), "menu:buy")}}
+	if row := a.buyTrafficRow(ctx, u.TelegramID); row != nil {
+		text, rows = i18n.T(lang, "rw.limited_traffic"), [][]models.InlineKeyboardButton{row}
+	}
+	ok := a.notifyKB(ctx, u.TelegramID, text, rows) != 0
 	a.log.Info("remnawave webhook: limit notified", "tg_id", u.TelegramID, "ok", ok)
 	return ok
 }
@@ -245,9 +247,11 @@ func (a *App) pushTrafficThreshold(ctx context.Context, u rwUserPayload) bool {
 	if pct := u.LastTriggeredThreshold; pct > 0 && pct < 100 {
 		text = i18n.T(lang, "rw.traffic_pct", pct)
 	}
-	ok := a.notifyKB(ctx, u.TelegramID, text, [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")},
-	}) != 0
+	rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "btn.mysubs"), "menu:mysubs")}}
+	if row := a.buyTrafficRow(ctx, u.TelegramID); row != nil {
+		rows = [][]models.InlineKeyboardButton{append(row, rows[0]...)}
+	}
+	ok := a.notifyKB(ctx, u.TelegramID, text, rows) != 0
 	a.log.Info("remnawave webhook: traffic threshold notified", "tg_id", u.TelegramID, "pct", u.LastTriggeredThreshold, "ok", ok)
 	return ok
 }

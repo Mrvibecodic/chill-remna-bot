@@ -144,12 +144,17 @@ func (a *App) startYooMoney(ctx context.Context, chatID int64) {
 		a.sendHome(ctx, chatID, i18n.T(lang, "ym.no_price"))
 		return
 	}
-	payURL, label, err := a.ymCreateInvoiceSnap(ctx, chatID, months, valueK, a.saleSnapshot(s))
+	snap := a.saleSnapshot(s)
+	prompt := i18n.T(lang, "ym.pay_prompt", months, value+curSuffix(curRUB))
+	if s.traffic() {
+		prompt = i18n.T(lang, "pay.prompt_traffic", trafficInvoiceDesc(lang, snap), value+curSuffix(curRUB))
+	}
+	payURL, label, err := a.ymCreateInvoiceSnap(ctx, chatID, months, valueK, snap)
 	if err != nil {
 		a.sendHome(ctx, chatID, a.clientErr(ctx, chatID, "ЮMoney", err))
 		return
 	}
-	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodYooMoney, i18n.T(lang, "ym.pay_prompt", months, value+curSuffix(curRUB))), [][]models.InlineKeyboardButton{
+	a.sendKB(ctx, chatID, withPayNote(lang, model.PayMethodYooMoney, prompt), [][]models.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "ym.btn_pay"), URL: payURL}},
 		{btn(i18n.T(lang, "ym.btn_check"), "ymc:"+label)},
 		{btn(i18n.T(lang, "btn.home"), "menu:home")},
@@ -162,7 +167,7 @@ func (a *App) ymCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	if !a.ymSellable() {
 		return "", "", errUserText(i18n.T(a.lang(chatID), "ym.not_configured"))
 	}
-	if months <= 0 || kopecks <= 0 {
+	if (months <= 0 && !snap.IsTraffic()) || kopecks <= 0 {
 		return "", "", fmt.Errorf("yoomoney: months=%d kopecks=%d", months, kopecks)
 	}
 	if a.store == nil {
@@ -170,6 +175,16 @@ func (a *App) ymCreateInvoiceSnap(ctx context.Context, chatID int64, months int,
 	}
 	_ = a.store.UpsertUser(ctx, chatID)
 	label = ymLabel(chatID)
+	if snap.IsTraffic() {
+		if err := a.store.AddTrafficInvoice(ctx, &model.PendingInvoice{
+			Method: model.PayMethodYooMoney, ExtID: label, TelegramID: chatID, Purpose: trafficPurpose(snap), Kopecks: kopecks, Snapshot: snap,
+		}); err != nil {
+			a.payLog(ctx, model.PayMethodYooMoney, label, chatID, "invoice_error", "%s: %v", trafficPurpose(snap), err)
+			return "", "", fmt.Errorf("шлюз ЮMoney: строка счёта: %w", err)
+		}
+		a.payLog(ctx, model.PayMethodYooMoney, label, chatID, "invoice_created", "%s %s amount=%s RUB", trafficPurpose(snap), snap.Code, yoomoney.FormatSum(kopecks))
+		return a.ymPayURL(label), label, nil
+	}
 	if snap == nil {
 		snap = a.planSnapshot(months)
 	}
@@ -213,7 +228,7 @@ func (a *App) YooMoneyPayForm(ctx context.Context, label string) (action string,
 	if a.store == nil || !cfg.Enabled || !cfg.Ready() || !strings.HasPrefix(label, ymExtPrefix) || len(label) > yoomoney.LabelMaxLen {
 		return "", nil, false
 	}
-	p, _ := a.store.PendingByExtID(ctx, label)
+	p, _ := a.invoiceAny(ctx, a.store, label)
 	if p == nil || p.Method != model.PayMethodYooMoney || p.Kopecks <= 0 {
 		return "", nil, false
 	}
@@ -261,7 +276,7 @@ func (a *App) onYMCheck(ctx context.Context, chatID int64, label string) {
 	}
 	// По API видна только зачисленная сумма — проверка с допуском комиссии.
 	// Операцию выбираем тем же правилом, что сверка и вебхук.
-	p, _ := a.store.PendingByExtID(ctx, label)
+	p, _ := a.invoiceAny(ctx, a.store, label)
 	op, extra := a.ymPickOp(ctx, paid, p)
 	if op == nil {
 		// Счёт не покрывает ни одна операция (или строки счёта нет): об этом
@@ -383,7 +398,7 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 	if a.store == nil {
 		return ymFailed
 	}
-	p, _ := a.store.PendingByExtID(ctx, label)
+	p, traffic := a.invoiceAny(ctx, a.store, label)
 	hint := ymLabelHint(label)
 	if p == nil {
 		a.payLog(ctx, model.PayMethodYooMoney, label, hint, "error", "оплата подтверждена (операция %s, %s RUB), но строки счёта нет — получатель и назначение неизвестны", opID, yoomoney.FormatSum(creditedK))
@@ -403,7 +418,7 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 		a.ymNotifyAdmin(ctx, label+":under", "ym.admin_underpaid", escapeName(opID), yoomoney.FormatSum(shown), yoomoney.FormatSum(p.Kopecks), a.userLabelByID(ctx, p.TelegramID))
 		// Счёт закрывается: дальше разбирает админ, а сверка и опрос
 		// мини-аппа по зачисленной сумме выдали бы то, что уже отклонено.
-		_ = a.store.ResolvePending(ctx, p.ID)
+		resolveAny(ctx, a.store, p, traffic)
 		return ymUnderpaid
 	}
 	switch {
@@ -413,6 +428,13 @@ func (a *App) finalizeYooMoney(ctx context.Context, label, opID string, paidK, c
 		a.payLog(ctx, model.PayMethodYooMoney, label, p.TelegramID, "api_amount", "выдано по истории кошелька: зачислено %s RUB при счёте %s (операция %s)", yoomoney.FormatSum(creditedK), yoomoney.FormatSum(p.Kopecks), opID)
 	}
 	amount := yoomoney.FormatSum(p.Kopecks) + " RUB"
+	if traffic {
+		res, _ := a.settleTraffic(ctx, p, amount)
+		if res == trafficIssued || res == trafficAlready {
+			return ymIssued
+		}
+		return ymFailed
+	}
 	if p.Purpose == purposeTopUp {
 		// Счёт гасится ТОЛЬКО после зачисления — иначе сверка его потеряет.
 		if err := a.finalizeTopUp(ctx, p.TelegramID, p.Kopecks, model.PayMethodYooMoney, amount, label); err != nil {
