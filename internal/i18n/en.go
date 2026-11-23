@@ -933,7 +933,7 @@ var en = map[string]string{
 	"plans.new_name":               "New plan",
 	"plans.copy_name":              "%s (copy)",
 	"plans.too_long":               "✂️ Too long: %d characters max. The value was left unchanged.",
-	"plans.enable_empty":           "⚠️ The plan has no periods and prices — there is nothing to enable yet. Set them first.",
+	"plans.enable_empty":           "⚠️ The plan has no period with a price — there is nothing to enable yet. Set a price first.",
 	"plans.name_required":          "✏️ A plan needs a name — send it as text. The value was left unchanged.",
 	"plans.move_edge":              "↕️ The plan is already at the edge of the list — nowhere to move.",
 	"plans.btn_pricing":            "💲 Prices",

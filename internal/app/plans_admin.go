@@ -239,7 +239,7 @@ func planListLabel(lang string, p *model.Plan) string {
 	if p.IsTraffic() {
 		return mark + " " + name + " · " + i18n.T(lang, "plans.traffic_short", len(trafficTerms(p).Packs))
 	}
-	return mark + " " + name + " · " + i18n.T(lang, "plans.durations_short", len(p.Durations))
+	return mark + " " + name + " · " + i18n.T(lang, "plans.durations_short", planDurationsOnSale(p))
 }
 
 // planTitle — имя тарифа со значком, как есть. Годится для подписи кнопки:
@@ -751,14 +751,15 @@ func (a *App) applyPlanText(ctx context.Context, chatID int64, field, text strin
 
 func (a *App) togglePlan(ctx context.Context, chatID int64, code string) {
 	lang := a.lang(chatID)
-	// Тариф без длительностей включать нельзя: в витрине он либо пустой, либо
-	// продаётся по пустой цене. Ровно поэтому новый тариф и создаётся
+	// Тариф без продаваемого срока включать нельзя: витрина его не покажет, а
+	// в списке он стоял бы с ✅, как продающийся. Срок без базовой цены не в
+	// счёт — он снят с продажи. Ровно поэтому новый тариф и создаётся
 	// выключенным — здесь тот же запрет с другой стороны.
 	_, err := a.editPlan(ctx, code, func(p *model.Plan) error {
 		if !p.Enabled && p.IsTraffic() && !trafficPlanSells(p) {
 			return errPlanNoTraffic
 		}
-		if !p.Enabled && !p.IsTraffic() && len(p.Durations) == 0 {
+		if !p.Enabled && !p.IsTraffic() && planDurationsOnSale(p) == 0 {
 			// Отказ возвращается ошибкой, а не флагом: тогда строка тарифа не
 			// перезаписывается вообще — незачем трогать базу, чтобы ничего не
 			// изменить.
@@ -929,7 +930,7 @@ var errPlanCodeTaken = errors.New("код тарифа занят")
 
 var errPlanNoTraffic = errors.New("у трафик-тарифа нет трафика или цены")
 
-// errPlanNoDurations — у тарифа не заданы сроки, включать нечего.
+// errPlanNoDurations — у тарифа нет срока с ценой, включать нечего.
 var errPlanNoDurations = errors.New("у тарифа нет длительностей")
 
 // clampRunes подрезает строку по числу символов, а не байтов: в имени тарифа

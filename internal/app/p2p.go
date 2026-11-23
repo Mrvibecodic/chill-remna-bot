@@ -246,12 +246,22 @@ func planSellsAnything(p *model.Plan) bool {
 	if !p.KnownKind() {
 		return false
 	}
+	return planDurationsOnSale(p) > 0
+}
+
+// planDurationsOnSale — сколько сроков тариф продаёт: срок с непустой базовой
+// ценой, тот же признак, по которому срок рисуют витрина и мини-апп. Срок со
+// стёртой базовой ценой в тарифе остаётся — снятый с продажи, со своими
+// переопределениями цен и лимитов, которые вернутся вместе с ценой, — но
+// проданным не считается.
+func planDurationsOnSale(p *model.Plan) int {
+	n := 0
 	for i := range p.Durations {
 		if p.Durations[i].Months > 0 && p.Durations[i].Base != "" {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // planMinPrice — минимальная базовая цена тарифа для подписи «от …».

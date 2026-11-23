@@ -357,7 +357,7 @@ func (a *App) handlePlanImportDoc(ctx context.Context, m *models.Message) {
 		ui.planImport, ui.planImportAccess = nil, nil
 		return
 	}
-	terms := i18n.T(lang, "plans.durations_short", len(p.Durations))
+	terms := i18n.T(lang, "plans.durations_short", planDurationsOnSale(p))
 	if p.IsTraffic() {
 		terms = i18n.T(lang, "plans.traffic_short", len(trafficTerms(p).Packs))
 	}
