@@ -125,3 +125,62 @@ func TestPlanDurationsOnSale(t *testing.T) {
 		t.Fatalf("planDurationsOnSale = %d, want 2", n)
 	}
 }
+
+// Экран срока показывает отдельные цены только включённых способов: при
+// включённых Stars и ЮMoney админ видел поля ЮKassa и перевода и решал, что
+// ЮMoney подписана как ЮKassa. ЮMoney своей цены не имеет — экран говорит,
+// что она берёт базовую.
+func TestPlanMonth_PriceFieldsFollowEnabledMethods(t *testing.T) {
+	ctx := context.Background()
+	a, fm, _ := planAdminApp(t)
+	if err := a.syncBasePlan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a.botCfg.Stars.Enabled = true
+	a.botCfg.YooMoney.Enabled = true
+
+	// 3 мес: своих цен нет ни у одного способа.
+	planTap(t, a, "pln:prm:3:"+model.PlanCodeBase)
+	text, cbs := fm.last(), fm.lastKBCallbacks()
+	for _, want := range []string{"Базовая: 400", "по базовой цене: ЮMoney, баланс", "Stars: —"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("на экране срока нет %q:\n%s", want, text)
+		}
+	}
+	for _, bad := range []string{"ЮKassa", "Перевод"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("выключенный способ без своей цены показан (%q):\n%s", bad, text)
+		}
+	}
+	if !hasCB(cbs, "pln:in:s:3:"+model.PlanCodeBase) || !hasCB(cbs, "pln:in:b:3:"+model.PlanCodeBase) {
+		t.Fatalf("нет кнопок базовой цены и Stars: %v", cbs)
+	}
+	if hasCB(cbs, "pln:in:y:3:"+model.PlanCodeBase) || hasCB(cbs, "pln:in:p:3:"+model.PlanCodeBase) {
+		t.Fatalf("кнопки цен выключенных способов на месте: %v", cbs)
+	}
+
+	// 1 мес: у перевода и ЮKassa заданы свои цены, способы выключены — цены
+	// видны с пометкой, чтобы их можно было стереть.
+	planTap(t, a, "pln:prm:1:"+model.PlanCodeBase)
+	text, cbs = fm.last(), fm.lastKBCallbacks()
+	for _, want := range []string{"Перевод: 140", "ЮKassa: 160", "способ выключен", "Stars: 99"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("на экране срока нет %q:\n%s", want, text)
+		}
+	}
+	if !hasCB(cbs, "pln:in:y:1:"+model.PlanCodeBase) || !hasCB(cbs, "pln:in:p:1:"+model.PlanCodeBase) {
+		t.Fatalf("заданную цену выключенного способа нельзя стереть — кнопки нет: %v", cbs)
+	}
+
+	// Включили ЮKassa: на сроке со своей ценой она базовую не берёт, на
+	// сроке без своей — берёт.
+	a.botCfg.YooKassa.Enabled = true
+	planTap(t, a, "pln:prm:1:"+model.PlanCodeBase)
+	if text = fm.last(); !strings.Contains(text, "по базовой цене: ЮMoney, баланс") || strings.Contains(text, "ЮKassa: 160"+" ₽"+" (способ") {
+		t.Fatalf("1 мес при включённой ЮKassa со своей ценой:\n%s", text)
+	}
+	planTap(t, a, "pln:prm:3:"+model.PlanCodeBase)
+	if text = fm.last(); !strings.Contains(text, "по базовой цене: ЮKassa, ЮMoney, баланс") {
+		t.Fatalf("3 мес при включённой ЮKassa без своей цены:\n%s", text)
+	}
+}

@@ -171,20 +171,95 @@ func (a *App) showPlanMonth(ctx context.Context, chatID int64, code string, mo i
 		starsStr = strconv.Itoa(stars) + " ⭐"
 	}
 
+	// Отдельные цены есть только у трёх способов, и показываем их, только
+	// если способ включён: иначе при включённых, скажем, Stars и ЮMoney экран
+	// предлагал ЮKassa и перевод — и выглядело, будто ЮMoney подписана как
+	// ЮKassa. Заданную цену выключенного способа не прячем: она вернётся вместе
+	// со способом, и админ должен её видеть, чтобы стереть.
 	moStr := strconv.Itoa(mo)
-	rows := [][]models.InlineKeyboardButton{
-		{btn(i18n.T(lang, "plans.btn_base_price"), "pln:in:b:"+moStr+":"+p.Code),
-			btn(i18n.T(lang, "plans.btn_stars_price"), "pln:in:s:"+moStr+":"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_p2p_price"), "pln:in:p:"+moStr+":"+p.Code),
-			btn(i18n.T(lang, "plans.btn_yk_price"), "pln:in:y:"+moStr+":"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_traffic"), "pln:in:t:"+moStr+":"+p.Code),
-			btn(i18n.T(lang, "plans.btn_devices"), "pln:in:d:"+moStr+":"+p.Code)},
-		{btn(i18n.T(lang, "plans.btn_month_squads"), "pln:sqm:"+moStr+":"+p.Code)},
-		navBack(lang, "pln:pr:"+p.Code),
+	in := func(kind string) string { return "pln:in:" + kind + ":" + moStr + ":" + p.Code }
+	type field struct {
+		label, value, kind string
+		on, set            bool
 	}
+	fields := []field{
+		{"plans.btn_stars_price", starsStr, "s", a.methodEnabled(model.PayMethodStars), stars > 0},
+		{"plans.btn_p2p_price", price(p2p), "p", a.methodEnabled(model.PayMethodP2P), strings.TrimSpace(p2p) != ""},
+		{"plans.btn_yk_price", price(yk), "y", a.methodEnabled(model.PayMethodYooKassa), strings.TrimSpace(yk) != ""},
+	}
+	var parts []string
+	var priceBtns []models.InlineKeyboardButton
+	for _, f := range fields {
+		if !f.on && !f.set {
+			continue
+		}
+		part := i18n.T(lang, f.label) + ": " + f.value
+		if !f.on {
+			part += i18n.T(lang, "plans.method_off")
+		}
+		parts = append(parts, part)
+		priceBtns = append(priceBtns, btn(i18n.T(lang, f.label), in(f.kind)))
+	}
+	var extra string
+	if users := a.baseMethodsFor(lang, d); len(users) > 0 {
+		extra += i18n.T(lang, "plans.base_users", strings.Join(users, ", ")) + "\n"
+	}
+	if len(parts) > 0 {
+		// По строке на способ: с пометкой «способ выключен» в одну строку
+		// на телефоне не помещалось.
+		extra += strings.Join(parts, "\n") + "\n"
+	}
+
+	rows := [][]models.InlineKeyboardButton{{btn(i18n.T(lang, "plans.btn_base_price"), in("b"))}}
+	// Кнопки цен — по две в ряд, как было: базовая открывает первый ряд.
+	for _, b := range priceBtns {
+		if last := len(rows) - 1; len(rows[last]) < 2 {
+			rows[last] = append(rows[last], b)
+			continue
+		}
+		rows = append(rows, []models.InlineKeyboardButton{b})
+	}
+	rows = append(rows,
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_traffic"), in("t")),
+			btn(i18n.T(lang, "plans.btn_devices"), in("d"))},
+		[]models.InlineKeyboardButton{btn(i18n.T(lang, "plans.btn_month_squads"), "pln:sqm:"+moStr+":"+p.Code)},
+		navBack(lang, "pln:pr:"+p.Code),
+	)
 	a.sendPayKB(ctx, chatID, i18n.T(lang, "plans.prm_title",
-		planTitleHTML(lang, p), mo, price(base), price(p2p), price(yk), starsStr,
+		planTitleHTML(lang, p), mo, price(base), extra,
 		traffic, devices, squads), rows)
+}
+
+// baseMethodsFor — включённые способы, которые продают срок по базовой цене:
+// у перевода и ЮKassa своя цена срока перекрывает базовую, остальные
+// (ЮMoney, CryptoBot, Platega, Heleket) берут её всегда. Баланс — всегда
+// последним: оплата с баланса работает и при выключенном пополнении. Stars
+// продаются своей ценой, Tribute — ценой своей подписки, поэтому их тут нет.
+func (a *App) baseMethodsFor(lang string, d *model.PlanDuration) []string {
+	var out []string
+	for _, m := range payMethodOrder {
+		switch m {
+		case model.PayMethodStars, model.PayMethodTribute:
+			continue
+		case model.PayMethodP2P:
+			if d != nil && strings.TrimSpace(d.P2P) != "" {
+				continue
+			}
+		case model.PayMethodYooKassa:
+			if d != nil && strings.TrimSpace(d.YooKassa) != "" {
+				continue
+			}
+		}
+		if !a.methodEnabled(m) {
+			continue
+		}
+		if m == model.PayMethodP2P {
+			out = append(out, i18n.T(lang, "plans.m_p2p"))
+			continue
+		}
+		out = append(out, methodLabel(m))
+	}
+	return append(out, i18n.T(lang, "plans.m_balance"))
 }
 
 // monthAllowed ограничивает НОВЫЕ сроки редактора текущей сеткой: витрина,
