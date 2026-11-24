@@ -165,7 +165,7 @@ func (a *App) MiniSubscription(ctx context.Context, tgID int64) web.MiniSubDTO {
 			lang := a.lang(tgID)
 			for _, d := range info.List {
 				name, meta := deviceParts(lang, d, cfg)
-				dto.Devices = append(dto.Devices, web.MiniDeviceDTO{Name: name, Meta: meta})
+				dto.Devices = append(dto.Devices, web.MiniDeviceDTO{Name: name, Meta: meta, ID: d.HWID})
 			}
 		}
 	}

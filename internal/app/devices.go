@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"html"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
@@ -20,6 +22,14 @@ import (
 // nothing will connect.
 func (a *App) onDevices(ctx context.Context, chatID int64, val string) {
 	lang := a.lang(chatID)
+	if strings.HasPrefix(val, "del:") {
+		a.askDeleteDevice(ctx, chatID, strings.TrimPrefix(val, "del:"))
+		return
+	}
+	if strings.HasPrefix(val, "delok:") {
+		a.confirmDeleteDevice(ctx, chatID, strings.TrimPrefix(val, "delok:"))
+		return
+	}
 	switch val {
 	case "list":
 		a.showDevices(ctx, chatID)
@@ -87,17 +97,114 @@ func (a *App) showDevices(ctx context.Context, chatID int64) {
 		return
 	}
 	info = a.withHwidDefault(ctx, info)
+	rows = [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "dev.btn_reset"), "dev:reset")},
+	}
+	for i := range info.List {
+		rows = append(rows, []models.InlineKeyboardButton{{
+			Text:         "✖ " + strconv.Itoa(i+1),
+			CallbackData: "dev:del:" + strconv.Itoa(i),
+		}})
+	}
+	rows = append(rows, navBack(lang, "menu:mysubs"))
 	val := strconv.Itoa(info.Used)
 	if info.HasLimit {
 		val += " / " + strconv.Itoa(info.Limit)
 	}
 	head := i18n.T(lang, "dev.list_title", val)
 	lines := make([]string, 0, len(info.List))
-	for _, d := range info.List {
-		lines = append(lines, deviceLine(lang, d, cfg))
+	for i, d := range info.List {
+		lines = append(lines, strconv.Itoa(i+1)+". "+deviceLine(lang, d, cfg))
 	}
 	parts := devicePages(head, lines, i18n.T(lang, "dev.list_note"))
 	a.sendKBParts(ctx, chatID, parts, rows)
+}
+
+// askDeleteDevice shows a confirmation for one device from the list. The index
+// is re-resolved against a fresh list so a stale button cannot delete a device
+// that was removed or reordered in the meantime.
+func (a *App) askDeleteDevice(ctx context.Context, chatID int64, raw string) {
+	lang := a.lang(chatID)
+	panel := a.panelClient()
+	if panel == nil {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.del_fail"), [][]models.InlineKeyboardButton{navBack(lang, "dev:list")})
+		return
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(raw))
+	info, ok := panel.DevicesByTelegramID(ctx, chatID)
+	if err != nil || !ok || idx < 0 || idx >= len(info.List) {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.del_not_found"), [][]models.InlineKeyboardButton{navBack(lang, "dev:list")})
+		return
+	}
+	head, _ := deviceParts(lang, info.List[idx], a.devicesConfig())
+	a.sendKBSection(ctx, chatID, assets.SectionMySubscription, i18n.T(lang, "dev.del_ask", html.EscapeString(head)), [][]models.InlineKeyboardButton{
+		{btn(i18n.T(lang, "dev.btn_del_yes"), "dev:delok:"+strconv.Itoa(idx))},
+		navBack(lang, "dev:list"),
+	})
+}
+
+// confirmDeleteDevice removes exactly one HWID registration. Credentials are
+// not rotated: every other device keeps its keys and the subscription URL.
+func (a *App) confirmDeleteDevice(ctx context.Context, chatID int64, raw string) {
+	lang := a.lang(chatID)
+	fail := func() {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.del_fail"), [][]models.InlineKeyboardButton{navBack(lang, "dev:list")})
+	}
+	panel := a.panelClient()
+	if panel == nil {
+		fail()
+		return
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(raw))
+	info, ok := panel.DevicesByTelegramID(ctx, chatID)
+	if err != nil || !ok || idx < 0 || idx >= len(info.List) {
+		a.sendKB(ctx, chatID, i18n.T(lang, "dev.del_not_found"), [][]models.InlineKeyboardButton{navBack(lang, "dev:list")})
+		return
+	}
+	found, err := panel.DeleteHwidDevice(ctx, chatID, info.List[idx].HWID)
+	if err != nil || !found {
+		if err != nil {
+			a.log.Warn("delete device", "tg", chatID, "err", err)
+		}
+		fail()
+		return
+	}
+	a.invalidateSubCache(chatID)
+	a.sendKB(ctx, chatID, i18n.T(lang, "dev.del_done"), [][]models.InlineKeyboardButton{navBack(lang, "dev:list")})
+}
+
+// MiniDeleteDevice removes one device from the authenticated user's own list
+// (Mini App / web cabinet). The HWID must be present in a fresh panel snapshot,
+// so a crafted request cannot target another user's device.
+func (a *App) MiniDeleteDevice(ctx context.Context, tgID int64, hwid string) web.MiniActionDTO {
+	panel := a.panelClient()
+	if panel == nil {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.panel_down"))}
+	}
+	hwid = strings.TrimSpace(hwid)
+	info, ok := panel.DevicesByTelegramID(ctx, tgID)
+	if !ok {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "mini.no_sub"))}
+	}
+	found := false
+	for _, d := range info.List {
+		if d.HWID == hwid {
+			found = true
+			break
+		}
+	}
+	if hwid == "" || !found {
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "dev.del_not_found"))}
+	}
+	okDel, err := panel.DeleteHwidDevice(ctx, tgID, hwid)
+	if err != nil || !okDel {
+		if err != nil {
+			a.log.Warn("miniapp delete device failed", "tg", tgID, "err", err)
+		}
+		return web.MiniActionDTO{Error: stripHTMLTags(i18n.T(a.lang(tgID), "dev.del_fail"))}
+	}
+	a.invalidateSubCache(tgID)
+	return web.MiniActionDTO{OK: true}
 }
 
 // devicePages нарезает список на сообщения по границам устройств: разрыв

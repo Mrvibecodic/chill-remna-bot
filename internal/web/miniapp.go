@@ -104,6 +104,7 @@ type MiniProvider interface {
 	// MiniResetDevices rotates the user's credentials and clears all their HWID
 	// devices (mirrors the chat "reset devices" flow). Available in the cabinet too.
 	MiniResetDevices(ctx context.Context, tgID int64) MiniActionDTO
+	MiniDeleteDevice(ctx context.Context, tgID int64, hwid string) MiniActionDTO
 
 	// --- web cabinet (browser site; reuses everything above except trial) ---
 	CabinetEnabled() bool
@@ -401,6 +402,9 @@ type MiniSubDTO struct {
 type MiniDeviceDTO struct {
 	Name string `json:"name"`
 	Meta string `json:"meta,omitempty"`
+	// ID — HWID отпечаток: по нему мини-апп просит отключить именно это
+	// устройство. Отдаём только владельцу подписки, в его же списке.
+	ID string `json:"id,omitempty"`
 }
 
 // MiniPlanDTO — один ТАРИФ витрины (v2: раньше это был один срок «Базового»;
@@ -1019,6 +1023,28 @@ func (s *Server) handleMiniResetDevices(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	writeJSON(w, http.StatusOK, s.mini.MiniResetDevices(ctx, id))
+}
+
+func (s *Server) handleMiniDeleteDevice(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.miniGuard(w, r)
+	if !ok {
+		return
+	}
+	body, err := readAllLimited(r, 4*1024)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.mini.MiniDeleteDevice(ctx, id, req.ID))
 }
 
 // handleMiniWallet — кошелёк: баланс и прогноз по своему тарифу.
